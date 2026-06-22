@@ -6,7 +6,7 @@ A Raspberry Pi 5 executará os programas em Python, fará a captura da câmera e
 
 ## Estado atual
 
-As Fases 1 e 2 estão prontas para testes físicos: a Raspberry envia comandos pela USB Serial ao Arduino e também pode capturar imagens da câmera CSI. Ainda não há visão computacional ou segue-linha.
+As Fases 1, 2 e 3 estão prontas para testes físicos: a Raspberry envia comandos pela USB Serial ao Arduino, captura imagens da câmera CSI e detecta a linha preta em uma imagem. Ainda não há movimento automático do robô.
 
 Por segurança, os motores iniciam parados, a velocidade é limitada a 120 e o Arduino para todos os motores após 1 segundo sem receber um comando completo.
 
@@ -29,3 +29,5 @@ python3 raspberry/serial_test.py --porta auto --comando PING
 Para testar cada motor, use `python3 raspberry/serial_test.py --porta auto --teste-motores`. Mantenha as rodas fora do chão durante esse teste.
 
 Para salvar uma imagem da câmera CSI, use `python3 raspberry/camera_test.py`. As imagens de teste são salvas em `captures/`.
+
+Para detectar a linha em uma imagem salva, use `python3 raspberry/line_test.py --imagem captures/NOME_DA_IMAGEM.jpg --salvar-mascara`.
