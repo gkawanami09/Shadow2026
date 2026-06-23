@@ -53,6 +53,11 @@ from config import (
     RUN_CLEAN_DX_EXTREMA,
     RUN_CLEAN_ANGULO_CURVA,
     RUN_CLEAN_ANGULO_EXTREMA,
+    RUN_CLEAN_COTOVELO_DELTA_ANGULO,
+    RUN_CLEAN_COTOVELO_DX_MIN,
+    RUN_CLEAN_COTOVELO_MIN_PONTOS,
+    RUN_CLEAN_EXTREMA_DX_COM_ANGULO,
+    RUN_CLEAN_EXTREMA_ANGULO_COM_DX,
     RUN_CLEAN_EXTREMA_INTERNA_INICIAL,
     RUN_CLEAN_EXTREMA_INTERNA_MAX_NEG,
     RUN_CLEAN_EXTREMA_EXTERNA_INICIAL,
@@ -153,6 +158,36 @@ def extrair_centro_faixa(mascara, y1, y2, x_inicio_roi, y_inicio_roi, centro_ima
     return min(candidatos, key=lambda ponto: abs(ponto["x"] - referencia))
 
 
+def normalizar_delta_angulo(delta):
+    while delta > 180:
+        delta -= 360
+    while delta < -180:
+        delta += 360
+    return delta
+
+
+def detectar_cotovelo(guia):
+    """Detecta uma quebra acentuada na direcao da centroline conectada."""
+    if not guia["ok"]:
+        return False
+    pontos = guia["pontos"]
+    if len(pontos) < RUN_CLEAN_COTOVELO_MIN_PONTOS:
+        return False
+
+    ponto_baixo = guia["ponto_atual"]
+    ponto_alvo = guia["ponto_alvo"]
+    ponto_medio = pontos[len(pontos) // 2]
+    dx1 = ponto_medio["x"] - ponto_baixo["x"]
+    dy1 = ponto_baixo["y"] - ponto_medio["y"]
+    dx2 = ponto_alvo["x"] - ponto_medio["x"]
+    dy2 = ponto_medio["y"] - ponto_alvo["y"]
+    ang1 = math.degrees(math.atan2(dx1, max(dy1, 1)))
+    ang2 = math.degrees(math.atan2(dx2, max(dy2, 1)))
+    delta = abs(normalizar_delta_angulo(ang2 - ang1))
+    dx_total = abs(ponto_alvo["x"] - ponto_baixo["x"])
+    return delta >= RUN_CLEAN_COTOVELO_DELTA_ANGULO and dx_total >= RUN_CLEAN_COTOVELO_DX_MIN
+
+
 def extrair_guia_linha(resultado):
     """Monta uma centroline conectada e retorna seus pontos de controle."""
     mascara = resultado["mascara_limpa"]
@@ -217,7 +252,7 @@ def extrair_guia_linha(resultado):
         lado = "DIREITA"
     else:
         lado = "CENTRO"
-    return {
+    guia = {
         "ok": True,
         "pontos": pontos,
         "ponto_atual": ponto_atual,
@@ -230,14 +265,25 @@ def extrair_guia_linha(resultado):
         "lado": lado,
         "baixa": baixa,
     }
+    guia["cotovelo"] = detectar_cotovelo(guia)
+    return guia
 
 
 def classificar_modo(guia):
     if not guia["ok"]:
         return "RECUPERAR"
-    if abs(guia["dx"]) >= RUN_CLEAN_DX_EXTREMA or abs(guia["angulo"]) >= RUN_CLEAN_ANGULO_EXTREMA:
+    if guia.get("baixa") != "SEGURA":
+        return "RECUPERAR"
+
+    dx_abs = abs(guia["dx"])
+    ang_abs = abs(guia["angulo"])
+    if guia.get("cotovelo", False):
         return "FOLLOW_EXTREMA"
-    if abs(guia["dx"]) >= RUN_CLEAN_DX_CURVA or abs(guia["angulo"]) >= RUN_CLEAN_ANGULO_CURVA:
+    if dx_abs >= RUN_CLEAN_EXTREMA_DX_COM_ANGULO and ang_abs >= RUN_CLEAN_EXTREMA_ANGULO_COM_DX:
+        return "FOLLOW_EXTREMA"
+    if dx_abs >= RUN_CLEAN_DX_EXTREMA and ang_abs >= RUN_CLEAN_ANGULO_EXTREMA:
+        return "FOLLOW_EXTREMA"
+    if dx_abs >= RUN_CLEAN_DX_CURVA or ang_abs >= RUN_CLEAN_ANGULO_CURVA:
         return "FOLLOW_CURVA"
     return "FOLLOW_NORMAL"
 
@@ -350,7 +396,7 @@ def criar_debug_run(resultado, guia, estado, comando, ultimo_lado):
             f"Estado: {estado}", f"Cmd: {comando}", f"Baixa: {guia['baixa']}",
             f"Atual: {atual['erro']:.1f}", f"Alvo: {alvo['erro']:.1f}",
             f"dx: {guia['dx']:.1f}", f"angulo: {guia['angulo']:.1f}",
-            f"Lado: {guia['lado']}", f"Ultimo lado: {ultimo_lado}",
+            f"Lado: {guia['lado']}", f"Cotovelo: {guia.get('cotovelo', False)}", f"Ultimo lado: {ultimo_lado}",
         ]
     else:
         linhas = [f"Estado: {estado}", f"Cmd: {comando}", "Baixa: PERDIDA", f"Ultimo lado: {ultimo_lado}"]
@@ -375,7 +421,7 @@ def imprimir_log(guia, estado, comando, ultimo_lado, intensidade=None):
         linha = (
             f"Estado: {estado} | Cmd: {comando} | Atual: {guia['erro_atual']:.0f} | "
             f"Alvo: {guia['erro_alvo']:.0f} | dx: {guia['dx']:.0f} | ang: {guia['angulo']:.1f} | "
-            f"lado: {guia['lado']}"
+            f"lado: {guia['lado']} | cotovelo: {guia.get('cotovelo', False)}"
         )
         if estado == "FOLLOW_EXTREMA" and intensidade is not None:
             linha += f" | intensidade: {intensidade:.2f}"
@@ -414,8 +460,8 @@ def main():
             frame = capturar_frame_bgr(camera)
             resultado = detectar_linha(frame)
             guia = extrair_guia_linha(resultado)
-            if resultado["encontrou_linha"] and guia["ok"]:
-                modo = classificar_modo(guia)
+            modo = classificar_modo(guia)
+            if resultado["encontrou_linha"] and guia["ok"] and modo != "RECUPERAR":
                 atualizar_lado_valido(historico_lados, guia)
                 ultimo_lado = historico_lados[-1] if historico_lados else "CENTRO"
                 comando, _, _, intensidade = calcular_comando_follow(guia, modo, memoria)
