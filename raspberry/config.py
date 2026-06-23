@@ -23,15 +23,29 @@ CAMERA_HEIGHT = 480
 CAMERA_FPS = 30
 PASTA_CAPTURAS = "captures"
 
-# Configuracoes de visao da linha preta. Ajuste estes valores usando as imagens
-# de debug salvas em captures/.
-LIMIAR_PRETO = 80
+# ===============================
+# CONFIGURACOES DA LINHA PRETA
+# ===============================
 
-# Regiao de interesse em proporcao da imagem.
-ROI_Y_INICIO = 0.35
+# ROI em proporcao da imagem inteira.
+ROI_Y_INICIO = 0.20
 ROI_Y_FIM = 1.00
-ROI_X_INICIO = 0.10
-ROI_X_FIM = 0.90
+ROI_X_INICIO = 0.05
+ROI_X_FIM = 0.95
 
-AREA_MINIMA_LINHA = 800
-IMAGEM_TESTE_PADRAO = None
+# A parte superior esta mais distante da camera.
+DIVISAO_TOPO_BAIXO = 0.40
+
+# Preto em BGR: os tres canais da linha devem estar baixos.
+PRETO_MIN_BGR = [0, 0, 0]
+PRETO_MAX_TOPO_BGR = [90, 90, 90]
+PRETO_MAX_BAIXO_BGR = [145, 145, 145]
+
+# Area minima para aceitar um contorno como linha.
+AREA_MINIMA_LINHA = 1500
+
+# Limpeza simples da mascara.
+KERNEL_LINHA = 3
+ERODE_INICIAL = 2
+DILATE_LINHA = 6
+ERODE_FINAL = 2
