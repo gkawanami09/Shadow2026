@@ -7,6 +7,6 @@
 5. **Fase 4 - Comando sugerido de segue-linha:** calcular e imprimir o comando por faixas, sem mover o robo. A Fase 4.5 usa parametros suaves antes do primeiro movimento real.
 6. **Fase 5 - Segue-linha real:** seguir continuamente por vetor, sem duracao fixa; a parada normal e por CTRL+C.
 7. **Fase 6 - Recuperacao e curvas fechadas:** usar curva forte com `LADO` e Tank Assist por pulsos para recuperar perda de linha, sem rotina fixa de 90 graus.
-8. **Fase 7 - Ajuste fino:** calibrar estabilidade, curvas, Tank Assist e busca de linha.
+8. **Fase 7 - Ajuste fino:** calibrar as duas bolinhas de guia, curvas, Tank Assist e busca de linha.
 9. **Fase 8 - Verde/vermelho:** detectar marcacoes da pista.
 10. **Fase 9 - Obstaculos e ajustes OBR:** tratar situacoes especiais.

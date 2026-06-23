@@ -1,6 +1,7 @@
 """Segue-linha continuo com Tank Assist para recuperar curvas e perda da linha."""
 
 import argparse
+import math
 import time
 from collections import Counter, deque
 from datetime import datetime
@@ -27,6 +28,12 @@ from config import (
     RUN_VELOCIDADE_BUSCA, RUN_VELOCIDADE_CURVA_FORTE, RUN_VELOCIDADE_MAXIMA,
     RUN_VELOCIDADE_MINIMA, RUN_VELOCIDADE_REALINHAR, RUN_VELOCIDADE_TANK,
     RUN_VELOCIDADE_VARREDURA, RUN_Y_BAIXA_FIM, RUN_Y_BAIXA_INICIO,
+    RUN_ANGULO_SAIDA_TANK, RUN_ANGULO_TANK_ASSIST, RUN_DISTANCIA_MAX_CONEXAO_X,
+    RUN_DX_CURVA_FORTE, RUN_DX_SAIDA_TANK, RUN_DX_TANK_ASSIST,
+    RUN_KP_ALVO, RUN_KP_ALVO_CURVA_FORTE, RUN_KP_ATUAL,
+    RUN_KP_ATUAL_CURVA_FORTE, RUN_KP_DX, RUN_KP_DX_CURVA_FORTE,
+    RUN_MIN_PIXELS_PONTO_GUIA, RUN_NUM_FAIXAS_GUIA, RUN_PONTO_ALVO_Y_MAX,
+    RUN_PONTO_ALVO_Y_MIN, RUN_PONTO_ATUAL_Y_MAX, RUN_PONTO_ATUAL_Y_MIN,
     SERIAL_PORT, TIMEOUT_SERIAL,
 )
 from line_test import criar_debug_linha, detectar_linha
@@ -99,50 +106,44 @@ def medir_baixa(mascara_limpa, x_inicio_roi, centro_imagem_x):
             "fraca": fraca, "risco": not segura or abs(erro) >= RUN_LIMIAR_ERRO_BAIXA_RISCO}
 
 
-def extrair_pontos_vetor(mascara_limpa, x_inicio_roi, y_inicio_roi, centro_imagem_x):
-    """Extrai o centro da linha em seis faixas, da parte baixa para a alta."""
+def extrair_pontos_guia(mascara_limpa, x_inicio_roi, y_inicio_roi, centro_imagem_x):
+    """Segue a mesma linha da base para cima e retorna ponto atual e lookahead."""
     altura, largura = mascara_limpa.shape[:2]
-    pontos = []
-    for indice in range(6):
-        y2 = altura - indice * altura // 6
-        y1 = altura - (indice + 1) * altura // 6
+    conectados, x_anterior = [], None
+    for indice in range(RUN_NUM_FAIXAS_GUIA):
+        y2 = altura - indice * altura // RUN_NUM_FAIXAS_GUIA
+        y1 = altura - (indice + 1) * altura // RUN_NUM_FAIXAS_GUIA
         faixa = mascara_limpa[y1:y2, :]
         contornos, _ = cv2.findContours(faixa, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        contorno = max(contornos, key=cv2.contourArea, default=None)
-        ponto = {"encontrou": False, "x": None, "y": y_inicio_roi + (y1 + y2) // 2,
-                 "erro": None}
-        if contorno is not None and cv2.contourArea(contorno) > 0:
+        candidatos = []
+        for contorno in contornos:
+            if cv2.contourArea(contorno) < RUN_MIN_PIXELS_PONTO_GUIA:
+                continue
             momentos = cv2.moments(contorno)
             if momentos["m00"]:
-                x = x_inicio_roi + int(momentos["m10"] / momentos["m00"])
-                ponto.update({"encontrou": True, "x": x, "erro": x - centro_imagem_x})
-        pontos.append(ponto)
-    return pontos
+                candidatos.append((int(momentos["m10"] / momentos["m00"]), cv2.contourArea(contorno)))
+        if not candidatos:
+            continue
+        escolhido = max(candidatos, key=lambda candidato: candidato[1]) if x_anterior is None else min(candidatos, key=lambda candidato: abs(candidato[0] - x_anterior))
+        if x_anterior is not None and abs(escolhido[0] - x_anterior) > RUN_DISTANCIA_MAX_CONEXAO_X:
+            continue
+        x_anterior = escolhido[0]
+        conectados.append({"x": x_inicio_roi + escolhido[0], "y": y_inicio_roi + (y1 + y2) // 2,
+                           "erro": x_inicio_roi + escolhido[0] - centro_imagem_x, "pixels": int(escolhido[1]),
+                           "fracao_y": (y1 + y2) / (2 * altura)})
 
-
-def calcular_controle_vetor(pontos):
-    validos = [ponto for ponto in pontos if ponto["encontrou"]]
-    if not validos:
-        return None
-    perto = validos[0]
-    lookahead = validos[min(len(validos) - 1, max(1, len(validos) // 2))]
-    return {"erro_lateral": perto["erro"], "erro_direcao": lookahead["erro"] - perto["erro"],
-            "ponto_perto": perto, "ponto_lookahead": lookahead}
-
-
-def decidir_lado_confiavel(baixa, controle, correcao_normal):
-    """Prioriza a direcao da curva para escolher o giro de recuperacao."""
-    if controle is not None:
-        erro_direcao = controle.get("erro_direcao")
-        if erro_direcao is not None and abs(erro_direcao) >= RUN_LIMIAR_DIRECAO_LADO_CONFIAVEL:
-            return ("ESQUERDA", "DIRECAO") if erro_direcao < 0 else ("DIREITA", "DIRECAO")
-    if correcao_normal is not None and abs(correcao_normal) >= RUN_LIMIAR_CORRECAO_LADO_CONFIAVEL:
-        return ("ESQUERDA", "CORRECAO") if correcao_normal < 0 else ("DIREITA", "CORRECAO")
-    if baixa is not None:
-        erro_baixa = baixa.get("erro")
-        if erro_baixa is not None and abs(erro_baixa) >= RUN_LIMIAR_BAIXA_LADO_CONFIAVEL:
-            return ("ESQUERDA", "BAIXA") if erro_baixa < 0 else ("DIREITA", "BAIXA")
-    return "CENTRO", "INDEFINIDO"
+    atuais = [ponto for ponto in conectados if RUN_PONTO_ATUAL_Y_MIN <= ponto["fracao_y"] <= RUN_PONTO_ATUAL_Y_MAX]
+    alvos = [ponto for ponto in conectados if RUN_PONTO_ALVO_Y_MIN <= ponto["fracao_y"] <= RUN_PONTO_ALVO_Y_MAX]
+    if not atuais or not alvos:
+        return {"ok": False, "ponto_atual": None, "ponto_alvo": None, "dx": None, "dy": None,
+                "angulo": None, "lado_curva": "CENTRO"}
+    atual = min(atuais, key=lambda ponto: abs(ponto["fracao_y"] - (RUN_PONTO_ATUAL_Y_MIN + RUN_PONTO_ATUAL_Y_MAX) / 2))
+    alvo = min(alvos, key=lambda ponto: abs(ponto["fracao_y"] - (RUN_PONTO_ALVO_Y_MIN + RUN_PONTO_ALVO_Y_MAX) / 2))
+    dx, dy = alvo["x"] - atual["x"], alvo["y"] - atual["y"]
+    angulo = math.degrees(math.atan2(abs(dx), max(1, abs(dy))))
+    lado = "ESQUERDA" if dx < -RUN_DX_CURVA_FORTE else "DIREITA" if dx > RUN_DX_CURVA_FORTE else "CENTRO"
+    return {"ok": True, "ponto_atual": atual, "ponto_alvo": alvo, "dx": dx, "dy": dy,
+            "angulo": angulo, "lado_curva": lado}
 
 
 def escolher_lado_busca(historico_lados, ultimo_lado_confiavel):
@@ -160,25 +161,36 @@ def comando_tank(lado, velocidade):
     return "PARAR"
 
 
-def comando_lado_por_controle(erro_lateral, erro_direcao, modo):
+def comando_por_guia(guia, modo):
+    """Calcula LADO a partir dos erros das duas bolinhas e do deslocamento dx."""
     parametros = {
-        "NORMAL": (RUN_VELOCIDADE_BASE, RUN_KP_LATERAL, RUN_KP_DIRECAO, RUN_CORRECAO_MAXIMA),
-        "CURVA_FORTE": (RUN_VELOCIDADE_CURVA_FORTE, RUN_KP_CURVA_FORTE_LATERAL, RUN_KP_CURVA_FORTE_DIRECAO, RUN_CORRECAO_MAXIMA_CURVA_FORTE),
-        "REALINHAR": (RUN_VELOCIDADE_REALINHAR, RUN_KP_REALINHAR, RUN_KP_REALINHAR, RUN_CORRECAO_MAXIMA_REALINHAR),
+        "NORMAL": (RUN_VELOCIDADE_BASE, RUN_KP_ATUAL, RUN_KP_ALVO, RUN_KP_DX, RUN_CORRECAO_MAXIMA),
+        "CURVA_FORTE": (RUN_VELOCIDADE_CURVA_FORTE, RUN_KP_ATUAL_CURVA_FORTE, RUN_KP_ALVO_CURVA_FORTE, RUN_KP_DX_CURVA_FORTE, RUN_CORRECAO_MAXIMA_CURVA_FORTE),
+        "REALINHAR": (RUN_VELOCIDADE_REALINHAR, RUN_KP_REALINHAR, RUN_KP_REALINHAR, 0.20, RUN_CORRECAO_MAXIMA_REALINHAR),
     }
-    base, kp_lateral, kp_direcao, maximo = parametros[modo]
-    correcao = limitar(kp_lateral * erro_lateral + kp_direcao * erro_direcao, -maximo, maximo)
+    base, kp_atual, kp_alvo, kp_dx, maximo = parametros[modo]
+    correcao = limitar(kp_atual * guia["ponto_atual"]["erro"] + kp_alvo * guia["ponto_alvo"]["erro"] + kp_dx * guia["dx"], -maximo, maximo)
     esquerda = round(limitar(base + correcao, RUN_VELOCIDADE_MINIMA, RUN_VELOCIDADE_MAXIMA))
     direita = round(limitar(base - correcao, RUN_VELOCIDADE_MINIMA, RUN_VELOCIDADE_MAXIMA))
     return f"LADO {esquerda} {direita}", correcao
 
 
+def desenhar_guia(debug, guia):
+    if guia and guia["ok"]:
+        atual, alvo = guia["ponto_atual"], guia["ponto_alvo"]
+        cv2.line(debug, (atual["x"], atual["y"]), (alvo["x"], alvo["y"]), (0, 255, 255), 2)
+        cv2.circle(debug, (atual["x"], atual["y"]), 7, (0, 0, 255), -1)
+        cv2.circle(debug, (alvo["x"], alvo["y"]), 7, (255, 0, 255), -1)
+    return debug
+
+
 def salvar_debug_evento(resultado, estado, comando, info_extra):
     if not (SALVAR_DEBUG_ATIVO and RUN_SALVAR_DEBUG_EVENTOS):
         return
-    debug = criar_debug_linha(resultado)
+    guia = info_extra.get("Guia")
+    debug = desenhar_guia(criar_debug_linha(resultado), guia)
     linhas = [f"Estado: {estado}", f"Cmd: {comando}"]
-    linhas.extend(f"{chave}: {valor}" for chave, valor in info_extra.items())
+    linhas.extend(f"{chave}: {valor}" for chave, valor in info_extra.items() if chave != "Guia")
     for indice, texto in enumerate(linhas):
         cv2.putText(debug, texto, (15, 65 + indice * 25), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
     pasta = Path(PASTA_CAPTURAS)
@@ -221,26 +233,18 @@ def main():
         while True:
             resultado = detectar_linha(capturar_frame_bgr(camera))
             baixa = medir_baixa(resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["centro_imagem_x"])
-            pontos = extrair_pontos_vetor(resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["y_inicio_roi"], resultado["centro_imagem_x"])
-            controle = calcular_controle_vetor(pontos)
-            correcao_normal = comando_normal = None
-            if controle is not None:
-                comando_normal, correcao_normal = comando_lado_por_controle(
-                    controle["erro_lateral"], controle["erro_direcao"], "NORMAL"
-                )
-            lado_calculado, origem_lado = decidir_lado_confiavel(baixa, controle, correcao_normal)
-            if lado_calculado != "CENTRO":
-                historico_lados.append(lado_calculado)
-                ultimo_lado_confiavel = escolher_lado_busca(historico_lados, ultimo_lado_confiavel)
+            guia = extrair_pontos_guia(resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["y_inicio_roi"], resultado["centro_imagem_x"])
+            if guia["ok"] and guia["lado_curva"] != "CENTRO":
+                ultimo_lado_confiavel = guia["lado_curva"]
+                historico_lados.append(ultimo_lado_confiavel)
 
             motivo, comando, correcao = "", "PARAR", 0
             if estado in ("TANK_ASSIST", "BUSCA_TANQUE", "VARREDURA"):
                 baixa_reencontrada = (
                     baixa["segura"]
-                    and baixa["erro"] is not None
-                    and abs(baixa["erro"]) <= RUN_LIMIAR_ERRO_SAIDA_TANK
-                    and controle is not None
-                    and abs(controle["erro_direcao"]) <= RUN_LIMIAR_DIRECAO_SAIDA_TANK
+                    and guia["ok"]
+                    and abs(guia["dx"]) <= RUN_DX_SAIDA_TANK
+                    and abs(guia["angulo"]) <= RUN_ANGULO_SAIDA_TANK
                 )
                 frames_reencontro = frames_reencontro + 1 if baixa_reencontrada else 0
                 if frames_reencontro >= RUN_FRAMES_REENCONTRO_BAIXA:
@@ -268,7 +272,7 @@ def main():
                     enviar_seguro(conexao, comando, args.motores); time.sleep(RUN_TEMPO_PULSO_VARREDURA)
                     enviar_seguro(conexao, "PARAR", args.motores)
                     etapa_varredura = (etapa_varredura + 1) % len(sequencia)
-            elif not resultado["encontrou_linha"] or controle is None:
+            elif not resultado["encontrou_linha"] or not guia["ok"]:
                 lado_tank_ativo = escolher_lado_busca(historico_lados, ultimo_lado_confiavel)
                 origem_lado_tank = "HISTORICO"
                 tempo_estado = time.monotonic()
@@ -283,14 +287,18 @@ def main():
                         time.sleep(RUN_TEMPO_PULSO_BUSCA)
                         enviar_seguro(conexao, "PARAR", args.motores)
             else:
-                erro_lateral, erro_direcao = controle["erro_lateral"], controle["erro_direcao"]
+                comando_normal, correcao_normal = comando_por_guia(guia, "NORMAL")
                 frames_risco = frames_risco + 1 if baixa["risco"] else 0
                 frames_correcao_saturada = frames_correcao_saturada + 1 if abs(correcao_normal) >= RUN_CORRECAO_SATURADA_TANK else 0
                 if estado == "REALINHAR" and time.monotonic() - tempo_estado < RUN_TEMPO_REALINHAR:
-                    comando, correcao = comando_lado_por_controle(erro_lateral, erro_direcao, "REALINHAR")
-                elif frames_risco >= RUN_FRAMES_RISCO_TANK or frames_correcao_saturada >= RUN_FRAMES_CORRECAO_SATURADA:
-                    lado_tank_ativo = escolher_lado_busca(historico_lados, ultimo_lado_confiavel)
-                    origem_lado_tank = origem_lado
+                    comando, correcao = comando_por_guia(guia, "REALINHAR")
+                elif (abs(guia["dx"]) >= RUN_DX_TANK_ASSIST
+                      or guia["angulo"] >= RUN_ANGULO_TANK_ASSIST
+                      or (baixa["fraca"] and abs(guia["dx"]) >= RUN_DX_CURVA_FORTE)
+                      or frames_risco >= RUN_FRAMES_RISCO_TANK
+                      or frames_correcao_saturada >= RUN_FRAMES_CORRECAO_SATURADA):
+                    lado_tank_ativo = guia["lado_curva"]
+                    origem_lado_tank = "GUIA_DX"
                     tempo_estado = time.monotonic()
                     if lado_tank_ativo == "CENTRO":
                         estado, comando, motivo = "VARREDURA", "PARAR", "risco_sem_lado"
@@ -302,19 +310,19 @@ def main():
                             enviar_seguro(conexao, comando, args.motores)
                             time.sleep(RUN_TEMPO_PULSO_TANK)
                             enviar_seguro(conexao, "PARAR", args.motores)
-                elif abs(erro_direcao) >= RUN_LIMIAR_CURVA_FORTE or abs(correcao_normal) >= RUN_CORRECAO_SATURADA_TANK:
-                    estado, comando, correcao = "CURVA_FORTE", *comando_lado_por_controle(erro_lateral, erro_direcao, "CURVA_FORTE")
+                elif abs(guia["dx"]) >= RUN_DX_CURVA_FORTE:
+                    estado, comando, correcao = "CURVA_FORTE", *comando_por_guia(guia, "CURVA_FORTE")
                 else:
                     estado, comando, correcao = "NORMAL", comando_normal, correcao_normal
 
             if estado != estado_anterior:
-                salvar_debug_evento(resultado, estado, comando, {"Baixa": "SEGURA" if baixa["segura"] else "FRACA" if baixa["fraca"] else "PERDIDA", "Lat": controle["erro_lateral"] if controle else None, "Dir": controle["erro_direcao"] if controle else None, "Lado conf": ultimo_lado_confiavel, "Origem lado": origem_lado})
+                salvar_debug_evento(resultado, estado, comando, {"Baixa": "SEGURA" if baixa["segura"] else "FRACA" if baixa["fraca"] else "PERDIDA", "Atual": guia["ponto_atual"]["erro"] if guia["ok"] else None, "Alvo": guia["ponto_alvo"]["erro"] if guia["ok"] else None, "dx": guia["dx"], "angulo": guia["angulo"], "Lado": guia["lado_curva"], "Guia": guia})
                 estado_anterior = estado
             if args.mostrar:
-                cv2.imshow("Segue-linha - q para parar", criar_debug_linha(resultado))
+                cv2.imshow("Segue-linha - q para parar", desenhar_guia(criar_debug_linha(resultado), guia))
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     raise KeyboardInterrupt
-            print(f"Estado: {estado} | Baixa: {'SEGURA' if baixa['segura'] else 'FRACA' if baixa['fraca'] else 'PERDIDA'} | Lat: {controle['erro_lateral'] if controle else None} | Dir: {controle['erro_direcao'] if controle else None} | Cmd: {comando} | Lado conf: {ultimo_lado_confiavel} | Origem lado: {origem_lado}{' | Motivo: ' + motivo if motivo else ''}")
+            print(f"Estado: {estado} | Atual: {guia['ponto_atual']['erro'] if guia['ok'] else None} | Alvo: {guia['ponto_alvo']['erro'] if guia['ok'] else None} | dx: {guia['dx']} | Lado: {guia['lado_curva']} | Cmd: {comando}{' | Motivo: ' + motivo if motivo else ''}")
             if estado in ("NORMAL", "CURVA_FORTE", "REALINHAR"):
                 enviar_seguro(conexao, comando, args.motores)
             time.sleep(RUN_INTERVALO_LOOP)
