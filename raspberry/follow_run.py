@@ -1,4 +1,4 @@
-"""Primeiro segue-linha real, limitado e seguro."""
+"""Segue-linha real com curva fechada e recuperacao limitada da linha."""
 
 import argparse
 import time
@@ -9,62 +9,36 @@ import cv2
 
 from camera_test import capturar_frame_bgr, iniciar_camera
 from config import (
-    CAMERA_HEIGHT, CAMERA_WIDTH, DURACAO_TESTE_SEGUE_LINHA,
-    INTERVALO_COMANDO_SEGUNDOS, KP_SEGUE_LINHA, MAX_FRAMES_SEM_LINHA,
-    PARAR_SE_PERDER_LINHA, PASTA_CAPTURAS, SERIAL_PORT,
-    TIMEOUT_SERIAL, BAUD_RATE, VELOCIDADE_BASE_SEGUE_LINHA,
-)
-from follow_test import (
-    calcular_comando, calcular_erro_final, calcular_erro_faixa,
-    criar_debug_follow,
-)
-from line_test import criar_debug_linha, detectar_linha
-from config import (
+    BAUD_RATE, CAMERA_HEIGHT, CAMERA_WIDTH, CORRECAO_MAXIMA_CURVA_FECHADA,
+    CORRECAO_MAXIMA_NORMAL, DURACAO_TESTE_SEGUE_LINHA,
     FAIXA_ALTA_FIM, FAIXA_ALTA_INICIO, FAIXA_BAIXA_FIM,
     FAIXA_BAIXA_INICIO, FAIXA_MEDIA_FIM, FAIXA_MEDIA_INICIO,
+    FRAMES_LINHA_REENCONTRADA, INTERVALO_COMANDO_SEGUNDOS,
+    KP_CURVA_FECHADA, KP_NORMAL, LIMIAR_ERRO_BAIXO_CURVA_FECHADA,
+    LIMIAR_ERRO_CURVA_FECHADA, MAX_FRAMES_BUSCA_SEM_LINHA,
+    MAX_FRAMES_SEM_LINHA_ANTES_BUSCA, PASTA_CAPTURAS, SERIAL_PORT,
+    TEMPO_MAX_BUSCA_LINHA, TIMEOUT_SERIAL, VELOCIDADE_BASE_CURVA_FECHADA,
+    VELOCIDADE_BASE_NORMAL, VELOCIDADE_GIRO_BUSCA,
+    VELOCIDADE_MAXIMA_CURVA_FECHADA, VELOCIDADE_MAXIMA_SEGUE_LINHA,
+    VELOCIDADE_MINIMA_CURVA_FECHADA, VELOCIDADE_MINIMA_SEGUE_LINHA,
 )
+from follow_test import calcular_comando, calcular_erro_final, calcular_erro_faixa, criar_debug_follow
+from line_test import criar_debug_linha, detectar_linha
 
 
 def ler_argumentos():
-    parser = argparse.ArgumentParser(description="Segue-linha real de baixa velocidade.")
+    parser = argparse.ArgumentParser(description="Segue-linha com recuperacao de curva fechada.")
     parser.add_argument("--camera", action="store_true", help="Usa a camera CSI real.")
-    parser.add_argument("--motores", action="store_true", help="Permite enviar comandos reais ao Arduino.")
+    parser.add_argument("--motores", action="store_true", help="Permite comandos reais ao Arduino.")
     parser.add_argument("--porta", default="auto", help="Porta serial ou 'auto'.")
     parser.add_argument("--duracao", type=float, default=DURACAO_TESTE_SEGUE_LINHA, help="Duracao maxima em segundos.")
-    parser.add_argument("--salvar-debug", action="store_true", help="Salva primeiro, ultimo e perda de linha.")
+    parser.add_argument("--salvar-debug", action="store_true", help="Salva eventos importantes do teste.")
     parser.add_argument("--mostrar", action="store_true", help="Mostra preview do debug, se houver interface grafica.")
     return parser.parse_args()
 
 
-def enviar_parar_seguro(conexao):
-    """Tenta parar o Arduino sem deixar uma falha de limpeza interromper o fim."""
-    if conexao is None or not conexao.is_open:
-        return False
-    try:
-        from utils import enviar_comando
-        resposta = enviar_comando(conexao, "PARAR")
-        if resposta and not resposta.startswith("OK"):
-            print(f"Aviso: resposta inesperada ao PARAR: {resposta}")
-            return False
-        return True
-    except Exception as erro:
-        print(f"Aviso: nao foi possivel enviar PARAR: {erro}")
-        return False
-
-
-def salvar_debug(imagem, nome):
-    pasta = Path(PASTA_CAPTURAS)
-    pasta.mkdir(parents=True, exist_ok=True)
-    caminho = pasta / f"debug_follow_{nome}_{datetime.now():%Y%m%d_%H%M%S_%f}.jpg"
-    if not cv2.imwrite(str(caminho), imagem):
-        raise RuntimeError(f"Nao foi possivel salvar debug: {caminho}")
-    print(f"Debug salvo em: {caminho}")
-
-
 def calcular_faixas(resultado):
-    mascara = resultado["mascara_limpa"]
-    x_inicio = resultado["x_inicio_roi"]
-    centro = resultado["centro_imagem_x"]
+    mascara, x_inicio, centro = resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["centro_imagem_x"]
     return {
         "baixa": calcular_erro_faixa(mascara, x_inicio, centro, FAIXA_BAIXA_INICIO, FAIXA_BAIXA_FIM),
         "media": calcular_erro_faixa(mascara, x_inicio, centro, FAIXA_MEDIA_INICIO, FAIXA_MEDIA_FIM),
@@ -72,8 +46,79 @@ def calcular_faixas(resultado):
     }
 
 
+def detectar_curva_fechada(erro_final, faixas):
+    """Identifica curva forte usando o erro geral e as faixas proximas."""
+    baixo, medio = faixas["baixa"]["erro"], faixas["media"]["erro"]
+    if abs(erro_final) >= LIMIAR_ERRO_CURVA_FECHADA:
+        return True
+    if baixo is not None and abs(baixo) >= LIMIAR_ERRO_BAIXO_CURVA_FECHADA:
+        return True
+    if not faixas["baixa"]["encontrou"] and (faixas["media"]["encontrou"] or faixas["alta"]["encontrou"]):
+        return True
+    return baixo is not None and medio is not None and baixo * medio > 0 and abs(baixo) >= 0.6 * LIMIAR_ERRO_BAIXO_CURVA_FECHADA and abs(medio) >= 0.6 * LIMIAR_ERRO_CURVA_FECHADA
+
+
+def calcular_comando_estado(erro_final, curva_fechada):
+    if curva_fechada:
+        return calcular_comando(erro_final, KP_CURVA_FECHADA, VELOCIDADE_BASE_CURVA_FECHADA, CORRECAO_MAXIMA_CURVA_FECHADA, VELOCIDADE_MINIMA_CURVA_FECHADA, VELOCIDADE_MAXIMA_CURVA_FECHADA)
+    return calcular_comando(erro_final, KP_NORMAL, VELOCIDADE_BASE_NORMAL, CORRECAO_MAXIMA_NORMAL, VELOCIDADE_MINIMA_SEGUE_LINHA, VELOCIDADE_MAXIMA_SEGUE_LINHA)
+
+
+def comando_busca(ultimo_lado_linha, ultimo_erro_valido):
+    if ultimo_lado_linha == "ESQUERDA" or (ultimo_lado_linha == "CENTRO" and ultimo_erro_valido < 0):
+        return f"GIRAR_ESQ {VELOCIDADE_GIRO_BUSCA}"
+    if ultimo_lado_linha == "DIREITA" or (ultimo_lado_linha == "CENTRO" and ultimo_erro_valido > 0):
+        return f"GIRAR_DIR {VELOCIDADE_GIRO_BUSCA}"
+    return "PARAR"
+
+
+def enviar_parar_seguro(conexao):
+    if conexao is None or not conexao.is_open:
+        return False
+    try:
+        from utils import enviar_comando
+        resposta = enviar_comando(conexao, "PARAR")
+        return not resposta or resposta.startswith("OK")
+    except Exception as erro:
+        print(f"Aviso: nao foi possivel enviar PARAR: {erro}")
+        return False
+
+
+def fechar_camera_segura(camera):
+    if camera is not None:
+        try:
+            camera.stop()
+        except Exception as erro:
+            print(f"Aviso ao fechar camera: {erro}")
+
+
+def fechar_serial_segura(conexao):
+    if conexao is not None and conexao.is_open:
+        try:
+            conexao.close()
+        except Exception as erro:
+            print(f"Aviso ao fechar serial: {erro}")
+
+
+def salvar_debug(imagem, estado):
+    pasta = Path(PASTA_CAPTURAS)
+    pasta.mkdir(parents=True, exist_ok=True)
+    caminho = pasta / f"debug_run_SPEC06_{datetime.now():%Y%m%d_%H%M%S_%f}_{estado.lower()}.jpg"
+    if not cv2.imwrite(str(caminho), imagem):
+        raise RuntimeError(f"Nao foi possivel salvar debug: {caminho}")
+    print(f"Debug salvo em: {caminho}")
+
+
+def adicionar_info_debug(imagem, estado, comando, ultimo_lado):
+    debug = imagem.copy()
+    textos = (f"Estado: {estado}", f"Cmd: {comando}", f"Ultimo lado: {ultimo_lado}")
+    for indice, texto in enumerate(textos):
+        cv2.putText(debug, texto, (15, debug.shape[0] - 65 + indice * 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+    return debug
+
+
 def mostrar_preview(imagem):
-    cv2.imshow("Segue-linha - pressione q para parar", imagem)
+    cv2.imshow("Segue-linha SPEC 06 - q para parar", imagem)
     return cv2.waitKey(1) & 0xFF == ord("q")
 
 
@@ -86,77 +131,103 @@ def main():
         print("Erro: a duracao deve ser maior que zero.")
         return 1
 
-    conexao = None
     camera = None
+    conexao = None
+    debug_salvos = set()
     try:
         from utils import abrir_serial, enviar_comando
-
         porta = SERIAL_PORT if argumentos.porta == "auto" else argumentos.porta
         conexao = abrir_serial(porta, BAUD_RATE, TIMEOUT_SERIAL)
-        # A abertura da porta USB pode reiniciar o Arduino.
         time.sleep(2.0)
         conexao.reset_input_buffer()
-        print(f"Duracao: {argumentos.duracao:.1f}s")
-        print(f"Velocidade base: {VELOCIDADE_BASE_SEGUE_LINHA}")
-        print(f"KP: {KP_SEGUE_LINHA:.2f}")
-        print(f"Modo motores: {'ATIVADO' if argumentos.motores else 'SIMULACAO'}")
-
         if not enviar_parar_seguro(conexao):
             raise RuntimeError("Nao foi possivel confirmar o PARAR inicial.")
         print("PARAR enviado antes do inicio.")
-
+        print(f"Duracao: {argumentos.duracao:.1f}s | Modo: {'MOTORES' if argumentos.motores else 'SIMULACAO'}")
         if argumentos.motores:
             print("ATENCAO: MODO COM MOTORES ATIVADOS.")
-            print("Deixe o robo no chao, com espaco livre e mao perto da chave.")
             input("Pressione ENTER para iniciar ou CTRL+C para cancelar.")
         else:
             print("MODO SIMULACAO: motores nao serao acionados.")
 
         camera = iniciar_camera(CAMERA_WIDTH, CAMERA_HEIGHT)
-        inicio = time.monotonic()
-        frames_sem_linha = 0
-        primeiro_debug_salvo = False
+        inicio, estado = time.monotonic(), "NORMAL"
+        ultimo_lado_linha, ultimo_erro_valido = "CENTRO", 0
+        frames_sem_linha = frames_busca_sem_linha = frames_linha_reencontrada = 0
+        tempo_inicio_busca = None
+        ultimo_debug = None
 
-        while time.monotonic() - inicio < argumentos.duracao:
-            frame = capturar_frame_bgr(camera)
-            resultado = detectar_linha(frame)
+        while time.monotonic() - inicio < argumentos.duracao and estado != "PARADO":
+            resultado = detectar_linha(capturar_frame_bgr(camera))
             tempo = time.monotonic() - inicio
-
-            if not resultado["encontrou_linha"]:
-                frames_sem_linha += 1
-                print(f"Tempo: {tempo:.1f}s | Linha perdida ({frames_sem_linha}/{MAX_FRAMES_SEM_LINHA})")
-                if argumentos.salvar_debug:
-                    salvar_debug(criar_debug_linha(resultado), "linha_perdida")
-                if PARAR_SE_PERDER_LINHA and frames_sem_linha >= MAX_FRAMES_SEM_LINHA:
-                    enviar_parar_seguro(conexao)
-                    print("Linha perdida | PARAR")
-                    break
-            else:
-                frames_sem_linha = 0
+            if resultado["encontrou_linha"]:
                 faixas = calcular_faixas(resultado)
                 erro_final = calcular_erro_final(faixas)
-                if erro_final is None:
-                    enviar_parar_seguro(conexao)
-                    print(f"Tempo: {tempo:.1f}s | Faixas sem linha | PARAR")
-                    break
-                _, esquerda, direita, comando = calcular_comando(erro_final, KP_SEGUE_LINHA, VELOCIDADE_BASE_SEGUE_LINHA)
-                debug = criar_debug_follow(resultado, faixas, erro_final, comando, VELOCIDADE_BASE_SEGUE_LINHA, KP_SEGUE_LINHA)
-                print(f"Tempo: {tempo:.1f}s | Erro: {erro_final:.1f} | Comando: {comando} | Linha: OK")
-                if argumentos.salvar_debug and not primeiro_debug_salvo:
-                    salvar_debug(debug, "primeiro")
-                    primeiro_debug_salvo = True
-                if argumentos.motores:
-                    resposta = enviar_comando(conexao, comando)
-                    if resposta and not resposta.startswith("OK"):
-                        raise RuntimeError(f"Arduino respondeu: {resposta}")
-                if argumentos.mostrar and mostrar_preview(debug):
-                    print("Preview encerrado pelo usuario.")
-                    break
+                if erro_final is not None:
+                    ultimo_erro_valido = erro_final
+                    ultimo_lado_linha = "ESQUERDA" if erro_final < -10 else "DIREITA" if erro_final > 10 else "CENTRO"
+                    frames_sem_linha = 0
+                    if estado == "BUSCA_LINHA":
+                        frames_linha_reencontrada += 1
+                        if frames_linha_reencontrada < FRAMES_LINHA_REENCONTRADA:
+                            comando = "PARAR"
+                            ultimo_debug = adicionar_info_debug(criar_debug_follow(resultado, faixas, erro_final, comando, VELOCIDADE_BASE_NORMAL, KP_NORMAL), estado, comando, ultimo_lado_linha)
+                            print(f"Tempo: {tempo:.1f}s | Estado: BUSCA_LINHA | Linha reencontrada aguardando confirmacao")
+                            if argumentos.motores:
+                                enviar_comando(conexao, comando)
+                            time.sleep(INTERVALO_COMANDO_SEGUNDOS)
+                            continue
+                        frames_linha_reencontrada, tempo_inicio_busca = 0, None
+                        if argumentos.salvar_debug and "reencontrada" not in debug_salvos:
+                            salvar_debug(criar_debug_linha(resultado), "reencontrada")
+                            debug_salvos.add("reencontrada")
 
+                    curva_fechada = detectar_curva_fechada(erro_final, faixas)
+                    estado = "CURVA_FECHADA" if curva_fechada else "NORMAL"
+                    _, _, _, comando = calcular_comando_estado(erro_final, curva_fechada)
+                    base = VELOCIDADE_BASE_CURVA_FECHADA if curva_fechada else VELOCIDADE_BASE_NORMAL
+                    kp = KP_CURVA_FECHADA if curva_fechada else KP_NORMAL
+                    ultimo_debug = adicionar_info_debug(criar_debug_follow(resultado, faixas, erro_final, comando, base, kp), estado, comando, ultimo_lado_linha)
+                    print(f"Tempo: {tempo:.1f}s | Estado: {estado} | Erro: {erro_final:.1f} | Cmd: {comando} | Linha: OK")
+                    evento = "primeiro" if "primeiro" not in debug_salvos else "curva_fechada" if curva_fechada else None
+                    if argumentos.salvar_debug and evento and evento not in debug_salvos:
+                        salvar_debug(ultimo_debug, evento)
+                        debug_salvos.add(evento)
+                    if argumentos.motores:
+                        resposta = enviar_comando(conexao, comando)
+                        if resposta and not resposta.startswith("OK"):
+                            raise RuntimeError(f"Arduino respondeu: {resposta}")
+                    if argumentos.mostrar and mostrar_preview(ultimo_debug):
+                        print("Preview encerrado pelo usuario.")
+                        break
+                    time.sleep(INTERVALO_COMANDO_SEGUNDOS)
+                    continue
+
+            # Linha nao encontrada, ou faixas sem pixels suficientes.
+            if estado != "BUSCA_LINHA":
+                frames_sem_linha += 1
+                if frames_sem_linha >= MAX_FRAMES_SEM_LINHA_ANTES_BUSCA:
+                    estado, tempo_inicio_busca = "BUSCA_LINHA", time.monotonic()
+                    frames_busca_sem_linha = frames_linha_reencontrada = 0
+            if estado == "BUSCA_LINHA":
+                frames_busca_sem_linha += 1
+                comando = comando_busca(ultimo_lado_linha, ultimo_erro_valido)
+                ultimo_debug = adicionar_info_debug(criar_debug_linha(resultado), estado, comando, ultimo_lado_linha)
+                print(f"Tempo: {tempo:.1f}s | Estado: BUSCA_LINHA | Ultimo lado: {ultimo_lado_linha} | Cmd: {comando} | Linha: PERDIDA")
+                if argumentos.salvar_debug and "perdida" not in debug_salvos:
+                    salvar_debug(ultimo_debug, "perdida")
+                    debug_salvos.add("perdida")
+                if comando == "PARAR" or frames_busca_sem_linha >= MAX_FRAMES_BUSCA_SEM_LINHA or time.monotonic() - tempo_inicio_busca >= TEMPO_MAX_BUSCA_LINHA:
+                    enviar_parar_seguro(conexao)
+                    estado = "PARADO"
+                    print("Linha nao reencontrada dentro do tempo maximo. PARAR enviado por seguranca.")
+                    break
+                if argumentos.motores:
+                    enviar_comando(conexao, comando)
             time.sleep(INTERVALO_COMANDO_SEGUNDOS)
 
-        if argumentos.salvar_debug and 'debug' in locals():
-            salvar_debug(debug, "ultimo")
+        if argumentos.salvar_debug and ultimo_debug is not None:
+            salvar_debug(ultimo_debug, "ultimo")
         print("Teste finalizado.")
         return 0
     except KeyboardInterrupt:
@@ -168,11 +239,13 @@ def main():
     finally:
         if enviar_parar_seguro(conexao):
             print("PARAR enviado por seguranca.")
-        if camera is not None:
-            camera.stop()
-        cv2.destroyAllWindows()
-        if conexao is not None and conexao.is_open:
-            conexao.close()
+        fechar_camera_segura(camera)
+        fechar_serial_segura(conexao)
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:
+            pass
+        print("Recursos liberados.")
 
 
 if __name__ == "__main__":

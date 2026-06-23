@@ -58,10 +58,11 @@ def limitar(valor, minimo, maximo):
     return max(minimo, min(maximo, valor))
 
 
-def calcular_comando(erro_final, kp, velocidade_base):
-    correcao = limitar(kp * erro_final, -CORRECAO_MAXIMA, CORRECAO_MAXIMA)
-    esquerda = round(limitar(velocidade_base + correcao, VELOCIDADE_MINIMA_SEGUE_LINHA, VELOCIDADE_MAXIMA_SEGUE_LINHA))
-    direita = round(limitar(velocidade_base - correcao, VELOCIDADE_MINIMA_SEGUE_LINHA, VELOCIDADE_MAXIMA_SEGUE_LINHA))
+def calcular_comando(erro_final, kp, velocidade_base, correcao_maxima=CORRECAO_MAXIMA, velocidade_minima=VELOCIDADE_MINIMA_SEGUE_LINHA, velocidade_maxima=VELOCIDADE_MAXIMA_SEGUE_LINHA):
+    """Calcula LADO com limites ajustaveis para normal ou curva fechada."""
+    correcao = limitar(kp * erro_final, -correcao_maxima, correcao_maxima)
+    esquerda = round(limitar(velocidade_base + correcao, velocidade_minima, velocidade_maxima))
+    direita = round(limitar(velocidade_base - correcao, velocidade_minima, velocidade_maxima))
     return correcao, esquerda, direita, f"LADO {esquerda} {direita}"
 
 
