@@ -16,6 +16,9 @@ from config import (
     VELOCIDADE_BASE_SEGUE_LINHA, VELOCIDADE_MAXIMA_SEGUE_LINHA,
     VELOCIDADE_MINIMA_SEGUE_LINHA,
 )
+from config import (Y_TRAVA_BAIXA_INICIO, Y_TRAVA_BAIXA_FIM,
+    MIN_PIXELS_LINHA_SEGURA_BAIXA, MIN_PIXELS_LINHA_FRACA_BAIXA,
+    LIMIAR_ERRO_BAIXO_RISCO_PERDA)
 from config import (
     NUM_FAIXAS_CAMINHO, MIN_PIXELS_FAIXA_CAMINHO, DISTANCIA_MAX_ENTRE_FAIXAS,
     Y_CONTROLE_PERTO_INICIO, Y_CONTROLE_PERTO_FIM, Y_LOOKAHEAD_INICIO,
@@ -99,6 +102,19 @@ def calcular_controle_vetor(pontos):
     correcao = max(-CORRECAO_MAXIMA_VETOR, min(CORRECAO_MAXIMA_VETOR, KP_LATERAL * erro_lateral + KP_DIRECAO * erro_direcao))
     esq, dir = round(max(VELOCIDADE_MINIMA_VETOR, min(VELOCIDADE_MAXIMA_VETOR, base + correcao))), round(max(VELOCIDADE_MINIMA_VETOR, min(VELOCIDADE_MAXIMA_VETOR, base - correcao)))
     return {"erro_lateral": erro_lateral, "erro_direcao": erro_direcao, "correcao": correcao, "comando": f"LADO {esq} {dir}", "ponto_perto": ponto_perto, "ponto_lookahead": ponto_lookahead, "linha_baixa": bool(perto)}
+
+
+def medir_linha_baixa(mascara_limpa, x_inicio_roi, centro_imagem_x):
+    altura = mascara_limpa.shape[0]
+    y1, y2 = int(altura * Y_TRAVA_BAIXA_INICIO), int(altura * Y_TRAVA_BAIXA_FIM)
+    _, xs = np.where(mascara_limpa[y1:y2, :] > 0)
+    pixels = len(xs)
+    centro_x = x_inicio_roi + int(np.mean(xs)) if pixels else None
+    erro = centro_x - centro_imagem_x if centro_x is not None else None
+    segura = pixels >= MIN_PIXELS_LINHA_SEGURA_BAIXA
+    fraca = MIN_PIXELS_LINHA_FRACA_BAIXA <= pixels < MIN_PIXELS_LINHA_SEGURA_BAIXA
+    risco = not segura or (erro is not None and abs(erro) >= LIMIAR_ERRO_BAIXO_RISCO_PERDA)
+    return {"encontrou": pixels > 0, "pixels": pixels, "centro_x": centro_x, "erro": erro, "segura": segura, "fraca": fraca, "risco_perda": risco}
 
 
 def limitar(valor, minimo, maximo):

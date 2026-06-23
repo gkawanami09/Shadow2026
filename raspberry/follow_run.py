@@ -35,7 +35,10 @@ from config import (
     KP_ZIGZAG, CORRECAO_MAXIMA_ZIGZAG, PESO_ZIGZAG_BAIXA,
     PESO_ZIGZAG_MEDIA, PESO_ZIGZAG_ALTA,
 )
-from follow_test import calcular_comando, calcular_erro_final, calcular_erro_faixa, criar_debug_follow, extrair_caminho_linha, calcular_controle_vetor
+from follow_test import calcular_comando, calcular_erro_final, calcular_erro_faixa, criar_debug_follow, extrair_caminho_linha, calcular_controle_vetor, medir_linha_baixa
+from config import (FRAMES_CONFIRMAR_RISCO_PERDA, VELOCIDADE_BUSCA_TANQUE,
+    TEMPO_BUSCA_TANQUE_LADO, TEMPO_MAX_BUSCA_TOTAL, TAMANHO_HISTORICO_LADO,
+    LIMIAR_ERRO_LADO_CONFIAVEL)
 from line_test import criar_debug_linha, detectar_linha
 
 
@@ -215,6 +218,10 @@ def main():
         tempo_inicio_zigzag = None
         tempo_bloqueio_curva_90_ate = 0
         historico_erros = []
+        historico_lados = []
+        frames_risco_perda = 0
+        tempo_inicio_busca_tanque = None
+        lado_busca = "CENTRO"
         frames_reencontro_curva_90 = 0
         frames_suspeita_curva_90 = 0
 
@@ -223,6 +230,29 @@ def main():
             tempo = time.monotonic() - inicio
             pontos_vetor = extrair_caminho_linha(resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["y_inicio_roi"], resultado["centro_imagem_x"])
             controle_vetor = calcular_controle_vetor(pontos_vetor)
+            baixa = medir_linha_baixa(resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["centro_imagem_x"])
+            if baixa["segura"] and baixa["erro"] is not None:
+                lado = "ESQUERDA" if baixa["erro"] < -LIMIAR_ERRO_LADO_CONFIAVEL else "DIREITA" if baixa["erro"] > LIMIAR_ERRO_LADO_CONFIAVEL else "CENTRO"
+                historico_lados.append(lado)
+                if len(historico_lados) > TAMANHO_HISTORICO_LADO: historico_lados.pop(0)
+                frames_risco_perda = 0
+            else:
+                frames_risco_perda += 1
+            if frames_risco_perda >= FRAMES_CONFIRMAR_RISCO_PERDA:
+                lados = [lado for lado in historico_lados if lado != "CENTRO"]
+                lado_busca = max(set(lados), key=lados.count) if lados else "CENTRO"
+                if tempo_inicio_busca_tanque is None:
+                    tempo_inicio_busca_tanque = time.monotonic()
+                    print(f"Tempo: {tempo:.1f}s | Estado: TRAVA_PERDA | Cmd: PARAR | Ultimo lado: {lado_busca}")
+                    if argumentos.motores: enviar_comando(conexao, "PARAR")
+                if time.monotonic() - tempo_inicio_busca_tanque >= TEMPO_MAX_BUSCA_TOTAL:
+                    print("Busca excedeu tempo maximo. PARAR.")
+                    estado = "PARADO"; break
+                comando = f"GIRAR_ESQ {VELOCIDADE_BUSCA_TANQUE}" if lado_busca == "ESQUERDA" else f"GIRAR_DIR {VELOCIDADE_BUSCA_TANQUE}" if lado_busca == "DIREITA" else "PARAR"
+                print(f"Tempo: {tempo:.1f}s | Estado: BUSCA_TANQUE | Cmd: {comando} | Baixa: PERDIDA")
+                if argumentos.motores and comando != "PARAR": enviar_comando(conexao, comando)
+                time.sleep(INTERVALO_COMANDO_SEGUNDOS); continue
+            tempo_inicio_busca_tanque = None
             if controle_vetor and controle_vetor["linha_baixa"] and estado not in ("AVANCAR_ANTES_GIRO_90", "GIRAR_90", "REALINHAR_POS_90"):
                 estado = "LINHA_FORTE" if sum(p["encontrou"] for p in pontos_vetor) >= 4 else "LINHA_FRACA"
                 comando = controle_vetor["comando"]
