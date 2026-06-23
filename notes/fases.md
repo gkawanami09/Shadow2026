@@ -8,6 +8,6 @@
 6. **Fase 5 - Segue-linha real:** seguir continuamente por vetor, sem duracao fixa; a parada normal e por CTRL+C.
 7. **Fase 6 - Recuperacao e curvas fechadas:** usar curva forte com `LADO` e Tank Assist por pulsos para recuperar perda de linha, sem rotina fixa de 90 graus.
 8. **Fase 7 - Segue-linha limpo:** usar `follow_clean.py` com centroline conectada, lookahead e `LADO` assinado; a calibracao 1.3 adiciona `FOLLOW_RISCO` positivo, histerese de baixa fraca/segura e confirmacao de linha reaparecida por `LADO` antes de sair da recuperacao.
-9. **Fase 8 - Follow Destinos 1.0:** testar `follow_destinos.py`, que escolhe destino visual por hierarquia FRENTE, CURVA e RETORNO antes de detectar verde e vermelho.
+9. **Fase 8 - Follow Destinos 1.1A:** testar `follow_destinos.py`, que escolhe destino visual por hierarquia FRENTE, CURVA e RETORNO; a calibracao 1.1A reforca somente o RETORNO assinado e os giros de recuperacao.
 10. **Fase 9 - Verde/vermelho:** detectar marcacoes da pista.
 11. **Fase 10 - Obstaculos e ajustes OBR:** tratar situacoes especiais.
