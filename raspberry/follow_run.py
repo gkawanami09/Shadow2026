@@ -15,12 +15,16 @@ from config import (
     FAIXA_BAIXA_INICIO, FAIXA_MEDIA_FIM, FAIXA_MEDIA_INICIO,
     FRAMES_LINHA_REENCONTRADA, INTERVALO_COMANDO_SEGUNDOS,
     KP_CURVA_FECHADA, KP_NORMAL, LIMIAR_ERRO_BAIXO_CURVA_FECHADA,
-    LIMIAR_ERRO_CURVA_FECHADA, MAX_FRAMES_BUSCA_SEM_LINHA,
+    LIMIAR_ERRO_CURVA_FECHADA, LIMIAR_ERRO_CURVA_90,
+    LIMIAR_ERRO_MEDIA_ALTA_CURVA_90, LIMIAR_ERRO_SAIDA_CURVA_90,
+    MAX_FRAMES_BUSCA_SEM_LINHA,
     MAX_FRAMES_SEM_LINHA_ANTES_BUSCA, PASTA_CAPTURAS, SERIAL_PORT,
-    TEMPO_MAX_BUSCA_LINHA, TIMEOUT_SERIAL, VELOCIDADE_BASE_CURVA_FECHADA,
-    VELOCIDADE_BASE_NORMAL, VELOCIDADE_GIRO_BUSCA,
+    TEMPO_MAX_BUSCA_LINHA, TEMPO_MAX_CURVA_90, TIMEOUT_SERIAL, VELOCIDADE_BASE_CURVA_FECHADA,
+    VELOCIDADE_BASE_NORMAL, VELOCIDADE_GIRO_BUSCA, VELOCIDADE_GIRO_CURVA_90,
     VELOCIDADE_MAXIMA_CURVA_FECHADA, VELOCIDADE_MAXIMA_SEGUE_LINHA,
     VELOCIDADE_MINIMA_CURVA_FECHADA, VELOCIDADE_MINIMA_SEGUE_LINHA,
+    FRAMES_CONFIRMAR_CURVA_90, FRAMES_REENCONTRO_CURVA_90,
+    PAUSA_ANTES_GIRO_90,
 )
 from follow_test import calcular_comando, calcular_erro_final, calcular_erro_faixa, criar_debug_follow
 from line_test import criar_debug_linha, detectar_linha
@@ -69,6 +73,28 @@ def comando_busca(ultimo_lado_linha, ultimo_erro_valido):
         return f"GIRAR_ESQ {VELOCIDADE_GIRO_BUSCA}"
     if ultimo_lado_linha == "DIREITA" or (ultimo_lado_linha == "CENTRO" and ultimo_erro_valido > 0):
         return f"GIRAR_DIR {VELOCIDADE_GIRO_BUSCA}"
+    return "PARAR"
+
+
+def detectar_curva_90(erro_final, faixas, ultimo_erro_valido):
+    """Retorna indicio de curva 90, lado e motivo para o log."""
+    if erro_final is not None and abs(erro_final) >= LIMIAR_ERRO_CURVA_90:
+        return {"detectou": True, "lado": "ESQUERDA" if erro_final < 0 else "DIREITA", "motivo": "erro_final"}
+    candidatos = [faixas["media"]["erro"], faixas["alta"]["erro"]]
+    if not faixas["baixa"]["encontrou"]:
+        for erro in candidatos:
+            if erro is not None and abs(erro) >= LIMIAR_ERRO_MEDIA_ALTA_CURVA_90:
+                return {"detectou": True, "lado": "ESQUERDA" if erro < 0 else "DIREITA", "motivo": "faixa_media_alta"}
+    if erro_final is None and abs(ultimo_erro_valido) >= LIMIAR_ERRO_CURVA_90:
+        return {"detectou": True, "lado": "ESQUERDA" if ultimo_erro_valido < 0 else "DIREITA", "motivo": "ultimo_erro"}
+    return {"detectou": False, "lado": "DESCONHECIDO", "motivo": ""}
+
+
+def comando_curva_90(lado):
+    if lado == "ESQUERDA":
+        return f"GIRAR_ESQ {VELOCIDADE_GIRO_CURVA_90}"
+    if lado == "DIREITA":
+        return f"GIRAR_DIR {VELOCIDADE_GIRO_CURVA_90}"
     return "PARAR"
 
 
@@ -156,10 +182,45 @@ def main():
         frames_sem_linha = frames_busca_sem_linha = frames_linha_reencontrada = 0
         tempo_inicio_busca = None
         ultimo_debug = None
+        lado_curva_90 = "DESCONHECIDO"
+        tempo_inicio_curva_90 = None
+        frames_reencontro_curva_90 = 0
+        frames_suspeita_curva_90 = 0
 
         while time.monotonic() - inicio < argumentos.duracao and estado != "PARADO":
             resultado = detectar_linha(capturar_frame_bgr(camera))
             tempo = time.monotonic() - inicio
+            if estado == "CURVA_90":
+                erro_curva_90 = None
+                if resultado["encontrou_linha"]:
+                    faixas_90 = calcular_faixas(resultado)
+                    erro_curva_90 = calcular_erro_final(faixas_90)
+                    if erro_curva_90 is not None and abs(erro_curva_90) <= LIMIAR_ERRO_SAIDA_CURVA_90:
+                        frames_reencontro_curva_90 += 1
+                    else:
+                        frames_reencontro_curva_90 = 0
+                else:
+                    frames_reencontro_curva_90 = 0
+                if frames_reencontro_curva_90 >= FRAMES_REENCONTRO_CURVA_90:
+                    print("Linha reencontrada. Voltando para NORMAL.")
+                    estado, tempo_inicio_curva_90 = "NORMAL", None
+                    frames_suspeita_curva_90 = 0
+                    continue
+                comando = comando_curva_90(lado_curva_90)
+                linha_texto = "OK" if resultado["encontrou_linha"] else "PERDIDA"
+                if argumentos.salvar_debug and "curva_90_durante" not in debug_salvos:
+                    salvar_debug(adicionar_info_debug(criar_debug_linha(resultado), "CURVA_90", comando, lado_curva_90), "curva_90_durante")
+                    debug_salvos.add("curva_90_durante")
+                print(f"Tempo: {tempo:.1f}s | Estado: CURVA_90 | Lado: {lado_curva_90} | Cmd: {comando} | Linha: {linha_texto} | Erro: {erro_curva_90}")
+                if tempo_inicio_curva_90 is None or time.monotonic() - tempo_inicio_curva_90 >= TEMPO_MAX_CURVA_90 or comando == "PARAR":
+                    enviar_parar_seguro(conexao)
+                    estado = "PARADO"
+                    print("Tempo maximo de CURVA_90 excedido. PARAR enviado.")
+                    break
+                if argumentos.motores:
+                    enviar_comando(conexao, comando)
+                time.sleep(INTERVALO_COMANDO_SEGUNDOS)
+                continue
             if resultado["encontrou_linha"]:
                 faixas = calcular_faixas(resultado)
                 erro_final = calcular_erro_final(faixas)
@@ -167,6 +228,20 @@ def main():
                     ultimo_erro_valido = erro_final
                     ultimo_lado_linha = "ESQUERDA" if erro_final < -10 else "DIREITA" if erro_final > 10 else "CENTRO"
                     frames_sem_linha = 0
+                    suspeita_90 = detectar_curva_90(erro_final, faixas, ultimo_erro_valido)
+                    frames_suspeita_curva_90 = frames_suspeita_curva_90 + 1 if suspeita_90["detectou"] else 0
+                    if frames_suspeita_curva_90 >= FRAMES_CONFIRMAR_CURVA_90:
+                        estado = "CURVA_90"
+                        lado_curva_90 = suspeita_90["lado"]
+                        tempo_inicio_curva_90 = time.monotonic()
+                        frames_reencontro_curva_90 = 0
+                        if PAUSA_ANTES_GIRO_90 > 0:
+                            time.sleep(PAUSA_ANTES_GIRO_90)
+                        if argumentos.salvar_debug and "curva_90_entrada" not in debug_salvos:
+                            salvar_debug(adicionar_info_debug(criar_debug_linha(resultado), "CURVA_90", comando_curva_90(lado_curva_90), lado_curva_90), "curva_90_entrada")
+                            debug_salvos.add("curva_90_entrada")
+                        print(f"Entrando em CURVA_90 para {lado_curva_90} ({suspeita_90['motivo']}).")
+                        continue
                     if estado == "BUSCA_LINHA":
                         frames_linha_reencontrada += 1
                         if frames_linha_reencontrada < FRAMES_LINHA_REENCONTRADA:
@@ -204,6 +279,16 @@ def main():
                     continue
 
             # Linha nao encontrada, ou faixas sem pixels suficientes.
+            faixas_vazias = {nome: {"encontrou": False, "erro": None} for nome in ("baixa", "media", "alta")}
+            suspeita_90 = detectar_curva_90(None, faixas_vazias, ultimo_erro_valido)
+            frames_suspeita_curva_90 = frames_suspeita_curva_90 + 1 if suspeita_90["detectou"] else 0
+            if frames_suspeita_curva_90 >= FRAMES_CONFIRMAR_CURVA_90:
+                estado = "CURVA_90"
+                lado_curva_90 = suspeita_90["lado"]
+                tempo_inicio_curva_90 = time.monotonic()
+                frames_reencontro_curva_90 = 0
+                print(f"Entrando em CURVA_90 para {lado_curva_90} ({suspeita_90['motivo']}).")
+                continue
             if estado != "BUSCA_LINHA":
                 frames_sem_linha += 1
                 if frames_sem_linha >= MAX_FRAMES_SEM_LINHA_ANTES_BUSCA:
