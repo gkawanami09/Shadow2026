@@ -25,6 +25,15 @@ from config import (
     VELOCIDADE_MINIMA_CURVA_FECHADA, VELOCIDADE_MINIMA_SEGUE_LINHA,
     FRAMES_CONFIRMAR_CURVA_90, FRAMES_REENCONTRO_CURVA_90,
     PAUSA_ANTES_GIRO_90,
+    TEMPO_AVANCO_ANTES_GIRO_90, VELOCIDADE_AVANCO_ANTES_GIRO_90,
+    TEMPO_MAX_GIRAR_90, TEMPO_MAX_TOTAL_CURVA_90,
+    FRAMES_LINHA_BAIXA_REENCONTRADA_90, LIMIAR_ERRO_SAIDA_90,
+    TEMPO_REALINHAR_POS_90, VELOCIDADE_BASE_REALINHAR_POS_90,
+    KP_REALINHAR_POS_90, TAMANHO_HISTORICO_ERRO_ZIGZAG,
+    LIMIAR_ERRO_ZIGZAG, MIN_TROCAS_SINAL_ZIGZAG, TEMPO_MIN_ZIGZAG_SUAVE,
+    TEMPO_BLOQUEIO_CURVA_90_APOS_ZIGZAG, VELOCIDADE_BASE_ZIGZAG,
+    KP_ZIGZAG, CORRECAO_MAXIMA_ZIGZAG, PESO_ZIGZAG_BAIXA,
+    PESO_ZIGZAG_MEDIA, PESO_ZIGZAG_ALTA,
 )
 from follow_test import calcular_comando, calcular_erro_final, calcular_erro_faixa, criar_debug_follow
 from line_test import criar_debug_linha, detectar_linha
@@ -96,6 +105,24 @@ def comando_curva_90(lado):
     if lado == "DIREITA":
         return f"GIRAR_DIR {VELOCIDADE_GIRO_CURVA_90}"
     return "PARAR"
+
+
+def detectar_zigzag(historico_erros):
+    sinais = []
+    for erro in historico_erros:
+        if abs(erro) >= LIMIAR_ERRO_ZIGZAG:
+            sinais.append(-1 if erro < 0 else 1)
+    trocas = sum(anterior != atual for anterior, atual in zip(sinais, sinais[1:]))
+    return trocas >= MIN_TROCAS_SINAL_ZIGZAG
+
+
+def calcular_erro_zigzag(faixas):
+    pesos = {"baixa": PESO_ZIGZAG_BAIXA, "media": PESO_ZIGZAG_MEDIA, "alta": PESO_ZIGZAG_ALTA}
+    encontradas = [nome for nome in pesos if faixas[nome]["erro"] is not None]
+    if not encontradas:
+        return None
+    soma = sum(pesos[nome] for nome in encontradas)
+    return sum(faixas[nome]["erro"] * pesos[nome] for nome in encontradas) / soma
 
 
 def enviar_parar_seguro(conexao):
@@ -184,26 +211,54 @@ def main():
         ultimo_debug = None
         lado_curva_90 = "DESCONHECIDO"
         tempo_inicio_curva_90 = None
+        tempo_inicio_estado_90 = None
+        tempo_inicio_zigzag = None
+        tempo_bloqueio_curva_90_ate = 0
+        historico_erros = []
         frames_reencontro_curva_90 = 0
         frames_suspeita_curva_90 = 0
 
         while time.monotonic() - inicio < argumentos.duracao and estado != "PARADO":
             resultado = detectar_linha(capturar_frame_bgr(camera))
             tempo = time.monotonic() - inicio
-            if estado == "CURVA_90":
+            if estado == "AVANCAR_ANTES_GIRO_90":
+                comando = f"LADO {VELOCIDADE_AVANCO_ANTES_GIRO_90} {VELOCIDADE_AVANCO_ANTES_GIRO_90}"
+                print(f"Tempo: {tempo:.1f}s | Estado: AVANCAR_ANTES_GIRO_90 | Lado: {lado_curva_90} | Cmd: {comando}")
+                if argumentos.motores:
+                    enviar_comando(conexao, comando)
+                if time.monotonic() - tempo_inicio_estado_90 >= TEMPO_AVANCO_ANTES_GIRO_90:
+                    estado, tempo_inicio_estado_90 = "GIRAR_90", time.monotonic()
+                    print("Avanco antes do giro concluido. Indo para GIRAR_90.")
+                time.sleep(INTERVALO_COMANDO_SEGUNDOS)
+                continue
+            if estado == "REALINHAR_POS_90":
+                if time.monotonic() - tempo_inicio_estado_90 >= TEMPO_REALINHAR_POS_90:
+                    estado = "NORMAL"
+                    print("Realinhamento pos 90 concluido. Voltando para NORMAL.")
+                    continue
+                if resultado["encontrou_linha"]:
+                    faixas_real = calcular_faixas(resultado)
+                    erro_real = calcular_erro_final(faixas_real)
+                    if erro_real is not None:
+                        _, _, _, comando = calcular_comando(erro_real, KP_REALINHAR_POS_90, VELOCIDADE_BASE_REALINHAR_POS_90)
+                        if argumentos.motores:
+                            enviar_comando(conexao, comando)
+                time.sleep(INTERVALO_COMANDO_SEGUNDOS)
+                continue
+            if estado == "GIRAR_90":
                 erro_curva_90 = None
                 if resultado["encontrou_linha"]:
                     faixas_90 = calcular_faixas(resultado)
                     erro_curva_90 = calcular_erro_final(faixas_90)
-                    if erro_curva_90 is not None and abs(erro_curva_90) <= LIMIAR_ERRO_SAIDA_CURVA_90:
+                    if faixas_90["baixa"]["encontrou"] and erro_curva_90 is not None and abs(erro_curva_90) <= LIMIAR_ERRO_SAIDA_90:
                         frames_reencontro_curva_90 += 1
                     else:
                         frames_reencontro_curva_90 = 0
                 else:
                     frames_reencontro_curva_90 = 0
-                if frames_reencontro_curva_90 >= FRAMES_REENCONTRO_CURVA_90:
-                    print("Linha reencontrada. Voltando para NORMAL.")
-                    estado, tempo_inicio_curva_90 = "NORMAL", None
+                if frames_reencontro_curva_90 >= FRAMES_LINHA_BAIXA_REENCONTRADA_90:
+                    print("Linha reencontrada na faixa baixa. Indo para REALINHAR_POS_90.")
+                    estado, tempo_inicio_estado_90 = "REALINHAR_POS_90", time.monotonic()
                     frames_suspeita_curva_90 = 0
                     continue
                 comando = comando_curva_90(lado_curva_90)
@@ -212,7 +267,7 @@ def main():
                     salvar_debug(adicionar_info_debug(criar_debug_linha(resultado), "CURVA_90", comando, lado_curva_90), "curva_90_durante")
                     debug_salvos.add("curva_90_durante")
                 print(f"Tempo: {tempo:.1f}s | Estado: CURVA_90 | Lado: {lado_curva_90} | Cmd: {comando} | Linha: {linha_texto} | Erro: {erro_curva_90}")
-                if tempo_inicio_curva_90 is None or time.monotonic() - tempo_inicio_curva_90 >= TEMPO_MAX_CURVA_90 or comando == "PARAR":
+                if tempo_inicio_curva_90 is None or time.monotonic() - tempo_inicio_curva_90 >= TEMPO_MAX_TOTAL_CURVA_90 or time.monotonic() - tempo_inicio_estado_90 >= TEMPO_MAX_GIRAR_90 or comando == "PARAR":
                     enviar_parar_seguro(conexao)
                     estado = "PARADO"
                     print("Tempo maximo de CURVA_90 excedido. PARAR enviado.")
@@ -226,14 +281,23 @@ def main():
                 erro_final = calcular_erro_final(faixas)
                 if erro_final is not None:
                     ultimo_erro_valido = erro_final
+                    historico_erros.append(erro_final)
+                    if len(historico_erros) > TAMANHO_HISTORICO_ERRO_ZIGZAG:
+                        historico_erros.pop(0)
+                    if detectar_zigzag(historico_erros):
+                        estado = "ZIGZAG_SUAVE"
+                        tempo_inicio_zigzag = time.monotonic()
+                        tempo_bloqueio_curva_90_ate = time.monotonic() + TEMPO_BLOQUEIO_CURVA_90_APOS_ZIGZAG
+                        print("ZIGZAG detectado. Bloqueando CURVA_90 temporariamente.")
                     ultimo_lado_linha = "ESQUERDA" if erro_final < -10 else "DIREITA" if erro_final > 10 else "CENTRO"
                     frames_sem_linha = 0
                     suspeita_90 = detectar_curva_90(erro_final, faixas, ultimo_erro_valido)
                     frames_suspeita_curva_90 = frames_suspeita_curva_90 + 1 if suspeita_90["detectou"] else 0
-                    if frames_suspeita_curva_90 >= FRAMES_CONFIRMAR_CURVA_90:
-                        estado = "CURVA_90"
+                    if frames_suspeita_curva_90 >= FRAMES_CONFIRMAR_CURVA_90 and time.monotonic() >= tempo_bloqueio_curva_90_ate:
+                        estado = "AVANCAR_ANTES_GIRO_90"
                         lado_curva_90 = suspeita_90["lado"]
                         tempo_inicio_curva_90 = time.monotonic()
+                        tempo_inicio_estado_90 = tempo_inicio_curva_90
                         frames_reencontro_curva_90 = 0
                         if PAUSA_ANTES_GIRO_90 > 0:
                             time.sleep(PAUSA_ANTES_GIRO_90)
@@ -257,11 +321,20 @@ def main():
                             salvar_debug(criar_debug_linha(resultado), "reencontrada")
                             debug_salvos.add("reencontrada")
 
-                    curva_fechada = detectar_curva_fechada(erro_final, faixas)
-                    estado = "CURVA_FECHADA" if curva_fechada else "NORMAL"
-                    _, _, _, comando = calcular_comando_estado(erro_final, curva_fechada)
-                    base = VELOCIDADE_BASE_CURVA_FECHADA if curva_fechada else VELOCIDADE_BASE_NORMAL
-                    kp = KP_CURVA_FECHADA if curva_fechada else KP_NORMAL
+                    if estado == "ZIGZAG_SUAVE":
+                        erro_zigzag = calcular_erro_zigzag(faixas)
+                        erro_final = erro_zigzag if erro_zigzag is not None else erro_final
+                        if time.monotonic() - tempo_inicio_zigzag >= TEMPO_MIN_ZIGZAG_SUAVE and not detectar_zigzag(historico_erros):
+                            estado = "NORMAL"
+                            print("Saindo de ZIGZAG_SUAVE. Voltando para NORMAL.")
+                        _, _, _, comando = calcular_comando(erro_final, KP_ZIGZAG, VELOCIDADE_BASE_ZIGZAG, CORRECAO_MAXIMA_ZIGZAG)
+                        base, kp, curva_fechada = VELOCIDADE_BASE_ZIGZAG, KP_ZIGZAG, False
+                    else:
+                        curva_fechada = detectar_curva_fechada(erro_final, faixas)
+                        estado = "CURVA_FECHADA" if curva_fechada else "NORMAL"
+                        _, _, _, comando = calcular_comando_estado(erro_final, curva_fechada)
+                        base = VELOCIDADE_BASE_CURVA_FECHADA if curva_fechada else VELOCIDADE_BASE_NORMAL
+                        kp = KP_CURVA_FECHADA if curva_fechada else KP_NORMAL
                     ultimo_debug = adicionar_info_debug(criar_debug_follow(resultado, faixas, erro_final, comando, base, kp), estado, comando, ultimo_lado_linha)
                     print(f"Tempo: {tempo:.1f}s | Estado: {estado} | Erro: {erro_final:.1f} | Cmd: {comando} | Linha: OK")
                     evento = "primeiro" if "primeiro" not in debug_salvos else "curva_fechada" if curva_fechada else None
