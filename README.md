@@ -31,3 +31,14 @@ Para testar cada motor, use `python3 raspberry/serial_test.py --porta auto --tes
 Para salvar uma imagem da câmera CSI, use `python3 raspberry/camera_test.py`. As imagens de teste são salvas em `captures/`.
 
 Para detectar a linha em uma imagem salva, use `python3 raspberry/line_test.py --imagem captures/NOME_DA_IMAGEM.jpg --salvar-mascara`.
+
+## Follow Destinos 1.0
+
+O controlador experimental `follow_destinos.py` escolhe um destino visual por raios, com prioridade para frente, depois curva e por fim retorno. O `follow_clean.py` continua disponivel como controlador de backup.
+
+```bash
+python3 raspberry/follow_destinos.py --camera --salvar-debug
+python3 raspberry/follow_destinos.py --camera --motores --porta auto --salvar-debug
+```
+
+Teste primeiro sem motores e depois com o robo suspenso. A parada normal e `CTRL+C`.
