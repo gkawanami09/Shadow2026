@@ -311,3 +311,80 @@ RUN_CORRECAO_MAXIMA_CURVA_FORTE = 45
 RUN_VELOCIDADE_TANK = 42
 RUN_TEMPO_PULSO_TANK = 0.09
 RUN_USAR_HISTORICO_APENAS_SE_LINHA_PERDIDA = True
+
+# ===============================
+# RUN_CLEAN - SEGUE-LINHA FINAL LIMPO
+# ===============================
+
+# Loop principal
+RUN_CLEAN_INTERVALO = 0.06
+
+# Divisao da ROI em faixas horizontais
+RUN_CLEAN_NUM_FAIXAS = 9
+RUN_CLEAN_MIN_PIXELS_FAIXA = 70
+
+# Ponto atual: perto do robo
+RUN_CLEAN_ATUAL_Y_MIN = 0.72
+RUN_CLEAN_ATUAL_Y_MAX = 0.96
+
+# Ponto alvo/lookahead: mais a frente
+RUN_CLEAN_ALVO_Y_MIN = 0.35
+RUN_CLEAN_ALVO_Y_MAX = 0.68
+
+# Distancia maxima em X para conectar uma faixa com a proxima
+RUN_CLEAN_MAX_SALTO_X = 150
+
+# Controle normal
+RUN_CLEAN_BASE_RETA = 58
+RUN_CLEAN_BASE_CURVA = 46
+RUN_CLEAN_BASE_EXTREMA = 36
+
+# Limites de velocidade
+RUN_CLEAN_VEL_MIN_NORMAL = 20
+RUN_CLEAN_VEL_MIN_CURVA = 0
+
+# Em curva extrema, permitir roda interna ir para tras
+RUN_CLEAN_VEL_MIN_EXTREMA = -35
+RUN_CLEAN_VEL_MAX = 95
+
+# Ganhos do controle por ponto atual + alvo + dx
+RUN_CLEAN_K_ATUAL = 0.22
+RUN_CLEAN_K_ALVO = 0.28
+RUN_CLEAN_K_DX = 0.40
+
+# Ganhos para curva extrema
+RUN_CLEAN_K_ATUAL_EXTREMA = 0.12
+RUN_CLEAN_K_ALVO_EXTREMA = 0.22
+RUN_CLEAN_K_DX_EXTREMA = 0.62
+
+# Limites da correcao
+RUN_CLEAN_CORRECAO_MAX_NORMAL = 38
+RUN_CLEAN_CORRECAO_MAX_CURVA = 50
+RUN_CLEAN_CORRECAO_MAX_EXTREMA = 75
+
+# Classificacao de curva pelo dx e angulo
+RUN_CLEAN_DX_CURVA = 45
+RUN_CLEAN_DX_EXTREMA = 85
+RUN_CLEAN_ANGULO_CURVA = 22
+RUN_CLEAN_ANGULO_EXTREMA = 38
+
+# Suavizacao temporal para nao ficar chacoalhando
+RUN_CLEAN_ALPHA_SUAVIZACAO = 0.45
+
+# Limitador de aceleracao entre comandos
+RUN_CLEAN_DELTA_MAX_VELOCIDADE = 22
+RUN_CLEAN_DELTA_MAX_EXTREMA = 34
+
+# Recuperacao quando a linha sumir
+RUN_CLEAN_VEL_RECUPERAR = 42
+RUN_CLEAN_VEL_VARREDURA = 38
+RUN_CLEAN_TEMPO_TROCA_VARREDURA = 0.35
+
+# Historico do ultimo lado valido
+RUN_CLEAN_HISTORICO_LADO = 10
+RUN_CLEAN_DX_LADO_MIN = 25
+RUN_CLEAN_ERRO_LADO_MIN = 18
+
+# Debug
+RUN_CLEAN_SALVAR_DEBUG_EVENTOS = True
+RUN_CLEAN_INTERVALO_DEBUG = 0.50
