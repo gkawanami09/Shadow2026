@@ -16,11 +16,14 @@ from config import (
     RUN_FRAMES_RISCO_TANK, RUN_INTERVALO_LOOP, RUN_KP_CURVA_FORTE_DIRECAO,
     RUN_KP_CURVA_FORTE_LATERAL, RUN_KP_DIRECAO, RUN_KP_LATERAL,
     RUN_KP_REALINHAR, RUN_LIMIAR_CURVA_FORTE, RUN_LIMIAR_ERRO_BAIXA_RISCO,
-    RUN_LIMIAR_ERRO_SAIDA_TANK, RUN_LIMIAR_LADO_CONFIAVEL,
+    RUN_LIMIAR_BAIXA_LADO_CONFIAVEL, RUN_LIMIAR_CORRECAO_LADO_CONFIAVEL,
+    RUN_LIMIAR_DIRECAO_LADO_CONFIAVEL, RUN_LIMIAR_DIRECAO_SAIDA_TANK,
+    RUN_LIMIAR_ERRO_SAIDA_TANK,
     RUN_MIN_PIXELS_BAIXA_FRACA, RUN_MIN_PIXELS_BAIXA_SEGURA,
     RUN_SALVAR_DEBUG_EVENTOS, RUN_TAMANHO_HISTORICO_LADO,
     RUN_TEMPO_MAX_TANK, RUN_TEMPO_PULSO_BUSCA, RUN_TEMPO_PULSO_TANK,
-    RUN_TEMPO_PULSO_VARREDURA, RUN_TEMPO_REALINHAR, RUN_VELOCIDADE_BASE,
+    RUN_TEMPO_PULSO_VARREDURA, RUN_TEMPO_REALINHAR, RUN_TANK_ASSIST_IMEDIATO,
+    RUN_VELOCIDADE_BASE,
     RUN_VELOCIDADE_BUSCA, RUN_VELOCIDADE_CURVA_FORTE, RUN_VELOCIDADE_MAXIMA,
     RUN_VELOCIDADE_MINIMA, RUN_VELOCIDADE_REALINHAR, RUN_VELOCIDADE_TANK,
     RUN_VELOCIDADE_VARREDURA, RUN_Y_BAIXA_FIM, RUN_Y_BAIXA_INICIO,
@@ -127,12 +130,19 @@ def calcular_controle_vetor(pontos):
             "ponto_perto": perto, "ponto_lookahead": lookahead}
 
 
-def atualizar_lado_confiavel(historico_lados, erro):
-    if erro is None:
-        return None
-    lado = "ESQUERDA" if erro < -RUN_LIMIAR_LADO_CONFIAVEL else "DIREITA" if erro > RUN_LIMIAR_LADO_CONFIAVEL else "CENTRO"
-    historico_lados.append(lado)
-    return lado
+def decidir_lado_confiavel(baixa, controle, correcao_normal):
+    """Prioriza a direcao da curva para escolher o giro de recuperacao."""
+    if controle is not None:
+        erro_direcao = controle.get("erro_direcao")
+        if erro_direcao is not None and abs(erro_direcao) >= RUN_LIMIAR_DIRECAO_LADO_CONFIAVEL:
+            return ("ESQUERDA", "DIRECAO") if erro_direcao < 0 else ("DIREITA", "DIRECAO")
+    if correcao_normal is not None and abs(correcao_normal) >= RUN_LIMIAR_CORRECAO_LADO_CONFIAVEL:
+        return ("ESQUERDA", "CORRECAO") if correcao_normal < 0 else ("DIREITA", "CORRECAO")
+    if baixa is not None:
+        erro_baixa = baixa.get("erro")
+        if erro_baixa is not None and abs(erro_baixa) >= RUN_LIMIAR_BAIXA_LADO_CONFIAVEL:
+            return ("ESQUERDA", "BAIXA") if erro_baixa < 0 else ("DIREITA", "BAIXA")
+    return "CENTRO", "INDEFINIDO"
 
 
 def escolher_lado_busca(historico_lados, ultimo_lado_confiavel):
@@ -202,7 +212,8 @@ def main():
 
         estado, estado_anterior = "NORMAL", None
         historico_lados = deque(maxlen=RUN_TAMANHO_HISTORICO_LADO)
-        ultimo_lado_confiavel, ultimo_erro = "CENTRO", 0
+        ultimo_lado_confiavel = "CENTRO"
+        lado_tank_ativo, origem_lado_tank = "CENTRO", "INDEFINIDO"
         frames_risco = frames_correcao_saturada = frames_reencontro = 0
         tempo_estado = time.monotonic()
         etapa_varredura = 0
@@ -212,16 +223,25 @@ def main():
             baixa = medir_baixa(resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["centro_imagem_x"])
             pontos = extrair_pontos_vetor(resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["y_inicio_roi"], resultado["centro_imagem_x"])
             controle = calcular_controle_vetor(pontos)
-            if baixa["encontrou"]:
-                ultimo_erro = baixa["erro"]
-                atualizar_lado_confiavel(historico_lados, ultimo_erro)
-                lado = escolher_lado_busca(historico_lados, ultimo_lado_confiavel)
-                if lado != "CENTRO":
-                    ultimo_lado_confiavel = lado
+            correcao_normal = comando_normal = None
+            if controle is not None:
+                comando_normal, correcao_normal = comando_lado_por_controle(
+                    controle["erro_lateral"], controle["erro_direcao"], "NORMAL"
+                )
+            lado_calculado, origem_lado = decidir_lado_confiavel(baixa, controle, correcao_normal)
+            if lado_calculado != "CENTRO":
+                historico_lados.append(lado_calculado)
+                ultimo_lado_confiavel = escolher_lado_busca(historico_lados, ultimo_lado_confiavel)
 
             motivo, comando, correcao = "", "PARAR", 0
             if estado in ("TANK_ASSIST", "BUSCA_TANQUE", "VARREDURA"):
-                baixa_reencontrada = baixa["segura"] and abs(baixa["erro"]) <= RUN_LIMIAR_ERRO_SAIDA_TANK
+                baixa_reencontrada = (
+                    baixa["segura"]
+                    and baixa["erro"] is not None
+                    and abs(baixa["erro"]) <= RUN_LIMIAR_ERRO_SAIDA_TANK
+                    and controle is not None
+                    and abs(controle["erro_direcao"]) <= RUN_LIMIAR_DIRECAO_SAIDA_TANK
+                )
                 frames_reencontro = frames_reencontro + 1 if baixa_reencontrada else 0
                 if frames_reencontro >= RUN_FRAMES_REENCONTRO_BAIXA:
                     estado, tempo_estado, frames_reencontro = "REALINHAR", time.monotonic(), 0
@@ -229,14 +249,14 @@ def main():
                 elif estado == "TANK_ASSIST" and time.monotonic() - tempo_estado >= RUN_TEMPO_MAX_TANK:
                     estado, tempo_estado = "BUSCA_TANQUE", time.monotonic()
                 elif estado == "TANK_ASSIST":
-                    comando, motivo = comando_tank(escolher_lado_busca(historico_lados, ultimo_lado_confiavel), RUN_VELOCIDADE_TANK), "risco"
+                    comando, motivo = comando_tank(lado_tank_ativo, RUN_VELOCIDADE_TANK), f"risco_{origem_lado_tank}"
                     if comando == "PARAR":
                         estado, tempo_estado = "VARREDURA", time.monotonic()
                     else:
                         enviar_seguro(conexao, comando, args.motores); time.sleep(RUN_TEMPO_PULSO_TANK)
                         enviar_seguro(conexao, "PARAR", args.motores)
                 if estado == "BUSCA_TANQUE":
-                    comando = comando_tank(escolher_lado_busca(historico_lados, ultimo_lado_confiavel), RUN_VELOCIDADE_BUSCA)
+                    comando = comando_tank(lado_tank_ativo, RUN_VELOCIDADE_BUSCA)
                     if comando == "PARAR":
                         estado, tempo_estado = "VARREDURA", time.monotonic()
                     else:
@@ -249,33 +269,52 @@ def main():
                     enviar_seguro(conexao, "PARAR", args.motores)
                     etapa_varredura = (etapa_varredura + 1) % len(sequencia)
             elif not resultado["encontrou_linha"] or controle is None:
-                estado, tempo_estado = "BUSCA_TANQUE", time.monotonic()
-                comando, motivo = "PARAR", "linha perdida"
-                enviar_seguro(conexao, comando, args.motores)
+                lado_tank_ativo = escolher_lado_busca(historico_lados, ultimo_lado_confiavel)
+                origem_lado_tank = "HISTORICO"
+                tempo_estado = time.monotonic()
+                if lado_tank_ativo == "CENTRO":
+                    estado, comando, motivo = "VARREDURA", "PARAR", "linha_perdida_sem_lado"
+                else:
+                    estado = "BUSCA_TANQUE"
+                    comando = comando_tank(lado_tank_ativo, RUN_VELOCIDADE_BUSCA)
+                    motivo = f"linha_perdida_lado_{lado_tank_ativo}"
+                    if args.motores:
+                        enviar_seguro(conexao, comando, args.motores)
+                        time.sleep(RUN_TEMPO_PULSO_BUSCA)
+                        enviar_seguro(conexao, "PARAR", args.motores)
             else:
                 erro_lateral, erro_direcao = controle["erro_lateral"], controle["erro_direcao"]
-                comando_normal, correcao_normal = comando_lado_por_controle(erro_lateral, erro_direcao, "NORMAL")
                 frames_risco = frames_risco + 1 if baixa["risco"] else 0
                 frames_correcao_saturada = frames_correcao_saturada + 1 if abs(correcao_normal) >= RUN_CORRECAO_SATURADA_TANK else 0
                 if estado == "REALINHAR" and time.monotonic() - tempo_estado < RUN_TEMPO_REALINHAR:
                     comando, correcao = comando_lado_por_controle(erro_lateral, erro_direcao, "REALINHAR")
                 elif frames_risco >= RUN_FRAMES_RISCO_TANK or frames_correcao_saturada >= RUN_FRAMES_CORRECAO_SATURADA:
-                    estado, tempo_estado, motivo = "TANK_ASSIST", time.monotonic(), "risco"
-                    comando = "PARAR"
-                    enviar_seguro(conexao, comando, args.motores)
+                    lado_tank_ativo = escolher_lado_busca(historico_lados, ultimo_lado_confiavel)
+                    origem_lado_tank = origem_lado
+                    tempo_estado = time.monotonic()
+                    if lado_tank_ativo == "CENTRO":
+                        estado, comando, motivo = "VARREDURA", "PARAR", "risco_sem_lado"
+                    else:
+                        estado = "TANK_ASSIST"
+                        comando = comando_tank(lado_tank_ativo, RUN_VELOCIDADE_TANK)
+                        motivo = f"risco_lado_{lado_tank_ativo}_origem_{origem_lado_tank}"
+                        if args.motores and RUN_TANK_ASSIST_IMEDIATO:
+                            enviar_seguro(conexao, comando, args.motores)
+                            time.sleep(RUN_TEMPO_PULSO_TANK)
+                            enviar_seguro(conexao, "PARAR", args.motores)
                 elif abs(erro_direcao) >= RUN_LIMIAR_CURVA_FORTE or abs(correcao_normal) >= RUN_CORRECAO_SATURADA_TANK:
                     estado, comando, correcao = "CURVA_FORTE", *comando_lado_por_controle(erro_lateral, erro_direcao, "CURVA_FORTE")
                 else:
                     estado, comando, correcao = "NORMAL", comando_normal, correcao_normal
 
             if estado != estado_anterior:
-                salvar_debug_evento(resultado, estado, comando, {"Baixa": "SEGURA" if baixa["segura"] else "FRACA" if baixa["fraca"] else "PERDIDA", "Lat": controle["erro_lateral"] if controle else None, "Dir": controle["erro_direcao"] if controle else None, "Lado conf": ultimo_lado_confiavel})
+                salvar_debug_evento(resultado, estado, comando, {"Baixa": "SEGURA" if baixa["segura"] else "FRACA" if baixa["fraca"] else "PERDIDA", "Lat": controle["erro_lateral"] if controle else None, "Dir": controle["erro_direcao"] if controle else None, "Lado conf": ultimo_lado_confiavel, "Origem lado": origem_lado})
                 estado_anterior = estado
             if args.mostrar:
                 cv2.imshow("Segue-linha - q para parar", criar_debug_linha(resultado))
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     raise KeyboardInterrupt
-            print(f"Estado: {estado} | Baixa: {'SEGURA' if baixa['segura'] else 'FRACA' if baixa['fraca'] else 'PERDIDA'} | Lat: {controle['erro_lateral'] if controle else None} | Dir: {controle['erro_direcao'] if controle else None} | Cmd: {comando} | Lado conf: {ultimo_lado_confiavel}{' | Motivo: ' + motivo if motivo else ''}")
+            print(f"Estado: {estado} | Baixa: {'SEGURA' if baixa['segura'] else 'FRACA' if baixa['fraca'] else 'PERDIDA'} | Lat: {controle['erro_lateral'] if controle else None} | Dir: {controle['erro_direcao'] if controle else None} | Cmd: {comando} | Lado conf: {ultimo_lado_confiavel} | Origem lado: {origem_lado}{' | Motivo: ' + motivo if motivo else ''}")
             if estado in ("NORMAL", "CURVA_FORTE", "REALINHAR"):
                 enviar_seguro(conexao, comando, args.motores)
             time.sleep(RUN_INTERVALO_LOOP)
