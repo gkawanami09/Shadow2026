@@ -276,6 +276,46 @@ def controlar_destino(destino, memoria, confirmar=False):
     return f"LADO {round(vel_esq)} {round(vel_dir)}", vel_esq, vel_dir, correcao_suave
 
 
+def lado_destino(destino):
+    """Retorna o lado do vetor final usado pelo controle do destino."""
+    angulo = destino.get("angulo_destino", destino.get("angulo", 0))
+    if angulo < -15:
+        return "ESQUERDA"
+    if angulo > 15:
+        return "DIREITA"
+    return "CENTRO"
+
+
+def resetar_confirmacao_lado(memoria):
+    memoria["lado_pendente"] = "CENTRO"
+    memoria["frames_confirmacao_lado"] = 0
+
+
+def avaliar_retorno_lado_oposto(destino, memoria):
+    """Confirma RETORNO oposto antes de substituir o lado de recuperacao."""
+    if not destino.get("ok", False) or destino.get("tipo") != "RETORNO":
+        resetar_confirmacao_lado(memoria)
+        return "NAO_APLICA"
+
+    lado_atual = lado_destino(destino)
+    lado_anterior = memoria.get("ultimo_lado", "CENTRO")
+    if lado_atual == "CENTRO":
+        resetar_confirmacao_lado(memoria)
+        return "NAO_APLICA"
+    if lado_anterior == "CENTRO" or lado_atual == lado_anterior:
+        resetar_confirmacao_lado(memoria)
+        return "ACEITAR_RETORNO"
+
+    if memoria.get("lado_pendente") == lado_atual:
+        memoria["frames_confirmacao_lado"] += 1
+    else:
+        memoria["lado_pendente"] = lado_atual
+        memoria["frames_confirmacao_lado"] = 1
+    if memoria["frames_confirmacao_lado"] >= 2:
+        return "ACEITAR_RETORNO"
+    return "CONFIRMAR_LADO"
+
+
 def atualizar_tipo_confiavel(destino, memoria):
     if destino["tipo"] == memoria["ultimo_tipo_confiavel"]:
         memoria["frames_mesmo_tipo"] += 1
@@ -283,12 +323,12 @@ def atualizar_tipo_confiavel(destino, memoria):
         memoria["ultimo_tipo_confiavel"] = destino["tipo"]
         memoria["frames_mesmo_tipo"] = 1
     memoria["ultimo_score_confiavel"] = destino["score"]
-    if destino["angulo"] < -15:
-        memoria["ultimo_lado"] = "ESQUERDA"
-    elif destino["angulo"] > 15:
-        memoria["ultimo_lado"] = "DIREITA"
+    lado = lado_destino(destino)
+    if lado in ("ESQUERDA", "DIREITA"):
+        memoria["ultimo_lado"] = lado
     memoria["tipo_pendente"] = "PERDIDO"
     memoria["frames_confirmacao_tipo"] = 0
+    resetar_confirmacao_lado(memoria)
 
 
 def decidir_tipo(destino, memoria):
@@ -313,6 +353,21 @@ def decidir_tipo(destino, memoria):
         atualizar_tipo_confiavel(destino, memoria)
         return False
     return True
+
+
+def decidir_confirmacao_destino(destino, memoria):
+    """Centraliza a confirmacao lateral de RETORNO e a histerese normal de tipo."""
+    if not destino.get("ok", False):
+        resetar_confirmacao_lado(memoria)
+        return True
+
+    estado_retorno = avaliar_retorno_lado_oposto(destino, memoria)
+    if estado_retorno == "CONFIRMAR_LADO":
+        return True
+    if estado_retorno == "ACEITAR_RETORNO":
+        atualizar_tipo_confiavel(destino, memoria)
+        return False
+    return decidir_tipo(destino, memoria)
 
 
 def comando_recuperacao(ultimo_lado, controle_varredura):
@@ -385,7 +440,11 @@ def imprimir_log(estado, destino, comando, memoria):
             f"Estado: {estado} | Tipo: {destino['tipo']} | Cmd: {comando} | "
             f"ang: {destino['angulo_destino']:.1f} | score: {destino['score']:.1f} | "
             f"cont: {destino['continuidade']:.2f} | dist: {destino['distancia']:.0f} | "
-            f"segmento: {destino['segmento_hits']} | motivo: {destino['motivo']} | ultimo: {memoria['ultimo_lado']}"
+            f"segmento: {destino['segmento_hits']} | motivo: {destino['motivo']} | "
+            f"lado_dest: {lado_destino(destino)} | ultimo: {memoria['ultimo_lado']} | "
+            f"ultimo_tipo: {memoria['ultimo_tipo_confiavel']} | pend_tipo: {memoria['tipo_pendente']} | "
+            f"pend_lado: {memoria.get('lado_pendente', 'CENTRO')} | "
+            f"frames_lado: {memoria.get('frames_confirmacao_lado', 0)}"
         )
     else:
         print(f"Estado: {estado} | Tipo: PERDIDO | Cmd: {comando} | ultimo: {memoria['ultimo_lado']}")
@@ -417,6 +476,7 @@ def main():
             "frames_mesmo_tipo": 0, "tipo_pendente": "PERDIDO", "frames_confirmacao_tipo": 0,
             "ultimo_lado": "CENTRO", "frames_destino_perdido": 0,
             "frames_destino_confiavel": 0, "em_recuperacao": False,
+            "lado_pendente": "CENTRO", "frames_confirmacao_lado": 0,
         }
         controle_varredura = {"etapa": 0, "ultima_troca": time.monotonic()}
         estado_anterior, ultimo_debug = None, 0
@@ -424,6 +484,8 @@ def main():
         while True:
             resultado = detectar_linha(capturar_frame_bgr(camera))
             destino = escolher_destino(resultado)
+            if not destino["ok"]:
+                resetar_confirmacao_lado(memoria)
             if resultado["encontrou_linha"] and destino["ok"]:
                 memoria["frames_destino_confiavel"] += 1
                 memoria["frames_destino_perdido"] = 0
@@ -438,7 +500,7 @@ def main():
                     comando, _, _, _ = controlar_destino(destino, memoria, confirmar=True)
                 else:
                     memoria["em_recuperacao"] = False
-                    confirmar = decidir_tipo(destino, memoria)
+                    confirmar = decidir_confirmacao_destino(destino, memoria)
                     estado = "FOLLOW_CONFIRMAR" if confirmar else "FOLLOW_DESTINO"
                     comando, _, _, _ = controlar_destino(destino, memoria, confirmar=confirmar)
             elif memoria["em_recuperacao"] or deve_recuperar:
@@ -448,7 +510,7 @@ def main():
                 memoria["correcao_anterior"] = 0
                 memoria["vel_anterior"] = (0, 0)
             elif destino["ok"]:
-                confirmar = decidir_tipo(destino, memoria)
+                confirmar = decidir_confirmacao_destino(destino, memoria)
                 estado = "FOLLOW_CONFIRMAR" if confirmar else "FOLLOW_DESTINO"
                 comando, _, _, _ = controlar_destino(destino, memoria, confirmar=confirmar)
             else:
