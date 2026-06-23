@@ -53,6 +53,12 @@ from config import (
     RUN_CLEAN_DX_EXTREMA,
     RUN_CLEAN_ANGULO_CURVA,
     RUN_CLEAN_ANGULO_EXTREMA,
+    RUN_CLEAN_EXTREMA_INTERNA_INICIAL,
+    RUN_CLEAN_EXTREMA_INTERNA_MAX_NEG,
+    RUN_CLEAN_EXTREMA_EXTERNA_INICIAL,
+    RUN_CLEAN_EXTREMA_EXTERNA_MAX,
+    RUN_CLEAN_EXTREMA_DX_FULL,
+    RUN_CLEAN_EXTREMA_ANGULO_FULL,
 
     RUN_CLEAN_ALPHA_SUAVIZACAO,
     RUN_CLEAN_DELTA_MAX_VELOCIDADE,
@@ -236,8 +242,45 @@ def classificar_modo(guia):
     return "FOLLOW_NORMAL"
 
 
+def calcular_intensidade_extrema(guia):
+    """Retorna de 0 a 1 conforme a intensidade da curva extrema."""
+    intensidade_dx = abs(guia["dx"]) / max(RUN_CLEAN_EXTREMA_DX_FULL, 1)
+    intensidade_ang = abs(guia["angulo"]) / max(RUN_CLEAN_EXTREMA_ANGULO_FULL, 1)
+    return limitar(max(intensidade_dx, intensidade_ang), 0.0, 1.0)
+
+
+def calcular_comando_extrema(guia, memoria):
+    """Calcula LADO assinado explicito para uma curva extrema visivel."""
+    intensidade = calcular_intensidade_extrema(guia)
+    interna = RUN_CLEAN_EXTREMA_INTERNA_INICIAL + intensidade * (
+        RUN_CLEAN_EXTREMA_INTERNA_MAX_NEG - RUN_CLEAN_EXTREMA_INTERNA_INICIAL
+    )
+    externa = RUN_CLEAN_EXTREMA_EXTERNA_INICIAL + intensidade * (
+        RUN_CLEAN_EXTREMA_EXTERNA_MAX - RUN_CLEAN_EXTREMA_EXTERNA_INICIAL
+    )
+    interna = limitar(interna, RUN_CLEAN_EXTREMA_INTERNA_MAX_NEG, 0)
+    externa = limitar(externa, 0, RUN_CLEAN_EXTREMA_EXTERNA_MAX)
+    if guia["dx"] < 0:
+        vel_esq, vel_dir = interna, externa
+    elif guia["dx"] > 0:
+        vel_esq, vel_dir = externa, interna
+    else:
+        vel_esq = RUN_CLEAN_BASE_EXTREMA
+        vel_dir = RUN_CLEAN_BASE_EXTREMA
+
+    vel_esq_ant, vel_dir_ant = memoria["vel_anterior"]
+    vel_esq = limitar(vel_esq, vel_esq_ant - RUN_CLEAN_DELTA_MAX_EXTREMA, vel_esq_ant + RUN_CLEAN_DELTA_MAX_EXTREMA)
+    vel_dir = limitar(vel_dir, vel_dir_ant - RUN_CLEAN_DELTA_MAX_EXTREMA, vel_dir_ant + RUN_CLEAN_DELTA_MAX_EXTREMA)
+    memoria["correcao_anterior"] = 0
+    memoria["vel_anterior"] = (vel_esq, vel_dir)
+    return f"LADO {round(vel_esq)} {round(vel_dir)}", vel_esq, vel_dir, intensidade
+
+
 def calcular_comando_follow(guia, modo, memoria):
     """Retorna comando LADO, velocidades e correcao suavizada."""
+    if modo == "FOLLOW_EXTREMA":
+        return calcular_comando_extrema(guia, memoria)
+
     erro_atual = guia["erro_atual"]
     erro_alvo = guia["erro_alvo"]
     dx = guia["dx"]
@@ -247,9 +290,6 @@ def calcular_comando_follow(guia, modo, memoria):
     elif modo == "FOLLOW_CURVA":
         base, vel_min, correcao_max = RUN_CLEAN_BASE_CURVA, RUN_CLEAN_VEL_MIN_CURVA, RUN_CLEAN_CORRECAO_MAX_CURVA
         correcao = RUN_CLEAN_K_ATUAL * erro_atual + RUN_CLEAN_K_ALVO * erro_alvo + RUN_CLEAN_K_DX * dx
-    elif modo == "FOLLOW_EXTREMA":
-        base, vel_min, correcao_max = RUN_CLEAN_BASE_EXTREMA, RUN_CLEAN_VEL_MIN_EXTREMA, RUN_CLEAN_CORRECAO_MAX_EXTREMA
-        correcao = RUN_CLEAN_K_ATUAL_EXTREMA * erro_atual + RUN_CLEAN_K_ALVO_EXTREMA * erro_alvo + RUN_CLEAN_K_DX_EXTREMA * dx
     else:
         raise ValueError(f"Modo de follow invalido: {modo}")
 
@@ -258,7 +298,7 @@ def calcular_comando_follow(guia, modo, memoria):
     correcao_suave = limitar(correcao_suave, -correcao_max, correcao_max)
     vel_esq = limitar(base + correcao_suave, vel_min, RUN_CLEAN_VEL_MAX)
     vel_dir = limitar(base - correcao_suave, vel_min, RUN_CLEAN_VEL_MAX)
-    delta_max = RUN_CLEAN_DELTA_MAX_EXTREMA if modo == "FOLLOW_EXTREMA" else RUN_CLEAN_DELTA_MAX_VELOCIDADE
+    delta_max = RUN_CLEAN_DELTA_MAX_VELOCIDADE
     vel_esq_ant, vel_dir_ant = memoria["vel_anterior"]
     vel_esq = limitar(vel_esq, vel_esq_ant - delta_max, vel_esq_ant + delta_max)
     vel_dir = limitar(vel_dir, vel_dir_ant - delta_max, vel_dir_ant + delta_max)
@@ -330,13 +370,16 @@ def salvar_debug_evento(debug, estado):
     return caminho
 
 
-def imprimir_log(guia, estado, comando, ultimo_lado):
+def imprimir_log(guia, estado, comando, ultimo_lado, intensidade=None):
     if guia["ok"]:
-        print(
+        linha = (
             f"Estado: {estado} | Cmd: {comando} | Atual: {guia['erro_atual']:.0f} | "
             f"Alvo: {guia['erro_alvo']:.0f} | dx: {guia['dx']:.0f} | ang: {guia['angulo']:.1f} | "
-            f"lado: {guia['lado']} | baixa: {guia['baixa']} | ultimo: {ultimo_lado}"
+            f"lado: {guia['lado']}"
         )
+        if estado == "FOLLOW_EXTREMA" and intensidade is not None:
+            linha += f" | intensidade: {intensidade:.2f}"
+        print(f"{linha} | baixa: {guia['baixa']} | ultimo: {ultimo_lado}")
     else:
         print(f"Estado: {estado} | Cmd: {comando} | linha: PERDIDA | ultimo: {ultimo_lado}")
 
@@ -375,17 +418,18 @@ def main():
                 modo = classificar_modo(guia)
                 atualizar_lado_valido(historico_lados, guia)
                 ultimo_lado = historico_lados[-1] if historico_lados else "CENTRO"
-                comando, _, _, _ = calcular_comando_follow(guia, modo, memoria)
+                comando, _, _, intensidade = calcular_comando_follow(guia, modo, memoria)
                 estado = modo
             else:
                 ultimo_lado = historico_lados[-1] if historico_lados else "CENTRO"
                 estado = "RECUPERAR_GIRO" if ultimo_lado in ("ESQUERDA", "DIREITA") else "RECUPERAR_VARREDURA"
                 comando = comando_recuperacao(ultimo_lado, estado, controle_varredura)
+                intensidade = None
                 memoria["correcao_anterior"] = 0
                 memoria["vel_anterior"] = (0, 0)
 
             enviar_seguro(conexao, comando, args.motores)
-            imprimir_log(guia, estado, comando, ultimo_lado)
+            imprimir_log(guia, estado, comando, ultimo_lado, intensidade)
             if args.salvar_debug:
                 agora = time.monotonic()
                 if estado != estado_anterior or agora - ultimo_debug >= RUN_CLEAN_INTERVALO_DEBUG:
