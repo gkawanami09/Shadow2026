@@ -39,6 +39,7 @@ from follow_test import calcular_comando, calcular_erro_final, calcular_erro_fai
 from config import (FRAMES_CONFIRMAR_RISCO_PERDA, VELOCIDADE_BUSCA_TANQUE,
     TEMPO_BUSCA_TANQUE_LADO, TEMPO_MAX_BUSCA_TOTAL, TAMANHO_HISTORICO_LADO,
     LIMIAR_ERRO_LADO_CONFIAVEL)
+from config import TEMPO_PARAR_TEMPORARIO, TEMPO_MAX_RECUPERACAO_LINHA
 from line_test import criar_debug_linha, detectar_linha
 
 
@@ -122,6 +123,17 @@ def calcular_erro_zigzag(faixas):
 def enviar_parar_seguro(conexao):
     if conexao is None or not conexao.is_open:
         return False
+
+
+def parar_temporario(conexao):
+    """Para para analisar a camera; o loop de recuperacao continua."""
+    enviar_parar_seguro(conexao)
+    time.sleep(TEMPO_PARAR_TEMPORARIO)
+
+
+def parar_definitivo(conexao):
+    """Usado apenas em timeout, erro, interrupcao ou fim do teste."""
+    enviar_parar_seguro(conexao)
     try:
         from utils import enviar_comando
         resposta = enviar_comando(conexao, "PARAR")
@@ -222,7 +234,7 @@ def main():
             pontos_vetor = extrair_caminho_linha(resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["y_inicio_roi"], resultado["centro_imagem_x"])
             controle_vetor = calcular_controle_vetor(pontos_vetor)
             baixa = medir_linha_baixa(resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["centro_imagem_x"])
-            if baixa["segura"] and baixa["erro"] is not None:
+            if baixa["encontrou"] and baixa["erro"] is not None:
                 lado = "ESQUERDA" if baixa["erro"] < -LIMIAR_ERRO_LADO_CONFIAVEL else "DIREITA" if baixa["erro"] > LIMIAR_ERRO_LADO_CONFIAVEL else "CENTRO"
                 historico_lados.append(lado)
                 if len(historico_lados) > TAMANHO_HISTORICO_LADO: historico_lados.pop(0)
@@ -234,10 +246,12 @@ def main():
                 lado_busca = max(set(lados), key=lados.count) if lados else "CENTRO"
                 if tempo_inicio_busca_tanque is None:
                     tempo_inicio_busca_tanque = time.monotonic()
-                    print(f"Tempo: {tempo:.1f}s | Estado: TRAVA_PERDA | Cmd: PARAR | Ultimo lado: {lado_busca}")
-                    if argumentos.motores: enviar_comando(conexao, "PARAR")
-                if time.monotonic() - tempo_inicio_busca_tanque >= TEMPO_MAX_BUSCA_TOTAL:
+                    print(f"Linha perdida. Iniciando recuperacao. Ultimo lado confiavel: {lado_busca}")
+                    print(f"Tempo: {tempo:.1f}s | Estado: TRAVA_PERDA | Cmd: PARAR temporario")
+                    if argumentos.motores: parar_temporario(conexao)
+                if time.monotonic() - tempo_inicio_busca_tanque >= TEMPO_MAX_RECUPERACAO_LINHA:
                     print("Busca excedeu tempo maximo. PARAR.")
+                    parar_definitivo(conexao)
                     estado = "PARADO"; break
                 comando = f"GIRAR_ESQ {VELOCIDADE_BUSCA_TANQUE}" if lado_busca == "ESQUERDA" else f"GIRAR_DIR {VELOCIDADE_BUSCA_TANQUE}" if lado_busca == "DIREITA" else "PARAR"
                 print(f"Tempo: {tempo:.1f}s | Estado: BUSCA_TANQUE | Cmd: {comando} | Baixa: PERDIDA")
