@@ -48,6 +48,16 @@ from config import (
     RUN_CLEAN_CORRECAO_MAX_NORMAL,
     RUN_CLEAN_CORRECAO_MAX_CURVA,
     RUN_CLEAN_CORRECAO_MAX_EXTREMA,
+    RUN_CLEAN_BASE_RISCO,
+    RUN_CLEAN_VEL_MIN_RISCO,
+    RUN_CLEAN_CORRECAO_MAX_RISCO,
+    RUN_CLEAN_ERRO_ATUAL_RISCO,
+    RUN_CLEAN_ERRO_ALVO_RISCO,
+    RUN_CLEAN_DX_RISCO,
+    RUN_CLEAN_ANGULO_RISCO,
+    RUN_CLEAN_FRAMES_FRACA_PARA_RECUPERAR,
+    RUN_CLEAN_FRAMES_SEGURA_PARA_SAIR_RECUPERAR,
+    RUN_CLEAN_USAR_LADO_GUIA_FRACO,
 
     RUN_CLEAN_DX_CURVA,
     RUN_CLEAN_DX_EXTREMA,
@@ -270,22 +280,38 @@ def extrair_guia_linha(resultado):
 
 
 def classificar_modo(guia):
-    if not guia["ok"]:
-        return "RECUPERAR"
-    if guia.get("baixa") != "SEGURA":
+    if not guia.get("ok", False):
         return "RECUPERAR"
 
     dx_abs = abs(guia["dx"])
     ang_abs = abs(guia["angulo"])
+    if guia.get("baixa") != "SEGURA":
+        return "FOLLOW_RISCO"
     if guia.get("cotovelo", False):
         return "FOLLOW_EXTREMA"
     if dx_abs >= RUN_CLEAN_EXTREMA_DX_COM_ANGULO and ang_abs >= RUN_CLEAN_EXTREMA_ANGULO_COM_DX:
         return "FOLLOW_EXTREMA"
     if dx_abs >= RUN_CLEAN_DX_EXTREMA and ang_abs >= RUN_CLEAN_ANGULO_EXTREMA:
         return "FOLLOW_EXTREMA"
+    if guia_em_risco(guia):
+        return "FOLLOW_RISCO"
     if dx_abs >= RUN_CLEAN_DX_CURVA or ang_abs >= RUN_CLEAN_ANGULO_CURVA:
         return "FOLLOW_CURVA"
     return "FOLLOW_NORMAL"
+
+
+def guia_em_risco(guia):
+    """Retorna se a linha visivel esta perto de sair da regiao controlavel."""
+    if not guia.get("ok", False):
+        return False
+    if guia.get("baixa") != "SEGURA":
+        return True
+    return (
+        abs(guia["erro_atual"]) >= RUN_CLEAN_ERRO_ATUAL_RISCO
+        or abs(guia["erro_alvo"]) >= RUN_CLEAN_ERRO_ALVO_RISCO
+        or abs(guia["dx"]) >= RUN_CLEAN_DX_RISCO
+        or abs(guia["angulo"]) >= RUN_CLEAN_ANGULO_RISCO
+    )
 
 
 def calcular_intensidade_extrema(guia):
@@ -336,6 +362,9 @@ def calcular_comando_follow(guia, modo, memoria):
     elif modo == "FOLLOW_CURVA":
         base, vel_min, correcao_max = RUN_CLEAN_BASE_CURVA, RUN_CLEAN_VEL_MIN_CURVA, RUN_CLEAN_CORRECAO_MAX_CURVA
         correcao = RUN_CLEAN_K_ATUAL * erro_atual + RUN_CLEAN_K_ALVO * erro_alvo + RUN_CLEAN_K_DX * dx
+    elif modo == "FOLLOW_RISCO":
+        base, vel_min, correcao_max = RUN_CLEAN_BASE_RISCO, RUN_CLEAN_VEL_MIN_RISCO, RUN_CLEAN_CORRECAO_MAX_RISCO
+        correcao = RUN_CLEAN_K_ATUAL * erro_atual + RUN_CLEAN_K_ALVO * erro_alvo + RUN_CLEAN_K_DX * dx
     else:
         raise ValueError(f"Modo de follow invalido: {modo}")
 
@@ -348,6 +377,8 @@ def calcular_comando_follow(guia, modo, memoria):
     vel_esq_ant, vel_dir_ant = memoria["vel_anterior"]
     vel_esq = limitar(vel_esq, vel_esq_ant - delta_max, vel_esq_ant + delta_max)
     vel_dir = limitar(vel_dir, vel_dir_ant - delta_max, vel_dir_ant + delta_max)
+    vel_esq = limitar(vel_esq, vel_min, RUN_CLEAN_VEL_MAX)
+    vel_dir = limitar(vel_dir, vel_min, RUN_CLEAN_VEL_MAX)
     memoria["correcao_anterior"] = correcao_suave
     memoria["vel_anterior"] = (vel_esq, vel_dir)
     return f"LADO {round(vel_esq)} {round(vel_dir)}", vel_esq, vel_dir, correcao_suave
@@ -362,6 +393,18 @@ def atualizar_lado_valido(historico_lados, guia):
         historico_lados.append("ESQUERDA")
     elif guia["erro_atual"] > RUN_CLEAN_ERRO_LADO_MIN:
         historico_lados.append("DIREITA")
+
+
+def escolher_lado_recuperacao(guia, historico_lados):
+    """Prioriza o lado atual de uma linha fraca antes do historico seguro."""
+    if (
+        RUN_CLEAN_USAR_LADO_GUIA_FRACO
+        and guia.get("ok", False)
+        and guia.get("baixa") == "FRACA"
+        and guia.get("lado") in ("ESQUERDA", "DIREITA")
+    ):
+        return guia["lado"]
+    return historico_lados[-1] if historico_lados else "CENTRO"
 
 
 def comando_recuperacao(ultimo_lado, estado_recuperacao, controle_varredura):
@@ -380,7 +423,7 @@ def comando_recuperacao(ultimo_lado, estado_recuperacao, controle_varredura):
     return f"{comando} {RUN_CLEAN_VEL_VARREDURA}"
 
 
-def criar_debug_run(resultado, guia, estado, comando, ultimo_lado):
+def criar_debug_run(resultado, guia, estado, comando, ultimo_lado, memoria):
     debug = criar_debug_linha(resultado)
     if guia["ok"]:
         for ponto in guia["pontos"]:
@@ -396,7 +439,10 @@ def criar_debug_run(resultado, guia, estado, comando, ultimo_lado):
             f"Estado: {estado}", f"Cmd: {comando}", f"Baixa: {guia['baixa']}",
             f"Atual: {atual['erro']:.1f}", f"Alvo: {alvo['erro']:.1f}",
             f"dx: {guia['dx']:.1f}", f"angulo: {guia['angulo']:.1f}",
-            f"Lado: {guia['lado']}", f"Cotovelo: {guia.get('cotovelo', False)}", f"Ultimo lado: {ultimo_lado}",
+            f"Lado: {guia['lado']}", f"Cotovelo: {guia.get('cotovelo', False)}",
+            f"Risco: {guia_em_risco(guia)}", f"Recup: {memoria.get('em_recuperacao', False)}",
+            f"Fraca: {memoria.get('frames_baixa_fraca', 0)}", f"Segura: {memoria.get('frames_baixa_segura', 0)}",
+            f"Ultimo lado: {ultimo_lado}",
         ]
     else:
         linhas = [f"Estado: {estado}", f"Cmd: {comando}", "Baixa: PERDIDA", f"Ultimo lado: {ultimo_lado}"]
@@ -416,18 +462,23 @@ def salvar_debug_evento(debug, estado):
     return caminho
 
 
-def imprimir_log(guia, estado, comando, ultimo_lado, intensidade=None):
+def imprimir_log(guia, estado, comando, ultimo_lado, memoria, intensidade=None):
     if guia["ok"]:
         linha = (
             f"Estado: {estado} | Cmd: {comando} | Atual: {guia['erro_atual']:.0f} | "
             f"Alvo: {guia['erro_alvo']:.0f} | dx: {guia['dx']:.0f} | ang: {guia['angulo']:.1f} | "
-            f"lado: {guia['lado']} | cotovelo: {guia.get('cotovelo', False)}"
+            f"lado: {guia['lado']} | cotovelo: {guia.get('cotovelo', False)} | "
+            f"risco: {guia_em_risco(guia)} | fraca: {memoria['frames_baixa_fraca']} | "
+            f"segura: {memoria['frames_baixa_segura']}"
         )
         if estado == "FOLLOW_EXTREMA" and intensidade is not None:
             linha += f" | intensidade: {intensidade:.2f}"
         print(f"{linha} | baixa: {guia['baixa']} | ultimo: {ultimo_lado}")
     else:
-        print(f"Estado: {estado} | Cmd: {comando} | linha: PERDIDA | ultimo: {ultimo_lado}")
+        print(
+            f"Estado: {estado} | Cmd: {comando} | linha: PERDIDA | ultimo: {ultimo_lado} | "
+            f"fraca: {memoria['frames_baixa_fraca']} | segura: {memoria['frames_baixa_segura']}"
+        )
 
 
 def main():
@@ -451,7 +502,13 @@ def main():
 
         camera = iniciar_camera(CAMERA_WIDTH, CAMERA_HEIGHT)
         historico_lados = deque(maxlen=RUN_CLEAN_HISTORICO_LADO)
-        memoria = {"correcao_anterior": 0, "vel_anterior": (0, 0)}
+        memoria = {
+            "correcao_anterior": 0,
+            "vel_anterior": (0, 0),
+            "frames_baixa_fraca": 0,
+            "frames_baixa_segura": 0,
+            "em_recuperacao": False,
+        }
         estado_anterior = None
         ultimo_debug = 0
         controle_varredura = {"etapa": 0, "ultima_troca": time.monotonic()}
@@ -460,30 +517,68 @@ def main():
             frame = capturar_frame_bgr(camera)
             resultado = detectar_linha(frame)
             guia = extrair_guia_linha(resultado)
-            modo = classificar_modo(guia)
-            if resultado["encontrou_linha"] and guia["ok"] and modo != "RECUPERAR":
-                atualizar_lado_valido(historico_lados, guia)
-                ultimo_lado = historico_lados[-1] if historico_lados else "CENTRO"
-                comando, _, _, intensidade = calcular_comando_follow(guia, modo, memoria)
-                estado = modo
+
+            if guia.get("ok", False) and guia.get("baixa") == "SEGURA":
+                memoria["frames_baixa_segura"] += 1
+                memoria["frames_baixa_fraca"] = 0
+            elif guia.get("ok", False) and guia.get("baixa") == "FRACA":
+                memoria["frames_baixa_fraca"] += 1
+                memoria["frames_baixa_segura"] = 0
             else:
-                ultimo_lado = historico_lados[-1] if historico_lados else "CENTRO"
-                estado = "RECUPERAR_GIRO" if ultimo_lado in ("ESQUERDA", "DIREITA") else "RECUPERAR_VARREDURA"
-                comando = comando_recuperacao(ultimo_lado, estado, controle_varredura)
+                memoria["frames_baixa_fraca"] += 1
+                memoria["frames_baixa_segura"] = 0
+
+            modo = classificar_modo(guia)
+            deve_recuperar = (
+                not resultado["encontrou_linha"]
+                or not guia.get("ok", False)
+                or memoria["frames_baixa_fraca"] >= RUN_CLEAN_FRAMES_FRACA_PARA_RECUPERAR
+            )
+            lado_recuperacao = None
+
+            if (
+                memoria["em_recuperacao"]
+                and resultado["encontrou_linha"]
+                and guia.get("ok", False)
+                and guia.get("baixa") == "SEGURA"
+            ):
+                if memoria["frames_baixa_segura"] < RUN_CLEAN_FRAMES_SEGURA_PARA_SAIR_RECUPERAR:
+                    estado = "FOLLOW_RISCO"
+                    comando, _, _, intensidade = calcular_comando_follow(guia, estado, memoria)
+                else:
+                    memoria["em_recuperacao"] = False
+                    modo = classificar_modo(guia)
+                    atualizar_lado_valido(historico_lados, guia)
+                    comando, _, _, intensidade = calcular_comando_follow(guia, modo, memoria)
+                    estado = modo
+            elif memoria["em_recuperacao"] or deve_recuperar:
+                memoria["em_recuperacao"] = True
+                lado_recuperacao = escolher_lado_recuperacao(guia, historico_lados)
+                estado = "RECUPERAR_GIRO" if lado_recuperacao in ("ESQUERDA", "DIREITA") else "RECUPERAR_VARREDURA"
+                comando = comando_recuperacao(lado_recuperacao, estado, controle_varredura)
                 intensidade = None
                 memoria["correcao_anterior"] = 0
                 memoria["vel_anterior"] = (0, 0)
+            else:
+                memoria["em_recuperacao"] = False
+                if guia.get("baixa") == "SEGURA":
+                    atualizar_lado_valido(historico_lados, guia)
+                comando, _, _, intensidade = calcular_comando_follow(guia, modo, memoria)
+                estado = modo
+
+            ultimo_lado = historico_lados[-1] if historico_lados else "CENTRO"
+            ultimo_lado_log = lado_recuperacao if estado.startswith("RECUPERAR") else ultimo_lado
 
             enviar_seguro(conexao, comando, args.motores)
-            imprimir_log(guia, estado, comando, ultimo_lado, intensidade)
+            imprimir_log(guia, estado, comando, ultimo_lado_log, memoria, intensidade)
             if args.salvar_debug:
                 agora = time.monotonic()
                 if estado != estado_anterior or agora - ultimo_debug >= RUN_CLEAN_INTERVALO_DEBUG:
-                    salvar_debug_evento(criar_debug_run(resultado, guia, estado, comando, ultimo_lado), estado)
+                    salvar_debug_evento(criar_debug_run(resultado, guia, estado, comando, ultimo_lado_log, memoria), estado)
                     ultimo_debug = agora
             estado_anterior = estado
             if args.mostrar:
-                cv2.imshow("follow_clean", criar_debug_run(resultado, guia, estado, comando, ultimo_lado))
+                cv2.imshow("follow_clean", criar_debug_run(resultado, guia, estado, comando, ultimo_lado_log, memoria))
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     raise KeyboardInterrupt
             time.sleep(RUN_CLEAN_INTERVALO)

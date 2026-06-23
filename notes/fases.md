@@ -7,6 +7,6 @@
 5. **Fase 4 - Comando sugerido de segue-linha:** calcular e imprimir o comando por faixas, sem mover o robo. A Fase 4.5 usa parametros suaves antes do primeiro movimento real.
 6. **Fase 5 - Segue-linha real:** seguir continuamente por vetor, sem duracao fixa; a parada normal e por CTRL+C.
 7. **Fase 6 - Recuperacao e curvas fechadas:** usar curva forte com `LADO` e Tank Assist por pulsos para recuperar perda de linha, sem rotina fixa de 90 graus.
-8. **Fase 7 - Segue-linha limpo:** usar `follow_clean.py` com centroline conectada, lookahead e `LADO` assinado; a calibracao 1.2 reserva extrema para cotovelo real com linha baixa segura e recupera continuamente quando a linha esta ausente, o guia e invalido ou a baixa esta fraca.
+8. **Fase 7 - Segue-linha limpo:** usar `follow_clean.py` com centroline conectada, lookahead e `LADO` assinado; a calibracao 1.3 adiciona `FOLLOW_RISCO` positivo, histerese de baixa fraca/segura e confirmacao de linha reaparecida por `LADO` antes de sair da recuperacao.
 9. **Fase 8 - Verde/vermelho:** detectar marcacoes da pista.
 10. **Fase 9 - Obstaculos e ajustes OBR:** tratar situacoes especiais.
