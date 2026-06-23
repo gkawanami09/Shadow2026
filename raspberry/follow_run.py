@@ -89,17 +89,8 @@ def comando_busca(ultimo_lado_linha, ultimo_erro_valido):
 
 
 def detectar_curva_90(erro_final, faixas, ultimo_erro_valido):
-    """Retorna indicio de curva 90, lado e motivo para o log."""
-    if erro_final is not None and abs(erro_final) >= LIMIAR_ERRO_CURVA_90:
-        return {"detectou": True, "lado": "ESQUERDA" if erro_final < 0 else "DIREITA", "motivo": "erro_final"}
-    candidatos = [faixas["media"]["erro"], faixas["alta"]["erro"]]
-    if not faixas["baixa"]["encontrou"]:
-        for erro in candidatos:
-            if erro is not None and abs(erro) >= LIMIAR_ERRO_MEDIA_ALTA_CURVA_90:
-                return {"detectou": True, "lado": "ESQUERDA" if erro < 0 else "DIREITA", "motivo": "faixa_media_alta"}
-    if erro_final is None and abs(ultimo_erro_valido) >= LIMIAR_ERRO_CURVA_90:
-        return {"detectou": True, "lado": "ESQUERDA" if ultimo_erro_valido < 0 else "DIREITA", "motivo": "ultimo_erro"}
-    return {"detectou": False, "lado": "DESCONHECIDO", "motivo": ""}
+    """Compatibilidade: curva 90 nao possui mais gatilho especifico."""
+    return {"detectou": False, "lado": "DESCONHECIDO", "motivo": "tank_assist"}
 
 
 def comando_curva_90(lado):
