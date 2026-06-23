@@ -39,7 +39,9 @@ from follow_test import calcular_comando, calcular_erro_final, calcular_erro_fai
 from config import (FRAMES_CONFIRMAR_RISCO_PERDA, VELOCIDADE_BUSCA_TANQUE,
     TEMPO_BUSCA_TANQUE_LADO, TEMPO_MAX_BUSCA_TOTAL, TAMANHO_HISTORICO_LADO,
     LIMIAR_ERRO_LADO_CONFIAVEL)
-from config import TEMPO_PARAR_TEMPORARIO, TEMPO_MAX_RECUPERACAO_LINHA
+from config import (TEMPO_PARAR_TEMPORARIO, TEMPO_MAX_RECUPERACAO_LINHA,
+    TEMPO_ESPERA_ARDUINO_RESET, TENTATIVAS_CONFIRMAR_PARAR,
+    INTERVALO_TENTATIVA_PARAR)
 from line_test import criar_debug_linha, detectar_linha
 
 
@@ -123,6 +125,24 @@ def calcular_erro_zigzag(faixas):
 def enviar_parar_seguro(conexao):
     if conexao is None or not conexao.is_open:
         return False
+    try:
+        from utils import enviar_comando
+        resposta = enviar_comando(conexao, "PARAR")
+        return not resposta or "PARADO" in resposta.upper() or resposta.upper().startswith("OK")
+    except Exception as erro:
+        print(f"Aviso: nao foi possivel enviar PARAR: {erro}")
+        return False
+
+
+def confirmar_parar_inicial(conexao):
+    from utils import enviar_comando_ler_respostas
+    for tentativa in range(1, TENTATIVAS_CONFIRMAR_PARAR + 1):
+        respostas = enviar_comando_ler_respostas(conexao, "PARAR", timeout=0.7)
+        print(f"Tentativa PARAR inicial {tentativa}: {respostas}")
+        if any("PARADO" in resposta.upper() for resposta in respostas):
+            return True
+        time.sleep(INTERVALO_TENTATIVA_PARAR)
+    return False
 
 
 def parar_temporario(conexao):
@@ -134,13 +154,7 @@ def parar_temporario(conexao):
 def parar_definitivo(conexao):
     """Usado apenas em timeout, erro, interrupcao ou fim do teste."""
     enviar_parar_seguro(conexao)
-    try:
-        from utils import enviar_comando
-        resposta = enviar_comando(conexao, "PARAR")
-        return not resposta or resposta.startswith("OK")
-    except Exception as erro:
-        print(f"Aviso: nao foi possivel enviar PARAR: {erro}")
-        return False
+    return True
 
 
 def fechar_camera_segura(camera):
@@ -197,10 +211,11 @@ def main():
         from utils import abrir_serial, enviar_comando
         porta = SERIAL_PORT if argumentos.porta == "auto" else argumentos.porta
         conexao = abrir_serial(porta, BAUD_RATE, TIMEOUT_SERIAL)
-        time.sleep(2.0)
+        time.sleep(TEMPO_ESPERA_ARDUINO_RESET)
         conexao.reset_input_buffer()
-        if not enviar_parar_seguro(conexao):
-            raise RuntimeError("Nao foi possivel confirmar o PARAR inicial.")
+        conexao.reset_output_buffer()
+        if not confirmar_parar_inicial(conexao):
+            raise RuntimeError("Nao foi possivel confirmar o PARAR inicial apos varias tentativas.")
         print("PARAR enviado antes do inicio.")
         print(f"Duracao: {argumentos.duracao:.1f}s | Modo: {'MOTORES' if argumentos.motores else 'SIMULACAO'}")
         if argumentos.motores:

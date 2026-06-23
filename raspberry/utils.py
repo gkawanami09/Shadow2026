@@ -1,6 +1,7 @@
 """Funcoes simples para a comunicacao serial do robo."""
 
 import serial
+import time
 from serial.tools import list_ports
 
 
@@ -52,6 +53,21 @@ def enviar_comando(conexao, comando, esperar_resposta=True):
 
     resposta = conexao.readline().decode("utf-8", errors="replace").strip()
     return resposta
+
+
+def enviar_comando_ler_respostas(conexao, comando, timeout=1.0):
+    """Envia um comando e coleta todas as respostas recebidas no periodo."""
+    conexao.write((comando.strip() + "\n").encode("utf-8"))
+    conexao.flush()
+    inicio, respostas = time.monotonic(), []
+    while time.monotonic() - inicio < timeout:
+        if conexao.in_waiting > 0:
+            linha = conexao.readline().decode("utf-8", errors="ignore").strip()
+            if linha:
+                respostas.append(linha)
+        else:
+            time.sleep(0.01)
+    return respostas
 
 
 def limitar_velocidade(velocidade, limite=120):
