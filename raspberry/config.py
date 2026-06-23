@@ -54,11 +54,15 @@ ERODE_FINAL = 2
 # CONFIGURACOES DO COMANDO SUGERIDO
 # ===============================
 
-VELOCIDADE_BASE_SEGUE_LINHA = 70
+# Valores seguros para o primeiro teste real do robo.
+# A ideia e comecar devagar e aumentar depois.
+VELOCIDADE_BASE_SEGUE_LINHA = 60
 VELOCIDADE_MINIMA_SEGUE_LINHA = 35
-VELOCIDADE_MAXIMA_SEGUE_LINHA = 120
-KP_SEGUE_LINHA = 0.45
-CORRECAO_MAXIMA = 50
+VELOCIDADE_MAXIMA_SEGUE_LINHA = 90
+
+# Ganho proporcional inicial mais suave.
+KP_SEGUE_LINHA = 0.30
+CORRECAO_MAXIMA = 30
 
 # Faixas proporcionais dentro da ROI.
 FAIXA_BAIXA_INICIO = 0.65

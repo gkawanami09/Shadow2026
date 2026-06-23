@@ -65,7 +65,7 @@ def calcular_comando(erro_final, kp, velocidade_base):
     return correcao, esquerda, direita, f"LADO {esquerda} {direita}"
 
 
-def criar_debug_follow(resultado_linha, faixas, erro_final, comando):
+def criar_debug_follow(resultado_linha, faixas, erro_final, comando, velocidade_base, kp):
     debug = resultado_linha["imagem_original"].copy()
     x_inicio, x_fim = resultado_linha["x_inicio_roi"], resultado_linha["x_fim_roi"]
     y_inicio, y_fim = resultado_linha["y_inicio_roi"], resultado_linha["y_fim_roi"]
@@ -81,7 +81,8 @@ def criar_debug_follow(resultado_linha, faixas, erro_final, comando):
     cv2.line(debug, (centro_imagem, 0), (centro_imagem, resultado_linha["altura"]), (0, 255, 255), 2)
     linhas = [
         f"Baixa: {faixas['baixa']['erro']}", f"Media: {faixas['media']['erro']}",
-        f"Alta: {faixas['alta']['erro']}", f"Erro final: {erro_final:.1f}",
+        f"Alta: {faixas['alta']['erro']}", f"Base: {velocidade_base}  KP: {kp:.2f}",
+        f"Erro final: {erro_final:.1f}",
         f"{comando} - SEM MOTOR",
     ]
     for indice, texto in enumerate(linhas):
@@ -114,6 +115,7 @@ def main():
         resultado = detectar_linha(imagem)
         if not resultado["encontrou_linha"]:
             print("Status linha: LINHA_NAO_ENCONTRADA")
+            print("Modo: SIMULACAO_SEM_MOTOR")
             print("Comando sugerido: PARAR")
             print("MOTORES NAO ACIONADOS")
             return 2
@@ -126,17 +128,22 @@ def main():
         erro_final = calcular_erro_final(faixas)
         if erro_final is None:
             print("Status linha: LINHA_NAO_ENCONTRADA")
+            print("Modo: SIMULACAO_SEM_MOTOR")
             print("Comando sugerido: PARAR")
             print("MOTORES NAO ACIONADOS")
             return 2
+        correcao_bruta = argumentos.kp * erro_final
         correcao, esquerda, direita, comando = calcular_comando(erro_final, argumentos.kp, argumentos.velocidade_base)
-        debug = criar_debug_follow(resultado, faixas, erro_final, comando)
+        debug = criar_debug_follow(resultado, faixas, erro_final, comando, argumentos.velocidade_base, argumentos.kp)
         print("Status linha: LINHA_ENCONTRADA")
+        print("Modo: SIMULACAO_SEM_MOTOR")
         for nome in ("baixa", "media", "alta"):
-            print(f"Erro faixa {nome}: {faixas[nome]['erro']}")
+            print(f"{nome.capitalize()}: {faixas[nome]['erro']}")
         print(f"Erro final: {erro_final:.2f}")
+        print(f"Velocidade base: {argumentos.velocidade_base}")
         print(f"KP: {argumentos.kp}")
-        print(f"Correcao: {correcao:.2f}")
+        print(f"Correcao: {correcao_bruta:.2f}")
+        print(f"Correcao limitada: {correcao:.2f}")
         print(f"Velocidade esquerda: {esquerda}")
         print(f"Velocidade direita: {direita}")
         print(f"Comando sugerido: {comando}")
