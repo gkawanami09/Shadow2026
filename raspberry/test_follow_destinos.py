@@ -97,7 +97,19 @@ class RecuperacaoESelecaoTests(unittest.TestCase):
         deve_recuperar, motivo = follow.avaliar_recuperacao(resultado, destino_valido, memoria())
 
         self.assertFalse(deve_recuperar)
-        self.assertEqual(motivo, "LINHA_FALSE")
+        self.assertEqual(motivo, "LINHA_FALSE_DESTINO_OK")
+        self.assertTrue(follow.deve_confirmar_destino(resultado, destino_valido))
+
+    def test_recuperacao_latente_com_destino_valido_nao_gira(self):
+        resultado = {"encontrou_linha": False}
+        destino_valido = destino("RETORNO", 80)
+        estado = memoria()
+        estado["em_recuperacao"] = True
+
+        deve_recuperar, motivo = follow.avaliar_recuperacao(resultado, destino_valido, estado)
+
+        self.assertFalse(deve_recuperar)
+        self.assertEqual(motivo, "LINHA_FALSE_DESTINO_OK")
         self.assertTrue(follow.deve_confirmar_destino(resultado, destino_valido))
 
     def test_tipo_usa_vetor_final_e_nao_angulo_do_raio(self):

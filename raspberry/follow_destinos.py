@@ -407,13 +407,16 @@ def decidir_confirmacao_destino(destino, memoria):
 
 def avaliar_recuperacao(resultado, destino, memoria):
     """Prioriza destino visual valido sobre a flag global de linha."""
-    if memoria["em_recuperacao"]:
-        return True, "EM_RECUPERACAO"
-    if not destino["ok"]:
-        return True, "DESTINO_PERDIDO"
-    if not resultado["encontrou_linha"]:
-        return False, "LINHA_FALSE"
-    return False, "NAO_APLICA"
+    if destino.get("ok", False):
+        if not resultado.get("encontrou_linha", False):
+            return False, "LINHA_FALSE_DESTINO_OK"
+        if memoria.get("em_recuperacao", False):
+            return False, "EM_RECUPERACAO_COM_DESTINO_OK"
+        return False, "NAO_APLICA"
+
+    if memoria.get("em_recuperacao", False):
+        return True, "EM_RECUPERACAO_SEM_DESTINO"
+    return True, "DESTINO_PERDIDO"
 
 
 def deve_confirmar_destino(resultado, destino):
