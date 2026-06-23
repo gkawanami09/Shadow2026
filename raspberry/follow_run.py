@@ -35,7 +35,7 @@ from config import (
     KP_ZIGZAG, CORRECAO_MAXIMA_ZIGZAG, PESO_ZIGZAG_BAIXA,
     PESO_ZIGZAG_MEDIA, PESO_ZIGZAG_ALTA,
 )
-from follow_test import calcular_comando, calcular_erro_final, calcular_erro_faixa, criar_debug_follow
+from follow_test import calcular_comando, calcular_erro_final, calcular_erro_faixa, criar_debug_follow, extrair_caminho_linha, calcular_controle_vetor
 from line_test import criar_debug_linha, detectar_linha
 
 
@@ -221,6 +221,16 @@ def main():
         while time.monotonic() - inicio < argumentos.duracao and estado != "PARADO":
             resultado = detectar_linha(capturar_frame_bgr(camera))
             tempo = time.monotonic() - inicio
+            pontos_vetor = extrair_caminho_linha(resultado["mascara_limpa"], resultado["x_inicio_roi"], resultado["y_inicio_roi"], resultado["centro_imagem_x"])
+            controle_vetor = calcular_controle_vetor(pontos_vetor)
+            if controle_vetor and controle_vetor["linha_baixa"] and estado not in ("AVANCAR_ANTES_GIRO_90", "GIRAR_90", "REALINHAR_POS_90"):
+                estado = "LINHA_FORTE" if sum(p["encontrou"] for p in pontos_vetor) >= 4 else "LINHA_FRACA"
+                comando = controle_vetor["comando"]
+                print(f"Tempo: {tempo:.1f}s | Estado: {estado} | Lat: {controle_vetor['erro_lateral']:.0f} | Dir: {controle_vetor['erro_direcao']:.0f} | Corr: {controle_vetor['correcao']:.0f} | Cmd: {comando} | Baixa: SIM")
+                if argumentos.motores:
+                    enviar_comando(conexao, comando)
+                time.sleep(INTERVALO_COMANDO_SEGUNDOS)
+                continue
             if estado == "AVANCAR_ANTES_GIRO_90":
                 comando = f"LADO {VELOCIDADE_AVANCO_ANTES_GIRO_90} {VELOCIDADE_AVANCO_ANTES_GIRO_90}"
                 print(f"Tempo: {tempo:.1f}s | Estado: AVANCAR_ANTES_GIRO_90 | Lado: {lado_curva_90} | Cmd: {comando}")

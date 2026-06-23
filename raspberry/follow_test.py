@@ -16,6 +16,14 @@ from config import (
     VELOCIDADE_BASE_SEGUE_LINHA, VELOCIDADE_MAXIMA_SEGUE_LINHA,
     VELOCIDADE_MINIMA_SEGUE_LINHA,
 )
+from config import (
+    NUM_FAIXAS_CAMINHO, MIN_PIXELS_FAIXA_CAMINHO, DISTANCIA_MAX_ENTRE_FAIXAS,
+    Y_CONTROLE_PERTO_INICIO, Y_CONTROLE_PERTO_FIM, Y_LOOKAHEAD_INICIO,
+    Y_LOOKAHEAD_FIM, MIN_PIXELS_LINHA_PERTO, KP_LATERAL, KP_DIRECAO,
+    CORRECAO_MAXIMA_VETOR, VELOCIDADE_BASE_VETOR, VELOCIDADE_MINIMA_VETOR,
+    VELOCIDADE_MAXIMA_VETOR, VELOCIDADE_BASE_CURVA_FORTE,
+    LIMIAR_DIRECAO_CURVA_FORTE, REDUZIR_VELOCIDADE_EM_CURVA,
+)
 from line_test import carregar_imagem, detectar_linha
 
 
@@ -52,6 +60,45 @@ def calcular_erro_final(faixas):
         return None
     soma_pesos = sum(pesos[nome] for nome in encontradas)
     return sum(faixas[nome]["erro"] * pesos[nome] for nome in encontradas) / soma_pesos
+
+
+def extrair_caminho_linha(mascara_limpa, x_inicio_roi, y_inicio_roi, centro_imagem_x):
+    """Reconstrói o caminho da linha, da parte baixa da ROI para o topo."""
+    altura = mascara_limpa.shape[0]
+    pontos, x_anterior = [], None
+    for indice in range(NUM_FAIXAS_CAMINHO - 1, -1, -1):
+        y1, y2 = int(altura * indice / NUM_FAIXAS_CAMINHO), int(altura * (indice + 1) / NUM_FAIXAS_CAMINHO)
+        faixa = mascara_limpa[y1:y2, :]
+        contornos, _ = cv2.findContours(faixa, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        candidatos = []
+        for contorno in contornos:
+            pixels = int(cv2.contourArea(contorno))
+            if pixels >= MIN_PIXELS_FAIXA_CAMINHO:
+                momentos = cv2.moments(contorno)
+                if momentos["m00"]:
+                    candidatos.append((int(momentos["m10"] / momentos["m00"]), pixels))
+        escolhido = min(candidatos, key=lambda item: abs(item[0] - x_anterior)) if candidatos and x_anterior is not None else (candidatos[0] if candidatos else None)
+        ponto = {"x": None, "y": y_inicio_roi + (y1 + y2) // 2, "erro": None, "pixels": 0, "encontrou": False}
+        if escolhido and (x_anterior is None or abs(escolhido[0] - x_anterior) <= DISTANCIA_MAX_ENTRE_FAIXAS):
+            ponto.update({"x": x_inicio_roi + escolhido[0], "erro": x_inicio_roi + escolhido[0] - centro_imagem_x, "pixels": escolhido[1], "encontrou": True})
+            x_anterior = escolhido[0]
+        pontos.append(ponto)
+    return pontos
+
+
+def calcular_controle_vetor(pontos):
+    perto = [p for p in pontos if p["encontrou"] and Y_CONTROLE_PERTO_INICIO <= (p["y"] - pontos[-1]["y"] + 1) / max(1, pontos[0]["y"] - pontos[-1]["y"] + 1) <= Y_CONTROLE_PERTO_FIM]
+    validos = [p for p in pontos if p["encontrou"]]
+    if not validos:
+        return None
+    ponto_perto = validos[0]
+    ponto_lookahead = validos[min(len(validos) - 1, max(1, len(validos) // 2))]
+    erro_lateral = sum(p["erro"] for p in (perto or [ponto_perto])) / len(perto or [ponto_perto])
+    erro_direcao = (ponto_lookahead["x"] - ponto_perto["x"]) / max(ponto_perto["y"] - ponto_lookahead["y"], 1) * 100
+    base = VELOCIDADE_BASE_CURVA_FORTE if REDUZIR_VELOCIDADE_EM_CURVA and abs(erro_direcao) >= LIMIAR_DIRECAO_CURVA_FORTE else VELOCIDADE_BASE_VETOR
+    correcao = max(-CORRECAO_MAXIMA_VETOR, min(CORRECAO_MAXIMA_VETOR, KP_LATERAL * erro_lateral + KP_DIRECAO * erro_direcao))
+    esq, dir = round(max(VELOCIDADE_MINIMA_VETOR, min(VELOCIDADE_MAXIMA_VETOR, base + correcao))), round(max(VELOCIDADE_MINIMA_VETOR, min(VELOCIDADE_MAXIMA_VETOR, base - correcao)))
+    return {"erro_lateral": erro_lateral, "erro_direcao": erro_direcao, "correcao": correcao, "comando": f"LADO {esq} {dir}", "ponto_perto": ponto_perto, "ponto_lookahead": ponto_lookahead, "linha_baixa": bool(perto)}
 
 
 def limitar(valor, minimo, maximo):
