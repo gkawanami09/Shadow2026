@@ -43,10 +43,10 @@ GREEN_MORPH_OPEN_ITER = 1
 GREEN_MORPH_CLOSE_ITER = 2
 
 # Filtros dos contornos candidatos.
-GREEN_MIN_AREA = 120
+GREEN_MIN_AREA = 500
 GREEN_MAX_AREA_REL = 0.18
-GREEN_MIN_WIDTH = 6
-GREEN_MIN_HEIGHT = 6
+GREEN_MIN_WIDTH = 15
+GREEN_MIN_HEIGHT = 15
 GREEN_MIN_FILL_RATIO = 0.28
 
 # Confirmacao de verde real dentro de cada contorno aceito pela mascara HSV.
