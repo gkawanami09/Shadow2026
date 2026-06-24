@@ -9,8 +9,14 @@ from config import (
     GREEN_H_MAX,
     GREEN_H_MIN,
     GREEN_MAX_AREA_REL,
+    GREEN_MAX_ASPECT_RATIO,
     GREEN_MIN_AREA,
+    GREEN_MEAN_G_MINUS_B_MIN,
+    GREEN_MEAN_G_MINUS_R_MIN,
+    GREEN_MEAN_S_MIN,
+    GREEN_MIN_ASPECT_RATIO,
     GREEN_MIN_FILL_RATIO,
+    GREEN_MIN_GREEN_RATIO,
     GREEN_MIN_HEIGHT,
     GREEN_MIN_WIDTH,
     GREEN_MORPH_CLOSE_ITER,
@@ -59,12 +65,16 @@ def criar_mascara_verde(frame_bgr):
     )
     return {
         "mascara": mascara_limpa,
+        "roi_bgr": roi,
+        "roi_hsv": hsv,
         "y_inicio_roi": y_inicio,
         "y_fim_roi": y_fim,
     }
 
 
-def extrair_contornos_verdes(mascara, y_inicio_roi, largura_frame, altura_frame, x_referencia=None):
+def extrair_contornos_verdes(
+    mascara, roi_bgr, roi_hsv, y_inicio_roi, largura_frame, altura_frame, x_referencia=None
+):
     """Extrai contornos verdes validos da mascara relativa a ROI."""
     if x_referencia is None:
         x_referencia = largura_frame // 2
@@ -85,6 +95,23 @@ def extrair_contornos_verdes(mascara, y_inicio_roi, largura_frame, altura_frame,
         if fill_ratio < GREEN_MIN_FILL_RATIO:
             continue
 
+        mascara_contorno = np.zeros_like(mascara)
+        cv2.drawContours(mascara_contorno, [contorno], -1, 255, thickness=cv2.FILLED)
+        mean_h, mean_s, mean_v, _ = cv2.mean(roi_hsv, mask=mascara_contorno)
+        mean_b, mean_g, mean_r, _ = cv2.mean(roi_bgr, mask=mascara_contorno)
+        g_minus_r = mean_g - mean_r
+        g_minus_b = mean_g - mean_b
+        green_ratio = mean_g / max(mean_r, mean_b, 1.0)
+        aspect_ratio = largura / altura
+        if (
+            mean_s < GREEN_MEAN_S_MIN
+            or g_minus_r < GREEN_MEAN_G_MINUS_R_MIN
+            or g_minus_b < GREEN_MEAN_G_MINUS_B_MIN
+            or green_ratio < GREEN_MIN_GREEN_RATIO
+            or not GREEN_MIN_ASPECT_RATIO <= aspect_ratio <= GREEN_MAX_ASPECT_RATIO
+        ):
+            continue
+
         momentos = cv2.moments(contorno)
         if momentos["m00"] == 0:
             continue
@@ -100,6 +127,16 @@ def extrair_contornos_verdes(mascara, y_inicio_roi, largura_frame, altura_frame,
                     cx, x_referencia, largura_frame, GREEN_CENTER_DEADBAND_REL
                 ),
                 "fill_ratio": fill_ratio,
+                "mean_h": mean_h,
+                "mean_s": mean_s,
+                "mean_v": mean_v,
+                "mean_b": mean_b,
+                "mean_g": mean_g,
+                "mean_r": mean_r,
+                "g_minus_r": g_minus_r,
+                "g_minus_b": g_minus_b,
+                "green_ratio": green_ratio,
+                "aspect_ratio": aspect_ratio,
             }
         )
     return sorted(validos, key=lambda item: item["area"], reverse=True)
@@ -164,6 +201,8 @@ def detectar_verde(frame_bgr, x_referencia=None):
     mascara_resultado = criar_mascara_verde(frame_bgr)
     contornos = extrair_contornos_verdes(
         mascara_resultado["mascara"],
+        mascara_resultado["roi_bgr"],
+        mascara_resultado["roi_hsv"],
         mascara_resultado["y_inicio_roi"],
         largura,
         altura,
@@ -206,6 +245,11 @@ def criar_debug_verde(frame_bgr, resultado_verde):
         lado = contorno["lado"]
         cv2.rectangle(debug, (x, y), (x + w, y + h), cores[lado], 2)
         cv2.putText(debug, rotulos[lado], (x, max(18, y - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, cores[lado], 2)
+        metricas = (
+            f"{rotulos[lado]} S:{contorno['mean_s']:.0f} "
+            f"GR:{contorno['g_minus_r']:.0f} GB:{contorno['g_minus_b']:.0f}"
+        )
+        cv2.putText(debug, metricas, (x, min(altura - 8, y + h + 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, cores[lado], 1)
 
     linhas = [
         f"verde: {resultado_verde['tipo']} | conf: {resultado_verde['confianca']:.2f}",

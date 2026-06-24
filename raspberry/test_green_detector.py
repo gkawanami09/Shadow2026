@@ -67,6 +67,45 @@ class GreenDetectorTests(unittest.TestCase):
         self.assertEqual(resultado["tipo"], "ESQUERDA")
         self.assertGreater(resultado["area_esquerda"], 0)
 
+    def test_verde_claro_fraco_e_rejeitado(self):
+        frame = self.criar_frame()
+        cv2.rectangle(frame, (80, 200), (180, 300), (180, 210, 180), -1)
+        resultado = detectar_verde(frame)
+        self.assertEqual(resultado["tipo"], "NENHUM")
+
+    def test_verde_saturado_expoe_metricas(self):
+        frame = self.criar_frame()
+        self.retangulo_verde(frame, (80, 200), (180, 300))
+        resultado = detectar_verde(frame)
+        self.assertEqual(resultado["tipo"], "ESQUERDA")
+        contorno = resultado["contornos"][0]
+        for chave in (
+            "mean_h", "mean_s", "mean_v", "mean_b", "mean_g", "mean_r",
+            "g_minus_r", "g_minus_b", "green_ratio", "aspect_ratio",
+        ):
+            self.assertIn(chave, contorno)
+
+    def test_verde_direita_ignora_falso_verde_esquerda(self):
+        frame = self.criar_frame()
+        cv2.rectangle(frame, (80, 200), (180, 300), (180, 210, 180), -1)
+        self.retangulo_verde(frame, (460, 200), (560, 300))
+        resultado = detectar_verde(frame)
+        self.assertEqual(resultado["tipo"], "DIREITA")
+
+    def test_verde_esquerda_ignora_falso_verde_direita(self):
+        frame = self.criar_frame()
+        self.retangulo_verde(frame, (80, 200), (180, 300))
+        cv2.rectangle(frame, (460, 200), (560, 300), (180, 210, 180), -1)
+        resultado = detectar_verde(frame)
+        self.assertEqual(resultado["tipo"], "ESQUERDA")
+
+    def test_dois_verdes_reais_continuam_duplo(self):
+        frame = self.criar_frame()
+        self.retangulo_verde(frame, (80, 200), (180, 300))
+        self.retangulo_verde(frame, (460, 200), (560, 300))
+        resultado = detectar_verde(frame)
+        self.assertEqual(resultado["tipo"], "DUPLO")
+
 
 if __name__ == "__main__":
     unittest.main()

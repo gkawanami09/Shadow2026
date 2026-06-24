@@ -30,8 +30,8 @@ PASTA_CAPTURAS = "captures"
 # HSV do OpenCV: H varia de 0 a 179.
 GREEN_H_MIN = 35
 GREEN_H_MAX = 90
-GREEN_S_MIN = 55
-GREEN_V_MIN = 45
+GREEN_S_MIN = 75
+GREEN_V_MIN = 35
 
 # ROI vertical usada para procurar marcacoes da pista.
 GREEN_ROI_Y_MIN_REL = 0.25
@@ -43,11 +43,19 @@ GREEN_MORPH_OPEN_ITER = 1
 GREEN_MORPH_CLOSE_ITER = 2
 
 # Filtros dos contornos candidatos.
-GREEN_MIN_AREA = 80
+GREEN_MIN_AREA = 120
 GREEN_MAX_AREA_REL = 0.18
 GREEN_MIN_WIDTH = 6
 GREEN_MIN_HEIGHT = 6
-GREEN_MIN_FILL_RATIO = 0.22
+GREEN_MIN_FILL_RATIO = 0.28
+
+# Confirmacao de verde real dentro de cada contorno aceito pela mascara HSV.
+GREEN_MEAN_S_MIN = 80
+GREEN_MEAN_G_MINUS_R_MIN = 25
+GREEN_MEAN_G_MINUS_B_MIN = 8
+GREEN_MIN_GREEN_RATIO = 1.08
+GREEN_MAX_ASPECT_RATIO = 4.0
+GREEN_MIN_ASPECT_RATIO = 0.20
 
 # Classificacao espacial das marcacoes.
 GREEN_CENTER_DEADBAND_REL = 0.10

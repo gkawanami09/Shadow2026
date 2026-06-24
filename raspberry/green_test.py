@@ -37,6 +37,14 @@ def imprimir_resultado(resultado):
         f"area_centro: {resultado['area_centro']:.0f} | "
         f"qtd: {resultado['qtd_contornos']} | obs: {resultado['observacao']}"
     )
+    for indice, contorno in enumerate(resultado["contornos"][:5], start=1):
+        print(
+            f"contorno {indice} | lado: {contorno['lado']} | "
+            f"area: {contorno['area']:.0f} | S: {contorno['mean_s']:.0f} | "
+            f"G-R: {contorno['g_minus_r']:.0f} | "
+            f"G-B: {contorno['g_minus_b']:.0f} | "
+            f"ratio: {contorno['green_ratio']:.2f}"
+        )
 
 
 def salvar_debug(frame, resultado):
@@ -79,6 +87,7 @@ def executar_imagem(caminho, salvar, mostrar):
 def executar_camera(salvar, mostrar):
     camera = iniciar_camera(CAMERA_WIDTH, CAMERA_HEIGHT)
     ultimo_debug = 0.0
+    ultimo_tipo_salvo = None
     print("Detector de verde iniciado. Pressione q na janela ou CTRL+C para sair.")
     try:
         while True:
@@ -88,11 +97,12 @@ def executar_camera(salvar, mostrar):
             if (
                 salvar
                 and GREEN_SALVAR_DEBUG_EVENTOS
-                and resultado["tipo"] != "NENHUM"
+                and resultado["tipo"] != ultimo_tipo_salvo
                 and agora - ultimo_debug >= GREEN_INTERVALO_DEBUG
             ):
                 salvar_debug(frame, resultado)
                 ultimo_debug = agora
+                ultimo_tipo_salvo = resultado["tipo"]
 
             if mostrar:
                 cv2.imshow("Debug verde - pressione q para sair", criar_debug_verde(frame, resultado))
