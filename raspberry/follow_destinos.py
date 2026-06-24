@@ -29,15 +29,7 @@ from config import (
     DEST_SEGMENTO_GAP_MAX_MULT, DEST_SEGMENTO_MIN_HITS_CURVA, DEST_SEGMENTO_MIN_HITS_FRENTE,
     DEST_SEGMENTO_MIN_HITS_RETORNO, DEST_TEMPO_TROCA_VARREDURA, DEST_VEL_MAX,
     DEST_VEL_MIN_CURVA, DEST_VEL_MIN_FRENTE, DEST_VEL_MIN_RETORNO,
-    GREEN_APPROACH_BEFORE_TURN_SEC, GREEN_APPROACH_SPEED_LEFT, GREEN_APPROACH_SPEED_RIGHT,
-    GREEN_FOLLOW_CLEAR_FRAMES_TO_RELEASE, GREEN_FOLLOW_CONFIRM_FRAMES,
-    GREEN_FOLLOW_CONFIRM_MAX_MISSES, GREEN_FOLLOW_COOLDOWN_SEC, GREEN_LOG_INTERVAL_SEC,
-    GREEN_REACQUIRE_CONFIRM_FRAMES, GREEN_REACQUIRE_MAX_SEC, GREEN_REACQUIRE_TURN_SPEED,
-    GREEN_RETURN_DIRECTION, GREEN_RETURN_MAX_SEC, GREEN_RETURN_MIN_SEC, GREEN_RETURN_SPEED,
-    GREEN_TURN_MAX_SEC, GREEN_TURN_MIN_SEC, GREEN_TURN_SPEED,
 )
-from green_action import analisar_intersecao_preta, decidir_verde_acionavel
-from green_detector import criar_mascara_linha_global, detectar_verde
 from line_test import criar_debug_linha, detectar_linha
 from utils import abrir_serial, enviar_comando
 
@@ -49,8 +41,6 @@ def ler_argumentos():
     parser.add_argument("--porta", default="auto", help="Porta serial ou auto.")
     parser.add_argument("--salvar-debug", action="store_true", help="Salva imagens de debug.")
     parser.add_argument("--mostrar", action="store_true", help="Mostra janela OpenCV.")
-    parser.add_argument("--green-log", action="store_true", help="Loga verde/intersecao sem alterar movimento.")
-    parser.add_argument("--green-move", action="store_true", help="Permite movimento real por verde.")
     return parser.parse_args()
 
 
@@ -87,188 +77,6 @@ def fechar_serial_segura(conexao):
             conexao.close()
         except Exception as erro:
             print(f"Aviso ao fechar serial: {erro}")
-
-
-def calcular_acao_verde(frame_bgr, resultado_linha):
-    """Calcula percepcao verde no frame atual, sem interferir no follow."""
-    try:
-        mascara_linha = criar_mascara_linha_global(resultado_linha)
-        resultado_verde = detectar_verde(
-            frame_bgr,
-            x_referencia=resultado_linha["centro_imagem_x"],
-            mascara_linha_global=mascara_linha,
-        )
-        analise = analisar_intersecao_preta(mascara_linha, resultado_linha["centro_imagem_x"])
-        return resultado_verde, analise, decidir_verde_acionavel(resultado_verde, analise)
-    except Exception as erro:
-        print(f"[GREEN] erro_visual={erro}")
-        analise = {
-            "tipo_intersecao": "NENHUMA", "black_center": 0, "black_left": 0,
-            "black_right": 0, "black_ratio_center": 0.0, "black_ratio_left": 0.0,
-            "black_ratio_right": 0.0,
-        }
-        verde = {"tipo_detectado": "NENHUM", "tipo_confirmado": "NENHUM", "contornos_confirmados": []}
-        acao = {
-            "verde_acionavel": "NENHUM", "acao_visual": "SEGUIR_RETO",
-            "motivo_acao": "erro_visual", "tipo_intersecao": "NENHUMA",
-            "intersecao_detectada": False, "analise_intersecao": analise,
-        }
-        return verde, analise, acao
-
-
-def criar_estado_verde(agora):
-    return {
-        "estado": "GREEN_IDLE", "acao_pendente": None, "acao_confirmada": None,
-        "frames_confirmados": 0, "misses": 0, "inicio_estado": agora,
-        "inicio_cooldown": 0.0, "clear_frames": 0, "reacquire_frames": 0,
-        "ultimo_log": 0.0, "ultimo_estado_logado": None, "evento": "",
-        "turn_saw_lost_line": False,
-    }
-
-
-def iniciar_estado_verde(estado_verde, novo_estado, agora):
-    estado_verde["estado"] = novo_estado
-    estado_verde["inicio_estado"] = agora
-    if novo_estado == "GREEN_TURNING":
-        estado_verde["turn_saw_lost_line"] = False
-    if novo_estado == "GREEN_COOLDOWN":
-        estado_verde["inicio_cooldown"] = agora
-        estado_verde["clear_frames"] = 0
-
-
-def acao_verde_eh_manobra(acao_visual):
-    return acao_visual in ("PREPARAR_ESQUERDA", "PREPARAR_DIREITA", "PREPARAR_RETORNO")
-
-
-def _direcao_acao_verde(acao):
-    if acao == "PREPARAR_ESQUERDA":
-        return "ESQUERDA"
-    if acao == "PREPARAR_DIREITA":
-        return "DIREITA"
-    return GREEN_RETURN_DIRECTION
-
-
-def _resetar_suavizacao_verde(memoria):
-    memoria["correcao_anterior"] = 0
-    memoria["vel_anterior"] = (0, 0)
-
-
-def atualizar_estado_verde(estado_verde, resultado_acao, destino, estado_follow, green_move, agora, memoria):
-    """Atualiza a maquina verde e nunca envia comandos ao Arduino."""
-    estado = estado_verde["estado"]
-    acao_visual = resultado_acao["acao_visual"]
-    elegivel = (
-        acao_verde_eh_manobra(acao_visual)
-        and destino.get("ok", False)
-        and estado_follow not in ("RECUPERAR_GIRO", "RECUPERAR_VARREDURA")
-    )
-
-    if estado == "GREEN_IDLE":
-        if elegivel:
-            estado_verde["evento"] = ""
-            estado_verde["acao_pendente"] = acao_visual
-            estado_verde["frames_confirmados"] = 1
-            estado_verde["misses"] = 0
-            iniciar_estado_verde(estado_verde, "GREEN_CONFIRMING", agora)
-    elif estado == "GREEN_CONFIRMING":
-        if elegivel and acao_visual == estado_verde["acao_pendente"]:
-            estado_verde["frames_confirmados"] += 1
-        else:
-            estado_verde["misses"] += 1
-        if estado_verde["misses"] > GREEN_FOLLOW_CONFIRM_MAX_MISSES:
-            estado_verde["acao_pendente"] = None
-            iniciar_estado_verde(estado_verde, "GREEN_IDLE", agora)
-        elif estado_verde["frames_confirmados"] >= GREEN_FOLLOW_CONFIRM_FRAMES:
-            if green_move:
-                estado_verde["acao_confirmada"] = estado_verde["acao_pendente"]
-                proximo = "GREEN_APPROACH" if GREEN_APPROACH_BEFORE_TURN_SEC > 0 else "GREEN_TURNING"
-                iniciar_estado_verde(estado_verde, proximo, agora)
-            else:
-                iniciar_estado_verde(estado_verde, "GREEN_COOLDOWN", agora)
-    elif estado == "GREEN_APPROACH":
-        if agora - estado_verde["inicio_estado"] >= GREEN_APPROACH_BEFORE_TURN_SEC:
-            iniciar_estado_verde(estado_verde, "GREEN_TURNING", agora)
-    elif estado == "GREEN_TURNING":
-        retorno = estado_verde["acao_confirmada"] == "PREPARAR_RETORNO"
-        minimo = GREEN_RETURN_MIN_SEC if retorno else GREEN_TURN_MIN_SEC
-        maximo = GREEN_RETURN_MAX_SEC if retorno else GREEN_TURN_MAX_SEC
-        decorrido = agora - estado_verde["inicio_estado"]
-        if not destino.get("ok", False):
-            estado_verde["turn_saw_lost_line"] = True
-        if decorrido >= maximo:
-            estado_verde["evento"] = "green_turn_timeout"
-            iniciar_estado_verde(estado_verde, "GREEN_REACQUIRE", agora)
-            estado_verde["reacquire_frames"] = 0
-        elif (
-            decorrido >= minimo
-            and estado_verde["turn_saw_lost_line"]
-            and destino.get("ok", False)
-        ):
-            iniciar_estado_verde(estado_verde, "GREEN_REACQUIRE", agora)
-            estado_verde["reacquire_frames"] = 0
-    elif estado == "GREEN_REACQUIRE":
-        if destino.get("ok", False):
-            estado_verde["reacquire_frames"] += 1
-        else:
-            estado_verde["reacquire_frames"] = 0
-        if estado_verde["reacquire_frames"] >= GREEN_REACQUIRE_CONFIRM_FRAMES:
-            _resetar_suavizacao_verde(memoria)
-            iniciar_estado_verde(estado_verde, "GREEN_COOLDOWN", agora)
-        elif agora - estado_verde["inicio_estado"] >= GREEN_REACQUIRE_MAX_SEC:
-            estado_verde["evento"] = "green_reacquire_timeout"
-            _resetar_suavizacao_verde(memoria)
-            iniciar_estado_verde(estado_verde, "GREEN_COOLDOWN", agora)
-    elif estado == "GREEN_COOLDOWN":
-        if resultado_acao["verde_acionavel"] == "NENHUM":
-            estado_verde["clear_frames"] += 1
-        else:
-            estado_verde["clear_frames"] = 0
-        if (
-            agora - estado_verde["inicio_cooldown"] >= GREEN_FOLLOW_COOLDOWN_SEC
-            and estado_verde["clear_frames"] >= GREEN_FOLLOW_CLEAR_FRAMES_TO_RELEASE
-        ):
-            estado_verde["acao_pendente"] = None
-            estado_verde["acao_confirmada"] = None
-            iniciar_estado_verde(estado_verde, "GREEN_IDLE", agora)
-    return estado_verde
-
-
-def comando_override_verde(estado_verde, destino, green_move):
-    """Retorna o comando verde ou None para preservar o comando normal."""
-    if not green_move:
-        return None
-    estado = estado_verde["estado"]
-    acao = estado_verde["acao_confirmada"]
-    direcao = _direcao_acao_verde(acao)
-    if estado == "GREEN_APPROACH":
-        return f"LADO {GREEN_APPROACH_SPEED_LEFT} {GREEN_APPROACH_SPEED_RIGHT}"
-    if estado == "GREEN_TURNING":
-        velocidade = GREEN_RETURN_SPEED if acao == "PREPARAR_RETORNO" else GREEN_TURN_SPEED
-        giro = "GIRAR_ESQ" if direcao == "ESQUERDA" else "GIRAR_DIR"
-        return f"{giro} {velocidade}"
-    if estado == "GREEN_REACQUIRE" and not destino.get("ok", False):
-        giro = "GIRAR_ESQ" if direcao == "ESQUERDA" else "GIRAR_DIR"
-        return f"{giro} {GREEN_REACQUIRE_TURN_SPEED}"
-    return None
-
-
-def log_verde(resultado_verde, analise, resultado_acao, estado_verde, green_move, comando_final, agora):
-    mudou = estado_verde["ultimo_estado_logado"] != estado_verde["estado"]
-    if not mudou and agora - estado_verde["ultimo_log"] < GREEN_LOG_INTERVAL_SEC:
-        return
-    depois = any(item.get("possivel_verde_depois_intersecao", False) for item in resultado_verde.get("contornos_confirmados", []))
-    print(
-        f"[GREEN] det={resultado_verde['tipo_detectado']} conf={resultado_verde['tipo_confirmado']} "
-        f"acionavel={resultado_acao['verde_acionavel']} acao={resultado_acao['acao_visual']} "
-        f"motivo={resultado_acao['motivo_acao']} inter={analise['tipo_intersecao']} "
-        f"C/L/R={analise['black_center']}/{analise['black_left']}/{analise['black_right']} "
-        f"ratio={analise['black_ratio_center']:.3f}/{analise['black_ratio_left']:.3f}/{analise['black_ratio_right']:.3f} "
-        f"depois={depois} move={'ON' if green_move else 'OFF'} estado={estado_verde['estado']} cmd={comando_final}"
-        f" acao_confirmada={estado_verde['acao_confirmada']} turn_lost={estado_verde['turn_saw_lost_line']}"
-        f" evento={estado_verde['evento']}"
-    )
-    estado_verde["ultimo_log"] = agora
-    estado_verde["ultimo_estado_logado"] = estado_verde["estado"]
 
 
 def tipo_por_angulo(angulo):
@@ -713,10 +521,6 @@ def imprimir_log(resultado, estado, destino, comando, memoria, motivo_recuperaca
 
 def main():
     args = ler_argumentos()
-    green_log = args.green_log or args.green_move
-    green_move = args.green_move and args.motores
-    if args.green_move and not args.motores:
-        print("[GREEN] --green-move solicitado sem --motores; usando modo log-only.")
     camera = None
     conexao = None
     try:
@@ -745,11 +549,9 @@ def main():
         }
         controle_varredura = {"etapa": 0, "ultima_troca": time.monotonic()}
         estado_anterior, ultimo_debug = None, 0
-        estado_verde = criar_estado_verde(time.monotonic())
 
         while True:
-            frame = capturar_frame_bgr(camera)
-            resultado = detectar_linha(frame)
+            resultado = detectar_linha(capturar_frame_bgr(camera))
             destino = escolher_destino(resultado)
             if not destino["ok"]:
                 resetar_confirmacao_lado_recuperacao(memoria)
@@ -784,31 +586,16 @@ def main():
                 estado = "FOLLOW_CONFIRMAR"
                 comando = comando_confirmar_sem_destino(memoria)
 
-            comando_final = comando
-            if green_log:
-                resultado_verde, analise_intersecao, resultado_acao_verde = calcular_acao_verde(frame, resultado)
-                agora_verde = time.monotonic()
-                atualizar_estado_verde(
-                    estado_verde, resultado_acao_verde, destino, estado, green_move, agora_verde, memoria
-                )
-                comando_verde = comando_override_verde(estado_verde, destino, green_move)
-                if comando_verde is not None:
-                    comando_final = comando_verde
-                log_verde(
-                    resultado_verde, analise_intersecao, resultado_acao_verde,
-                    estado_verde, green_move, comando_final, agora_verde,
-                )
-
-            enviar_seguro(conexao, comando_final, args.motores)
-            imprimir_log(resultado, estado, destino, comando_final, memoria, motivo_recuperacao)
+            enviar_seguro(conexao, comando, args.motores)
+            imprimir_log(resultado, estado, destino, comando, memoria, motivo_recuperacao)
             if args.salvar_debug:
                 agora = time.monotonic()
                 if DEST_SALVAR_DEBUG_EVENTOS and (estado != estado_anterior or agora - ultimo_debug >= DEST_INTERVALO_DEBUG):
-                    salvar_debug(criar_debug_destinos(resultado, destino, estado, comando_final, memoria, motivo_recuperacao), estado)
+                    salvar_debug(criar_debug_destinos(resultado, destino, estado, comando, memoria, motivo_recuperacao), estado)
                     ultimo_debug = agora
             estado_anterior = estado
             if args.mostrar:
-                cv2.imshow("follow_destinos", criar_debug_destinos(resultado, destino, estado, comando_final, memoria, motivo_recuperacao))
+                cv2.imshow("follow_destinos", criar_debug_destinos(resultado, destino, estado, comando, memoria, motivo_recuperacao))
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     raise KeyboardInterrupt
             time.sleep(DEST_INTERVALO)

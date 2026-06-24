@@ -1,119 +1,107 @@
-"""Testes sinteticos da decisao de verde por topologia da intersecao."""
+"""Testes sinteticos da camada visual de verde acionavel."""
 
 import unittest
 
 import cv2
 import numpy as np
 
-from green_action import (
-    analisar_intersecao_preta,
-    decidir_verde_acionavel,
-    dividir_zonas_intersecao,
-)
+from green_action import analisar_intersecao_preta, decidir_verde_acionavel, dividir_zonas_intersecao
 
 
 class GreenActionTests(unittest.TestCase):
-    def analise(self, tipo="CRUZ", node_y=320, confiavel=True):
-        return {
-            "intersecao_detectada": tipo in {"CRUZ", "LATERAL_ESQ", "LATERAL_DIR"},
-            "tipo_intersecao": tipo,
-            "node_y_near": node_y if confiavel else None,
-            "node_y_far": node_y - 8 if confiavel else None,
-            "node_y_center": node_y - 4 if confiavel else None,
-            "node_confiavel": confiavel,
-            "node_rows_count": 5 if confiavel else 0,
-            "zonas": {"zona_intersecao": (0, 280, 640, 400)},
-        }
+    def mascara(self, partes):
+        mascara = np.zeros((480, 640), dtype=np.uint8)
+        zonas = dividir_zonas_intersecao(640, 480, 320)
+        for parte in partes:
+            x1, y1, x2, y2 = zonas[f"zona_{parte}"]
+            cv2.rectangle(mascara, (x1, y1), (x2 - 1, y2 - 1), 255, -1)
+        return mascara
 
-    def verde(self, lados=("ESQUERDA",), y=330, h=60):
+    def verde(self, lados=()):
         contornos = []
         for lado in lados:
             x = {"ESQUERDA": 200, "DIREITA": 400, "CENTRO": 300}[lado]
-            contornos.append({"lado": lado, "area": 1200.0, "bbox": (x, y, 60, h), "confirmado": True})
+            contornos.append({"lado": lado, "area": 1200.0, "bbox": (x, 400, 60, 60), "confirmado": True})
         return {"contornos_confirmados": contornos}
 
-    def test_estima_no_por_ramos_laterais(self):
-        mascara = np.zeros((480, 640), dtype=np.uint8)
-        zonas = dividir_zonas_intersecao(640, 480, 320)
-        x1, y1, x2, _ = zonas["zona_esquerda"]
-        cv2.rectangle(mascara, (x1, y1 + 10), (x2 - 1, y1 + 14), 255, -1)
-        analise = analisar_intersecao_preta(mascara, 320)
-        self.assertTrue(analise["node_confiavel"])
-        self.assertEqual(analise["node_rows_count"], 5)
-        self.assertEqual(analise["node_y_near"], y1 + 14)
+    def decidir(self, partes, lados=()):
+        analise = analisar_intersecao_preta(self.mascara(partes), 320)
+        return decidir_verde_acionavel(self.verde(lados), analise)
 
-    def test_verde_esquerda_antes_aciona(self):
-        verde = self.verde(("ESQUERDA",), y=330)
-        resultado = decidir_verde_acionavel(verde, self.analise("LATERAL_ESQ"))
-        self.assertEqual(verde["contornos_confirmados"][0]["verde_posicao_intersecao"], "ANTES_INTERSECAO")
-        self.assertEqual(resultado["verde_acionavel"], "ESQUERDA")
-        self.assertEqual(resultado["acao_visual"], "PREPARAR_ESQUERDA")
-
-    def test_verde_direita_antes_aciona(self):
-        resultado = decidir_verde_acionavel(self.verde(("DIREITA",), y=330), self.analise("LATERAL_DIR"))
+    def test_verde_direita_lateral_direita(self):
+        resultado = self.decidir(("centro", "direita"), ("DIREITA",))
         self.assertEqual(resultado["verde_acionavel"], "DIREITA")
         self.assertEqual(resultado["acao_visual"], "PREPARAR_DIREITA")
 
-    def test_verde_depois_e_ignorado(self):
-        verde = self.verde(("ESQUERDA",), y=240, h=50)
-        resultado = decidir_verde_acionavel(verde, self.analise())
-        contorno = verde["contornos_confirmados"][0]
-        self.assertEqual(contorno["verde_posicao_intersecao"], "DEPOIS_INTERSECAO")
-        self.assertFalse(contorno["acionavel"])
-        self.assertEqual(contorno["motivo_acionavel"], "verde_depois_intersecao")
-        self.assertEqual(resultado["motivo_acao"], "verde_depois_intersecao")
-        self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
+    def test_verde_esquerda_lateral_esquerda(self):
+        resultado = self.decidir(("centro", "esquerda"), ("ESQUERDA",))
+        self.assertEqual(resultado["verde_acionavel"], "ESQUERDA")
+        self.assertEqual(resultado["acao_visual"], "PREPARAR_ESQUERDA")
 
-    def test_verde_perto_do_no_e_ambiguo(self):
-        verde = self.verde(("ESQUERDA",), y=280, h=70)
-        resultado = decidir_verde_acionavel(verde, self.analise())
-        self.assertEqual(verde["contornos_confirmados"][0]["verde_posicao_intersecao"], "AMBIGUO")
-        self.assertEqual(resultado["motivo_acao"], "verde_posicao_ambigua")
-        self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
-
-    def test_dois_verdes_antes_geram_retorno(self):
-        resultado = decidir_verde_acionavel(self.verde(("ESQUERDA", "DIREITA"), y=330), self.analise())
+    def test_dois_verdes_cruz_retorno(self):
+        resultado = self.decidir(("centro", "esquerda", "direita"), ("ESQUERDA", "DIREITA"))
         self.assertEqual(resultado["verde_acionavel"], "DUPLO")
         self.assertEqual(resultado["acao_visual"], "PREPARAR_RETORNO")
 
-    def test_dois_verdes_depois_nao_geram_retorno(self):
-        resultado = decidir_verde_acionavel(self.verde(("ESQUERDA", "DIREITA"), y=240, h=50), self.analise())
-        self.assertEqual(resultado["verde_acionavel"], "NENHUM")
+    def test_cruz_sem_verde(self):
+        resultado = self.decidir(("centro", "esquerda", "direita"))
         self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
-        self.assertEqual(resultado["motivo_acao"], "verde_depois_intersecao")
-        self.assertEqual(resultado["qtd_contornos_acionaveis"], 0)
+        self.assertEqual(resultado["motivo_acao"], "intersecao_sem_verde")
 
-    def test_um_verde_antes_e_outro_depois_usa_so_o_antes(self):
-        verde = self.verde(("ESQUERDA", "DIREITA"), y=330)
-        verde["contornos_confirmados"][1]["bbox"] = (400, 240, 60, 50)
-        resultado = decidir_verde_acionavel(verde, self.analise())
-        self.assertEqual(resultado["verde_acionavel"], "ESQUERDA")
-        self.assertEqual(resultado["acao_visual"], "PREPARAR_ESQUERDA")
-        self.assertEqual(resultado["qtd_contornos_acionaveis"], 1)
-
-    def test_no_nao_confiavel_nao_aciona(self):
-        resultado = decidir_verde_acionavel(self.verde(), self.analise(confiavel=False))
-        self.assertEqual(resultado["verde_acionavel"], "NENHUM")
-        self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
-        self.assertEqual(resultado["motivo_acao"], "no_intersecao_nao_confiavel")
-
-    def test_reta_e_nenhuma_seguem_reto(self):
-        for tipo in ("RETA", "NENHUMA"):
-            with self.subTest(tipo=tipo):
-                resultado = decidir_verde_acionavel(self.verde(), self.analise(tipo))
+    def test_laterais_sem_verde(self):
+        for lado in ("esquerda", "direita"):
+            with self.subTest(lado=lado):
+                resultado = self.decidir(("centro", lado))
+                self.assertEqual(resultado["verde_acionavel"], "NENHUM")
                 self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
 
-    def test_verde_central_antes_permanece_ambiguo(self):
-        resultado = decidir_verde_acionavel(self.verde(("CENTRO",), y=330), self.analise())
+    def test_reta_com_verde_confirmado_nao_aciona(self):
+        resultado = self.decidir(("centro",), ("DIREITA",))
+        self.assertEqual(resultado["tipo_intersecao"], "RETA")
+        self.assertEqual(resultado["verde_acionavel"], "NENHUM")
+        self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
+
+    def test_reta_sem_verde_segue_reto(self):
+        resultado = self.decidir(("centro",))
+        self.assertEqual(resultado["tipo_intersecao"], "RETA")
+        self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
+
+    def test_linha_grossa_nao_vira_cruz(self):
+        mascara = np.zeros((480, 640), dtype=np.uint8)
+        cv2.rectangle(mascara, (260, 384), (380, 470), 255, -1)
+        analise = analisar_intersecao_preta(mascara, 320)
+        self.assertNotEqual(analise["tipo_intersecao"], "CRUZ")
+
+    def test_intersecao_ambigua_com_verde(self):
+        resultado = self.decidir(("esquerda",), ("ESQUERDA",))
+        self.assertEqual(resultado["tipo_intersecao"], "AMBIGUA")
+        self.assertEqual(resultado["verde_acionavel"], "NENHUM")
+        self.assertEqual(resultado["motivo_acao"], "intersecao_ambigua")
+
+    def test_verde_acima_e_diagnostico_nao_bloqueante(self):
+        analise = analisar_intersecao_preta(self.mascara(("centro", "direita")), 320)
+        verde = self.verde(("DIREITA",))
+        verde["contornos_confirmados"][0]["bbox"] = (400, 280, 60, 60)
+        resultado = decidir_verde_acionavel(verde, analise)
+        contorno = verde["contornos_confirmados"][0]
+        self.assertTrue(contorno["possivel_verde_depois_intersecao"])
+        self.assertEqual(resultado["acao_visual"], "PREPARAR_DIREITA")
+
+    def test_verde_lado_incompativel(self):
+        verde = self.verde(("DIREITA",))
+        resultado = decidir_verde_acionavel(
+            verde, analisar_intersecao_preta(self.mascara(("centro", "esquerda")), 320)
+        )
+        self.assertEqual(resultado["verde_acionavel"], "NENHUM")
+        self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
+        self.assertEqual(resultado["analise_intersecao"]["tipo_intersecao"], "LATERAL_ESQ")
+        self.assertEqual(verde["contornos_confirmados"][0]["motivo_acionavel"], "verde_lado_incompativel")
+
+    def test_centro_so_e_ambiguo_em_intersecao_confiavel(self):
+        resultado = self.decidir(("centro", "esquerda", "direita"), ("CENTRO",))
         self.assertEqual(resultado["verde_acionavel"], "AMBIGUO")
         self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
         self.assertEqual(resultado["motivo_acao"], "verde_ambiguo")
-
-    def test_lado_incompativel_nao_aciona(self):
-        verde = self.verde(("DIREITA",), y=330)
-        resultado = decidir_verde_acionavel(verde, self.analise("LATERAL_ESQ"))
-        self.assertEqual(resultado["verde_acionavel"], "NENHUM")
-        self.assertEqual(verde["contornos_confirmados"][0]["motivo_acionavel"], "verde_lado_incompativel")
 
 
 if __name__ == "__main__":
