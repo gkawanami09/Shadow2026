@@ -60,3 +60,19 @@ python3 raspberry/follow_destinos.py --camera --motores --porta auto --salvar-de
 ```
 
 Teste primeiro sem motores e depois com o robo suspenso. A parada normal e `CTRL+C`.
+
+### Follow destinos com verde em log
+
+```bash
+python3 raspberry/follow_destinos.py --camera --motores --porta auto --green-log
+```
+
+Neste modo, o robo segue linha normalmente e apenas registra a decisao de verde. O verde nao altera o movimento.
+
+### Follow destinos com movimento por verde
+
+```bash
+python3 raspberry/follow_destinos.py --camera --motores --porta auto --green-log --green-move
+```
+
+Neste modo, o robo pode executar curva ou retorno por verde. Teste primeiro em velocidade baixa, com espaco livre e pronto para interromper com `CTRL+C`.

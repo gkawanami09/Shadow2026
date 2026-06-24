@@ -11,4 +11,5 @@
 9. **Fase 8 - Follow Destinos 1.1C REV2:** testar `follow_destinos.py`, que escolhe destino visual por hierarquia FRENTE, CURVA e RETORNO; a revisao trava RETORNO oposto por um frame antes de trocar o lado confiavel de recuperacao.
 10. **Fase 9 - Verde visual-only:** detectar marcacoes verdes com HSV, ROI, filtros de contorno, classificacao ESQUERDA/DIREITA/DUPLO/NENHUM/AMBIGUO e debug visual, sem alterar o movimento do robo.
 11. **Fase 9.3 - Verde acionavel:** combinar verde confirmado com estrutura preta da intersecao para diferenciar verde valido, intersecao falsa, linha lateral sem verde e verde fora da posicao correta, ainda sem movimento.
+12. **Fase 10 - Integracao verde + follow_destinos:** o robo segue linha normalmente, calcula verde acionavel no mesmo frame e pode logar ou executar manobras por verde apenas quando `--green-move` estiver ativado.
 11. **Fase 10 - Obstaculos e ajustes OBR:** tratar situacoes especiais.
