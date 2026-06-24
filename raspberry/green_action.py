@@ -99,6 +99,8 @@ def verde_esta_em_posicao_acionavel(contorno, analise_intersecao, altura_frame):
         return False, "verde_nao_confirmado"
     if contorno["area"] < GREEN_ACTION_MIN_CONFIRMED_GREEN_AREA:
         return False, "verde_area_pequena"
+    if contorno.get("possivel_verde_depois_intersecao", False):
+        return False, "verde_depois_intersecao"
     if contorno["lado"] == "CENTRO":
         return False, "verde_central_ambiguo"
     tipo = analise_intersecao["tipo_intersecao"]
@@ -142,6 +144,14 @@ def decidir_verde_acionavel(resultado_verde, analise_intersecao):
         "area_acionavel_esquerda": areas["ESQUERDA"], "area_acionavel_direita": areas["DIREITA"], "area_acionavel_centro": areas["CENTRO"],
     })
     if not acionaveis:
+        motivos_rejeicao = [item.get("motivo_acionavel") for item in confirmados]
+        if "verde_depois_intersecao" in motivos_rejeicao:
+            return {
+                **base,
+                "verde_acionavel": "NENHUM",
+                "acao_visual": "SEGUIR_RETO",
+                "motivo_acao": "verde_depois_intersecao",
+            }
         somente_centro = confirmados and all(item["lado"] == "CENTRO" for item in confirmados)
         motivo = "verde_ambiguo" if somente_centro else "intersecao_sem_verde"
         verde = "AMBIGUO" if somente_centro else "NENHUM"

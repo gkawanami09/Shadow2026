@@ -78,14 +78,45 @@ class GreenActionTests(unittest.TestCase):
         self.assertEqual(resultado["verde_acionavel"], "NENHUM")
         self.assertEqual(resultado["motivo_acao"], "intersecao_ambigua")
 
-    def test_verde_acima_e_diagnostico_nao_bloqueante(self):
-        analise = analisar_intersecao_preta(self.mascara(("centro", "direita")), 320)
-        verde = self.verde(("DIREITA",))
-        verde["contornos_confirmados"][0]["bbox"] = (400, 280, 60, 60)
+    def test_cruz_verde_esquerda_depois_da_intersecao_e_bloqueado(self):
+        analise = analisar_intersecao_preta(self.mascara(("centro", "esquerda", "direita")), 320)
+        verde = self.verde(("ESQUERDA",))
+        verde["contornos_confirmados"][0]["bbox"] = (200, 280, 60, 60)
         resultado = decidir_verde_acionavel(verde, analise)
         contorno = verde["contornos_confirmados"][0]
         self.assertTrue(contorno["possivel_verde_depois_intersecao"])
-        self.assertEqual(resultado["acao_visual"], "PREPARAR_DIREITA")
+        self.assertFalse(contorno["acionavel"])
+        self.assertEqual(contorno["motivo_acionavel"], "verde_depois_intersecao")
+        self.assertEqual(resultado["verde_acionavel"], "NENHUM")
+        self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
+        self.assertEqual(resultado["motivo_acao"], "verde_depois_intersecao")
+        self.assertEqual(resultado["area_acionavel_esquerda"], 0)
+
+    def test_lateral_esquerda_verde_depois_da_intersecao_e_bloqueado(self):
+        analise = analisar_intersecao_preta(self.mascara(("centro", "esquerda")), 320)
+        verde = self.verde(("ESQUERDA",))
+        verde["contornos_confirmados"][0]["bbox"] = (200, 280, 60, 60)
+        resultado = decidir_verde_acionavel(verde, analise)
+        self.assertEqual(resultado["verde_acionavel"], "NENHUM")
+        self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
+        self.assertEqual(resultado["motivo_acao"], "verde_depois_intersecao")
+
+    def test_dois_verdes_depois_da_intersecao_nao_viram_retorno(self):
+        analise = analisar_intersecao_preta(self.mascara(("centro", "esquerda", "direita")), 320)
+        verde = self.verde(("ESQUERDA", "DIREITA"))
+        for contorno in verde["contornos_confirmados"]:
+            contorno["bbox"] = (contorno["bbox"][0], 280, 60, 60)
+        resultado = decidir_verde_acionavel(verde, analise)
+        self.assertEqual(resultado["verde_acionavel"], "NENHUM")
+        self.assertEqual(resultado["acao_visual"], "SEGUIR_RETO")
+        self.assertEqual(resultado["motivo_acao"], "verde_depois_intersecao")
+        self.assertEqual(resultado["qtd_contornos_acionaveis"], 0)
+
+    def test_verde_valido_abaixo_da_intersecao_continua_acionando(self):
+        resultado = self.decidir(("centro", "esquerda"), ("ESQUERDA",))
+        self.assertEqual(resultado["verde_acionavel"], "ESQUERDA")
+        self.assertEqual(resultado["acao_visual"], "PREPARAR_ESQUERDA")
+        self.assertEqual(resultado["motivo_acao"], "verde_acionavel")
 
     def test_verde_lado_incompativel(self):
         verde = self.verde(("DIREITA",))
