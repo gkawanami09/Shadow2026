@@ -122,12 +122,15 @@ def criar_estado_verde(agora):
         "frames_confirmados": 0, "misses": 0, "inicio_estado": agora,
         "inicio_cooldown": 0.0, "clear_frames": 0, "reacquire_frames": 0,
         "ultimo_log": 0.0, "ultimo_estado_logado": None, "evento": "",
+        "turn_saw_lost_line": False,
     }
 
 
 def iniciar_estado_verde(estado_verde, novo_estado, agora):
     estado_verde["estado"] = novo_estado
     estado_verde["inicio_estado"] = agora
+    if novo_estado == "GREEN_TURNING":
+        estado_verde["turn_saw_lost_line"] = False
     if novo_estado == "GREEN_COOLDOWN":
         estado_verde["inicio_cooldown"] = agora
         estado_verde["clear_frames"] = 0
@@ -190,11 +193,17 @@ def atualizar_estado_verde(estado_verde, resultado_acao, destino, estado_follow,
         minimo = GREEN_RETURN_MIN_SEC if retorno else GREEN_TURN_MIN_SEC
         maximo = GREEN_RETURN_MAX_SEC if retorno else GREEN_TURN_MAX_SEC
         decorrido = agora - estado_verde["inicio_estado"]
+        if not destino.get("ok", False):
+            estado_verde["turn_saw_lost_line"] = True
         if decorrido >= maximo:
             estado_verde["evento"] = "green_turn_timeout"
             iniciar_estado_verde(estado_verde, "GREEN_REACQUIRE", agora)
             estado_verde["reacquire_frames"] = 0
-        elif decorrido >= minimo and destino.get("ok", False):
+        elif (
+            decorrido >= minimo
+            and estado_verde["turn_saw_lost_line"]
+            and destino.get("ok", False)
+        ):
             iniciar_estado_verde(estado_verde, "GREEN_REACQUIRE", agora)
             estado_verde["reacquire_frames"] = 0
     elif estado == "GREEN_REACQUIRE":
@@ -255,6 +264,7 @@ def log_verde(resultado_verde, analise, resultado_acao, estado_verde, green_move
         f"C/L/R={analise['black_center']}/{analise['black_left']}/{analise['black_right']} "
         f"ratio={analise['black_ratio_center']:.3f}/{analise['black_ratio_left']:.3f}/{analise['black_ratio_right']:.3f} "
         f"depois={depois} move={'ON' if green_move else 'OFF'} estado={estado_verde['estado']} cmd={comando_final}"
+        f" acao_confirmada={estado_verde['acao_confirmada']} turn_lost={estado_verde['turn_saw_lost_line']}"
         f" evento={estado_verde['evento']}"
     )
     estado_verde["ultimo_log"] = agora
@@ -794,11 +804,11 @@ def main():
             if args.salvar_debug:
                 agora = time.monotonic()
                 if DEST_SALVAR_DEBUG_EVENTOS and (estado != estado_anterior or agora - ultimo_debug >= DEST_INTERVALO_DEBUG):
-                    salvar_debug(criar_debug_destinos(resultado, destino, estado, comando, memoria, motivo_recuperacao), estado)
+                    salvar_debug(criar_debug_destinos(resultado, destino, estado, comando_final, memoria, motivo_recuperacao), estado)
                     ultimo_debug = agora
             estado_anterior = estado
             if args.mostrar:
-                cv2.imshow("follow_destinos", criar_debug_destinos(resultado, destino, estado, comando, memoria, motivo_recuperacao))
+                cv2.imshow("follow_destinos", criar_debug_destinos(resultado, destino, estado, comando_final, memoria, motivo_recuperacao))
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     raise KeyboardInterrupt
             time.sleep(DEST_INTERVALO)

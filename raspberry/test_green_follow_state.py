@@ -51,15 +51,22 @@ class GreenFollowStateTests(unittest.TestCase):
                 follow.atualizar_estado_verde(estado, dado, destino(), estado_follow, True, 0.0, memoria())
                 self.assertEqual(estado["estado"], "GREEN_IDLE")
 
-    def test_giro_respeita_minimo_e_sai_por_timeout(self):
+    def test_giro_exige_perda_antes_de_reaquisição_e_sai_por_timeout(self):
         estado = follow.criar_estado_verde(0.0)
-        estado.update({"estado": "GREEN_TURNING", "acao_confirmada": "PREPARAR_DIREITA", "inicio_estado": 0.0})
+        estado.update({"estado": "GREEN_TURNING", "acao_confirmada": "PREPARAR_DIREITA", "inicio_estado": 0.0, "turn_saw_lost_line": False})
         follow.atualizar_estado_verde(estado, acao(), destino(), "FOLLOW_DESTINO", True, follow.GREEN_TURN_MIN_SEC - 0.01, memoria())
         self.assertEqual(estado["estado"], "GREEN_TURNING")
         follow.atualizar_estado_verde(estado, acao(), destino(), "FOLLOW_DESTINO", True, follow.GREEN_TURN_MIN_SEC + 0.01, memoria())
+        self.assertEqual(estado["estado"], "GREEN_TURNING")
+
+        follow.atualizar_estado_verde(estado, acao(), destino(False), "FOLLOW_DESTINO", True, follow.GREEN_TURN_MIN_SEC + 0.02, memoria())
+        self.assertTrue(estado["turn_saw_lost_line"])
+        self.assertEqual(estado["estado"], "GREEN_TURNING")
+
+        follow.atualizar_estado_verde(estado, acao(), destino(), "FOLLOW_DESTINO", True, follow.GREEN_TURN_MIN_SEC + 0.03, memoria())
         self.assertEqual(estado["estado"], "GREEN_REACQUIRE")
 
-        estado.update({"estado": "GREEN_TURNING", "inicio_estado": 0.0})
+        estado.update({"estado": "GREEN_TURNING", "inicio_estado": 0.0, "turn_saw_lost_line": False})
         follow.atualizar_estado_verde(estado, acao(), destino(False), "FOLLOW_DESTINO", True, follow.GREEN_TURN_MAX_SEC + 0.01, memoria())
         self.assertEqual(estado["estado"], "GREEN_REACQUIRE")
 
