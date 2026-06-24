@@ -45,7 +45,11 @@ def processar_frame(frame):
         print(
             f"contorno {indice} | lado: {contorno['lado']} | acionavel: {contorno.get('acionavel', False)} | "
             f"motivo: {contorno.get('motivo_acionavel', '')} | acima: {contorno.get('ratio_acima_intersecao', 0):.2f} | "
-            f"possivel_depois: {contorno.get('possivel_verde_depois_intersecao', False)}"
+            f"possivel_depois: {contorno.get('possivel_verde_depois_intersecao', False)} | "
+            f"pos: {contorno.get('verde_posicao_intersecao', '')} | "
+            f"before: {contorno.get('green_before_node_ratio', 0):.2f} | "
+            f"after: {contorno.get('green_after_node_ratio', 0):.2f} | "
+            f"node_y: {contorno.get('node_y_near')} | node_ok: {acao['analise_intersecao'].get('node_confiavel')}"
         )
     return verde, acao
 
