@@ -10,4 +10,5 @@
 8. **Fase 7 - Segue-linha limpo:** usar `follow_clean.py` com centroline conectada, lookahead e `LADO` assinado; a calibracao 1.3 adiciona `FOLLOW_RISCO` positivo, histerese de baixa fraca/segura e confirmacao de linha reaparecida por `LADO` antes de sair da recuperacao.
 9. **Fase 8 - Follow Destinos 1.1C REV2:** testar `follow_destinos.py`, que escolhe destino visual por hierarquia FRENTE, CURVA e RETORNO; a revisao trava RETORNO oposto por um frame antes de trocar o lado confiavel de recuperacao.
 10. **Fase 9 - Verde visual-only:** detectar marcacoes verdes com HSV, ROI, filtros de contorno, classificacao ESQUERDA/DIREITA/DUPLO/NENHUM/AMBIGUO e debug visual, sem alterar o movimento do robo.
+11. **Fase 9.3 - Verde acionavel:** combinar verde confirmado com estrutura preta da intersecao para diferenciar verde valido, intersecao falsa, linha lateral sem verde e verde fora da posicao correta, ainda sem movimento.
 11. **Fase 10 - Obstaculos e ajustes OBR:** tratar situacoes especiais.
