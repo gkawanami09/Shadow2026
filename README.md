@@ -50,6 +50,16 @@ python3 raspberry/green_action_test.py --imagem caminho/para/imagem.jpg --salvar
 
 Este teste combina verde confirmado com estrutura preta da intersecao para gerar apenas intencao visual. Nao move motores.
 
+### Green OBR Analyzer por adjacencia
+
+```bash
+python3 raspberry/green_obr_analyzer.py --camera
+python3 raspberry/green_obr_analyzer.py --camera --mostrar
+python3 raspberry/green_obr_analyzer.py --camera --salvar-debug --log-detalhe
+```
+
+Este analyzer verifica o padrao de linha preta acima/abaixo/esquerda/direita de cada verde confirmado e imprime log compacto `[GOBR]`. E visual-only: nao importa o follow, nao abre serial e nao move motores.
+
 ## Follow Destinos 1.0
 
 O controlador experimental `follow_destinos.py` escolhe um destino visual por raios, com prioridade para frente, depois curva e por fim retorno. O `follow_clean.py` continua disponivel como controlador de backup.
