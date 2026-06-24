@@ -24,6 +24,40 @@ CAMERA_FPS = 30
 PASTA_CAPTURAS = "captures"
 
 # ===============================
+# DETECTOR DE VERDE - SPEC 09
+# ===============================
+
+# HSV do OpenCV: H varia de 0 a 179.
+GREEN_H_MIN = 35
+GREEN_H_MAX = 90
+GREEN_S_MIN = 55
+GREEN_V_MIN = 45
+
+# ROI vertical usada para procurar marcacoes da pista.
+GREEN_ROI_Y_MIN_REL = 0.25
+GREEN_ROI_Y_MAX_REL = 0.98
+
+# Limpeza da mascara HSV.
+GREEN_MORPH_KERNEL = 5
+GREEN_MORPH_OPEN_ITER = 1
+GREEN_MORPH_CLOSE_ITER = 2
+
+# Filtros dos contornos candidatos.
+GREEN_MIN_AREA = 80
+GREEN_MAX_AREA_REL = 0.18
+GREEN_MIN_WIDTH = 6
+GREEN_MIN_HEIGHT = 6
+GREEN_MIN_FILL_RATIO = 0.22
+
+# Classificacao espacial das marcacoes.
+GREEN_CENTER_DEADBAND_REL = 0.10
+GREEN_DUPLO_MIN_AREA_RATIO = 0.35
+
+# Debug visual do detector.
+GREEN_SALVAR_DEBUG_EVENTOS = True
+GREEN_INTERVALO_DEBUG = 0.50
+
+# ===============================
 # CONFIGURACOES DA LINHA PRETA
 # ===============================
 

@@ -32,6 +32,15 @@ Para salvar uma imagem da câmera CSI, use `python3 raspberry/camera_test.py`. A
 
 Para detectar a linha em uma imagem salva, use `python3 raspberry/line_test.py --imagem captures/NOME_DA_IMAGEM.jpg --salvar-mascara`.
 
+### Teste de verde
+
+```bash
+python3 raspberry/green_test.py --camera --salvar-debug
+python3 raspberry/green_test.py --imagem caminho/para/imagem.jpg --salvar-debug
+```
+
+Este teste apenas detecta verde e salva debug. Nao move motores.
+
 ## Follow Destinos 1.0
 
 O controlador experimental `follow_destinos.py` escolhe um destino visual por raios, com prioridade para frente, depois curva e por fim retorno. O `follow_clean.py` continua disponivel como controlador de backup.
