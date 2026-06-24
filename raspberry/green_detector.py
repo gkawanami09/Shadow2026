@@ -5,9 +5,19 @@ import numpy as np
 
 from config import (
     GREEN_CENTER_DEADBAND_REL,
+    GREEN_CONFIRM_MAX_DIST_BLACK_PX,
+    GREEN_CONFIRM_MIN_AREA_IN_ZONE_RATIO,
+    GREEN_CONFIRM_MIN_BLACK_NEAR_PIXELS,
+    GREEN_CONFIRM_Y_MAX_REL,
+    GREEN_CONFIRM_Y_MIN_REL,
     GREEN_DUPLO_MIN_AREA_RATIO,
+    GREEN_EXPECTED_SLOT_HEIGHT_REL,
+    GREEN_EXPECTED_SLOT_WIDTH_REL,
+    GREEN_EXPECTED_SLOT_Y_MIN_REL,
     GREEN_H_MAX,
     GREEN_H_MIN,
+    GREEN_LINE_MASK_DILATE_ITER,
+    GREEN_LINE_MASK_DILATE_KERNEL,
     GREEN_MAX_AREA_REL,
     GREEN_MAX_ASPECT_RATIO,
     GREEN_MIN_AREA,
@@ -24,9 +34,26 @@ from config import (
     GREEN_MORPH_OPEN_ITER,
     GREEN_ROI_Y_MAX_REL,
     GREEN_ROI_Y_MIN_REL,
+    GREEN_REQUIRE_LINE_PROXIMITY,
     GREEN_S_MIN,
     GREEN_V_MIN,
 )
+
+
+def criar_mascara_linha_global(resultado_linha):
+    """Reconstrói e dilata a máscara de linha na coordenada global do frame."""
+    altura = resultado_linha["altura"]
+    largura = resultado_linha["largura"]
+    mascara_global = np.zeros((altura, largura), dtype=np.uint8)
+    y_inicio = resultado_linha["y_inicio_roi"]
+    y_fim = resultado_linha["y_fim_roi"]
+    x_inicio = resultado_linha["x_inicio_roi"]
+    x_fim = resultado_linha["x_fim_roi"]
+    mascara_global[y_inicio:y_fim, x_inicio:x_fim] = resultado_linha["mascara_limpa"]
+    kernel = np.ones(
+        (GREEN_LINE_MASK_DILATE_KERNEL, GREEN_LINE_MASK_DILATE_KERNEL), dtype=np.uint8
+    )
+    return cv2.dilate(mascara_global, kernel, iterations=GREEN_LINE_MASK_DILATE_ITER)
 
 
 def lado_por_x(x_centro, x_referencia, largura, deadband_rel):
@@ -193,8 +220,31 @@ def resumir_verde(contornos):
     }
 
 
-def detectar_verde(frame_bgr, x_referencia=None):
-    """Detecta marcacoes verdes, retornando somente dados de percepcao."""
+def confirmar_contorno_por_linha(
+    contorno_info, mascara_linha_global, altura_frame, largura_frame
+):
+    """Confirma se um contorno aprovado por cor esta associado a linha preta."""
+    x, y, largura, altura = contorno_info["bbox"]
+    y_zona_inicio = int(altura_frame * GREEN_CONFIRM_Y_MIN_REL)
+    y_zona_fim = int(altura_frame * GREEN_CONFIRM_Y_MAX_REL)
+    altura_intersecao = max(0, min(y + altura, y_zona_fim) - max(y, y_zona_inicio))
+    area_in_confirm_zone_ratio = altura_intersecao / altura
+
+    x_inicio = max(0, x - GREEN_CONFIRM_MAX_DIST_BLACK_PX)
+    x_fim = min(largura_frame, x + largura + GREEN_CONFIRM_MAX_DIST_BLACK_PX)
+    y_inicio = max(0, y - GREEN_CONFIRM_MAX_DIST_BLACK_PX)
+    y_fim = min(altura_frame, y + altura + GREEN_CONFIRM_MAX_DIST_BLACK_PX)
+    black_near_pixels = int(cv2.countNonZero(mascara_linha_global[y_inicio:y_fim, x_inicio:x_fim]))
+
+    if area_in_confirm_zone_ratio < GREEN_CONFIRM_MIN_AREA_IN_ZONE_RATIO:
+        return False, "fora_zona_confirmacao", black_near_pixels, area_in_confirm_zone_ratio
+    if GREEN_REQUIRE_LINE_PROXIMITY and black_near_pixels < GREEN_CONFIRM_MIN_BLACK_NEAR_PIXELS:
+        return False, "sem_linha_preta_proxima", black_near_pixels, area_in_confirm_zone_ratio
+    return True, "confirmado_linha_proxima", black_near_pixels, area_in_confirm_zone_ratio
+
+
+def detectar_verde(frame_bgr, x_referencia=None, mascara_linha_global=None):
+    """Detecta verde por cor e o confirma geometricamente pela linha preta."""
     altura, largura = frame_bgr.shape[:2]
     if x_referencia is None:
         x_referencia = largura // 2
@@ -208,11 +258,58 @@ def detectar_verde(frame_bgr, x_referencia=None):
         altura,
         x_referencia,
     )
-    resumo = resumir_verde(contornos)
+    if mascara_linha_global is not None:
+        if mascara_linha_global.shape[:2] != (altura, largura):
+            raise ValueError("mascara_linha_global deve ter o mesmo tamanho do frame.")
+        for contorno in contornos:
+            confirmado, motivo, black_pixels, area_zona = confirmar_contorno_por_linha(
+                contorno, mascara_linha_global, altura, largura
+            )
+            contorno.update(
+                {
+                    "confirmado": confirmado,
+                    "motivo_confirmacao": motivo,
+                    "black_near_pixels": black_pixels,
+                    "area_in_confirm_zone_ratio": area_zona,
+                }
+            )
+    else:
+        for contorno in contornos:
+            contorno.update(
+                {
+                    "confirmado": False,
+                    "motivo_confirmacao": "sem_mascara_linha",
+                    "black_near_pixels": 0,
+                    "area_in_confirm_zone_ratio": 0.0,
+                }
+            )
+
+    contornos_confirmados = [item for item in contornos if item["confirmado"]]
+    resumo_detectado = resumir_verde(contornos)
+    resumo_confirmado = resumir_verde(contornos_confirmados)
+    if mascara_linha_global is None:
+        observacao = "sem_mascara_linha"
+    elif contornos_confirmados:
+        observacao = resumo_confirmado["observacao"]
+    elif contornos:
+        motivos = {item["motivo_confirmacao"] for item in contornos}
+        observacao = motivos.pop() if len(motivos) == 1 else "contornos_nao_confirmados"
+    else:
+        observacao = resumo_confirmado["observacao"]
+
     return {
-        **resumo,
+        **resumo_confirmado,
+        "tipo_detectado": resumo_detectado["tipo"],
+        "tipo_confirmado": resumo_confirmado["tipo"],
+        "tipo": resumo_confirmado["tipo"],
+        "confirmado": resumo_confirmado["tipo"] != "NENHUM",
+        "observacao": observacao,
         "contornos": contornos,
+        "contornos_confirmados": contornos_confirmados,
+        "qtd_contornos_detectados": len(contornos),
+        "qtd_contornos_confirmados": len(contornos_confirmados),
         "mascara": mascara_resultado["mascara"],
+        "mascara_linha_global": mascara_linha_global,
         "y_inicio_roi": mascara_resultado["y_inicio_roi"],
         "y_fim_roi": mascara_resultado["y_fim_roi"],
         "x_referencia": x_referencia,
@@ -228,7 +325,16 @@ def criar_debug_verde(frame_bgr, resultado_verde):
     x_referencia = resultado_verde["x_referencia"]
     margem = int(largura * GREEN_CENTER_DEADBAND_REL)
 
+    mascara_linha = resultado_verde.get("mascara_linha_global")
+    if mascara_linha is not None:
+        overlay = debug.copy()
+        overlay[mascara_linha > 0] = (255, 255, 0)
+        debug = cv2.addWeighted(debug, 0.78, overlay, 0.22, 0)
+
     cv2.rectangle(debug, (0, y_inicio), (largura - 1, y_fim - 1), (255, 255, 0), 2)
+    y_confirm_inicio = int(altura * GREEN_CONFIRM_Y_MIN_REL)
+    y_confirm_fim = int(altura * GREEN_CONFIRM_Y_MAX_REL)
+    cv2.rectangle(debug, (0, y_confirm_inicio), (largura - 1, y_confirm_fim), (255, 0, 255), 1)
     cv2.line(debug, (x_referencia, 0), (x_referencia, altura - 1), (0, 255, 255), 2)
     cv2.rectangle(
         debug,
@@ -237,22 +343,45 @@ def criar_debug_verde(frame_bgr, resultado_verde):
         (0, 165, 255),
         1,
     )
+    slot_largura = int(largura * GREEN_EXPECTED_SLOT_WIDTH_REL)
+    slot_altura = int(altura * GREEN_EXPECTED_SLOT_HEIGHT_REL)
+    slot_y = int(altura * GREEN_EXPECTED_SLOT_Y_MIN_REL)
+    slot_y_fim = min(altura - 1, slot_y + slot_altura)
+    cv2.rectangle(
+        debug,
+        (max(0, x_referencia - margem - slot_largura), slot_y),
+        (max(0, x_referencia - margem), slot_y_fim),
+        (128, 128, 128),
+        1,
+    )
+    cv2.rectangle(
+        debug,
+        (min(largura - 1, x_referencia + margem), slot_y),
+        (min(largura - 1, x_referencia + margem + slot_largura), slot_y_fim),
+        (128, 128, 128),
+        1,
+    )
 
     cores = {"ESQUERDA": (0, 255, 0), "DIREITA": (255, 0, 0), "CENTRO": (0, 165, 255)}
     rotulos = {"ESQUERDA": "E", "DIREITA": "D", "CENTRO": "C"}
     for contorno in resultado_verde["contornos"]:
         x, y, w, h = contorno["bbox"]
         lado = contorno["lado"]
-        cv2.rectangle(debug, (x, y), (x + w, y + h), cores[lado], 2)
-        cv2.putText(debug, rotulos[lado], (x, max(18, y - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, cores[lado], 2)
+        cor = cores[lado] if contorno["confirmado"] else (0, 255, 255)
+        rotulo = rotulos[lado] if contorno["confirmado"] else f"{rotulos[lado]}?"
+        cv2.rectangle(debug, (x, y), (x + w, y + h), cor, 2)
+        cv2.putText(debug, rotulo, (x, max(18, y - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, cor, 2)
         metricas = (
             f"{rotulos[lado]} S:{contorno['mean_s']:.0f} "
             f"GR:{contorno['g_minus_r']:.0f} GB:{contorno['g_minus_b']:.0f}"
         )
-        cv2.putText(debug, metricas, (x, min(altura - 8, y + h + 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, cores[lado], 1)
+        cv2.putText(debug, metricas, (x, min(altura - 25, y + h + 18)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, cor, 1)
+        motivo = "ok" if contorno["confirmado"] else contorno["motivo_confirmacao"]
+        cv2.putText(debug, motivo, (x, min(altura - 8, y + h + 36)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, cor, 1)
 
     linhas = [
-        f"verde: {resultado_verde['tipo']} | conf: {resultado_verde['confianca']:.2f}",
+        f"verde final: {resultado_verde['tipo_confirmado']} | detectado: {resultado_verde['tipo_detectado']}",
+        f"confirmados: {resultado_verde['qtd_contornos_confirmados']}/{resultado_verde['qtd_contornos_detectados']} | conf: {resultado_verde['confianca']:.2f}",
         "area E/D/C: "
         f"{resultado_verde['area_esquerda']:.0f}/"
         f"{resultado_verde['area_direita']:.0f}/"

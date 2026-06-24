@@ -15,7 +15,7 @@ from config import (
     GREEN_SALVAR_DEBUG_EVENTOS,
     PASTA_CAPTURAS,
 )
-from green_detector import criar_debug_verde, detectar_verde
+from green_detector import criar_debug_verde, criar_mascara_linha_global, detectar_verde
 from line_test import detectar_linha
 
 
@@ -29,9 +29,16 @@ def ler_argumentos():
     return parser.parse_args()
 
 
-def imprimir_resultado(resultado):
+def imprimir_resultado(resultado, resultado_linha):
     print(
-        f"verde: {resultado['tipo']} | conf: {resultado['confianca']:.2f} | "
+        f"linha_encontrada: {resultado_linha['encontrou_linha']} | "
+        f"black_mask_pixels: {cv2.countNonZero(resultado['mascara_linha_global'])}"
+    )
+    print(
+        f"verde final: {resultado['tipo_confirmado']} | "
+        f"detectado: {resultado['tipo_detectado']} | "
+        f"confirmados: {resultado['qtd_contornos_confirmados']}/{resultado['qtd_contornos_detectados']} | "
+        f"conf: {resultado['confianca']:.2f} | "
         f"area_esq: {resultado['area_esquerda']:.0f} | "
         f"area_dir: {resultado['area_direita']:.0f} | "
         f"area_centro: {resultado['area_centro']:.0f} | "
@@ -43,7 +50,11 @@ def imprimir_resultado(resultado):
             f"area: {contorno['area']:.0f} | S: {contorno['mean_s']:.0f} | "
             f"G-R: {contorno['g_minus_r']:.0f} | "
             f"G-B: {contorno['g_minus_b']:.0f} | "
-            f"ratio: {contorno['green_ratio']:.2f}"
+            f"ratio: {contorno['green_ratio']:.2f} | "
+            f"conf: {contorno['confirmado']} | "
+            f"motivo: {contorno['motivo_confirmacao']} | "
+            f"black: {contorno['black_near_pixels']} | "
+            f"zone: {contorno['area_in_confirm_zone_ratio']:.2f}"
         )
 
 
@@ -62,11 +73,12 @@ def salvar_debug(frame, resultado):
 
 
 def processar_frame(frame, x_referencia=None):
+    resultado_linha = detectar_linha(frame)
     if x_referencia is None:
-        resultado_linha = detectar_linha(frame)
         x_referencia = resultado_linha["centro_imagem_x"]
-    resultado = detectar_verde(frame, x_referencia)
-    imprimir_resultado(resultado)
+    mascara_linha_global = criar_mascara_linha_global(resultado_linha)
+    resultado = detectar_verde(frame, x_referencia, mascara_linha_global)
+    imprimir_resultado(resultado, resultado_linha)
     return resultado
 
 
@@ -74,7 +86,7 @@ def executar_imagem(caminho, salvar, mostrar):
     frame = cv2.imread(str(caminho))
     if frame is None:
         raise RuntimeError("Nao foi possivel carregar a imagem. Verifique o caminho informado.")
-    resultado = processar_frame(frame, frame.shape[1] // 2)
+    resultado = processar_frame(frame)
     debug = criar_debug_verde(frame, resultado)
     if salvar:
         salvar_debug(frame, resultado)
