@@ -10,6 +10,7 @@ from green_obr_analyzer import (
     analisar_adjacencia_preta_verde,
     classificar_marcador_verde_por_adjacencia,
     decidir_verde_obr_por_adjacencia,
+    formatar_log_detalhe,
     formatar_log_compacto,
 )
 
@@ -81,6 +82,7 @@ class GreenObrAnalyzerTests(unittest.TestCase):
                 "qtd_detectados": 1,
                 "adj": "T1B0L0R1",
                 "intersecao": "CRUZ",
+                "confianca": "OK",
                 "motivo": "marcador_esq",
             }
         )
@@ -89,6 +91,7 @@ class GreenObrAnalyzerTests(unittest.TestCase):
         self.assertIn("v=ESQUERDA 1/1", linha)
         self.assertIn("adj=T1B0L0R1", linha)
         self.assertIn("int=CRUZ", linha)
+        self.assertIn("conf=OK", linha)
         self.assertIn("motivo=marcador_esq", linha)
 
     def test_adjacencia_detecta_preto_acima_e_direita(self):
@@ -174,13 +177,85 @@ class GreenObrAnalyzerTests(unittest.TestCase):
         self.assertEqual(classe, "MARCADOR_INVALIDO")
         self.assertEqual(motivo, "verde_nao_confirmado")
 
-    def test_intersecao_reta_segue_reto(self):
+    def test_intersecao_nenhuma_nao_bloqueia_marcador_esquerdo(self):
+        resultado = self.decidir_com_adj(
+            [{"bbox": (90, 120, 30, 30), "lado": "ESQUERDA", "top": True, "right": True}],
+            tipo_intersecao="NENHUMA",
+        )
+        self.assertEqual(resultado["decisao"], "ESQ")
+        self.assertEqual(resultado["confianca"], "BAIXA")
+        self.assertEqual(resultado["motivo"], "marcador_esq_sem_intersecao")
+
+    def test_intersecao_reta_nao_bloqueia_marcador_direito(self):
+        resultado = self.decidir_com_adj(
+            [{"bbox": (190, 120, 30, 30), "lado": "DIREITA", "top": True, "left": True}],
+            tipo_intersecao="RETA",
+        )
+        self.assertEqual(resultado["decisao"], "DIR")
+        self.assertEqual(resultado["confianca"], "BAIXA")
+        self.assertEqual(resultado["motivo"], "marcador_dir_sem_intersecao")
+
+    def test_intersecao_ambigua_nao_bloqueia_retorno(self):
+        resultado = self.decidir_com_adj(
+            [
+                {"bbox": (90, 120, 30, 30), "lado": "ESQUERDA", "top": True, "right": True},
+                {"bbox": (190, 120, 30, 30), "lado": "DIREITA", "top": True, "left": True},
+            ],
+            tipo_intersecao="AMBIGUA",
+        )
+        self.assertEqual(resultado["decisao"], "RETORNO")
+        self.assertEqual(resultado["confianca"], "BAIXA")
+        self.assertEqual(resultado["motivo"], "duplo_sem_intersecao")
+
+    def test_log_compacto_inclui_confianca_baixa(self):
+        linha = formatar_log_compacto(
+            {
+                "decisao": "ESQ",
+                "verde": "ESQUERDA",
+                "qtd_confirmados": 1,
+                "qtd_detectados": 1,
+                "adj": "T1B0L0R1",
+                "intersecao": "NENHUMA",
+                "confianca": "BAIXA",
+                "motivo": "marcador_esq_sem_intersecao",
+            }
+        )
+        self.assertIn("conf=BAIXA", linha)
+        self.assertIn("motivo=marcador_esq_sem_intersecao", linha)
+
+    def test_log_detalhe_mostra_confirmados_e_rejeitados(self):
+        mascara = self.mascara()
+        confirmado = self.contorno(bbox=(90, 120, 30, 30))
+        rejeitado = {
+            **self.contorno(bbox=(190, 120, 30, 30), confirmado=False),
+            "motivo_confirmacao": "sem_linha_preta_proxima",
+            "black_near_pixels": 12,
+            "area_in_confirm_zone_ratio": 0.42,
+        }
+        self.pintar_adj(mascara, confirmado["bbox"], top=True, right=True)
+        resultado = decidir_verde_obr_por_adjacencia(
+            {
+                "tipo_confirmado": "ESQUERDA",
+                "contornos": [confirmado, rejeitado],
+                "contornos_confirmados": [confirmado],
+                "qtd_contornos_detectados": 2,
+                "qtd_contornos_confirmados": 1,
+            },
+            mascara,
+            self.analise("CRUZ"),
+        )
+        detalhe = formatar_log_detalhe(resultado)
+        self.assertIn("confirmados:", detalhe)
+        self.assertIn("rejeitados:", detalhe)
+        self.assertIn("motivo_confirmacao=sem_linha_preta_proxima", detalhe)
+
+    def test_intersecao_reta_nao_bloqueia_esquerda_legado(self):
         resultado = self.decidir_com_adj(
             [{"bbox": (90, 120, 30, 30), "lado": "ESQUERDA", "top": True, "right": True}],
             tipo_intersecao="RETA",
         )
-        self.assertEqual(resultado["decisao"], "RETO")
-        self.assertEqual(resultado["motivo"], "sem_intersecao_valida")
+        self.assertEqual(resultado["decisao"], "ESQ")
+        self.assertEqual(resultado["motivo"], "marcador_esq_sem_intersecao")
 
 
 if __name__ == "__main__":

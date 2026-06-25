@@ -24,6 +24,15 @@ GREEN_ADJ_MIN_AREA = 350
 INTERSECOES_OBR_VALIDAS = {"CRUZ", "LATERAL_ESQ", "LATERAL_DIR"}
 
 
+def avaliar_confianca_intersecao(tipo_intersecao):
+    """Retorna a confianca contextual da intersecao, sem bloquear adjacencia."""
+    if tipo_intersecao in INTERSECOES_OBR_VALIDAS:
+        return "OK", "intersecao_valida"
+    if tipo_intersecao in {"RETA", "NENHUMA"}:
+        return "BAIXA", "sem_intersecao_confirmada"
+    return "BAIXA", "intersecao_ambigua"
+
+
 def _clamp_roi(x1, y1, x2, y2, largura_frame, altura_frame):
     return (
         max(0, min(largura_frame, int(x1))),
@@ -160,8 +169,15 @@ def decidir_verde_obr_por_adjacencia(
     """Decide ESQ/DIR/RETORNO/RETO por adjacencia preto-verde, sem movimento."""
     altura_frame, largura_frame = mascara_linha_global.shape[:2]
     tipo_intersecao = _intersecao_tipo(analise_intersecao)
-    contornos = [dict(item) for item in resultado_verde.get("contornos_confirmados", [])]
-    for contorno in contornos:
+    confianca, motivo_confianca = avaliar_confianca_intersecao(tipo_intersecao)
+    contornos_detectados = [dict(item) for item in resultado_verde.get("contornos", [])]
+    contornos_confirmados = [
+        dict(item) for item in resultado_verde.get("contornos_confirmados", [])
+    ]
+    contornos_rejeitados = [
+        dict(item) for item in contornos_detectados if not item.get("confirmado", False)
+    ]
+    for contorno in contornos_confirmados:
         analisar_adjacencia_preta_verde(
             contorno, mascara_linha_global, largura_frame, altura_frame
         )
@@ -170,9 +186,11 @@ def decidir_verde_obr_por_adjacencia(
         contorno["motivo_marcador"] = motivo
 
     detectados = resultado_verde.get(
-        "qtd_contornos_detectados", len(resultado_verde.get("contornos", []))
+        "qtd_contornos_detectados", len(contornos_detectados)
     )
-    confirmados = resultado_verde.get("qtd_contornos_confirmados", len(contornos))
+    confirmados = resultado_verde.get(
+        "qtd_contornos_confirmados", len(contornos_confirmados)
+    )
     base = {
         "decisao": "RETO",
         "verde": "NENHUM",
@@ -180,9 +198,14 @@ def decidir_verde_obr_por_adjacencia(
         "qtd_confirmados": confirmados,
         "qtd_validos": 0,
         "intersecao": tipo_intersecao,
+        "confianca": confianca,
+        "motivo_confianca": motivo_confianca,
         "motivo": "sem_verde",
-        "adj": _resumir_adj(contornos),
-        "contornos": contornos,
+        "adj": _resumir_adj(contornos_confirmados),
+        "contornos": contornos_confirmados,
+        "contornos_detectados": contornos_detectados,
+        "contornos_confirmados": contornos_confirmados,
+        "contornos_rejeitados": contornos_rejeitados,
         "analise_intersecao": analise_intersecao,
     }
 
@@ -190,16 +213,13 @@ def decidir_verde_obr_por_adjacencia(
         motivo = "verde_nao_confirmado" if detectados else "sem_verde"
         return {**base, "motivo": motivo}
 
-    if tipo_intersecao not in INTERSECOES_OBR_VALIDAS:
-        return {**base, "verde": resultado_verde.get("tipo_confirmado", "NENHUM"), "motivo": "sem_intersecao_valida"}
-
-    validos_esq = [item for item in contornos if item.get("marcador") == "MARCADOR_ESQUERDA"]
-    validos_dir = [item for item in contornos if item.get("marcador") == "MARCADOR_DIREITA"]
+    validos_esq = [item for item in contornos_confirmados if item.get("marcador") == "MARCADOR_ESQUERDA"]
+    validos_dir = [item for item in contornos_confirmados if item.get("marcador") == "MARCADOR_DIREITA"]
     validos = validos_esq + validos_dir
-    ambiguos = [item for item in contornos if item.get("marcador") == "MARCADOR_AMBIGUO"]
+    ambiguos = [item for item in contornos_confirmados if item.get("marcador") == "MARCADOR_AMBIGUO"]
     falsos = [
         item
-        for item in contornos
+        for item in contornos_confirmados
         if item.get("motivo_marcador") == "verde_depois_ou_falso"
     ]
     base["qtd_validos"] = len(validos)
@@ -210,7 +230,7 @@ def decidir_verde_obr_por_adjacencia(
         elif ambiguos:
             motivo = "verde_ambiguo"
         else:
-            motivo = contornos[0].get("motivo_marcador", "padrao_desconhecido")
+            motivo = contornos_confirmados[0].get("motivo_marcador", "padrao_desconhecido")
         verde = "AMBIGUO" if motivo == "verde_ambiguo" else resultado_verde.get("tipo_confirmado", "NENHUM")
         return {**base, "verde": verde, "motivo": motivo}
 
@@ -219,27 +239,30 @@ def decidir_verde_obr_por_adjacencia(
     if len(validos) > 2 or len(validos_esq) > 1 or len(validos_dir) > 1:
         return {**base, "verde": "AMBIGUO", "motivo": "verde_ambiguo"}
     if validos_esq and validos_dir:
+        motivo = "duplo_valido" if confianca == "OK" else "duplo_sem_intersecao"
         return {
             **base,
             "decisao": "RETORNO",
             "verde": "DUPLO",
             "qtd_validos": len(validos),
-            "motivo": "duplo_valido",
+            "motivo": motivo,
         }
     if validos_esq:
+        motivo = "marcador_esq" if confianca == "OK" else "marcador_esq_sem_intersecao"
         return {
             **base,
             "decisao": "ESQ",
             "verde": "ESQUERDA",
             "qtd_validos": len(validos),
-            "motivo": "marcador_esq",
+            "motivo": motivo,
         }
+    motivo = "marcador_dir" if confianca == "OK" else "marcador_dir_sem_intersecao"
     return {
         **base,
         "decisao": "DIR",
         "verde": "DIREITA",
         "qtd_validos": len(validos),
-        "motivo": "marcador_dir",
+        "motivo": motivo,
     }
 
 
@@ -248,13 +271,18 @@ def formatar_log_compacto(decisao):
         f"[GOBR] dec={decisao['decisao']} | "
         f"v={decisao['verde']} {decisao['qtd_confirmados']}/{decisao['qtd_detectados']} | "
         f"adj={decisao['adj']} | int={decisao['intersecao']} | "
+        f"conf={decisao['confianca']} | "
         f"motivo={decisao['motivo']}"
     )
 
 
 def formatar_log_detalhe(decisao):
     linhas = []
-    for indice, contorno in enumerate(decisao.get("contornos", [])[:5], start=1):
+    confirmados = decisao.get("contornos_confirmados", decisao.get("contornos", []))
+    rejeitados = decisao.get("contornos_rejeitados", [])
+    if confirmados:
+        linhas.append("confirmados:")
+    for indice, contorno in enumerate(confirmados[:5], start=1):
         linhas.append(
             f"verde#{indice} lado={contorno.get('lado')} bbox={contorno.get('bbox')} "
             f"area={contorno.get('area', 0):.0f} S={contorno.get('mean_s', 0):.0f} "
@@ -266,6 +294,18 @@ def formatar_log_detalhe(decisao):
             f"{contorno.get('black_bottom_ratio', 0):.2f}/"
             f"{contorno.get('black_left_ratio', 0):.2f}/"
             f"{contorno.get('black_right_ratio', 0):.2f}"
+        )
+    if rejeitados:
+        linhas.append("rejeitados:")
+    for indice, contorno in enumerate(rejeitados[:5], start=1):
+        linhas.append(
+            f"verde#{indice} lado={contorno.get('lado')} bbox={contorno.get('bbox')} "
+            f"area={contorno.get('area', 0):.0f} S={contorno.get('mean_s', 0):.0f} "
+            f"GR={contorno.get('g_minus_r', 0):.0f} GB={contorno.get('g_minus_b', 0):.0f} "
+            f"confirmado={contorno.get('confirmado', False)} "
+            f"motivo_confirmacao={contorno.get('motivo_confirmacao')} "
+            f"black={contorno.get('black_near_pixels', 0)} "
+            f"areaZona={contorno.get('area_in_confirm_zone_ratio', 0):.2f}"
         )
     return "\n".join(linhas)
 
@@ -311,7 +351,21 @@ def criar_debug_obr(frame, decisao):
         overlay[mascara > 0] = (255, 255, 0)
         debug = cv2.addWeighted(debug, 0.78, overlay, 0.22, 0)
 
-    for contorno in decisao.get("contornos", []):
+    for contorno in decisao.get("contornos_rejeitados", []):
+        x, y, w, h = contorno["bbox"]
+        cor = (0, 140, 255)
+        cv2.rectangle(debug, (x, y), (x + w, y + h), cor, 2)
+        cv2.putText(
+            debug,
+            f"REJ {contorno.get('motivo_confirmacao', '')}",
+            (x, max(18, y - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            cor,
+            1,
+        )
+
+    for contorno in decisao.get("contornos_confirmados", decisao.get("contornos", [])):
         x, y, w, h = contorno["bbox"]
         valido = contorno.get("marcador") in {"MARCADOR_ESQUERDA", "MARCADOR_DIREITA"}
         cor = (0, 255, 0) if valido else (0, 255, 255)
