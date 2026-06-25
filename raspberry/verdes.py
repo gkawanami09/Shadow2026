@@ -88,6 +88,14 @@ def criar_mascara_verde(frame_bgr):
     return mascara
 
 
+def remover_verde_da_mascara_linha(mascara_linha, mascara_verde):
+    """Remove pixels verdes da mascara da linha para evitar falso preto no marcador."""
+    kernel = np.ones((5, 5), np.uint8)
+    mascara_verde_expandida = cv2.dilate(mascara_verde, kernel, iterations=1)
+    mascara_verde_invertida = cv2.bitwise_not(mascara_verde_expandida)
+    return cv2.bitwise_and(mascara_linha, mascara_verde_invertida)
+
+
 def encontrar_candidatos_verdes(frame_bgr, mascara_verde):
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
     contornos, _ = cv2.findContours(mascara_verde, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -438,8 +446,9 @@ def decidir_verdes(candidatos, cruzamento):
 
 def analisar_verdes(frame_bgr):
     resultado_linha = detectar_linha(frame_bgr)
-    mascara_linha = criar_mascara_linha_global(resultado_linha)
+    mascara_linha_original = criar_mascara_linha_global(resultado_linha)
     mascara_verde = criar_mascara_verde(frame_bgr)
+    mascara_linha = remover_verde_da_mascara_linha(mascara_linha_original, mascara_verde)
     cruzamento = analisar_cruzamento(mascara_linha)
     largura_linha_px = cruzamento["largura_linha_px"]
     candidatos = encontrar_candidatos_verdes(frame_bgr, mascara_verde)
@@ -458,6 +467,7 @@ def analisar_verdes(frame_bgr):
         "verdes": verdes,
         "mascaras": {
             "linha": mascara_linha,
+            "linha_original": mascara_linha_original,
             "verde": mascara_verde,
         },
     }
