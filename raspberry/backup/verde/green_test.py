@@ -15,7 +15,7 @@ from config import (
     GREEN_SALVAR_DEBUG_EVENTOS,
     PASTA_CAPTURAS,
 )
-from green_detector import criar_debug_verde, criar_mascara_linha_global, detectar_verde
+from raspberry.backup.verde.green_detector import criar_debug_verde, criar_mascara_linha_global, detectar_verde
 from line_test import detectar_linha
 
 

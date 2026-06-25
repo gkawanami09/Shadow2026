@@ -5,7 +5,7 @@ import unittest
 import cv2
 import numpy as np
 
-from green_obr_analyzer import (
+from raspberry.backup.verde.green_obr_analyzer import (
     LogCompacto,
     analisar_adjacencia_preta_verde,
     classificar_marcador_verde_por_adjacencia,

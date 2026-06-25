@@ -1,3 +1,4 @@
 # Arquivos criados automaticamente pelo Python.
 __pycache__/
 *.py[cod]
+.venv/

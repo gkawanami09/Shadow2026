@@ -5,7 +5,7 @@ import unittest
 import cv2
 import numpy as np
 
-from green_action import analisar_intersecao_preta, decidir_verde_acionavel, dividir_zonas_intersecao
+from raspberry.backup.verde.green_action import analisar_intersecao_preta, decidir_verde_acionavel, dividir_zonas_intersecao
 
 
 class GreenActionTests(unittest.TestCase):

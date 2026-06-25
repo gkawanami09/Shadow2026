@@ -5,7 +5,7 @@ import unittest
 import cv2
 import numpy as np
 
-from green_detector import detectar_verde
+from raspberry.backup.verde.green_detector import detectar_verde
 
 
 class GreenDetectorTests(unittest.TestCase):

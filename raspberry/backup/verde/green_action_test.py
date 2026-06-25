@@ -9,8 +9,8 @@ import cv2
 
 from camera_test import capturar_frame_bgr, iniciar_camera
 from config import CAMERA_HEIGHT, CAMERA_WIDTH, GREEN_INTERVALO_DEBUG, PASTA_CAPTURAS
-from green_action import analisar_intersecao_preta, decidir_verde_acionavel
-from green_detector import criar_debug_verde, criar_mascara_linha_global, detectar_verde
+from raspberry.backup.verde.green_action import analisar_intersecao_preta, decidir_verde_acionavel
+from raspberry.backup.verde.green_detector import criar_debug_verde, criar_mascara_linha_global, detectar_verde
 from line_test import detectar_linha
 
 
