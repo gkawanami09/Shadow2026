@@ -260,6 +260,14 @@ def calcular_lado_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     return "CENTRO", int(x_referencia)
 
 
+def calcular_lado_preliminar(candidato, cruzamento, mascara_linha, largura_linha_px):
+    lado, x_referencia = calcular_lado_verde(candidato, cruzamento, mascara_linha, largura_linha_px)
+    candidato = dict(candidato)
+    candidato["lado_preliminar"] = lado
+    candidato["x_referencia_preliminar"] = x_referencia
+    return candidato
+
+
 def unir_dois_candidatos(a, b):
     ax, ay, aw, ah = a["bbox"]
     bx, by, bw, bh = b["bbox"]
@@ -280,12 +288,34 @@ def unir_dois_candidatos(a, b):
     unido["motivo"] = "nao_validado"
     unido["confianca"] = 0.0
     unido["falso_depois_cruzamento"] = False
+    if a.get("lado_preliminar") == b.get("lado_preliminar"):
+        unido["lado_preliminar"] = a.get("lado_preliminar")
+        unido["x_referencia_preliminar"] = a.get(
+            "x_referencia_preliminar",
+            b.get("x_referencia_preliminar"),
+        )
     return unido
+
+
+def pode_juntar_candidatos(a, b, largura_linha_px):
+    lado_a = a.get("lado_preliminar", "CENTRO")
+    lado_b = b.get("lado_preliminar", "CENTRO")
+    if lado_a != lado_b:
+        return False
+
+    distancia = distancia_caixas(a["bbox"], b["bbox"])
+    distancia_max = max(12, largura_linha_px * 1.2)
+    if lado_a == "CENTRO":
+        distancia_max = max(8, largura_linha_px * 0.6)
+
+    unido = unir_dois_candidatos(a, b)
+    _, _, largura_unida, altura_unida = unido["bbox"]
+    uniao_plausivel = largura_unida <= largura_linha_px * 10 and altura_unida <= largura_linha_px * 10
+    return distancia <= distancia_max and uniao_plausivel
 
 
 def juntar_candidatos_verdes(candidatos, largura_linha_px):
     candidatos = [dict(candidato) for candidato in candidatos]
-    distancia_max = max(12, largura_linha_px * 1.2)
     mudou = True
     while mudou:
         mudou = False
@@ -300,12 +330,8 @@ def juntar_candidatos_verdes(candidatos, largura_linha_px):
                 if usados[j]:
                     continue
                 outro = candidatos[j]
-                distancia = distancia_caixas(atual["bbox"], outro["bbox"])
-                unido = unir_dois_candidatos(atual, outro)
-                _, _, uw, uh = unido["bbox"]
-                uniao_plausivel = uw <= largura_linha_px * 10 and uh <= largura_linha_px * 10
-                if distancia <= distancia_max and uniao_plausivel:
-                    atual = unido
+                if pode_juntar_candidatos(atual, outro, largura_linha_px):
+                    atual = unir_dois_candidatos(atual, outro)
                     usados[j] = True
                     mudou = True
             novos.append(atual)
@@ -377,7 +403,7 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
             return candidato
 
     if lado == "CENTRO":
-        candidato["motivo"] = "verde_central_ambiguo"
+        candidato["motivo"] = "verde_central_inseguro"
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
 
@@ -404,7 +430,7 @@ def decidir_verdes(candidatos, cruzamento):
     if len(validos_direita) == 1 and not validos_esquerda:
         return "DIREITA", "verde_direita_valido", validos_direita[0]["confianca"]
     if len(validos_esquerda) > 1 or len(validos_direita) > 1:
-        return "AMBIGUO", "verde_ambiguo", 0.45
+        return "INSEGURO", "verde_inseguro", 0.45
     if falsos:
         return "RETO", "verde_falso_depois_cruzamento", max(c["confianca"] for c in falsos)
     return "RETO", "cruzamento_sem_verde", max(0.55, cruzamento["confianca"])
@@ -417,6 +443,10 @@ def analisar_verdes(frame_bgr):
     cruzamento = analisar_cruzamento(mascara_linha)
     largura_linha_px = cruzamento["largura_linha_px"]
     candidatos = encontrar_candidatos_verdes(frame_bgr, mascara_verde)
+    candidatos = [
+        calcular_lado_preliminar(c, cruzamento, mascara_linha, largura_linha_px)
+        for c in candidatos
+    ]
     candidatos = juntar_candidatos_verdes(candidatos, largura_linha_px)
     verdes = [validar_verde(c, cruzamento, mascara_linha, largura_linha_px) for c in candidatos]
     decisao, motivo, confianca = decidir_verdes(verdes, cruzamento)

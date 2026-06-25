@@ -32,33 +32,37 @@ Para salvar uma imagem da câmera CSI, use `python3 raspberry/camera_test.py`. A
 
 Para detectar a linha em uma imagem salva, use `python3 raspberry/line_test.py --imagem captures/NOME_DA_IMAGEM.jpg --salvar-mascara`.
 
-### Teste de verde
+### Verde V2 - detector visual novo
 
 ```bash
-python3 raspberry/green_test.py --camera --salvar-debug
-python3 raspberry/green_test.py --imagem caminho/para/imagem.jpg --salvar-debug
+python3 raspberry/verdes.py --imagem captures/NOME_DA_IMAGEM.jpg --salvar-debug --log-detalhe
+python3 raspberry/verdes.py --camera --salvar-debug --log-detalhe
+python3 raspberry/verdes.py --camera --mostrar
 ```
 
-Este teste apenas detecta verde e salva debug. Nao move motores.
+Este detector e apenas visual. Ele nao move motores, nao abre Serial e nao altera o segue-linha.
+Ele detecta linha preta, cruzamento e marcadores verdes para decidir:
 
-### Teste de verde acionavel
+- `RETO`
+- `ESQUERDA`
+- `DIREITA`
+- `RETORNO`
+- `NENHUM`
+- `INSEGURO`
+
+Use esse arquivo para validar imagens reais antes de integrar com o `follow_destinos.py`.
+
+### Verde legado
 
 ```bash
-python3 raspberry/green_action_test.py --camera --salvar-debug
-python3 raspberry/green_action_test.py --imagem caminho/para/imagem.jpg --salvar-debug
+raspberry/green_detector.py
+raspberry/green_action.py
+raspberry/green_obr_analyzer.py
+raspberry/green_test.py
+raspberry/green_action_test.py
 ```
 
-Este teste combina verde confirmado com estrutura preta da intersecao para gerar apenas intencao visual. Nao move motores.
-
-### Green OBR Analyzer por adjacencia
-
-```bash
-python3 raspberry/green_obr_analyzer.py --camera
-python3 raspberry/green_obr_analyzer.py --camera --mostrar
-python3 raspberry/green_obr_analyzer.py --camera --salvar-debug --log-detalhe
-```
-
-Este analyzer verifica o padrao de linha preta acima/abaixo/esquerda/direita de cada verde confirmado e imprime log compacto `[GOBR]`. E visual-only: nao importa o follow, nao abre serial e nao move motores.
+Esses arquivos antigos ficam apenas como referencia historica. Para testes atuais de verde, use `raspberry/verdes.py`.
 
 ## Follow Destinos 1.0
 
