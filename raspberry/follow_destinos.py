@@ -31,7 +31,22 @@ from config import (
     DEST_VEL_MIN_CURVA, DEST_VEL_MIN_FRENTE, DEST_VEL_MIN_RETORNO,
 )
 from line_test import criar_debug_linha, detectar_linha
-from utils import abrir_serial, enviar_comando
+
+try:
+    from utils import abrir_serial, enviar_comando
+except ImportError:
+    abrir_serial = None
+    enviar_comando = None
+
+try:
+    from verdes import analisar_verdes
+except ImportError:
+    analisar_verdes = None
+
+
+TEMPO_SEGURAR_DECISAO_LOG = 0.80
+INTERVALO_LOG_SIMPLES = 0.20
+DECISOES_VERDE_LOG = ("RETO", "ESQUERDA", "DIREITA", "RETORNO", "INSEGURO")
 
 
 def ler_argumentos():
@@ -41,6 +56,8 @@ def ler_argumentos():
     parser.add_argument("--porta", default="auto", help="Porta serial ou auto.")
     parser.add_argument("--salvar-debug", action="store_true", help="Salva imagens de debug.")
     parser.add_argument("--mostrar", action="store_true", help="Mostra janela OpenCV.")
+    parser.add_argument("--verde-sombra", action="store_true", help="Analisa verdes sem interferir no movimento.")
+    parser.add_argument("--log", action="store_true", help="Imprime log limpo de decisao visual.")
     return parser.parse_args()
 
 
@@ -48,9 +65,53 @@ def limitar(valor, minimo, maximo):
     return max(minimo, min(maximo, valor))
 
 
+def criar_estado_log():
+    return {
+        "ultima_linha": None,
+        "ultimo_tempo": 0.0,
+        "decisao_segura": "NENHUM",
+        "tempo_ultima_decisao": 0.0,
+    }
+
+
+def formatar_log_simples(decisao):
+    if decisao == "NENHUM" or decisao == "SEGUE_LINHA":
+        return "[LOG] SEGUE_LINHA"
+    return f"[LOG] {decisao}"
+
+
+def atualizar_decisao_log_verde(resultado_verde, estado_log, agora):
+    decisao_atual = "NENHUM"
+    if resultado_verde is not None:
+        decisao_atual = resultado_verde.get("decisao", "NENHUM")
+
+    if decisao_atual in DECISOES_VERDE_LOG:
+        estado_log["decisao_segura"] = decisao_atual
+        estado_log["tempo_ultima_decisao"] = agora
+        return decisao_atual
+
+    if agora - estado_log["tempo_ultima_decisao"] <= TEMPO_SEGURAR_DECISAO_LOG:
+        return estado_log["decisao_segura"]
+
+    estado_log["decisao_segura"] = "NENHUM"
+    return "SEGUE_LINHA"
+
+
+def imprimir_log_simples(decisao, estado_log, agora):
+    linha = formatar_log_simples(decisao)
+    mudou = linha != estado_log.get("ultima_linha")
+    passou_intervalo = agora - estado_log.get("ultimo_tempo", 0.0) >= INTERVALO_LOG_SIMPLES
+    if mudou or passou_intervalo:
+        print(linha)
+        estado_log["ultima_linha"] = linha
+        estado_log["ultimo_tempo"] = agora
+
+
 def enviar_seguro(conexao, comando, motores_ativos):
     if not motores_ativos:
         return None
+    if enviar_comando is None:
+        raise RuntimeError("Suporte serial indisponivel.")
     if conexao is None or not conexao.is_open:
         raise RuntimeError("Conexao serial indisponivel.")
     return enviar_comando(conexao, comando)
@@ -527,16 +588,24 @@ def main():
         if not args.camera:
             print("Use --camera.")
             return 1
+        if args.verde_sombra and analisar_verdes is None:
+            print("Erro: nao foi possivel importar analisar_verdes de verdes.py")
+            return 1
         if args.motores:
+            if abrir_serial is None:
+                print("Erro: suporte serial indisponivel. Verifique a instalacao do pyserial.")
+                return 1
             porta = SERIAL_PORT if args.porta == "auto" else args.porta
             conexao = abrir_serial(porta, BAUD_RATE, TIMEOUT_SERIAL)
             time.sleep(1.8)
             if hasattr(conexao, "reset_input_buffer"):
                 conexao.reset_input_buffer()
                 conexao.reset_output_buffer()
-            print("Motores ativados. Iniciando segue-linha por destinos.")
+            if not args.log:
+                print("Motores ativados. Iniciando segue-linha por destinos.")
         else:
-            print("Simulacao sem motores.")
+            if not args.log:
+                print("Simulacao sem motores.")
 
         camera = iniciar_camera(CAMERA_WIDTH, CAMERA_HEIGHT)
         memoria = {
@@ -548,10 +617,13 @@ def main():
             "lado_recuperacao_pendente": "CENTRO", "frames_confirmacao_lado_recuperacao": 0,
         }
         controle_varredura = {"etapa": 0, "ultima_troca": time.monotonic()}
+        estado_log = criar_estado_log()
         estado_anterior, ultimo_debug = None, 0
 
         while True:
-            resultado = detectar_linha(capturar_frame_bgr(camera))
+            frame = capturar_frame_bgr(camera)
+            resultado_verde = analisar_verdes(frame) if args.verde_sombra else None
+            resultado = detectar_linha(frame)
             destino = escolher_destino(resultado)
             if not destino["ok"]:
                 resetar_confirmacao_lado_recuperacao(memoria)
@@ -587,7 +659,12 @@ def main():
                 comando = comando_confirmar_sem_destino(memoria)
 
             enviar_seguro(conexao, comando, args.motores)
-            imprimir_log(resultado, estado, destino, comando, memoria, motivo_recuperacao)
+            if args.log:
+                agora = time.monotonic()
+                decisao_log = atualizar_decisao_log_verde(resultado_verde, estado_log, agora)
+                imprimir_log_simples(decisao_log, estado_log, agora)
+            else:
+                imprimir_log(resultado, estado, destino, comando, memoria, motivo_recuperacao)
             if args.salvar_debug:
                 agora = time.monotonic()
                 if DEST_SALVAR_DEBUG_EVENTOS and (estado != estado_anterior or agora - ultimo_debug >= DEST_INTERVALO_DEBUG):
@@ -600,7 +677,8 @@ def main():
                     raise KeyboardInterrupt
             time.sleep(DEST_INTERVALO)
     except KeyboardInterrupt:
-        print("CTRL+C recebido. Parando robo.")
+        if not args.log:
+            print("CTRL+C recebido. Parando robo.")
         return 130
     except Exception as erro:
         print(f"Erro grave: {erro}")
@@ -613,7 +691,8 @@ def main():
             cv2.destroyAllWindows()
         except cv2.error:
             pass
-        print("Recursos liberados.")
+        if not args.log:
+            print("Recursos liberados.")
 
 
 if __name__ == "__main__":
