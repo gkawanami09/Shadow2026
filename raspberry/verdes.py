@@ -17,10 +17,12 @@ from config import CAMERA_HEIGHT, CAMERA_WIDTH, PASTA_CAPTURAS
 from line_test import detectar_linha
 
 
-VERDE_H_MIN = 35
-VERDE_H_MAX = 95
-VERDE_S_MIN = 50
-VERDE_V_MIN = 25
+VERDE_H_MIN = 40
+VERDE_H_MAX = 85
+VERDE_S_MIN = 70
+VERDE_V_MIN = 45
+VERDE_G_MENOS_R_MIN = 20
+VERDE_G_MENOS_B_MIN = 15
 
 KERNEL_VERDE = 5
 OPEN_VERDE = 1
@@ -33,8 +35,8 @@ VERDE_AREA_MIN_PERTO = 120
 VERDE_AREA_MAX_REL_QUADRO = 0.10
 VERDE_ASPECTO_MIN = 0.45
 VERDE_ASPECTO_MAX = 2.20
-VERDE_FILL_RATIO_MIN = 0.18
-VERDE_PROPORCAO_MIN = 1.02
+VERDE_FILL_RATIO_MIN = 0.25
+VERDE_PROPORCAO_MIN = 1.12
 
 PRETO_MARGEM_VERDE_MULT = 0.80
 PRETO_MIN_PIXELS_ABS = 10
@@ -44,7 +46,7 @@ PRETO_MIN_LADOS_AO_REDOR = 1
 MARGEM_CENTRO_LINHA_MULT = 0.80
 BUSCA_LINHA_DY = (0, 10, 20, -10, -20, 35, -35)
 
-AREA_MIN_VERDE_ABSOLUTA = 8
+AREA_MIN_VERDE_ABSOLUTA = 20
 LARGURA_MIN_VERDE = 4
 ALTURA_MIN_VERDE = 4
 
@@ -517,6 +519,8 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         and candidato["mean_v"] >= VERDE_V_MIN
         and candidato["proporcao_verde"] >= VERDE_PROPORCAO_MIN
         and candidato["fill_ratio"] >= VERDE_FILL_RATIO_MIN
+        and candidato["g_menos_r"] >= VERDE_G_MENOS_R_MIN
+        and candidato["g_menos_b"] >= VERDE_G_MENOS_B_MIN
     )
     if cor_boa:
         confianca += 0.25
