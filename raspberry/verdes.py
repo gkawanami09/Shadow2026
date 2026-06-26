@@ -63,6 +63,17 @@ def distancia_caixas(caixa_a, caixa_b):
     return (dx * dx + dy * dy) ** 0.5
 
 
+def contar_pixels_regiao(mascara, x1, y1, x2, y2):
+    altura, largura = mascara.shape[:2]
+    x1 = int(limitar(x1, 0, largura - 1))
+    x2 = int(limitar(x2, 1, largura))
+    y1 = int(limitar(y1, 0, altura - 1))
+    y2 = int(limitar(y2, 1, altura))
+    if x2 <= x1 or y2 <= y1:
+        return 0
+    return int(cv2.countNonZero(mascara[y1:y2, x1:x2]))
+
+
 def criar_mascara_linha_global(resultado_linha):
     altura = resultado_linha["altura"]
     largura = resultado_linha["largura"]
@@ -183,56 +194,91 @@ def analisar_cruzamento(mascara_linha):
     melhor = None
 
     for y in np.linspace(int(altura * 0.25), int(altura * 0.82), 32).astype(int):
-        y1 = limitar(y - 6, 0, altura - 1)
-        y2 = limitar(y + 7, 1, altura)
-        faixa = mascara_linha[y1:y2, :]
-        linha = cv2.reduce(faixa, 0, cv2.REDUCE_MAX).flatten() > 0
-        segmentos = encontrar_segmentos(linha)
-        if not segmentos:
-            continue
-        segmentos = [seg for seg in segmentos if seg[1] - seg[0] + 1 >= largura_linha_px * 1.2]
-        if not segmentos:
-            continue
-        segmento = max(segmentos, key=lambda seg: seg[1] - seg[0] + 1)
-        largura_segmento = segmento[1] - segmento[0] + 1
-        centro_x = int((segmento[0] + segmento[1]) / 2)
-        if largura_segmento < largura_linha_px * MULT_LARGURA_CRUZAMENTO:
+        x_linha = encontrar_centro_linha_por_y(mascara_linha, y + int(largura_linha_px * 1.5))
+        if x_linha is None:
+            x_linha = encontrar_centro_linha_por_y(mascara_linha, y)
+        if x_linha is None:
             continue
 
-        corredor = max(12, largura_linha_px * 1.5)
-        limite_esq = centro_x - corredor / 2
-        limite_dir = centro_x + corredor / 2
-        ramo_esquerda = segmento[0] < limite_esq - largura_linha_px * 0.7
-        ramo_direita = segmento[1] > limite_dir + largura_linha_px * 0.7
+        corredor = max(12, largura_linha_px * 1.4)
+        altura_faixa = max(10, int(largura_linha_px * 0.5))
+        alcance_lateral = max(corredor * 4.5, largura_linha_px * MULT_LARGURA_CRUZAMENTO)
+        alcance_vertical = max(largura_linha_px * 4.0, 45)
 
-        y_frente_1 = limitar(y - int(largura_linha_px * 3.5), 0, altura - 1)
-        y_frente_2 = limitar(y - int(largura_linha_px * 1.2), 1, altura)
-        x_frente_1 = int(limitar(centro_x - corredor, 0, largura - 1))
-        x_frente_2 = int(limitar(centro_x + corredor, 1, largura))
-        frente = mascara_linha[y_frente_1:y_frente_2, x_frente_1:x_frente_2]
-        ramo_frente = cv2.countNonZero(frente) >= max(20, largura_linha_px * 1.8)
+        y1 = y - altura_faixa
+        y2 = y + altura_faixa
+        x_centro_1 = x_linha - corredor / 2
+        x_centro_2 = x_linha + corredor / 2
 
-        if not (ramo_esquerda or ramo_direita):
+        pixels_esquerda = contar_pixels_regiao(
+            mascara_linha,
+            x_linha - alcance_lateral,
+            y1,
+            x_centro_1,
+            y2,
+        )
+        pixels_direita = contar_pixels_regiao(
+            mascara_linha,
+            x_centro_2,
+            y1,
+            x_linha + alcance_lateral,
+            y2,
+        )
+        pixels_frente = contar_pixels_regiao(
+            mascara_linha,
+            x_linha - corredor / 2,
+            y - alcance_vertical,
+            x_linha + corredor / 2,
+            y - largura_linha_px * 0.8,
+        )
+        pixels_baixo = contar_pixels_regiao(
+            mascara_linha,
+            x_linha - corredor / 2,
+            y + largura_linha_px * 0.8,
+            x_linha + corredor / 2,
+            y + alcance_vertical,
+        )
+
+        min_lateral = max(20, largura_linha_px * 1.0)
+        min_vertical = max(20, largura_linha_px * 1.0)
+        ramo_esquerda = pixels_esquerda >= min_lateral
+        ramo_direita = pixels_direita >= min_lateral
+        ramo_frente = pixels_frente >= min_vertical
+        linha_baixo = pixels_baixo >= min_vertical
+
+        tem_lateral = ramo_esquerda or ramo_direita
+        tem_vertical = linha_baixo and ramo_frente
+        if not (tem_lateral and tem_vertical):
             continue
+
+        soma_lateral = pixels_esquerda + pixels_direita
         confianca = limitar(
-            0.35 + 0.25 * (largura_segmento / max(largura_linha_px * 4.0, 1))
+            0.35
+            + 0.20 * (soma_lateral / max(largura_linha_px * 8.0, 1))
             + (0.15 if ramo_esquerda else 0.0)
             + (0.15 if ramo_direita else 0.0)
-            + (0.10 if ramo_frente else 0.0),
+            + (0.15 if ramo_frente else 0.0)
+            + (0.15 if linha_baixo else 0.0),
             0.0,
             1.0,
         )
+        segmento_inicio = x_linha - alcance_lateral if ramo_esquerda else x_centro_1
+        segmento_fim = x_linha + alcance_lateral if ramo_direita else x_centro_2
         candidato = {
             "detectado": True,
-            "centro": (centro_x, int(y)),
+            "centro": (int(x_linha), int(y)),
             "y_cruzamento": int(y),
             "largura_linha_px": largura_linha_px,
             "ramo_esquerda": bool(ramo_esquerda),
             "ramo_direita": bool(ramo_direita),
             "ramo_frente": bool(ramo_frente),
+            "linha_baixo": bool(linha_baixo),
             "confianca": confianca,
-            "motivo": "cruzamento_detectado",
-            "segmento": (int(segmento[0]), int(segmento[1])),
+            "motivo": "cruzamento_lateral_detectado",
+            "segmento": (
+                int(limitar(segmento_inicio, 0, largura - 1)),
+                int(limitar(segmento_fim, 0, largura - 1)),
+            ),
         }
         if melhor is None or candidato["confianca"] > melhor["confianca"]:
             melhor = candidato
