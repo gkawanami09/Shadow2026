@@ -132,7 +132,15 @@ def criar_mascara_verde(frame_bgr):
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
     minimo = np.array([VERDE_H_MIN, VERDE_S_MIN, VERDE_V_MIN], dtype=np.uint8)
     maximo = np.array([VERDE_H_MAX, 255, 255], dtype=np.uint8)
-    mascara = cv2.inRange(hsv, minimo, maximo)
+    mascara_hsv = cv2.inRange(hsv, minimo, maximo)
+
+    b, g, r = cv2.split(frame_bgr)
+    mascara_dominancia = (
+        (g.astype(np.int16) - r.astype(np.int16) >= VERDE_G_MENOS_R_MIN)
+        & (g.astype(np.int16) - b.astype(np.int16) >= VERDE_G_MENOS_B_MIN)
+    ).astype(np.uint8) * 255
+
+    mascara = cv2.bitwise_and(mascara_hsv, mascara_dominancia)
     kernel = np.ones((KERNEL_VERDE, KERNEL_VERDE), np.uint8)
     if OPEN_VERDE > 0:
         mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel, iterations=OPEN_VERDE)
