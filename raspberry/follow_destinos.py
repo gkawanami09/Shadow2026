@@ -47,16 +47,13 @@ except ImportError:
 TEMPO_SEGURAR_DECISAO_LOG = 0.80
 INTERVALO_LOG_SIMPLES = 0.20
 DECISOES_VERDE_LOG = ("RETO", "ESQUERDA", "DIREITA", "RETORNO", "INSEGURO")
-DECISOES_VERDE_ACAO = ("RETO", "ESQUERDA", "DIREITA", "RETORNO")
-TEMPO_SEGURAR_ACAO_RETO = 0.90
-TEMPO_SEGURAR_ACAO_LADO = 1.20
-TEMPO_SEGURAR_ACAO_RETORNO = 1.60
+DECISOES_VERDE_ACAO = ("ESQUERDA", "DIREITA")
 TEMPO_COOLDOWN_VERDE = 1.20
-TEMPO_CONFIRMAR_VERDE = 0.45
-MIN_FRAMES_CONFIRMAR_VERDE = 3
+TEMPO_CONFIRMAR_LADO_VERDE = 0.30
+MIN_FRAMES_CONFIRMAR_LADO = 2
 MIN_VOTOS_LADO_VERDE = 2
-MIN_VOTOS_RETO_VERDE = 3
-MIN_VOTOS_RETORNO_VERDE = 2
+TEMPO_AVANCAR_APOS_VERDE = 0.45
+TEMPO_EXECUTAR_LADO_VERDE = 1.20
 
 
 def ler_argumentos():
@@ -68,7 +65,7 @@ def ler_argumentos():
     parser.add_argument("--mostrar", action="store_true", help="Mostra janela OpenCV.")
     parser.add_argument("--verde-sombra", action="store_true", help="Analisa verdes sem interferir no movimento.")
     parser.add_argument("--verde-ativo", action="store_true", help="Usa verdes para preferir destinos do segue-linha.")
-    parser.add_argument("--verde-acoes", default="RETO,ESQUERDA,DIREITA,RETORNO", help="Acoes de verde ativas separadas por virgula.")
+    parser.add_argument("--verde-acoes", default="ESQUERDA,DIREITA", help="Acoes de verde ativas separadas por virgula.")
     parser.add_argument("--log", action="store_true", help="Imprime log limpo de decisao visual.")
     return parser.parse_args()
 
@@ -120,9 +117,11 @@ def imprimir_log_simples(decisao, estado_log, agora):
 
 
 def decisao_log_verde_ativo(resultado_verde, estado_verde, estado_log, agora):
-    if estado_verde["modo"] == "CONFIRMANDO":
+    if estado_verde["modo"] == "CONFIRMANDO_LADO":
         return "CONFIRMANDO"
-    if estado_verde["modo"] == "EXECUTANDO":
+    if estado_verde["modo"] == "AVANCANDO_APOS_VERDE":
+        return "AVANCANDO"
+    if estado_verde["modo"] == "EXECUTANDO_LADO":
         return estado_verde["decisao"]
     estado_log["decisao_segura"] = "NENHUM"
     return "SEGUE_LINHA"
@@ -134,16 +133,11 @@ def criar_estado_verde_ativo():
         "decisao": "NENHUM",
         "decisao_confirmada": "NENHUM",
         "tempo_inicio": 0.0,
-        "tempo_confirmacao": 0.0,
-        "tempo_ultima_decisao": 0.0,
         "cooldown_ate": 0.0,
-        "votos": {
-            "RETO": 0,
+        "votos_lado": {
             "ESQUERDA": 0,
             "DIREITA": 0,
-            "RETORNO": 0,
-            "INSEGURO": 0,
-            "NENHUM": 0,
+            "OUTRO": 0,
         },
         "frames_confirmacao": 0,
     }
@@ -158,16 +152,6 @@ def ler_verde_acoes(texto):
     return acoes
 
 
-def tempo_acao_verde(decisao):
-    if decisao == "RETO":
-        return TEMPO_SEGURAR_ACAO_RETO
-    if decisao in ("ESQUERDA", "DIREITA"):
-        return TEMPO_SEGURAR_ACAO_LADO
-    if decisao == "RETORNO":
-        return TEMPO_SEGURAR_ACAO_RETORNO
-    return 0.0
-
-
 def iniciar_cooldown_verde(estado_verde, agora):
     estado_verde["modo"] = "COOLDOWN"
     estado_verde["decisao"] = "NENHUM"
@@ -175,59 +159,49 @@ def iniciar_cooldown_verde(estado_verde, agora):
     estado_verde["cooldown_ate"] = agora + TEMPO_COOLDOWN_VERDE
 
 
-def limpar_votos_verde(estado_verde):
-    for decisao in estado_verde["votos"]:
-        estado_verde["votos"][decisao] = 0
+def limpar_votos_lado_verde(estado_verde):
+    for decisao in estado_verde["votos_lado"]:
+        estado_verde["votos_lado"][decisao] = 0
     estado_verde["frames_confirmacao"] = 0
 
 
-def registrar_voto_verde(resultado_verde, estado_verde):
-    decisao = "NENHUM"
+def registrar_voto_lado_verde(resultado_verde, estado_verde):
+    decisao = "OUTRO"
     if resultado_verde is not None:
         decisao = resultado_verde.get("decisao", "NENHUM")
-    if decisao not in estado_verde["votos"]:
-        decisao = "NENHUM"
-    estado_verde["votos"][decisao] += 1
+    if decisao not in ("ESQUERDA", "DIREITA"):
+        decisao = "OUTRO"
+    estado_verde["votos_lado"][decisao] += 1
     estado_verde["frames_confirmacao"] += 1
 
 
-def escolher_decisao_confirmada(estado_verde):
-    votos = estado_verde["votos"]
-    if votos["RETORNO"] >= MIN_VOTOS_RETORNO_VERDE or (votos["ESQUERDA"] >= 1 and votos["DIREITA"] >= 1):
-        return "RETORNO"
+def escolher_lado_confirmado(estado_verde):
+    votos = estado_verde["votos_lado"]
     if votos["ESQUERDA"] >= MIN_VOTOS_LADO_VERDE and votos["DIREITA"] == 0:
         return "ESQUERDA"
     if votos["DIREITA"] >= MIN_VOTOS_LADO_VERDE and votos["ESQUERDA"] == 0:
         return "DIREITA"
-    if (
-        votos["RETO"] >= MIN_VOTOS_RETO_VERDE
-        and votos["ESQUERDA"] == 0
-        and votos["DIREITA"] == 0
-        and votos["RETORNO"] == 0
-    ):
-        return "RETO"
     return "NENHUM"
 
 
-def iniciar_confirmacao_verde(estado_verde, agora):
-    estado_verde["modo"] = "CONFIRMANDO"
+def iniciar_confirmacao_lado_verde(estado_verde, agora):
+    estado_verde["modo"] = "CONFIRMANDO_LADO"
     estado_verde["decisao"] = "NENHUM"
     estado_verde["decisao_confirmada"] = "NENHUM"
     estado_verde["tempo_inicio"] = agora
-    estado_verde["tempo_confirmacao"] = agora
-    estado_verde["tempo_ultima_decisao"] = agora
-    limpar_votos_verde(estado_verde)
+    limpar_votos_lado_verde(estado_verde)
 
 
-def finalizar_confirmacao_verde(estado_verde, agora, acoes_ativas):
-    decisao = escolher_decisao_confirmada(estado_verde)
+def iniciar_avanco_apos_verde(estado_verde, agora, decisao):
+    estado_verde["modo"] = "AVANCANDO_APOS_VERDE"
+    estado_verde["decisao"] = decisao
     estado_verde["decisao_confirmada"] = decisao
-    if decisao in acoes_ativas:
-        estado_verde["modo"] = "EXECUTANDO"
-        estado_verde["decisao"] = decisao
-        estado_verde["tempo_inicio"] = agora
-    else:
-        iniciar_cooldown_verde(estado_verde, agora)
+    estado_verde["tempo_inicio"] = agora
+
+
+def iniciar_execucao_lado_verde(estado_verde, agora):
+    estado_verde["modo"] = "EXECUTANDO_LADO"
+    estado_verde["tempo_inicio"] = agora
 
 
 def atualizar_estado_verde_ativo(resultado_verde, estado_verde, agora, acoes_ativas):
@@ -238,26 +212,34 @@ def atualizar_estado_verde_ativo(resultado_verde, estado_verde, agora, acoes_ati
         else:
             return
 
-    if estado_verde["modo"] == "CONFIRMANDO":
-        registrar_voto_verde(resultado_verde, estado_verde)
-        tempo_ok = agora - estado_verde["tempo_confirmacao"] >= TEMPO_CONFIRMAR_VERDE
-        frames_ok = estado_verde["frames_confirmacao"] >= MIN_FRAMES_CONFIRMAR_VERDE
+    if estado_verde["modo"] == "CONFIRMANDO_LADO":
+        registrar_voto_lado_verde(resultado_verde, estado_verde)
+        tempo_ok = agora - estado_verde["tempo_inicio"] >= TEMPO_CONFIRMAR_LADO_VERDE
+        frames_ok = estado_verde["frames_confirmacao"] >= MIN_FRAMES_CONFIRMAR_LADO
         if tempo_ok and frames_ok:
-            finalizar_confirmacao_verde(estado_verde, agora, acoes_ativas)
+            decisao = escolher_lado_confirmado(estado_verde)
+            if decisao in ("ESQUERDA", "DIREITA") and decisao in acoes_ativas:
+                iniciar_avanco_apos_verde(estado_verde, agora, decisao)
+            else:
+                iniciar_cooldown_verde(estado_verde, agora)
         return
 
-    if estado_verde["modo"] == "EXECUTANDO":
-        decisao = estado_verde["decisao"]
-        if agora - estado_verde["tempo_inicio"] >= tempo_acao_verde(decisao):
+    if estado_verde["modo"] == "AVANCANDO_APOS_VERDE":
+        if agora - estado_verde["tempo_inicio"] >= TEMPO_AVANCAR_APOS_VERDE:
+            iniciar_execucao_lado_verde(estado_verde, agora)
+        return
+
+    if estado_verde["modo"] == "EXECUTANDO_LADO":
+        if agora - estado_verde["tempo_inicio"] >= TEMPO_EXECUTAR_LADO_VERDE:
             iniciar_cooldown_verde(estado_verde, agora)
         return
 
     decisao_atual = "NENHUM"
     if resultado_verde is not None:
         decisao_atual = resultado_verde.get("decisao", "NENHUM")
-    if decisao_atual in DECISOES_VERDE_ACAO:
-        iniciar_confirmacao_verde(estado_verde, agora)
-        registrar_voto_verde(resultado_verde, estado_verde)
+    if decisao_atual in ("ESQUERDA", "DIREITA") and decisao_atual in acoes_ativas:
+        iniciar_confirmacao_lado_verde(estado_verde, agora)
+        registrar_voto_lado_verde(resultado_verde, estado_verde)
 
 
 def preparar_destino_preferido(candidato, destino_normal, motivo):
@@ -290,30 +272,21 @@ def escolher_destino_preferindo_lado(destino_normal, lado):
     return destino_normal
 
 
-def escolher_destino_preferindo_retorno(destino_normal):
-    candidatos = destino_normal.get("validos_por_tipo", {}).get("RETORNO", [])
-    if candidatos:
-        escolhido = max(candidatos, key=lambda item: item["score"])
-        return preparar_destino_preferido(escolhido, destino_normal, "VERDE_RETORNO")
-    return destino_normal
-
-
 def aplicar_verde_ativo(resultado, destino_normal, estado_verde, agora):
-    if estado_verde["modo"] != "EXECUTANDO":
-        return destino_normal
     if not destino_normal.get("ok", False):
         return destino_normal
 
-    estado_verde["modo"] = "EXECUTANDO"
-    decisao = estado_verde["decisao"]
-    if decisao == "RETO":
+    if estado_verde["modo"] == "AVANCANDO_APOS_VERDE":
         return escolher_destino_preferindo_frente(destino_normal)
+
+    if estado_verde["modo"] != "EXECUTANDO_LADO":
+        return destino_normal
+
+    decisao = estado_verde["decisao"]
     if decisao == "ESQUERDA":
         return escolher_destino_preferindo_lado(destino_normal, "ESQUERDA")
     if decisao == "DIREITA":
         return escolher_destino_preferindo_lado(destino_normal, "DIREITA")
-    if decisao == "RETORNO":
-        return escolher_destino_preferindo_retorno(destino_normal)
     return destino_normal
 
 
@@ -803,9 +776,6 @@ def main():
             print("Erro: nao foi possivel importar analisar_verdes de verdes.py")
             return 1
         verde_acoes = ler_verde_acoes(args.verde_acoes)
-        if args.verde_ativo and not verde_acoes:
-            print("Erro: --verde-acoes nao possui nenhuma acao valida.")
-            return 1
         if args.motores:
             if abrir_serial is None:
                 print("Erro: suporte serial indisponivel. Verifique a instalacao do pyserial.")
@@ -881,8 +851,8 @@ def main():
                 estado = "FOLLOW_CONFIRMAR"
                 comando = comando_confirmar_sem_destino(memoria)
 
-            if args.verde_ativo and estado_verde["modo"] == "CONFIRMANDO":
-                estado = "VERDE_CONFIRMAR"
+            if args.verde_ativo and estado_verde["modo"] == "CONFIRMANDO_LADO":
+                estado = "VERDE_CONFIRMAR_LADO"
                 comando = "PARAR"
                 memoria["correcao_anterior"] = 0
                 memoria["vel_anterior"] = (0, 0)
