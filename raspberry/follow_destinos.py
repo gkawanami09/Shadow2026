@@ -52,6 +52,11 @@ TEMPO_SEGURAR_ACAO_RETO = 0.90
 TEMPO_SEGURAR_ACAO_LADO = 1.20
 TEMPO_SEGURAR_ACAO_RETORNO = 1.60
 TEMPO_COOLDOWN_VERDE = 1.20
+TEMPO_CONFIRMAR_VERDE = 0.45
+MIN_FRAMES_CONFIRMAR_VERDE = 3
+MIN_VOTOS_LADO_VERDE = 2
+MIN_VOTOS_RETO_VERDE = 3
+MIN_VOTOS_RETORNO_VERDE = 2
 
 
 def ler_argumentos():
@@ -114,13 +119,33 @@ def imprimir_log_simples(decisao, estado_log, agora):
         estado_log["ultimo_tempo"] = agora
 
 
+def decisao_log_verde_ativo(resultado_verde, estado_verde, estado_log, agora):
+    if estado_verde["modo"] == "CONFIRMANDO":
+        return "CONFIRMANDO"
+    if estado_verde["modo"] == "EXECUTANDO":
+        return estado_verde["decisao"]
+    estado_log["decisao_segura"] = "NENHUM"
+    return "SEGUE_LINHA"
+
+
 def criar_estado_verde_ativo():
     return {
         "modo": "NORMAL",
         "decisao": "NENHUM",
+        "decisao_confirmada": "NENHUM",
         "tempo_inicio": 0.0,
+        "tempo_confirmacao": 0.0,
         "tempo_ultima_decisao": 0.0,
         "cooldown_ate": 0.0,
+        "votos": {
+            "RETO": 0,
+            "ESQUERDA": 0,
+            "DIREITA": 0,
+            "RETORNO": 0,
+            "INSEGURO": 0,
+            "NENHUM": 0,
+        },
+        "frames_confirmacao": 0,
     }
 
 
@@ -146,7 +171,63 @@ def tempo_acao_verde(decisao):
 def iniciar_cooldown_verde(estado_verde, agora):
     estado_verde["modo"] = "COOLDOWN"
     estado_verde["decisao"] = "NENHUM"
+    estado_verde["decisao_confirmada"] = "NENHUM"
     estado_verde["cooldown_ate"] = agora + TEMPO_COOLDOWN_VERDE
+
+
+def limpar_votos_verde(estado_verde):
+    for decisao in estado_verde["votos"]:
+        estado_verde["votos"][decisao] = 0
+    estado_verde["frames_confirmacao"] = 0
+
+
+def registrar_voto_verde(resultado_verde, estado_verde):
+    decisao = "NENHUM"
+    if resultado_verde is not None:
+        decisao = resultado_verde.get("decisao", "NENHUM")
+    if decisao not in estado_verde["votos"]:
+        decisao = "NENHUM"
+    estado_verde["votos"][decisao] += 1
+    estado_verde["frames_confirmacao"] += 1
+
+
+def escolher_decisao_confirmada(estado_verde):
+    votos = estado_verde["votos"]
+    if votos["RETORNO"] >= MIN_VOTOS_RETORNO_VERDE or (votos["ESQUERDA"] >= 1 and votos["DIREITA"] >= 1):
+        return "RETORNO"
+    if votos["ESQUERDA"] >= MIN_VOTOS_LADO_VERDE and votos["DIREITA"] == 0:
+        return "ESQUERDA"
+    if votos["DIREITA"] >= MIN_VOTOS_LADO_VERDE and votos["ESQUERDA"] == 0:
+        return "DIREITA"
+    if (
+        votos["RETO"] >= MIN_VOTOS_RETO_VERDE
+        and votos["ESQUERDA"] == 0
+        and votos["DIREITA"] == 0
+        and votos["RETORNO"] == 0
+    ):
+        return "RETO"
+    return "NENHUM"
+
+
+def iniciar_confirmacao_verde(estado_verde, agora):
+    estado_verde["modo"] = "CONFIRMANDO"
+    estado_verde["decisao"] = "NENHUM"
+    estado_verde["decisao_confirmada"] = "NENHUM"
+    estado_verde["tempo_inicio"] = agora
+    estado_verde["tempo_confirmacao"] = agora
+    estado_verde["tempo_ultima_decisao"] = agora
+    limpar_votos_verde(estado_verde)
+
+
+def finalizar_confirmacao_verde(estado_verde, agora, acoes_ativas):
+    decisao = escolher_decisao_confirmada(estado_verde)
+    estado_verde["decisao_confirmada"] = decisao
+    if decisao in acoes_ativas:
+        estado_verde["modo"] = "EXECUTANDO"
+        estado_verde["decisao"] = decisao
+        estado_verde["tempo_inicio"] = agora
+    else:
+        iniciar_cooldown_verde(estado_verde, agora)
 
 
 def atualizar_estado_verde_ativo(resultado_verde, estado_verde, agora, acoes_ativas):
@@ -157,7 +238,15 @@ def atualizar_estado_verde_ativo(resultado_verde, estado_verde, agora, acoes_ati
         else:
             return
 
-    if estado_verde["modo"] in ("ARMADO", "EXECUTANDO"):
+    if estado_verde["modo"] == "CONFIRMANDO":
+        registrar_voto_verde(resultado_verde, estado_verde)
+        tempo_ok = agora - estado_verde["tempo_confirmacao"] >= TEMPO_CONFIRMAR_VERDE
+        frames_ok = estado_verde["frames_confirmacao"] >= MIN_FRAMES_CONFIRMAR_VERDE
+        if tempo_ok and frames_ok:
+            finalizar_confirmacao_verde(estado_verde, agora, acoes_ativas)
+        return
+
+    if estado_verde["modo"] == "EXECUTANDO":
         decisao = estado_verde["decisao"]
         if agora - estado_verde["tempo_inicio"] >= tempo_acao_verde(decisao):
             iniciar_cooldown_verde(estado_verde, agora)
@@ -166,11 +255,9 @@ def atualizar_estado_verde_ativo(resultado_verde, estado_verde, agora, acoes_ati
     decisao_atual = "NENHUM"
     if resultado_verde is not None:
         decisao_atual = resultado_verde.get("decisao", "NENHUM")
-    if decisao_atual in acoes_ativas:
-        estado_verde["modo"] = "ARMADO"
-        estado_verde["decisao"] = decisao_atual
-        estado_verde["tempo_inicio"] = agora
-        estado_verde["tempo_ultima_decisao"] = agora
+    if decisao_atual in DECISOES_VERDE_ACAO:
+        iniciar_confirmacao_verde(estado_verde, agora)
+        registrar_voto_verde(resultado_verde, estado_verde)
 
 
 def preparar_destino_preferido(candidato, destino_normal, motivo):
@@ -212,7 +299,7 @@ def escolher_destino_preferindo_retorno(destino_normal):
 
 
 def aplicar_verde_ativo(resultado, destino_normal, estado_verde, agora):
-    if estado_verde["modo"] not in ("ARMADO", "EXECUTANDO"):
+    if estado_verde["modo"] != "EXECUTANDO":
         return destino_normal
     if not destino_normal.get("ok", False):
         return destino_normal
@@ -794,9 +881,18 @@ def main():
                 estado = "FOLLOW_CONFIRMAR"
                 comando = comando_confirmar_sem_destino(memoria)
 
+            if args.verde_ativo and estado_verde["modo"] == "CONFIRMANDO":
+                estado = "VERDE_CONFIRMAR"
+                comando = "PARAR"
+                memoria["correcao_anterior"] = 0
+                memoria["vel_anterior"] = (0, 0)
+
             enviar_seguro(conexao, comando, args.motores)
             if args.log:
-                decisao_log = atualizar_decisao_log_verde(resultado_verde, estado_log, agora)
+                if args.verde_ativo:
+                    decisao_log = decisao_log_verde_ativo(resultado_verde, estado_verde, estado_log, agora)
+                else:
+                    decisao_log = atualizar_decisao_log_verde(resultado_verde, estado_log, agora)
                 imprimir_log_simples(decisao_log, estado_log, agora)
             else:
                 imprimir_log(resultado, estado, destino, comando, memoria, motivo_recuperacao)
