@@ -26,7 +26,25 @@ KERNEL_VERDE = 5
 OPEN_VERDE = 1
 CLOSE_VERDE = 2
 
-AREA_MIN_VERDE_ABSOLUTA = 40
+VERDE_Y_MIN_REL = 0.30
+VERDE_Y_MAX_REL = 0.95
+VERDE_AREA_MIN_LONGE = 35
+VERDE_AREA_MIN_PERTO = 120
+VERDE_AREA_MAX_REL_QUADRO = 0.10
+VERDE_ASPECTO_MIN = 0.45
+VERDE_ASPECTO_MAX = 2.20
+VERDE_FILL_RATIO_MIN = 0.18
+VERDE_PROPORCAO_MIN = 1.02
+
+PRETO_MARGEM_VERDE_MULT = 0.80
+PRETO_MIN_PIXELS_ABS = 10
+PRETO_MIN_PIXELS_REL = 0.10
+PRETO_MIN_LADOS_AO_REDOR = 1
+
+MARGEM_CENTRO_LINHA_MULT = 0.80
+BUSCA_LINHA_DY = (0, 10, 20, -10, -20, 35, -35)
+
+AREA_MIN_VERDE_ABSOLUTA = 8
 LARGURA_MIN_VERDE = 4
 ALTURA_MIN_VERDE = 4
 
@@ -72,6 +90,28 @@ def contar_pixels_regiao(mascara, x1, y1, x2, y2):
     if x2 <= x1 or y2 <= y1:
         return 0
     return int(cv2.countNonZero(mascara[y1:y2, x1:x2]))
+
+
+def area_minima_verde_por_y(cy, altura):
+    y_rel = cy / max(altura, 1)
+    faixa = max(VERDE_Y_MAX_REL - VERDE_Y_MIN_REL, 1e-6)
+    t = limitar((y_rel - VERDE_Y_MIN_REL) / faixa, 0.0, 1.0)
+    return VERDE_AREA_MIN_LONGE + t * (VERDE_AREA_MIN_PERTO - VERDE_AREA_MIN_LONGE)
+
+
+def roi_preto_tem_linha(mascara_linha, x1, y1, x2, y2):
+    altura, largura = mascara_linha.shape[:2]
+    x1 = int(limitar(x1, 0, largura - 1))
+    x2 = int(limitar(x2, 1, largura))
+    y1 = int(limitar(y1, 0, altura - 1))
+    y2 = int(limitar(y2, 1, altura))
+    if x2 <= x1 or y2 <= y1:
+        return False, 0, (x1, y1, x2, y2)
+
+    area_roi = max((x2 - x1) * (y2 - y1), 1)
+    pixels = int(cv2.countNonZero(mascara_linha[y1:y2, x1:x2]))
+    minimo = max(PRETO_MIN_PIXELS_ABS, int(area_roi * PRETO_MIN_PIXELS_REL))
+    return pixels >= minimo, pixels, (x1, y1, x2, y2)
 
 
 def criar_mascara_linha_global(resultado_linha):
@@ -173,7 +213,7 @@ def estimar_largura_linha(mascara_linha):
     return float(np.median(larguras_validas))
 
 
-def encontrar_centro_linha_por_y(mascara_linha, y):
+def encontrar_segmento_linha_por_y(mascara_linha, y, x_alvo=None):
     altura, largura = mascara_linha.shape[:2]
     y = int(limitar(y, 0, altura - 1))
     y1 = limitar(y - 5, 0, altura - 1)
@@ -183,9 +223,33 @@ def encontrar_centro_linha_por_y(mascara_linha, y):
     segmentos = encontrar_segmentos(linha)
     if not segmentos:
         return None
-    centro_imagem = largura / 2
-    segmento = min(segmentos, key=lambda seg: abs(((seg[0] + seg[1]) / 2) - centro_imagem))
-    return int((segmento[0] + segmento[1]) / 2)
+    if x_alvo is None:
+        x_alvo = largura / 2
+    segmento = min(segmentos, key=lambda seg: abs(((seg[0] + seg[1]) / 2) - x_alvo))
+    centro = int((segmento[0] + segmento[1]) / 2)
+    largura_segmento = int(segmento[1] - segmento[0] + 1)
+    return centro, largura_segmento, int(y)
+
+
+def encontrar_centro_linha_por_y(mascara_linha, y):
+    segmento = encontrar_segmento_linha_por_y(mascara_linha, y)
+    if segmento is None:
+        return None
+    return segmento[0]
+
+
+def encontrar_referencia_linha_local(mascara_linha, cx, cy):
+    for dy in BUSCA_LINHA_DY:
+        segmento = encontrar_segmento_linha_por_y(mascara_linha, cy + dy, x_alvo=cx)
+        if segmento is not None:
+            x_linha, largura_linha, y_linha = segmento
+            if 3 <= largura_linha <= mascara_linha.shape[1] * 0.45:
+                return {
+                    "x_linha": int(x_linha),
+                    "y_linha": int(y_linha),
+                    "largura_linha_px": float(largura_linha),
+                }
+    return None
 
 
 def analisar_cruzamento(mascara_linha):
@@ -393,24 +457,91 @@ def juntar_candidatos_verdes(candidatos, largura_linha_px):
     return candidatos
 
 
+def analisar_preto_ao_redor_do_verde(candidato, mascara_linha):
+    x, y, w, h = candidato["bbox"]
+    margem = max(6, int(max(w, h) * PRETO_MARGEM_VERDE_MULT))
+
+    preto_acima, pixels_acima, roi_acima = roi_preto_tem_linha(
+        mascara_linha, x, y - margem, x + w, y
+    )
+    preto_abaixo, pixels_abaixo, roi_abaixo = roi_preto_tem_linha(
+        mascara_linha, x, y + h, x + w, y + h + margem
+    )
+    preto_esquerda, pixels_esquerda, roi_esquerda = roi_preto_tem_linha(
+        mascara_linha, x - margem, y, x, y + h
+    )
+    preto_direita, pixels_direita, roi_direita = roi_preto_tem_linha(
+        mascara_linha, x + w, y, x + w + margem, y + h
+    )
+
+    return {
+        "preto_acima": bool(preto_acima),
+        "preto_abaixo": bool(preto_abaixo),
+        "preto_esquerda": bool(preto_esquerda),
+        "preto_direita": bool(preto_direita),
+        "pixels_acima": int(pixels_acima),
+        "pixels_abaixo": int(pixels_abaixo),
+        "pixels_esquerda": int(pixels_esquerda),
+        "pixels_direita": int(pixels_direita),
+        "rois_preto": {
+            "ACIMA": roi_acima,
+            "ABAIXO": roi_abaixo,
+            "ESQUERDA": roi_esquerda,
+            "DIREITA": roi_direita,
+        },
+    }
+
+
 def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato = dict(candidato)
     x, y, w, h = candidato["bbox"]
     cx, cy = candidato["centro"]
     altura, largura = mascara_linha.shape[:2]
-    lado, x_referencia = calcular_lado_verde(candidato, cruzamento, mascara_linha, largura_linha_px)
-    candidato["lado"] = lado
-    candidato["x_referencia"] = x_referencia
+    candidato.update(analisar_preto_ao_redor_do_verde(candidato, mascara_linha))
+    candidato["area_minima_y"] = float(area_minima_verde_por_y(cy, altura))
+    candidato["x_referencia"] = None
+    candidato["linha_referencia"] = None
+    candidato["pixels_linha_proxima"] = 0
+    candidato["falso_depois_cruzamento"] = False
+
+    y_rel = cy / max(altura, 1)
+    if y_rel < VERDE_Y_MIN_REL or y_rel > VERDE_Y_MAX_REL:
+        candidato["motivo"] = "fora_roi_vertical"
+        candidato["confianca"] = 0.0
+        return candidato
 
     confianca = 0.0
     cor_boa = (
         VERDE_H_MIN <= candidato["mean_h"] <= VERDE_H_MAX
         and candidato["mean_s"] >= VERDE_S_MIN
         and candidato["mean_v"] >= VERDE_V_MIN
-        and candidato["proporcao_verde"] >= 1.02
+        and candidato["proporcao_verde"] >= VERDE_PROPORCAO_MIN
+        and candidato["fill_ratio"] >= VERDE_FILL_RATIO_MIN
     )
     if cor_boa:
         confianca += 0.25
+    else:
+        candidato["motivo"] = "cor_hsv_invalida"
+        candidato["confianca"] = limitar(confianca, 0.0, 1.0)
+        return candidato
+
+    if candidato["area"] < candidato["area_minima_y"]:
+        candidato["motivo"] = "area_pequena_perspectiva"
+        candidato["confianca"] = limitar(confianca, 0.0, 1.0)
+        return candidato
+
+    if candidato["area"] > largura * altura * VERDE_AREA_MAX_REL_QUADRO:
+        candidato["motivo"] = "area_grande_demais"
+        candidato["confianca"] = limitar(confianca, 0.0, 1.0)
+        return candidato
+
+    aspecto = w / max(h, 1)
+    candidato["aspecto"] = float(aspecto)
+    if aspecto < VERDE_ASPECTO_MIN or aspecto > VERDE_ASPECTO_MAX:
+        candidato["motivo"] = "aspecto_invalido"
+        candidato["confianca"] = limitar(confianca, 0.0, 1.0)
+        return candidato
+    confianca += 0.20
 
     margem = int(max(10, largura_linha_px * 1.5))
     x1 = int(limitar(x - margem, 0, largura - 1))
@@ -427,16 +558,13 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
 
-    largura_min_rel = 0.7 * largura_linha_px
-    largura_max_rel = 8.0 * largura_linha_px
-    altura_min_rel = 0.5 * largura_linha_px
-    altura_max_rel = 8.0 * largura_linha_px
-    if w < largura_min_rel or h < altura_min_rel:
-        candidato["motivo"] = "verde_muito_pequeno_relativo"
-        candidato["confianca"] = limitar(confianca, 0.0, 1.0)
-        return candidato
-    if w > largura_max_rel or h > altura_max_rel:
-        candidato["motivo"] = "verde_grande_demais_relativo"
+    preto_lados = sum(
+        1
+        for chave in ("preto_acima", "preto_abaixo", "preto_esquerda", "preto_direita")
+        if candidato[chave]
+    )
+    if preto_lados < PRETO_MIN_LADOS_AO_REDOR:
+        candidato["motivo"] = "sem_preto_ao_redor"
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
     confianca += 0.20
@@ -447,19 +575,45 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
 
-    if cruzamento["detectado"]:
-        confianca += 0.20
-        margem_y = max(12, largura_linha_px * 1.5)
-        if cy < cruzamento["y_cruzamento"] - margem_y:
-            candidato["falso_depois_cruzamento"] = True
-            candidato["motivo"] = "falso_depois_cruzamento"
-            candidato["confianca"] = limitar(confianca, 0.0, 1.0)
-            return candidato
+    referencia_linha = encontrar_referencia_linha_local(mascara_linha, cx, cy)
+    if referencia_linha is None:
+        candidato["motivo"] = "sem_linha_preta_proxima"
+        candidato["confianca"] = limitar(confianca, 0.0, 1.0)
+        return candidato
+
+    x_linha = referencia_linha["x_linha"]
+    largura_linha_local = referencia_linha["largura_linha_px"]
+    candidato["linha_referencia"] = referencia_linha
+    candidato["x_referencia"] = x_linha
+
+    margem_centro = max(10, largura_linha_local * MARGEM_CENTRO_LINHA_MULT)
+    candidato["margem_centro_linha"] = float(margem_centro)
+    if cx < x_linha - margem_centro:
+        lado = "ESQUERDA"
+    elif cx > x_linha + margem_centro:
+        lado = "DIREITA"
+    else:
+        lado = "CENTRO"
+    candidato["lado"] = lado
 
     if lado == "CENTRO":
         candidato["motivo"] = "verde_central_inseguro"
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
+
+    coerente_esquerda = candidato["preto_acima"] or candidato["preto_direita"] or candidato["preto_abaixo"]
+    coerente_direita = candidato["preto_acima"] or candidato["preto_esquerda"] or candidato["preto_abaixo"]
+    if lado == "ESQUERDA" and not coerente_esquerda:
+        candidato["motivo"] = "sem_preto_ao_redor"
+        candidato["confianca"] = limitar(confianca, 0.0, 1.0)
+        return candidato
+    if lado == "DIREITA" and not coerente_direita:
+        candidato["motivo"] = "sem_preto_ao_redor"
+        candidato["confianca"] = limitar(confianca, 0.0, 1.0)
+        return candidato
+
+    if cruzamento["detectado"]:
+        confianca += 0.05
 
     confianca += 0.10
     candidato["valido"] = True
@@ -471,10 +625,6 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
 def decidir_verdes(candidatos, cruzamento):
     validos_esquerda = [c for c in candidatos if c["valido"] and c["lado"] == "ESQUERDA"]
     validos_direita = [c for c in candidatos if c["valido"] and c["lado"] == "DIREITA"]
-    falsos = [c for c in candidatos if c.get("falso_depois_cruzamento")]
-
-    if not cruzamento["detectado"]:
-        return "NENHUM", "sem_cruzamento", 0.0
 
     if validos_esquerda and validos_direita:
         confianca = min(max(max(c["confianca"] for c in validos_esquerda), max(c["confianca"] for c in validos_direita)), 1.0)
@@ -485,9 +635,9 @@ def decidir_verdes(candidatos, cruzamento):
         return "DIREITA", "verde_direita_valido", validos_direita[0]["confianca"]
     if len(validos_esquerda) > 1 or len(validos_direita) > 1:
         return "INSEGURO", "verde_inseguro", 0.45
-    if falsos:
-        return "RETO", "verde_falso_depois_cruzamento", max(c["confianca"] for c in falsos)
-    return "RETO", "cruzamento_sem_verde", max(0.55, cruzamento["confianca"])
+    if cruzamento["detectado"]:
+        return "NENHUM", "cruzamento_sem_verde_ignorado", 0.0
+    return "NENHUM", "sem_verde_valido", 0.0
 
 
 def analisar_verdes(frame_bgr):
@@ -538,7 +688,10 @@ def imprimir_log_detalhado(resultado):
         print(
             f"verde#{indice} lado={verde['lado']} bbox={verde['bbox']} area={verde['area']:.0f} "
             f"valido={verde['valido']} motivo={verde['motivo']} conf={verde['confianca']:.2f} "
-            f"falso={verde.get('falso_depois_cruzamento', False)}"
+            f"preto_acima={verde.get('preto_acima', False)} preto_abaixo={verde.get('preto_abaixo', False)} "
+            f"preto_esquerda={verde.get('preto_esquerda', False)} preto_direita={verde.get('preto_direita', False)} "
+            f"pixels_acima={verde.get('pixels_acima', 0)} pixels_abaixo={verde.get('pixels_abaixo', 0)} "
+            f"pixels_esquerda={verde.get('pixels_esquerda', 0)} pixels_direita={verde.get('pixels_direita', 0)}"
         )
 
 
@@ -580,6 +733,17 @@ def criar_debug_verdes(frame_bgr, resultado):
             cor = (0, 165, 255)
         cv2.rectangle(debug, (x, y), (x + w, y + h), cor, 2)
         cv2.circle(debug, verde["centro"], 4, cor, -1)
+        for nome_roi, roi in verde.get("rois_preto", {}).items():
+            rx1, ry1, rx2, ry2 = roi
+            tem_preto = verde.get(f"preto_{nome_roi.lower()}", False)
+            cor_roi = (255, 255, 0) if tem_preto else (90, 90, 90)
+            cv2.rectangle(debug, (rx1, ry1), (rx2, ry2), cor_roi, 1)
+        referencia = verde.get("linha_referencia")
+        if referencia is not None:
+            x_linha = referencia["x_linha"]
+            y_linha = referencia["y_linha"]
+            cv2.line(debug, (x_linha, max(0, y_linha - 12)), (x_linha, min(altura - 1, y_linha + 12)), (255, 0, 255), 2)
+            cv2.line(debug, (x_linha, y_linha), verde["centro"], (255, 0, 255), 1)
         texto = f"{verde['lado']} {verde['motivo']} {verde['confianca']:.2f}"
         cv2.putText(debug, texto, (x, max(18, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3)
         cv2.putText(debug, texto, (x, max(18, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, cor, 1)

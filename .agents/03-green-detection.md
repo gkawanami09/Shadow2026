@@ -62,3 +62,44 @@ Verde precisa ter confirmação por alguns frames ou confiança suficiente.
 Não confundir objeto verde no fundo com marcador de pista.
 Não confundir área de resgate verde com marcador verde do percurso.
 Quando estiver dentro da sala de resgate, desativar lógica de marcador verde do percurso.
+
+## Responsabilidade correta do verdes.py
+
+O arquivo `raspberry/verdes.py` deve detectar apenas marcadores verdes.
+
+Decisões permitidas no detector de verde:
+
+- NENHUM
+- ESQUERDA
+- DIREITA
+- RETORNO
+- INSEGURO
+
+Por enquanto, `verdes.py` NÃO deve retornar `RETO`.
+
+Mesmo que a regra da OBR diga que interseção sem verde significa seguir reto, essa decisão deve ficar para a lógica de navegação/interseção do `follow_destinos.py`, não para o detector de verde.
+
+Motivo:
+Se o detector de cruzamento errar em curva normal, ele pode gerar falso `RETO`. Então, no detector de verdes, cruzamento sem verde deve retornar `NENHUM`.
+
+Resumo:
+- verde esquerdo -> ESQUERDA
+- verde direito -> DIREITA
+- dois verdes -> RETORNO
+- sem verde -> NENHUM
+- dúvida -> INSEGURO
+- nunca retornar RETO nesta fase
+
+## Referência Overengineering
+
+Usar como referência conceitual:
+https://github.com/Overengineering-squared/Overengineering-squared-RoboCup
+
+Estratégia a adaptar:
+- detectar contorno verde;
+- filtrar por tamanho/área;
+- analisar preto ao redor do marcador verde;
+- decidir lado pela relação entre verde e linha preta;
+- usar confirmação temporal futuramente.
+
+Não copiar coordenadas fixas, porque a câmera do Shadow é frontal, inclinada e vê o verde antes do robô chegar na interseção.
