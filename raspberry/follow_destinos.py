@@ -47,6 +47,11 @@ except ImportError:
 TEMPO_SEGURAR_DECISAO_LOG = 0.80
 INTERVALO_LOG_SIMPLES = 0.20
 DECISOES_VERDE_LOG = ("RETO", "ESQUERDA", "DIREITA", "RETORNO", "INSEGURO")
+DECISOES_VERDE_ACAO = ("RETO", "ESQUERDA", "DIREITA", "RETORNO")
+TEMPO_SEGURAR_ACAO_RETO = 0.90
+TEMPO_SEGURAR_ACAO_LADO = 1.20
+TEMPO_SEGURAR_ACAO_RETORNO = 1.60
+TEMPO_COOLDOWN_VERDE = 1.20
 
 
 def ler_argumentos():
@@ -57,6 +62,8 @@ def ler_argumentos():
     parser.add_argument("--salvar-debug", action="store_true", help="Salva imagens de debug.")
     parser.add_argument("--mostrar", action="store_true", help="Mostra janela OpenCV.")
     parser.add_argument("--verde-sombra", action="store_true", help="Analisa verdes sem interferir no movimento.")
+    parser.add_argument("--verde-ativo", action="store_true", help="Usa verdes para preferir destinos do segue-linha.")
+    parser.add_argument("--verde-acoes", default="RETO,ESQUERDA,DIREITA,RETORNO", help="Acoes de verde ativas separadas por virgula.")
     parser.add_argument("--log", action="store_true", help="Imprime log limpo de decisao visual.")
     return parser.parse_args()
 
@@ -105,6 +112,122 @@ def imprimir_log_simples(decisao, estado_log, agora):
         print(linha)
         estado_log["ultima_linha"] = linha
         estado_log["ultimo_tempo"] = agora
+
+
+def criar_estado_verde_ativo():
+    return {
+        "modo": "NORMAL",
+        "decisao": "NENHUM",
+        "tempo_inicio": 0.0,
+        "tempo_ultima_decisao": 0.0,
+        "cooldown_ate": 0.0,
+    }
+
+
+def ler_verde_acoes(texto):
+    acoes = set()
+    for item in texto.split(","):
+        acao = item.strip().upper()
+        if acao in DECISOES_VERDE_ACAO:
+            acoes.add(acao)
+    return acoes
+
+
+def tempo_acao_verde(decisao):
+    if decisao == "RETO":
+        return TEMPO_SEGURAR_ACAO_RETO
+    if decisao in ("ESQUERDA", "DIREITA"):
+        return TEMPO_SEGURAR_ACAO_LADO
+    if decisao == "RETORNO":
+        return TEMPO_SEGURAR_ACAO_RETORNO
+    return 0.0
+
+
+def iniciar_cooldown_verde(estado_verde, agora):
+    estado_verde["modo"] = "COOLDOWN"
+    estado_verde["decisao"] = "NENHUM"
+    estado_verde["cooldown_ate"] = agora + TEMPO_COOLDOWN_VERDE
+
+
+def atualizar_estado_verde_ativo(resultado_verde, estado_verde, agora, acoes_ativas):
+    modo = estado_verde["modo"]
+    if modo == "COOLDOWN":
+        if agora >= estado_verde["cooldown_ate"]:
+            estado_verde["modo"] = "NORMAL"
+        else:
+            return
+
+    if estado_verde["modo"] in ("ARMADO", "EXECUTANDO"):
+        decisao = estado_verde["decisao"]
+        if agora - estado_verde["tempo_inicio"] >= tempo_acao_verde(decisao):
+            iniciar_cooldown_verde(estado_verde, agora)
+        return
+
+    decisao_atual = "NENHUM"
+    if resultado_verde is not None:
+        decisao_atual = resultado_verde.get("decisao", "NENHUM")
+    if decisao_atual in acoes_ativas:
+        estado_verde["modo"] = "ARMADO"
+        estado_verde["decisao"] = decisao_atual
+        estado_verde["tempo_inicio"] = agora
+        estado_verde["tempo_ultima_decisao"] = agora
+
+
+def preparar_destino_preferido(candidato, destino_normal, motivo):
+    destino = dict(candidato)
+    destino["motivo"] = motivo
+    destino["raios"] = destino_normal["raios"]
+    destino["validos_por_tipo"] = destino_normal["validos_por_tipo"]
+    destino["validos_por_lado"] = destino_normal["validos_por_lado"]
+    destino["erro_x"] = destino["destino_local"][0] - destino_normal["origem_local"][0]
+    return destino
+
+
+def escolher_destino_preferindo_frente(destino_normal):
+    candidatos = destino_normal.get("validos_por_tipo", {}).get("FRENTE", [])
+    if candidatos:
+        escolhido = max(candidatos, key=lambda item: item["score"])
+        return preparar_destino_preferido(escolhido, destino_normal, "VERDE_RETO_FRENTE")
+    candidatos = destino_normal.get("validos_por_lado", {}).get("CENTRO", [])
+    if candidatos:
+        escolhido = max(candidatos, key=lambda item: item["score"])
+        return preparar_destino_preferido(escolhido, destino_normal, "VERDE_RETO_CENTRO")
+    return destino_normal
+
+
+def escolher_destino_preferindo_lado(destino_normal, lado):
+    candidatos = destino_normal.get("validos_por_lado", {}).get(lado, [])
+    if candidatos:
+        escolhido = max(candidatos, key=lambda item: (item["tipo"] == "CURVA", item["score"]))
+        return preparar_destino_preferido(escolhido, destino_normal, f"VERDE_{lado}")
+    return destino_normal
+
+
+def escolher_destino_preferindo_retorno(destino_normal):
+    candidatos = destino_normal.get("validos_por_tipo", {}).get("RETORNO", [])
+    if candidatos:
+        escolhido = max(candidatos, key=lambda item: item["score"])
+        return preparar_destino_preferido(escolhido, destino_normal, "VERDE_RETORNO")
+    return destino_normal
+
+
+def aplicar_verde_ativo(resultado, destino_normal, estado_verde, agora):
+    if estado_verde["modo"] not in ("ARMADO", "EXECUTANDO"):
+        return destino_normal
+    if not destino_normal.get("ok", False):
+        return destino_normal
+
+    estado_verde["modo"] = "EXECUTANDO"
+    decisao = estado_verde["decisao"]
+    if decisao == "RETO":
+        return escolher_destino_preferindo_frente(destino_normal)
+    if decisao == "ESQUERDA":
+        return escolher_destino_preferindo_lado(destino_normal, "ESQUERDA")
+    if decisao == "DIREITA":
+        return escolher_destino_preferindo_lado(destino_normal, "DIREITA")
+    if decisao == "RETORNO":
+        return escolher_destino_preferindo_retorno(destino_normal)
+    return destino_normal
 
 
 def enviar_seguro(conexao, comando, motores_ativos):
@@ -588,8 +711,13 @@ def main():
         if not args.camera:
             print("Use --camera.")
             return 1
-        if args.verde_sombra and analisar_verdes is None:
+        usar_verde = args.verde_sombra or args.verde_ativo
+        if usar_verde and analisar_verdes is None:
             print("Erro: nao foi possivel importar analisar_verdes de verdes.py")
+            return 1
+        verde_acoes = ler_verde_acoes(args.verde_acoes)
+        if args.verde_ativo and not verde_acoes:
+            print("Erro: --verde-acoes nao possui nenhuma acao valida.")
             return 1
         if args.motores:
             if abrir_serial is None:
@@ -618,13 +746,21 @@ def main():
         }
         controle_varredura = {"etapa": 0, "ultima_troca": time.monotonic()}
         estado_log = criar_estado_log()
+        estado_verde = criar_estado_verde_ativo()
         estado_anterior, ultimo_debug = None, 0
 
         while True:
             frame = capturar_frame_bgr(camera)
-            resultado_verde = analisar_verdes(frame) if args.verde_sombra else None
+            agora = time.monotonic()
+            resultado_verde = analisar_verdes(frame) if usar_verde else None
             resultado = detectar_linha(frame)
-            destino = escolher_destino(resultado)
+            if args.verde_ativo:
+                atualizar_estado_verde_ativo(resultado_verde, estado_verde, agora, verde_acoes)
+            destino_normal = escolher_destino(resultado)
+            if args.verde_ativo:
+                destino = aplicar_verde_ativo(resultado, destino_normal, estado_verde, agora)
+            else:
+                destino = destino_normal
             if not destino["ok"]:
                 resetar_confirmacao_lado_recuperacao(memoria)
             if destino["ok"]:
@@ -660,7 +796,6 @@ def main():
 
             enviar_seguro(conexao, comando, args.motores)
             if args.log:
-                agora = time.monotonic()
                 decisao_log = atualizar_decisao_log_verde(resultado_verde, estado_log, agora)
                 imprimir_log_simples(decisao_log, estado_log, agora)
             else:
