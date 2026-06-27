@@ -776,8 +776,21 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
 
 
 def decidir_verdes(candidatos, cruzamento):
-    validos_esquerda = [c for c in candidatos if c["valido"] and c["lado"] == "ESQUERDA"]
-    validos_direita = [c for c in candidatos if c["valido"] and c["lado"] == "DIREITA"]
+    validos_antes = [
+        candidato
+        for candidato in candidatos
+        if candidato.get("valido")
+        and not candidato.get("verde_depois_intersecao", False)
+        and not candidato.get("falso_depois_cruzamento", False)
+    ]
+    validos_esquerda = [c for c in validos_antes if c["lado"] == "ESQUERDA"]
+    validos_direita = [c for c in validos_antes if c["lado"] == "DIREITA"]
+    falsos_depois = [
+        candidato
+        for candidato in candidatos
+        if candidato.get("verde_depois_intersecao", False)
+        or candidato.get("falso_depois_cruzamento", False)
+    ]
 
     if validos_esquerda and validos_direita:
         confianca = min(max(max(c["confianca"] for c in validos_esquerda), max(c["confianca"] for c in validos_direita)), 1.0)
@@ -788,6 +801,8 @@ def decidir_verdes(candidatos, cruzamento):
         return "DIREITA", "verde_direita_valido", validos_direita[0]["confianca"]
     if len(validos_esquerda) > 1 or len(validos_direita) > 1:
         return "INSEGURO", "verde_inseguro", 0.45
+    if falsos_depois:
+        return "NENHUM", "apenas_verde_depois_intersecao_ignorado", 0.0
     if cruzamento["detectado"]:
         return "NENHUM", "cruzamento_sem_verde_ignorado", 0.0
     return "NENHUM", "sem_verde_valido", 0.0
