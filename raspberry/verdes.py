@@ -32,7 +32,8 @@ VERDE_Y_MIN_REL = 0.30
 VERDE_Y_MAX_REL = 0.95
 VERDE_AREA_MIN_LONGE = 35
 VERDE_AREA_MIN_PERTO = 120
-VERDE_AREA_MAX_REL_QUADRO = 0.10
+VERDE_AREA_MAX_REL_QUADRO = 0.25
+VERDE_AREA_ABSURDA_REL_QUADRO = 0.45
 VERDE_ASPECTO_MIN = 0.45
 VERDE_ASPECTO_MAX = 2.20
 VERDE_FILL_RATIO_MIN = 0.25
@@ -262,6 +263,59 @@ def encontrar_referencia_linha_local(mascara_linha, cx, cy):
     return None
 
 
+def cruzamento_pode_ser_referencia(cruzamento, largura_imagem):
+    if not cruzamento.get("detectado") or cruzamento.get("centro") is None:
+        return False
+
+    cx_cruz, _ = cruzamento["centro"]
+    if cx_cruz < largura_imagem * 0.15 or cx_cruz > largura_imagem * 0.85:
+        return False
+
+    return bool(cruzamento.get("linha_baixo", False))
+
+
+def obter_referencia_lado_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
+    _, cy = candidato["centro"]
+    _, largura = mascara_linha.shape[:2]
+
+    if cruzamento_pode_ser_referencia(cruzamento, largura):
+        return {
+            "x_linha": int(cruzamento["centro"][0]),
+            "y_linha": int(cruzamento["centro"][1]),
+            "largura_linha_px": float(cruzamento.get("largura_linha_px", largura_linha_px)),
+            "origem": "cruzamento",
+            "confianca_referencia": 1.0,
+        }
+
+    x_alvo_principal = largura / 2
+    for dy in BUSCA_LINHA_DY:
+        segmento = encontrar_segmento_linha_por_y(
+            mascara_linha,
+            cy + dy,
+            x_alvo=x_alvo_principal,
+        )
+        if segmento is None:
+            continue
+
+        x_linha, largura_linha, y_linha = segmento
+        if 3 <= largura_linha <= largura * 0.45:
+            return {
+                "x_linha": int(x_linha),
+                "y_linha": int(y_linha),
+                "largura_linha_px": float(largura_linha),
+                "origem": "linha_local_centro",
+                "confianca_referencia": 0.75,
+            }
+
+    return {
+        "x_linha": int(largura / 2),
+        "y_linha": int(cy),
+        "largura_linha_px": float(largura_linha_px),
+        "origem": "centro_imagem_fallback",
+        "confianca_referencia": 0.35,
+    }
+
+
 def analisar_cruzamento(mascara_linha):
     altura, largura = mascara_linha.shape[:2]
     largura_linha_px = estimar_largura_linha(mascara_linha)
@@ -373,14 +427,16 @@ def analisar_cruzamento(mascara_linha):
 
 
 def calcular_lado_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
-    cx, cy = candidato["centro"]
-    if cruzamento["detectado"] and cruzamento["centro"] is not None:
-        x_referencia = cruzamento["centro"][0]
-    else:
-        x_linha = encontrar_centro_linha_por_y(mascara_linha, cy)
-        x_referencia = x_linha if x_linha is not None else mascara_linha.shape[1] // 2
+    cx, _ = candidato["centro"]
+    referencia = obter_referencia_lado_verde(
+        candidato,
+        cruzamento,
+        mascara_linha,
+        largura_linha_px,
+    )
+    x_referencia = referencia["x_linha"]
 
-    margem_centro = max(10, largura_linha_px * 0.8)
+    margem_centro = max(10, referencia["largura_linha_px"] * MARGEM_CENTRO_LINHA_MULT)
     if cx < x_referencia - margem_centro:
         return "ESQUERDA", int(x_referencia)
     if cx > x_referencia + margem_centro:
@@ -513,6 +569,11 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["linha_referencia"] = None
     candidato["pixels_linha_proxima"] = 0
     candidato["falso_depois_cruzamento"] = False
+    area_quadro = largura * altura
+    area_rel_quadro = candidato["area"] / max(area_quadro, 1)
+    candidato["area_rel_quadro"] = float(area_rel_quadro)
+    verde_grande_mas_plausivel = area_rel_quadro > VERDE_AREA_MAX_REL_QUADRO
+    candidato["verde_grande_mas_plausivel"] = bool(verde_grande_mas_plausivel)
 
     y_rel = cy / max(altura, 1)
     if y_rel < VERDE_Y_MIN_REL or y_rel > VERDE_Y_MAX_REL:
@@ -542,8 +603,8 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
 
-    if candidato["area"] > largura * altura * VERDE_AREA_MAX_REL_QUADRO:
-        candidato["motivo"] = "area_grande_demais"
+    if area_rel_quadro > VERDE_AREA_ABSURDA_REL_QUADRO:
+        candidato["motivo"] = "area_absurda"
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
 
@@ -587,16 +648,21 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
 
-    referencia_linha = encontrar_referencia_linha_local(mascara_linha, cx, cy)
-    if referencia_linha is None:
-        candidato["motivo"] = "sem_linha_preta_proxima"
+    referencia_linha = obter_referencia_lado_verde(
+        candidato,
+        cruzamento,
+        mascara_linha,
+        largura_linha_px,
+    )
+    candidato["linha_referencia"] = referencia_linha
+    candidato["x_referencia"] = referencia_linha["x_linha"]
+    if referencia_linha["origem"] == "centro_imagem_fallback":
+        candidato["motivo"] = "referencia_linha_fraca"
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
 
     x_linha = referencia_linha["x_linha"]
     largura_linha_local = referencia_linha["largura_linha_px"]
-    candidato["linha_referencia"] = referencia_linha
-    candidato["x_referencia"] = x_linha
 
     margem_centro = max(10, largura_linha_local * MARGEM_CENTRO_LINHA_MULT)
     candidato["margem_centro_linha"] = float(margem_centro)
@@ -624,10 +690,13 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
 
-    if cruzamento["detectado"]:
+    if cruzamento_pode_ser_referencia(cruzamento, largura):
         confianca += 0.05
 
     confianca += 0.10
+    if verde_grande_mas_plausivel:
+        confianca -= 0.05
+        candidato["observacao_tamanho"] = "verde_grande_mas_plausivel"
     candidato["valido"] = True
     candidato["motivo"] = "verde_esquerda_valido" if lado == "ESQUERDA" else "verde_direita_valido"
     candidato["confianca"] = limitar(confianca, 0.0, 1.0)
@@ -697,13 +766,18 @@ def formatar_log(resultado):
 
 def imprimir_log_detalhado(resultado):
     for indice, verde in enumerate(resultado["verdes"], start=1):
+        referencia = verde.get("linha_referencia") or {}
         print(
             f"verde#{indice} lado={verde['lado']} bbox={verde['bbox']} area={verde['area']:.0f} "
             f"valido={verde['valido']} motivo={verde['motivo']} conf={verde['confianca']:.2f} "
             f"preto_acima={verde.get('preto_acima', False)} preto_abaixo={verde.get('preto_abaixo', False)} "
             f"preto_esquerda={verde.get('preto_esquerda', False)} preto_direita={verde.get('preto_direita', False)} "
             f"pixels_acima={verde.get('pixels_acima', 0)} pixels_abaixo={verde.get('pixels_abaixo', 0)} "
-            f"pixels_esquerda={verde.get('pixels_esquerda', 0)} pixels_direita={verde.get('pixels_direita', 0)}"
+            f"pixels_esquerda={verde.get('pixels_esquerda', 0)} pixels_direita={verde.get('pixels_direita', 0)} "
+            f"origem_ref={referencia.get('origem', 'nenhuma')} x_ref={verde.get('x_referencia')} "
+            f"area_rel={verde.get('area_rel_quadro', 0.0):.3f} "
+            f"grande_plausivel={verde.get('verde_grande_mas_plausivel', False)} "
+            f"observacao_tamanho={verde.get('observacao_tamanho', 'nenhuma')}"
         )
 
 
