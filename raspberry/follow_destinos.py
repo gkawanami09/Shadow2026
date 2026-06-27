@@ -115,6 +115,7 @@ def criar_estado_verde_ativo():
     return {
         "modo": "NORMAL",
         "decisao_confirmada": "NENHUM",
+        "decisao_em_confirmacao": "NENHUM",
         "tempo_inicio": 0.0,
         "cooldown_ate": 0.0,
         "frames_confirmacao": 0,
@@ -134,6 +135,7 @@ def criar_estado_verde_ativo():
 
 def limpar_confirmacao_verde(estado_verde):
     estado_verde["decisao_confirmada"] = "NENHUM"
+    estado_verde["decisao_em_confirmacao"] = "NENHUM"
     estado_verde["frames_confirmacao"] = 0
     estado_verde["lado_busca_pos_verde"] = "CENTRO"
     estado_verde["lado_giro_retorno"] = "CENTRO"
@@ -189,19 +191,21 @@ def atualizar_estado_verde_ativo(
             return estado_verde
         limpar_confirmacao_verde(estado_verde)
         estado_verde["modo"] = "CONFIRMANDO_VERDE"
+        estado_verde["decisao_em_confirmacao"] = decisao_crua
         estado_verde["tempo_inicio"] = agora
         registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
         return estado_verde
 
     if modo == "CONFIRMANDO_VERDE":
-        registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
-        votos = estado_verde["votos"]
-        retorno_confirmado = votos["RETORNO"] >= MIN_VOTOS_RETORNO_VERDE
-        if votos["ESQUERDA"] > 0 and votos["DIREITA"] > 0 and not retorno_confirmado:
+        if (
+            decisao_crua == "NENHUM"
+            or decisao_crua != estado_verde["decisao_em_confirmacao"]
+        ):
             limpar_confirmacao_verde(estado_verde)
             entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
             return estado_verde
 
+        registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
         tem_frames = estado_verde["frames_confirmacao"] >= MIN_FRAMES_CONFIRMAR_VERDE
         decisao = escolher_decisao_confirmada_verde(estado_verde, acoes_habilitadas)
         if tem_frames and decisao != "NENHUM":
@@ -283,6 +287,12 @@ def log_estado_verde_ativo(estado_verde):
     if modo == "RECUPERANDO_LINHA":
         return f"BUSCANDO_LINHA_{estado_verde['lado_busca_pos_verde']}"
     return modo
+
+
+def filtrar_decisao_verde_para_acao(decisao, acao_permitida, origem_decisao):
+    if acao_permitida and origem_decisao == "VERDE_ANTES_INTERSECAO":
+        return decisao
+    return "NENHUM"
 
 
 def formatar_log_simples(decisao):
@@ -941,13 +951,28 @@ def main():
                 if resultado_verde is not None
                 else "NENHUM"
             )
+            acao_permitida = (
+                resultado_verde.get("acao_permitida", False)
+                if resultado_verde is not None
+                else False
+            )
+            origem_decisao = (
+                resultado_verde.get("origem_decisao", "DESCONHECIDA")
+                if resultado_verde is not None
+                else "DESCONHECIDA"
+            )
+            decisao_verde_para_acao = filtrar_decisao_verde_para_acao(
+                decisao_verde_crua,
+                acao_permitida,
+                origem_decisao,
+            )
             agora = time.monotonic()
             resultado = detectar_linha(frame)
             destino_normal = escolher_destino(resultado)
             if args.verde_ativo:
                 atualizar_estado_verde_ativo(
                     estado_verde_ativo,
-                    decisao_verde_crua,
+                    decisao_verde_para_acao,
                     args.verde_acoes,
                     agora,
                     destino_normal,

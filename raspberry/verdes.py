@@ -683,6 +683,7 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["dy_centro_cruzamento"] = posicao_cruzamento["dy_centro_cruzamento"]
     candidato["frac_bbox_antes"] = posicao_cruzamento["frac_bbox_antes"]
     if posicao_cruzamento["verde_depois_intersecao"]:
+        candidato["valido"] = False
         candidato["falso_depois_cruzamento"] = True
         candidato["motivo"] = "verde_depois_intersecao_ignorado"
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
@@ -779,33 +780,65 @@ def decidir_verdes(candidatos, cruzamento):
     validos_antes = [
         candidato
         for candidato in candidatos
-        if candidato.get("valido")
+        if candidato.get("valido", False)
+        and candidato.get("verde_antes_intersecao", False)
         and not candidato.get("verde_depois_intersecao", False)
         and not candidato.get("falso_depois_cruzamento", False)
     ]
-    validos_esquerda = [c for c in validos_antes if c["lado"] == "ESQUERDA"]
-    validos_direita = [c for c in validos_antes if c["lado"] == "DIREITA"]
+    validos_sobrepostos = [
+        candidato
+        for candidato in candidatos
+        if candidato.get("valido", False)
+        and candidato.get("posicao_cruzamento") == "SOBREPOSTO"
+        and not candidato.get("verde_depois_intersecao", False)
+        and not candidato.get("falso_depois_cruzamento", False)
+    ]
+    validos_para_acao = validos_antes + [
+        candidato
+        for candidato in validos_sobrepostos
+        if not any(candidato is valido_antes for valido_antes in validos_antes)
+    ]
     falsos_depois = [
         candidato
         for candidato in candidatos
         if candidato.get("verde_depois_intersecao", False)
         or candidato.get("falso_depois_cruzamento", False)
     ]
+    validos_esquerda = [c for c in validos_para_acao if c.get("lado") == "ESQUERDA"]
+    validos_direita = [c for c in validos_para_acao if c.get("lado") == "DIREITA"]
 
     if validos_esquerda and validos_direita:
         confianca = min(max(max(c["confianca"] for c in validos_esquerda), max(c["confianca"] for c in validos_direita)), 1.0)
-        return "RETORNO", "verde_duplo_valido", confianca
+        return "RETORNO", "verde_duplo_valido", confianca, True, "VERDE_ANTES_INTERSECAO"
     if len(validos_esquerda) == 1 and not validos_direita:
-        return "ESQUERDA", "verde_esquerda_valido", validos_esquerda[0]["confianca"]
+        return (
+            "ESQUERDA",
+            "verde_esquerda_valido",
+            validos_esquerda[0]["confianca"],
+            True,
+            "VERDE_ANTES_INTERSECAO",
+        )
     if len(validos_direita) == 1 and not validos_esquerda:
-        return "DIREITA", "verde_direita_valido", validos_direita[0]["confianca"]
+        return (
+            "DIREITA",
+            "verde_direita_valido",
+            validos_direita[0]["confianca"],
+            True,
+            "VERDE_ANTES_INTERSECAO",
+        )
     if len(validos_esquerda) > 1 or len(validos_direita) > 1:
-        return "INSEGURO", "verde_inseguro", 0.45
+        return "INSEGURO", "verde_inseguro", 0.45, False, "INSEGURO"
     if falsos_depois:
-        return "NENHUM", "apenas_verde_depois_intersecao_ignorado", 0.0
+        return (
+            "NENHUM",
+            "apenas_verde_depois_intersecao_ignorado",
+            0.0,
+            False,
+            "VERDE_DEPOIS_INTERSECAO",
+        )
     if cruzamento["detectado"]:
-        return "NENHUM", "cruzamento_sem_verde_ignorado", 0.0
-    return "NENHUM", "sem_verde_valido", 0.0
+        return "NENHUM", "cruzamento_sem_verde_ignorado", 0.0, False, "SEM_VERDE_VALIDO"
+    return "NENHUM", "sem_verde_valido", 0.0, False, "SEM_VERDE_VALIDO"
 
 
 def analisar_verdes(frame_bgr):
@@ -822,11 +855,33 @@ def analisar_verdes(frame_bgr):
     ]
     candidatos = juntar_candidatos_verdes(candidatos, largura_linha_px)
     verdes = [validar_verde(c, cruzamento, mascara_linha, largura_linha_px) for c in candidatos]
-    decisao, motivo, confianca = decidir_verdes(verdes, cruzamento)
+    decisao, motivo, confianca, acao_permitida, origem_decisao = decidir_verdes(
+        verdes,
+        cruzamento,
+    )
+    tem_verde_valido_antes = any(
+        candidato.get("valido", False)
+        and (
+            candidato.get("verde_antes_intersecao", False)
+            or candidato.get("posicao_cruzamento") == "SOBREPOSTO"
+        )
+        and not candidato.get("verde_depois_intersecao", False)
+        and not candidato.get("falso_depois_cruzamento", False)
+        for candidato in verdes
+    )
+    tem_verde_falso_depois = any(
+        candidato.get("verde_depois_intersecao", False)
+        or candidato.get("falso_depois_cruzamento", False)
+        for candidato in verdes
+    )
     return {
         "decisao": decisao,
         "motivo": motivo,
         "confianca": limitar(confianca, 0.0, 1.0),
+        "acao_permitida": bool(acao_permitida),
+        "origem_decisao": origem_decisao,
+        "tem_verde_valido_antes": bool(tem_verde_valido_antes),
+        "tem_verde_falso_depois": bool(tem_verde_falso_depois),
         "cruzamento": cruzamento,
         "verdes": verdes,
         "mascaras": {
@@ -844,7 +899,10 @@ def formatar_log(resultado):
     validos_direita = sum(1 for verde in verdes if verde["valido"] and verde["lado"] == "DIREITA")
     falsos = sum(1 for verde in verdes if verde.get("falso_depois_cruzamento"))
     return (
-        f"[VERDES] dec={resultado['decisao']} conf={resultado['confianca']:.2f} motivo={resultado['motivo']} | "
+        f"[VERDES] dec={resultado['decisao']} conf={resultado['confianca']:.2f} motivo={resultado['motivo']} "
+        f"acao={int(resultado['acao_permitida'])} origem={resultado['origem_decisao']} "
+        f"valido_antes={int(resultado['tem_verde_valido_antes'])} "
+        f"falso_depois={int(resultado['tem_verde_falso_depois'])} | "
         f"cruz={int(cruzamento['detectado'])} E={int(cruzamento['ramo_esquerda'])} "
         f"D={int(cruzamento['ramo_direita'])} F={int(cruzamento['ramo_frente'])} | "
         f"verdes E/D={validos_esquerda}/{validos_direita} falsos={falsos} total={len(verdes)}"
@@ -852,6 +910,13 @@ def formatar_log(resultado):
 
 
 def imprimir_log_detalhado(resultado):
+    print(
+        f"resumo decisao={resultado['decisao']} motivo={resultado['motivo']} "
+        f"confianca={resultado['confianca']:.2f} acao_permitida={resultado['acao_permitida']} "
+        f"origem_decisao={resultado['origem_decisao']} "
+        f"tem_verde_valido_antes={resultado['tem_verde_valido_antes']} "
+        f"tem_verde_falso_depois={resultado['tem_verde_falso_depois']}"
+    )
     for indice, verde in enumerate(resultado["verdes"], start=1):
         referencia = verde.get("linha_referencia") or {}
         print(
