@@ -49,11 +49,12 @@ INTERVALO_LOG_SIMPLES = 0.20
 DECISOES_VERDE_LOG = ("RETO", "ESQUERDA", "DIREITA", "RETORNO", "INSEGURO")
 ACOES_VERDE_VALIDAS = ("ESQUERDA", "DIREITA", "RETORNO")
 
-TEMPO_CONFIRMAR_VERDE = 0.55
-MIN_FRAMES_CONFIRMAR_VERDE = 4
+TEMPO_CONFIRMAR_VERDE = 0.75
+MIN_FRAMES_CONFIRMAR_VERDE = 3
 MIN_VOTOS_LADO_VERDE = 2
 MIN_VOTOS_RETORNO_VERDE = 2
-MAX_FRAMES_NENHUM_CONFIRMAR_VERDE = 2
+MAX_FRAMES_NENHUM_CONFIRMAR_VERDE = 4
+TEMPO_ARMAR_VERDE = 0.90
 
 TEMPO_AVANCAR_APOS_VERDE = 0.45
 
@@ -117,6 +118,8 @@ def criar_estado_verde_ativo():
         "modo": "NORMAL",
         "decisao_confirmada": "NENHUM",
         "decisao_em_confirmacao": "NENHUM",
+        "decisao_intencao": "NENHUM",
+        "tempo_inicio_intencao": 0.0,
         "tempo_inicio": 0.0,
         "cooldown_ate": 0.0,
         "frames_confirmacao": 0,
@@ -138,6 +141,8 @@ def criar_estado_verde_ativo():
 def limpar_confirmacao_verde(estado_verde):
     estado_verde["decisao_confirmada"] = "NENHUM"
     estado_verde["decisao_em_confirmacao"] = "NENHUM"
+    estado_verde["decisao_intencao"] = "NENHUM"
+    estado_verde["tempo_inicio_intencao"] = 0.0
     estado_verde["frames_confirmacao"] = 0
     estado_verde["frames_nenhum_confirmacao"] = 0
     estado_verde["lado_busca_pos_verde"] = "CENTRO"
@@ -203,12 +208,18 @@ def atualizar_estado_verde_ativo(
         limpar_confirmacao_verde(estado_verde)
         estado_verde["modo"] = "CONFIRMANDO_VERDE"
         estado_verde["decisao_em_confirmacao"] = decisao_crua
+        estado_verde["decisao_intencao"] = decisao_crua
         estado_verde["tempo_inicio"] = agora
+        estado_verde["tempo_inicio_intencao"] = agora
         registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
         return estado_verde
 
     if modo == "CONFIRMANDO_VERDE":
-        if decisao_crua == "NENHUM":
+        intencao = estado_verde["decisao_intencao"]
+        if decisao_crua == intencao:
+            estado_verde["frames_nenhum_confirmacao"] = 0
+            registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
+        elif decisao_crua == "NENHUM":
             estado_verde["frames_nenhum_confirmacao"] += 1
             estado_verde["frames_confirmacao"] += 1
             if (
@@ -218,30 +229,17 @@ def atualizar_estado_verde_ativo(
                 limpar_confirmacao_verde(estado_verde)
                 entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
                 return estado_verde
-            if agora - estado_verde["tempo_inicio"] < TEMPO_CONFIRMAR_VERDE:
-                return estado_verde
         elif decisao_crua in acoes_habilitadas:
             estado_verde["frames_nenhum_confirmacao"] = 0
-            if estado_verde["decisao_em_confirmacao"] == "NENHUM":
-                estado_verde["decisao_em_confirmacao"] = decisao_crua
-            if decisao_crua != estado_verde["decisao_em_confirmacao"]:
+            if intencao != "RETORNO" and decisao_crua == "RETORNO":
                 registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
-                decisao_conflito = escolher_decisao_confirmada_verde(
-                    estado_verde,
-                    acoes_habilitadas,
-                )
-                envolve_retorno = "RETORNO" in (
-                    decisao_crua,
-                    estado_verde["decisao_em_confirmacao"],
-                )
-                if envolve_retorno and decisao_conflito == "RETORNO":
+                if estado_verde["votos"]["RETORNO"] >= MIN_VOTOS_RETORNO_VERDE:
+                    estado_verde["decisao_intencao"] = "RETORNO"
                     estado_verde["decisao_em_confirmacao"] = "RETORNO"
-                else:
-                    limpar_confirmacao_verde(estado_verde)
-                    entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
-                    return estado_verde
             else:
-                registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
+                limpar_confirmacao_verde(estado_verde)
+                entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
+                return estado_verde
         else:
             limpar_confirmacao_verde(estado_verde)
             entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
@@ -253,8 +251,9 @@ def atualizar_estado_verde_ativo(
             confirmar_decisao_verde(estado_verde, decisao, agora)
             return estado_verde
 
-        if agora - estado_verde["tempo_inicio"] >= TEMPO_CONFIRMAR_VERDE:
-            if decisao != "NENHUM":
+        tempo_intencao = agora - estado_verde["tempo_inicio_intencao"]
+        if tempo_intencao >= TEMPO_ARMAR_VERDE:
+            if decisao != "NENHUM" and tem_frames:
                 confirmar_decisao_verde(estado_verde, decisao, agora)
             else:
                 limpar_confirmacao_verde(estado_verde)
@@ -868,6 +867,13 @@ def comando_confirmar_sem_destino(memoria):
     return f"LADO {round(vel_esq)} {round(vel_dir)}"
 
 
+def aplicar_comando_confirmando_verde(destino, memoria):
+    if destino.get("ok", False):
+        comando, _, _, _ = controlar_destino(destino, memoria, confirmar=True)
+        return comando
+    return comando_confirmar_sem_destino(memoria)
+
+
 def criar_debug_destinos(resultado, destino, estado, comando, memoria, motivo_recuperacao):
     debug = criar_debug_linha(resultado)
     x_inicio, y_inicio = resultado["x_inicio_roi"], resultado["y_inicio_roi"]
@@ -1031,6 +1037,10 @@ def main():
                 args.verde_ativo
                 and estado_verde_ativo["modo"] == "RECUPERANDO_LINHA"
             )
+            confirmando_verde = (
+                args.verde_ativo
+                and estado_verde_ativo["modo"] == "CONFIRMANDO_VERDE"
+            )
             if executando_retorno_verde:
                 deve_recuperar = False
                 motivo_recuperacao = "VERDE_RETORNO_CEGO"
@@ -1055,7 +1065,10 @@ def main():
                 and destino.get("ok", False)
                 and lado_destino(destino) == estado_verde_ativo["decisao_confirmada"]
             )
-            if executando_retorno_verde:
+            if confirmando_verde:
+                estado = "CONFIRMANDO_VERDE"
+                comando = aplicar_comando_confirmando_verde(destino_normal, memoria)
+            elif executando_retorno_verde:
                 estado = "VERDE_RETORNO_CEGO"
                 comando = comando_giro_retorno_verde(estado_verde_ativo, memoria)
             elif recuperando_linha_verde:
