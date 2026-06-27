@@ -49,10 +49,11 @@ INTERVALO_LOG_SIMPLES = 0.20
 DECISOES_VERDE_LOG = ("RETO", "ESQUERDA", "DIREITA", "RETORNO", "INSEGURO")
 ACOES_VERDE_VALIDAS = ("ESQUERDA", "DIREITA", "RETORNO")
 
-TEMPO_CONFIRMAR_VERDE = 0.45
-MIN_FRAMES_CONFIRMAR_VERDE = 3
+TEMPO_CONFIRMAR_VERDE = 0.55
+MIN_FRAMES_CONFIRMAR_VERDE = 4
 MIN_VOTOS_LADO_VERDE = 2
 MIN_VOTOS_RETORNO_VERDE = 2
+MAX_FRAMES_NENHUM_CONFIRMAR_VERDE = 2
 
 TEMPO_AVANCAR_APOS_VERDE = 0.45
 
@@ -119,6 +120,7 @@ def criar_estado_verde_ativo():
         "tempo_inicio": 0.0,
         "cooldown_ate": 0.0,
         "frames_confirmacao": 0,
+        "frames_nenhum_confirmacao": 0,
         "frames_sem_verde": 0,
         "lado_busca_pos_verde": "CENTRO",
         "lado_giro_retorno": "CENTRO",
@@ -137,6 +139,7 @@ def limpar_confirmacao_verde(estado_verde):
     estado_verde["decisao_confirmada"] = "NENHUM"
     estado_verde["decisao_em_confirmacao"] = "NENHUM"
     estado_verde["frames_confirmacao"] = 0
+    estado_verde["frames_nenhum_confirmacao"] = 0
     estado_verde["lado_busca_pos_verde"] = "CENTRO"
     estado_verde["lado_giro_retorno"] = "CENTRO"
     estado_verde["busca_pos_verde_ate"] = 0.0
@@ -177,6 +180,14 @@ def escolher_decisao_confirmada_verde(estado_verde, acoes_habilitadas):
     return "NENHUM"
 
 
+def confirmar_decisao_verde(estado_verde, decisao, agora):
+    estado_verde["decisao_confirmada"] = decisao
+    estado_verde["lado_busca_pos_verde"] = decisao
+    estado_verde["frames_linha_pos_verde"] = 0
+    estado_verde["modo"] = "AVANCANDO_APOS_VERDE"
+    estado_verde["tempo_inicio"] = agora
+
+
 def atualizar_estado_verde_ativo(
     estado_verde,
     decisao_crua,
@@ -197,28 +208,57 @@ def atualizar_estado_verde_ativo(
         return estado_verde
 
     if modo == "CONFIRMANDO_VERDE":
-        if (
-            decisao_crua == "NENHUM"
-            or decisao_crua != estado_verde["decisao_em_confirmacao"]
-        ):
+        if decisao_crua == "NENHUM":
+            estado_verde["frames_nenhum_confirmacao"] += 1
+            estado_verde["frames_confirmacao"] += 1
+            if (
+                estado_verde["frames_nenhum_confirmacao"]
+                > MAX_FRAMES_NENHUM_CONFIRMAR_VERDE
+            ):
+                limpar_confirmacao_verde(estado_verde)
+                entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
+                return estado_verde
+            if agora - estado_verde["tempo_inicio"] < TEMPO_CONFIRMAR_VERDE:
+                return estado_verde
+        elif decisao_crua in acoes_habilitadas:
+            estado_verde["frames_nenhum_confirmacao"] = 0
+            if estado_verde["decisao_em_confirmacao"] == "NENHUM":
+                estado_verde["decisao_em_confirmacao"] = decisao_crua
+            if decisao_crua != estado_verde["decisao_em_confirmacao"]:
+                registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
+                decisao_conflito = escolher_decisao_confirmada_verde(
+                    estado_verde,
+                    acoes_habilitadas,
+                )
+                envolve_retorno = "RETORNO" in (
+                    decisao_crua,
+                    estado_verde["decisao_em_confirmacao"],
+                )
+                if envolve_retorno and decisao_conflito == "RETORNO":
+                    estado_verde["decisao_em_confirmacao"] = "RETORNO"
+                else:
+                    limpar_confirmacao_verde(estado_verde)
+                    entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
+                    return estado_verde
+            else:
+                registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
+        else:
             limpar_confirmacao_verde(estado_verde)
             entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
             return estado_verde
 
-        registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
         tem_frames = estado_verde["frames_confirmacao"] >= MIN_FRAMES_CONFIRMAR_VERDE
         decisao = escolher_decisao_confirmada_verde(estado_verde, acoes_habilitadas)
         if tem_frames and decisao != "NENHUM":
-            estado_verde["decisao_confirmada"] = decisao
-            estado_verde["lado_busca_pos_verde"] = decisao
-            estado_verde["frames_linha_pos_verde"] = 0
-            estado_verde["modo"] = "AVANCANDO_APOS_VERDE"
-            estado_verde["tempo_inicio"] = agora
+            confirmar_decisao_verde(estado_verde, decisao, agora)
             return estado_verde
 
         if agora - estado_verde["tempo_inicio"] >= TEMPO_CONFIRMAR_VERDE:
-            limpar_confirmacao_verde(estado_verde)
-            entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
+            if decisao != "NENHUM":
+                confirmar_decisao_verde(estado_verde, decisao, agora)
+            else:
+                limpar_confirmacao_verde(estado_verde)
+                entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
         return estado_verde
 
     if modo == "AVANCANDO_APOS_VERDE":
