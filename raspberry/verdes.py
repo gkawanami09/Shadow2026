@@ -38,6 +38,10 @@ VERDE_ASPECTO_MIN = 0.45
 VERDE_ASPECTO_MAX = 2.20
 VERDE_FILL_RATIO_MIN = 0.25
 VERDE_PROPORCAO_MIN = 1.12
+VERDE_MARGEM_DEPOIS_MIN_PX = 6
+VERDE_MARGEM_DEPOIS_MAX_PX = 16
+VERDE_MARGEM_DEPOIS_MULT_ALTURA = 0.08
+VERDE_FRAC_MIN_BBOX_ANTES = 0.45
 
 PRETO_MARGEM_VERDE_MULT = 0.80
 PRETO_MIN_PIXELS_ABS = 10
@@ -558,6 +562,57 @@ def analisar_preto_ao_redor_do_verde(candidato, mascara_linha):
     }
 
 
+def analisar_posicao_verde_em_relacao_cruzamento(candidato, cruzamento):
+    if not cruzamento.get("detectado") or cruzamento.get("y_cruzamento") is None:
+        return {
+            "posicao": "SEM_CRUZAMENTO",
+            "verde_antes_intersecao": True,
+            "verde_depois_intersecao": False,
+            "y_cruzamento": None,
+            "dy_centro_cruzamento": None,
+            "frac_bbox_antes": None,
+        }
+
+    _, y, _, h = candidato["bbox"]
+    _, cy = candidato["centro"]
+    y_cruzamento = int(cruzamento["y_cruzamento"])
+    margem = int(
+        limitar(
+            h * VERDE_MARGEM_DEPOIS_MULT_ALTURA,
+            VERDE_MARGEM_DEPOIS_MIN_PX,
+            VERDE_MARGEM_DEPOIS_MAX_PX,
+        )
+    )
+
+    # Na imagem, a regiao antes da intersecao fica abaixo do y do cruzamento.
+    y_limite_antes = y_cruzamento + margem
+    altura_antes = max(0, (y + h) - y_limite_antes)
+    frac_bbox_antes = altura_antes / max(h, 1)
+    dy_centro = cy - y_cruzamento
+
+    if cy < y_cruzamento - margem and frac_bbox_antes < VERDE_FRAC_MIN_BBOX_ANTES:
+        posicao = "DEPOIS"
+        verde_antes = False
+    elif cy >= y_cruzamento - margem:
+        posicao = "ANTES"
+        verde_antes = True
+    elif frac_bbox_antes >= VERDE_FRAC_MIN_BBOX_ANTES:
+        posicao = "SOBREPOSTO"
+        verde_antes = True
+    else:
+        posicao = "DEPOIS"
+        verde_antes = False
+
+    return {
+        "posicao": posicao,
+        "verde_antes_intersecao": verde_antes,
+        "verde_depois_intersecao": not verde_antes,
+        "y_cruzamento": y_cruzamento,
+        "dy_centro_cruzamento": float(dy_centro),
+        "frac_bbox_antes": float(frac_bbox_antes),
+    }
+
+
 def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato = dict(candidato)
     x, y, w, h = candidato["bbox"]
@@ -569,6 +624,11 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["linha_referencia"] = None
     candidato["pixels_linha_proxima"] = 0
     candidato["falso_depois_cruzamento"] = False
+    candidato["posicao_cruzamento"] = "NAO_ANALISADO"
+    candidato["verde_antes_intersecao"] = False
+    candidato["verde_depois_intersecao"] = False
+    candidato["dy_centro_cruzamento"] = None
+    candidato["frac_bbox_antes"] = None
     area_quadro = largura * altura
     area_rel_quadro = candidato["area"] / max(area_quadro, 1)
     candidato["area_rel_quadro"] = float(area_rel_quadro)
@@ -615,6 +675,18 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
     confianca += 0.20
+
+    posicao_cruzamento = analisar_posicao_verde_em_relacao_cruzamento(candidato, cruzamento)
+    candidato["posicao_cruzamento"] = posicao_cruzamento["posicao"]
+    candidato["verde_depois_intersecao"] = posicao_cruzamento["verde_depois_intersecao"]
+    candidato["verde_antes_intersecao"] = posicao_cruzamento["verde_antes_intersecao"]
+    candidato["dy_centro_cruzamento"] = posicao_cruzamento["dy_centro_cruzamento"]
+    candidato["frac_bbox_antes"] = posicao_cruzamento["frac_bbox_antes"]
+    if posicao_cruzamento["verde_depois_intersecao"]:
+        candidato["falso_depois_cruzamento"] = True
+        candidato["motivo"] = "verde_depois_intersecao_ignorado"
+        candidato["confianca"] = limitar(confianca, 0.0, 1.0)
+        return candidato
 
     margem = int(max(10, largura_linha_px * 1.5))
     x1 = int(limitar(x - margem, 0, largura - 1))
@@ -777,7 +849,11 @@ def imprimir_log_detalhado(resultado):
             f"origem_ref={referencia.get('origem', 'nenhuma')} x_ref={verde.get('x_referencia')} "
             f"area_rel={verde.get('area_rel_quadro', 0.0):.3f} "
             f"grande_plausivel={verde.get('verde_grande_mas_plausivel', False)} "
-            f"observacao_tamanho={verde.get('observacao_tamanho', 'nenhuma')}"
+            f"observacao_tamanho={verde.get('observacao_tamanho', 'nenhuma')} "
+            f"posicao_cruzamento={verde.get('posicao_cruzamento', 'NAO_ANALISADO')} "
+            f"verde_depois_intersecao={verde.get('verde_depois_intersecao', False)} "
+            f"dy_centro_cruzamento={verde.get('dy_centro_cruzamento')} "
+            f"frac_bbox_antes={verde.get('frac_bbox_antes')}"
         )
 
 
@@ -830,7 +906,10 @@ def criar_debug_verdes(frame_bgr, resultado):
             y_linha = referencia["y_linha"]
             cv2.line(debug, (x_linha, max(0, y_linha - 12)), (x_linha, min(altura - 1, y_linha + 12)), (255, 0, 255), 2)
             cv2.line(debug, (x_linha, y_linha), verde["centro"], (255, 0, 255), 1)
-        texto = f"{verde['lado']} {verde['motivo']} {verde['confianca']:.2f}"
+        if verde.get("verde_depois_intersecao"):
+            texto = f"DEPOIS {verde['motivo']} {verde['confianca']:.2f}"
+        else:
+            texto = f"{verde['lado']} {verde['motivo']} {verde['confianca']:.2f}"
         cv2.putText(debug, texto, (x, max(18, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3)
         cv2.putText(debug, texto, (x, max(18, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, cor, 1)
 
