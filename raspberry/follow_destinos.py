@@ -87,6 +87,11 @@ def ler_argumentos():
     parser.add_argument("--porta", default="auto", help="Porta serial ou auto.")
     parser.add_argument("--salvar-debug", action="store_true", help="Salva imagens de debug.")
     parser.add_argument("--mostrar", action="store_true", help="Mostra janela OpenCV.")
+    parser.add_argument(
+        "--stream-debug",
+        action="store_true",
+        help="Mostra stream visual em tempo real com linha, destino, verde, estado e comando.",
+    )
     parser.add_argument("--verde-sombra", action="store_true", help="Analisa verdes sem interferir no movimento.")
     parser.add_argument("--verde-ativo", action="store_true", help="Ativa manobras confirmadas pelo detector de verdes.")
     parser.add_argument(
@@ -913,6 +918,187 @@ def criar_debug_destinos(resultado, destino, estado, comando, memoria, motivo_re
     return debug
 
 
+def _texto_stream(debug, texto, posicao, cor=(255, 255, 255), escala=0.43):
+    """Desenha texto legivel sem depender do conteudo recebido."""
+    cv2.putText(debug, str(texto), posicao, cv2.FONT_HERSHEY_SIMPLEX, escala, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(debug, str(texto), posicao, cv2.FONT_HERSHEY_SIMPLEX, escala, cor, 1, cv2.LINE_AA)
+
+
+def _numero_stream(valor, casas=2):
+    try:
+        return f"{float(valor):.{casas}f}"
+    except (TypeError, ValueError):
+        return "NA"
+
+
+def criar_stream_debug(
+    frame_bgr,
+    resultado_linha,
+    destino,
+    estado,
+    comando,
+    memoria,
+    motivo_recuperacao,
+    resultado_verde=None,
+    estado_verde_ativo=None,
+):
+    """Monta o stream visual usando apenas resultados ja calculados."""
+    debug = frame_bgr.copy()
+    resultado_linha = resultado_linha or {}
+    destino = destino or {}
+    memoria = memoria or {}
+
+    # Linha e ROI, sem executar novamente o detector.
+    x_inicio = int(resultado_linha.get("x_inicio_roi", 0) or 0)
+    y_inicio = int(resultado_linha.get("y_inicio_roi", 0) or 0)
+    x_fim = int(resultado_linha.get("x_fim_roi", debug.shape[1] - 1) or 0)
+    y_fim = int(resultado_linha.get("y_fim_roi", debug.shape[0] - 1) or 0)
+    cv2.rectangle(debug, (x_inicio, y_inicio), (x_fim, y_fim), (255, 255, 0), 1)
+    contorno = resultado_linha.get("contorno_principal")
+    if contorno is not None:
+        cv2.drawContours(debug, [contorno], -1, (0, 180, 0), 2, offset=(x_inicio, y_inicio))
+    centro_linha_x = resultado_linha.get("centro_linha_x")
+    centro_linha_y = resultado_linha.get("centro_linha_y")
+    if centro_linha_x is not None and centro_linha_y is not None:
+        cv2.circle(debug, (int(centro_linha_x), int(centro_linha_y)), 6, (0, 0, 255), -1)
+
+    # Destino escolhido e o melhor candidato de cada lado.
+    origem_local = destino.get("origem_local")
+    if origem_local is not None and len(origem_local) >= 2:
+        origem_global = (x_inicio + int(origem_local[0]), y_inicio + int(origem_local[1]))
+        cv2.circle(debug, origem_global, 6, (255, 0, 255), -1)
+        for lado, candidatos in (destino.get("validos_por_lado") or {}).items():
+            if not candidatos:
+                continue
+            melhor = max(candidatos, key=lambda item: item.get("score", 0))
+            ponto = melhor.get("destino_global")
+            if ponto is None and melhor.get("destino_local") is not None:
+                ponto = (x_inicio + int(melhor["destino_local"][0]), y_inicio + int(melhor["destino_local"][1]))
+            if ponto is not None:
+                ponto = (int(ponto[0]), int(ponto[1]))
+                cv2.circle(debug, ponto, 4, (255, 120, 0), -1)
+                _texto_stream(debug, lado, (ponto[0] + 5, ponto[1] - 5), (255, 180, 80), 0.35)
+        if destino.get("ok", False):
+            ponto = destino.get("destino_global")
+            if ponto is None and destino.get("destino_local") is not None:
+                ponto = (x_inicio + int(destino["destino_local"][0]), y_inicio + int(destino["destino_local"][1]))
+            if ponto is not None:
+                ponto = (int(ponto[0]), int(ponto[1]))
+                cv2.arrowedLine(debug, origem_global, ponto, (255, 0, 0), 3, tipLength=0.15)
+                _texto_stream(
+                    debug,
+                    f"{destino.get('tipo', 'NA')} {destino.get('motivo', 'NA')} "
+                    f"ang={_numero_stream(destino.get('angulo_destino'), 1)} "
+                    f"erro={destino.get('erro_x', 'NA')}",
+                    (max(5, ponto[0] - 80), max(18, ponto[1] - 12)),
+                    (255, 160, 40),
+                    0.38,
+                )
+
+    # Verdes e cruzamento ja analisados no loop.
+    if resultado_verde is not None:
+        cruzamento = resultado_verde.get("cruzamento") or {}
+        y_cruzamento = cruzamento.get("y_cruzamento")
+        if y_cruzamento is not None:
+            y_cruzamento = int(y_cruzamento)
+            cv2.line(debug, (0, y_cruzamento), (debug.shape[1] - 1, y_cruzamento), (255, 255, 255), 2)
+        for verde in resultado_verde.get("verdes") or []:
+            bbox = verde.get("bbox")
+            if bbox is None or len(bbox) < 4:
+                continue
+            x, y, w, h = (int(valor) for valor in bbox[:4])
+            falso_depois = bool(
+                verde.get("falso_depois_cruzamento", False)
+                or verde.get("verde_depois_intersecao", False)
+            )
+            if verde.get("valido", False) and not falso_depois:
+                cor = (0, 220, 0)
+                rotulo = f"OK_{verde.get('lado', 'NA')}"
+            elif falso_depois:
+                cor = (0, 0, 255)
+                rotulo = "FALSO_DEPOIS"
+            else:
+                cor = (0, 220, 255)
+                motivo = str(verde.get("motivo", "INVALIDO"))
+                rotulo = "INSEGURO" if "insegur" in motivo.lower() else "INVALIDO"
+            cv2.rectangle(debug, (x, y), (x + w, y + h), cor, 2)
+            _texto_stream(
+                debug,
+                f"{rotulo} {verde.get('lado', 'NA')} c={_numero_stream(verde.get('confianca'))} "
+                f"pos={verde.get('posicao_cruzamento', 'NA')} {verde.get('motivo', 'NA')}",
+                (x, max(15, y - 6)),
+                cor,
+                0.36,
+            )
+
+    verdes = (resultado_verde or {}).get("verdes") or []
+    verde_valido_antes = any(
+        item.get("valido", False)
+        and not item.get("verde_depois_intersecao", False)
+        and not item.get("falso_depois_cruzamento", False)
+        for item in verdes
+    )
+    verde_falso_depois = bool((resultado_verde or {}).get("tem_verde_falso_depois", False))
+    linhas = [
+        f"estado={estado if estado is not None else 'NA'}",
+        f"comando={comando if comando is not None else 'NA'}",
+        f"tipo_destino={destino.get('tipo', 'NA')}",
+        f"motivo={motivo_recuperacao if motivo_recuperacao is not None else destino.get('motivo', 'NA')}",
+        f"erro_x={destino.get('erro_x', resultado_linha.get('erro', 'NA'))}",
+        f"linha_encontrada={resultado_linha.get('encontrou_linha', False)}",
+        f"destino_ok={destino.get('ok', False)}",
+        f"ultimo_lado_recuperacao={memoria.get('ultimo_lado_recuperacao', 'NA')}",
+    ]
+    if not destino.get("ok", False):
+        linhas.append("DESTINO PERDIDO")
+    if resultado_verde is not None:
+        linhas.extend([
+            f"verde_decisao={resultado_verde.get('decisao', 'NA')}",
+            f"verde_motivo={resultado_verde.get('motivo', 'NA')}",
+            f"verde_conf={_numero_stream(resultado_verde.get('confianca'))}",
+            f"verde_acao={resultado_verde.get('acao_permitida', False)}",
+            f"verde_origem={resultado_verde.get('origem_decisao', 'NA')}",
+            f"verde_valido_antes={verde_valido_antes}",
+            f"verde_falso_depois={verde_falso_depois}",
+        ])
+        cruzamento = resultado_verde.get("cruzamento") or {}
+        linhas.extend([
+            f"cruzamento_detectado={cruzamento.get('detectado', False)}",
+            f"ramo_esquerda={cruzamento.get('ramo_esquerda', False)}",
+            f"ramo_direita={cruzamento.get('ramo_direita', False)}",
+            f"ramo_frente={cruzamento.get('ramo_frente', False)}",
+            f"linha_baixo={cruzamento.get('linha_baixo', False)}",
+            f"y_cruzamento={cruzamento.get('y_cruzamento', 'NA')}",
+        ])
+    if estado_verde_ativo is not None:
+        linhas.extend([
+            f"modo_verde={estado_verde_ativo.get('modo', 'NA')}",
+            f"decisao_confirmada={estado_verde_ativo.get('decisao_confirmada', 'NA')}",
+            f"decisao_intencao={estado_verde_ativo.get('decisao_intencao', 'NA')}",
+            f"frames_confirmacao={estado_verde_ativo.get('frames_confirmacao', 0)}",
+            f"frames_nenhum_confirmacao={estado_verde_ativo.get('frames_nenhum_confirmacao', 0)}",
+        ])
+
+    altura_linha = 18
+    max_por_coluna = max(1, (debug.shape[0] - 12) // altura_linha)
+    largura_coluna = max(300, debug.shape[1] // 2)
+    for indice, texto_linha in enumerate(linhas):
+        coluna = indice // max_por_coluna
+        linha = indice % max_por_coluna
+        _texto_stream(debug, texto_linha, (8 + coluna * largura_coluna, 18 + linha * altura_linha))
+    return debug
+
+
+def salvar_stream_debug(debug):
+    pasta = Path("debug") / "stream"
+    pasta.mkdir(parents=True, exist_ok=True)
+    agora = datetime.now()
+    caminho = pasta / f"stream_{agora.strftime('%Y%m%d_%H%M%S')}_{agora.microsecond // 1000:03d}.jpg"
+    if not cv2.imwrite(str(caminho), debug):
+        raise RuntimeError(f"Nao foi possivel salvar stream debug: {caminho}")
+    return caminho
+
+
 def salvar_debug(debug, estado):
     pasta = Path(PASTA_CAPTURAS)
     pasta.mkdir(parents=True, exist_ok=True)
@@ -1126,10 +1312,30 @@ def main():
                     salvar_debug(criar_debug_destinos(resultado, destino, estado, comando, memoria, motivo_recuperacao), estado)
                     ultimo_debug = agora
             estado_anterior = estado
+            stream_debug = None
             if args.mostrar:
                 cv2.imshow("follow_destinos", criar_debug_destinos(resultado, destino, estado, comando, memoria, motivo_recuperacao))
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+            if args.stream_debug:
+                stream_debug = criar_stream_debug(
+                    frame,
+                    resultado,
+                    destino,
+                    estado,
+                    comando,
+                    memoria,
+                    motivo_recuperacao,
+                    resultado_verde,
+                    estado_verde_ativo if args.verde_ativo else None,
+                )
+                cv2.imshow("Shadow Stream Debug", stream_debug)
+            if args.mostrar or args.stream_debug:
+                tecla = cv2.waitKey(1) & 0xFF
+                if tecla == ord("q"):
                     raise KeyboardInterrupt
+                if tecla == ord("s") and stream_debug is not None:
+                    caminho_stream = salvar_stream_debug(stream_debug)
+                    if not args.log:
+                        print(f"Stream debug salvo: {caminho_stream}")
             time.sleep(DEST_INTERVALO)
     except KeyboardInterrupt:
         if not args.log:
