@@ -42,6 +42,7 @@ VERDE_MARGEM_DEPOIS_MIN_PX = 6
 VERDE_MARGEM_DEPOIS_MAX_PX = 16
 VERDE_MARGEM_DEPOIS_MULT_ALTURA = 0.08
 VERDE_FRAC_MIN_BBOX_ANTES = 0.45
+MARGEM_SEPARAR_VERDE_INTERSECAO = 8
 
 PRETO_MARGEM_VERDE_MULT = 0.80
 PRETO_MIN_PIXELS_ABS = 10
@@ -202,9 +203,77 @@ def encontrar_candidatos_verdes(frame_bgr, mascara_verde):
             "motivo": "nao_validado",
             "confianca": 0.0,
             "falso_depois_cruzamento": False,
+            "origem_split": "ORIGINAL",
+            "bbox_original": None,
+            "area_original": None,
         }
         candidatos.append(candidato)
     return candidatos
+
+
+def separar_candidatos_verdes_por_cruzamento(
+    frame_bgr,
+    mascara_verde,
+    candidatos,
+    cruzamento,
+):
+    if not cruzamento.get("detectado") or cruzamento.get("y_cruzamento") is None:
+        return candidatos
+
+    y_cruzamento = int(cruzamento["y_cruzamento"])
+    altura = mascara_verde.shape[0]
+    limite_depois = int(limitar(
+        y_cruzamento - MARGEM_SEPARAR_VERDE_INTERSECAO,
+        0,
+        altura,
+    ))
+    limite_antes = int(limitar(
+        y_cruzamento + MARGEM_SEPARAR_VERDE_INTERSECAO,
+        0,
+        altura,
+    ))
+    separados = []
+
+    for candidato in candidatos:
+        x, y, w, h = candidato["bbox"]
+        if not (y < y_cruzamento < y + h):
+            separados.append(candidato)
+            continue
+
+        bbox_original = candidato["bbox"]
+        area_original = candidato["area"]
+        partes = []
+
+        # A convencao atual da camera usa y maior como regiao antes da intersecao.
+        if limite_antes < y + h:
+            mascara_antes = np.zeros_like(mascara_verde)
+            y_inicio = max(y, limite_antes)
+            mascara_antes[y_inicio:y + h, x:x + w] = mascara_verde[
+                y_inicio:y + h,
+                x:x + w,
+            ]
+            for parte in encontrar_candidatos_verdes(frame_bgr, mascara_antes):
+                parte["origem_split"] = "SPLIT_ANTES"
+                parte["bbox_original"] = bbox_original
+                parte["area_original"] = float(area_original)
+                partes.append(parte)
+
+        if y < limite_depois:
+            mascara_depois = np.zeros_like(mascara_verde)
+            y_fim = min(y + h, limite_depois)
+            mascara_depois[y:y_fim, x:x + w] = mascara_verde[
+                y:y_fim,
+                x:x + w,
+            ]
+            for parte in encontrar_candidatos_verdes(frame_bgr, mascara_depois):
+                parte["origem_split"] = "SPLIT_DEPOIS"
+                parte["bbox_original"] = bbox_original
+                parte["area_original"] = float(area_original)
+                partes.append(parte)
+
+        separados.extend(partes if partes else [candidato])
+
+    return separados
 
 
 def estimar_largura_linha(mascara_linha):
@@ -486,6 +555,10 @@ def unir_dois_candidatos(a, b):
 
 
 def pode_juntar_candidatos(a, b, largura_linha_px):
+    origens_split = {a.get("origem_split"), b.get("origem_split")}
+    if origens_split == {"SPLIT_ANTES", "SPLIT_DEPOIS"}:
+        return False
+
     lado_a = a.get("lado_preliminar", "CENTRO")
     lado_b = b.get("lado_preliminar", "CENTRO")
     if lado_a != lado_b:
@@ -613,6 +686,21 @@ def analisar_posicao_verde_em_relacao_cruzamento(candidato, cruzamento):
     }
 
 
+def criar_posicao_cruzamento_split(candidato, cruzamento, antes):
+    y_cruzamento = cruzamento.get("y_cruzamento")
+    cy = candidato["centro"][1]
+    return {
+        "posicao": "ANTES" if antes else "DEPOIS",
+        "verde_antes_intersecao": bool(antes),
+        "verde_depois_intersecao": not antes,
+        "y_cruzamento": y_cruzamento,
+        "dy_centro_cruzamento": (
+            float(cy - y_cruzamento) if y_cruzamento is not None else None
+        ),
+        "frac_bbox_antes": 1.0 if antes else 0.0,
+    }
+
+
 def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato = dict(candidato)
     x, y, w, h = candidato["bbox"]
@@ -629,6 +717,25 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["verde_depois_intersecao"] = False
     candidato["dy_centro_cruzamento"] = None
     candidato["frac_bbox_antes"] = None
+    origem_split = candidato.get("origem_split", "ORIGINAL")
+    posicao_split = None
+    if origem_split in ("SPLIT_ANTES", "SPLIT_DEPOIS"):
+        posicao_split = criar_posicao_cruzamento_split(
+            candidato,
+            cruzamento,
+            antes=origem_split == "SPLIT_ANTES",
+        )
+        candidato["posicao_cruzamento"] = posicao_split["posicao"]
+        candidato["verde_antes_intersecao"] = posicao_split["verde_antes_intersecao"]
+        candidato["verde_depois_intersecao"] = posicao_split["verde_depois_intersecao"]
+        candidato["dy_centro_cruzamento"] = posicao_split["dy_centro_cruzamento"]
+        candidato["frac_bbox_antes"] = posicao_split["frac_bbox_antes"]
+        if origem_split == "SPLIT_DEPOIS":
+            candidato["valido"] = False
+            candidato["falso_depois_cruzamento"] = True
+            candidato["motivo"] = "verde_depois_intersecao_ignorado"
+            candidato["confianca"] = 0.0
+            return candidato
     area_quadro = largura * altura
     area_rel_quadro = candidato["area"] / max(area_quadro, 1)
     candidato["area_rel_quadro"] = float(area_rel_quadro)
@@ -676,7 +783,13 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         return candidato
     confianca += 0.20
 
-    posicao_cruzamento = analisar_posicao_verde_em_relacao_cruzamento(candidato, cruzamento)
+    if posicao_split is not None:
+        posicao_cruzamento = posicao_split
+    else:
+        posicao_cruzamento = analisar_posicao_verde_em_relacao_cruzamento(
+            candidato,
+            cruzamento,
+        )
     candidato["posicao_cruzamento"] = posicao_cruzamento["posicao"]
     candidato["verde_depois_intersecao"] = posicao_cruzamento["verde_depois_intersecao"]
     candidato["verde_antes_intersecao"] = posicao_cruzamento["verde_antes_intersecao"]
@@ -849,6 +962,12 @@ def analisar_verdes(frame_bgr):
     cruzamento = analisar_cruzamento(mascara_linha)
     largura_linha_px = cruzamento["largura_linha_px"]
     candidatos = encontrar_candidatos_verdes(frame_bgr, mascara_verde)
+    candidatos = separar_candidatos_verdes_por_cruzamento(
+        frame_bgr,
+        mascara_verde,
+        candidatos,
+        cruzamento,
+    )
     candidatos = [
         calcular_lado_preliminar(c, cruzamento, mascara_linha, largura_linha_px)
         for c in candidatos
@@ -930,6 +1049,9 @@ def imprimir_log_detalhado(resultado):
             f"area_rel={verde.get('area_rel_quadro', 0.0):.3f} "
             f"grande_plausivel={verde.get('verde_grande_mas_plausivel', False)} "
             f"observacao_tamanho={verde.get('observacao_tamanho', 'nenhuma')} "
+            f"origem_split={verde.get('origem_split', 'ORIGINAL')} "
+            f"bbox_original={verde.get('bbox_original')} "
+            f"area_original={verde.get('area_original')} "
             f"posicao_cruzamento={verde.get('posicao_cruzamento', 'NAO_ANALISADO')} "
             f"verde_depois_intersecao={verde.get('verde_depois_intersecao', False)} "
             f"dy_centro_cruzamento={verde.get('dy_centro_cruzamento')} "
