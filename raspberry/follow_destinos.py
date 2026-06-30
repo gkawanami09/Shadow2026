@@ -403,41 +403,9 @@ def filtrar_decisao_verde_para_acao(decisao, acao_permitida, origem_decisao):
 
 
 def aplicar_historico_retorno_verde(resultado_verde, historico, agora):
-    if resultado_verde is None:
-        return resultado_verde
-    contagem_esquerda = resultado_verde.get("evidencias_retorno_esquerda", 0)
-    contagem_direita = resultado_verde.get("evidencias_retorno_direita", 0)
-    confianca = float(resultado_verde.get("confianca", 0.0) or 0.0)
-    if contagem_esquerda > 0:
-        historico["esquerda_instante"] = agora
-        historico["esquerda_conf"] = max(historico.get("esquerda_conf", 0.0), confianca)
-    if contagem_direita > 0:
-        historico["direita_instante"] = agora
-        historico["direita_conf"] = max(historico.get("direita_conf", 0.0), confianca)
-
-    cruzamento = resultado_verde.get("cruzamento") or {}
-    esquerda_recente = agora - historico.get("esquerda_instante", float("-inf")) <= TEMPO_HISTORICO_RETORNO_VERDE
-    direita_recente = agora - historico.get("direita_instante", float("-inf")) <= TEMPO_HISTORICO_RETORNO_VERDE
-    evidencia_atual = contagem_esquerda > 0 or contagem_direita > 0
-    tem_verde_real_atual = resultado_verde.get("tem_verde_valido_antes", False)
-    if (
-        cruzamento.get("detectado", False)
-        and esquerda_recente
-        and direita_recente
-        and evidencia_atual
-        and tem_verde_real_atual
-    ):
-        resultado_verde["decisao"] = "RETORNO"
-        resultado_verde["motivo"] = "verde_duplo_retorno_historico_curto"
-        resultado_verde["confianca"] = min(
-            max(historico.get("esquerda_conf", 0.55), 0.55),
-            max(historico.get("direita_conf", 0.55), 0.55),
-        )
-        resultado_verde["acao_permitida"] = True
-        resultado_verde["origem_decisao"] = "VERDE_ANTES_TOLERADO"
-        resultado_verde["suspeita_retorno"] = True
-        resultado_verde["retorno_por_historico"] = True
-    else:
+    # RETORNO exige os dois lados seguros no mesmo resultado visual. Memoria
+    # entre frames pode atravessar intersecoes e nunca deve criar uma acao.
+    if resultado_verde is not None:
         resultado_verde["retorno_por_historico"] = False
     return resultado_verde
 
@@ -1277,8 +1245,10 @@ def criar_stream_debug(
                 f"parcial={verde.get('verde_parcial_desalinhado', False)} "
                 f"area={_numero_stream(verde.get('area'), 0)} "
                 f"split={verde.get('origem_split', 'ORIGINAL')} "
-                f"ret={verde.get('usado_como_evidencia_retorno', False)} "
-                f"bloq_lat={verde.get('bloqueado_lateral_mas_usado_retorno', False)}",
+                f"acao={verde.get('usado_para_acao', False)} "
+                f"ret={verde.get('usado_para_retorno', False)} "
+                f"falso={verde.get('falso_depois_cruzamento', False)} "
+                f"forte_dep={verde.get('depois_forte_intersecao', False)}",
                 (x, max(15, y - 6)),
                 cor,
                 0.36,
@@ -1325,6 +1295,10 @@ def criar_stream_debug(
             f"verde_parcial={resultado_verde.get('tem_verde_parcial_desalinhado', False)}",
             f"suspeita_retorno={resultado_verde.get('suspeita_retorno', False)}",
             f"contexto_retorno={resultado_verde.get('contexto_retorno', False)}",
+            f"qtd_acao_E/D={resultado_verde.get('qtd_acao_esq', 0)}/{resultado_verde.get('qtd_acao_dir', 0)}",
+            f"qtd_falso_depois={resultado_verde.get('qtd_falso_depois', 0)}",
+            f"retorno_seguro={resultado_verde.get('retorno_seguro', False)}",
+            f"contexto_retorno_seguro={resultado_verde.get('contexto_retorno_seguro', False)}",
             f"retorno_com_falso_depois={resultado_verde.get('retorno_com_falso_depois', False)}",
             f"verdes_falsos_depois_count={resultado_verde.get('verdes_falsos_depois_count', 0)}",
             f"retorno_E/D={resultado_verde.get('evidencias_retorno_esquerda', 0)}/{resultado_verde.get('evidencias_retorno_direita', 0)}",
@@ -1468,12 +1442,8 @@ def main():
                 historico_retorno_verde,
                 agora,
             )
-            if resultado_verde is not None and estabilizar_decisao_lado_verde is not None:
-                resultado_verde = estabilizar_decisao_lado_verde(
-                    resultado_verde,
-                    historico_lado_verde,
-                    agora,
-                )
+            # Decisoes de lado sao sempre do quadro/intersecao atual. Recuperar o
+            # lado anterior pode contaminar uma nova intersecao.
             decisao_verde_crua = (
                 resultado_verde.get("decisao", "NENHUM")
                 if resultado_verde is not None
