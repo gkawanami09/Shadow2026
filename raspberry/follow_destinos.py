@@ -69,6 +69,28 @@ TEMPO_COOLDOWN_VERDE = 1.30
 MIN_FRAMES_LINHA_POS_VERDE = 2
 MIN_FRAMES_SEM_VERDE_PARA_REARMAR = 3
 
+# Curva fechada: parametros concentrados aqui para calibracao em pista.
+TANQUE_90_ATIVO = True
+TANQUE_90_ANGULO_MIN = 45
+TANQUE_90_ERRO_X_REL_MIN = 0.22
+TANQUE_90_SCORE_LATERAL_MIN = 600
+TANQUE_90_CONTINUIDADE_LATERAL_MIN = 0.65
+TANQUE_90_DISTANCIA_LATERAL_MIN = 90
+TANQUE_90_SCORE_FRENTE_MAX = 900
+TANQUE_90_DISTANCIA_FRENTE_MAX = 150
+TANQUE_90_CONTINUIDADE_FRENTE_MAX = 0.55
+TANQUE_90_TEMPO_MIN = 0.18
+TANQUE_90_TEMPO_MAX = 0.75
+TANQUE_90_VEL = DEST_VEL_RECUPERAR
+
+MODOS_VERDE_BLOQUEIAM_TANQUE_90 = {
+    "CONFIRMANDO_VERDE",
+    "AVANCANDO_APOS_VERDE",
+    "EXECUTANDO_VERDE",
+    "RECUPERANDO_LINHA",
+    "COOLDOWN_VERDE",
+}
+
 
 def interpretar_acoes_verde(valor):
     acoes = tuple(dict.fromkeys(item.strip().upper() for item in valor.split(",") if item.strip()))
@@ -574,6 +596,102 @@ def escolher_destino(resultado):
     }
 
 
+def _candidato_lateral_forte_tanque_90(candidato, largura_frame=None):
+    angulo = candidato.get("angulo_destino", candidato.get("angulo_raio", 0))
+    forte = (
+        candidato.get("score", 0) >= TANQUE_90_SCORE_LATERAL_MIN
+        and candidato.get("continuidade", 0) >= TANQUE_90_CONTINUIDADE_LATERAL_MIN
+        and candidato.get("distancia", 0) >= TANQUE_90_DISTANCIA_LATERAL_MIN
+        and abs(angulo) >= TANQUE_90_ANGULO_MIN
+    )
+    if not forte or not largura_frame:
+        return forte
+    origem_x = (candidato.get("origem_local") or (0, 0))[0]
+    destino_x = (candidato.get("destino_local") or (origem_x, 0))[0]
+    return abs(destino_x - origem_x) / float(largura_frame) >= TANQUE_90_ERRO_X_REL_MIN
+
+
+def escolher_lado_tanque_90(validos_por_lado):
+    """Escolhe uma unica lateral forte; duas laterais indicam intersecao/T."""
+    melhores = {}
+    for lado in ("ESQUERDA", "DIREITA"):
+        fortes = [
+            candidato
+            for candidato in validos_por_lado.get(lado, [])
+            if _candidato_lateral_forte_tanque_90(candidato)
+        ]
+        if fortes:
+            melhores[lado] = max(fortes, key=lambda item: item.get("score", 0))
+    if len(melhores) != 1:
+        return None
+    return next(iter(melhores))
+
+
+def frente_parece_falsa_em_curva_90(destino, validos_por_lado, largura_frame):
+    if not TANQUE_90_ATIVO:
+        return False
+    lado = escolher_lado_tanque_90(validos_por_lado)
+    if lado is None:
+        return False
+    if not any(
+        _candidato_lateral_forte_tanque_90(candidato, largura_frame)
+        for candidato in validos_por_lado.get(lado, [])
+    ):
+        return False
+
+    candidatos_frente = (destino.get("validos_por_tipo") or {}).get("FRENTE", [])
+    if not candidatos_frente:
+        return True
+    frente = max(candidatos_frente, key=lambda item: item.get("score", 0))
+    return (
+        frente.get("score", 0) <= TANQUE_90_SCORE_FRENTE_MAX
+        or frente.get("distancia", 0) <= TANQUE_90_DISTANCIA_FRENTE_MAX
+        or frente.get("continuidade", 0) <= TANQUE_90_CONTINUIDADE_FRENTE_MAX
+    )
+
+
+def iniciar_tanque_90(memoria, lado, agora):
+    memoria["tanque_90_ativo"] = True
+    memoria["tanque_90_lado"] = lado
+    memoria["tanque_90_inicio"] = agora
+    memoria["motivo_tanque_90"] = "LATERAL_FORTE_FRENTE_FRACA"
+
+
+def atualizar_tanque_90(memoria, destino, agora):
+    if not memoria.get("tanque_90_ativo", False):
+        return False
+    decorrido = agora - memoria.get("tanque_90_inicio", agora)
+    if decorrido >= TANQUE_90_TEMPO_MAX:
+        memoria["tanque_90_ativo"] = False
+        memoria["tanque_90_lado"] = "CENTRO"
+        memoria["motivo_tanque_90"] = "TEMPO_MAX"
+        memoria["tanque_90_aguarda_rearme"] = True
+        return False
+    frente_central_confiavel = (
+        destino.get("ok", False)
+        and destino.get("tipo") == "FRENTE"
+        and lado_destino(destino) == "CENTRO"
+        and candidato_confiavel(destino)
+        and destino.get("score", 0) > TANQUE_90_SCORE_FRENTE_MAX
+        and destino.get("distancia", 0) > TANQUE_90_DISTANCIA_FRENTE_MAX
+        and destino.get("continuidade", 0) > TANQUE_90_CONTINUIDADE_FRENTE_MAX
+    )
+    if decorrido >= TANQUE_90_TEMPO_MIN and frente_central_confiavel:
+        memoria["tanque_90_ativo"] = False
+        memoria["tanque_90_lado"] = "CENTRO"
+        memoria["motivo_tanque_90"] = "FRENTE_RECUPERADA"
+        return False
+    return True
+
+
+def comando_tanque_90(memoria):
+    if memoria.get("tanque_90_lado") == "ESQUERDA":
+        return f"GIRAR_ESQ {TANQUE_90_VEL}"
+    if memoria.get("tanque_90_lado") == "DIREITA":
+        return f"GIRAR_DIR {TANQUE_90_VEL}"
+    return None
+
+
 def preparar_destino_preferido(candidato, destino_normal, motivo):
     escolhido = dict(candidato)
     escolhido["motivo"] = motivo
@@ -1048,6 +1166,10 @@ def criar_stream_debug(
         f"linha_encontrada={resultado_linha.get('encontrou_linha', False)}",
         f"destino_ok={destino.get('ok', False)}",
         f"ultimo_lado_recuperacao={memoria.get('ultimo_lado_recuperacao', 'NA')}",
+        f"tanque_90_ativo={memoria.get('tanque_90_ativo', False)}",
+        f"tanque_90_lado={memoria.get('tanque_90_lado', 'CENTRO')}",
+        f"tanque_90_tempo={max(0.0, time.monotonic() - memoria.get('tanque_90_inicio', time.monotonic())):.2f}" if memoria.get("tanque_90_ativo", False) else "tanque_90_tempo=0.00",
+        f"motivo_tanque_90={memoria.get('motivo_tanque_90', 'NA')}",
     ]
     if not destino.get("ok", False):
         linhas.append("DESTINO PERDIDO")
@@ -1168,6 +1290,8 @@ def main():
             "ultimo_lado_recuperacao": "CENTRO", "frames_destino_perdido": 0,
             "frames_destino_confiavel": 0, "em_recuperacao": False,
             "lado_recuperacao_pendente": "CENTRO", "frames_confirmacao_lado_recuperacao": 0,
+            "tanque_90_ativo": False, "tanque_90_lado": "CENTRO", "tanque_90_inicio": 0.0,
+            "motivo_tanque_90": "INATIVO", "tanque_90_aguarda_rearme": False,
         }
         controle_varredura = {"etapa": 0, "ultima_troca": time.monotonic()}
         estado_log = criar_estado_log()
@@ -1214,6 +1338,31 @@ def main():
                 if args.verde_ativo
                 else destino_normal
             )
+            verde_bloqueia_tanque_90 = (
+                args.verde_ativo
+                and estado_verde_ativo["modo"] in MODOS_VERDE_BLOQUEIAM_TANQUE_90
+            )
+            curva_90_detectada = frente_parece_falsa_em_curva_90(
+                destino_normal,
+                destino_normal["validos_por_lado"],
+                frame.shape[1],
+            )
+            if not curva_90_detectada:
+                memoria["tanque_90_aguarda_rearme"] = False
+            if verde_bloqueia_tanque_90 and memoria["tanque_90_ativo"]:
+                memoria["tanque_90_ativo"] = False
+                memoria["tanque_90_lado"] = "CENTRO"
+                memoria["motivo_tanque_90"] = "BLOQUEADO_POR_VERDE"
+            elif memoria["tanque_90_ativo"]:
+                atualizar_tanque_90(memoria, destino_normal, agora)
+            elif (
+                not verde_bloqueia_tanque_90
+                and not memoria["tanque_90_aguarda_rearme"]
+                and curva_90_detectada
+            ):
+                lado_tanque_90 = escolher_lado_tanque_90(destino_normal["validos_por_lado"])
+                if lado_tanque_90 is not None:
+                    iniciar_tanque_90(memoria, lado_tanque_90, agora)
             executando_retorno_verde = (
                 args.verde_ativo
                 and estado_verde_ativo["modo"] == "EXECUTANDO_VERDE"
@@ -1267,6 +1416,11 @@ def main():
             elif executando_lado_verde:
                 estado = "FOLLOW_DESTINO"
                 comando, _, _, _ = controlar_destino(destino, memoria, confirmar=False)
+            elif memoria["tanque_90_ativo"]:
+                estado = f"TANQUE_90_{memoria['tanque_90_lado']}"
+                comando = comando_tanque_90(memoria)
+                memoria["correcao_anterior"] = 0
+                memoria["vel_anterior"] = (0, 0)
             elif memoria["em_recuperacao"] and destino["ok"]:
                 if memoria["frames_destino_confiavel"] < DEST_FRAMES_DESTINO_CONFIAVEL:
                     estado = "FOLLOW_CONFIRMAR"
@@ -1299,7 +1453,9 @@ def main():
                 )
             enviar_seguro(conexao, comando, args.motores)
             if args.log:
-                if args.verde_ativo:
+                if memoria["tanque_90_ativo"]:
+                    decisao_log = f"TANQUE_90_{memoria['tanque_90_lado']}"
+                elif args.verde_ativo:
                     decisao_log = log_estado_verde_ativo(estado_verde_ativo)
                 else:
                     decisao_log = atualizar_decisao_log_verde(resultado_verde, estado_log, agora)
