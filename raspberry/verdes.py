@@ -51,8 +51,8 @@ FRAC_BBOX_ANTES_FORTE_DEPOIS_MAX = 0.20
 CONFIANCA_MIN_VERDE_DESALINHADO = 0.60
 AREA_MIN_VERDE_DESALINHADO = 20
 AREA_MAX_VERDE_DESALINHADO = 0.25
-FATOR_AREA_MIN_VERDE_PARCIAL_DESALINHADO = 0.45
-AREA_MIN_VERDE_PARCIAL_ABS = 12
+FATOR_AREA_MIN_VERDE_PARCIAL_DESALINHADO = 0.32
+AREA_MIN_VERDE_PARCIAL_ABS = 8
 CONFIANCA_MIN_VERDE_PARCIAL_DESALINHADO = 0.50
 FILL_RATIO_MIN_VERDE_PARCIAL = 0.18
 
@@ -71,9 +71,9 @@ TEMPO_SEGURAR_VERDE_LADO_FORTE = 0.55
 CONFIANCA_MIN_SEGURAR_LADO_VERDE = 0.65
 BUSCA_LINHA_DY = (0, 10, 20, -10, -20, 35, -35)
 
-AREA_MIN_VERDE_ABSOLUTA = 20
-LARGURA_MIN_VERDE = 4
-ALTURA_MIN_VERDE = 4
+AREA_MIN_VERDE_ABSOLUTA = 14
+LARGURA_MIN_VERDE = 3
+ALTURA_MIN_VERDE = 3
 
 MULT_LARGURA_CRUZAMENTO = 2.6
 LARGURA_LINHA_FALLBACK = 30.0
@@ -259,7 +259,13 @@ def separar_candidatos_verdes_por_cruzamento(
 
     for candidato in candidatos:
         x, y, w, h = candidato["bbox"]
-        if not (y < y_cruzamento < y + h):
+        cy = candidato["centro"][1]
+        perto_faixa = (
+            abs(cy - y_cruzamento) <= MARGEM_VERDE_SOBREPOSTO_Y
+            or y <= y_cruzamento + MARGEM_VERDE_SOBREPOSTO_Y
+            and y + h >= y_cruzamento - MARGEM_VERDE_SOBREPOSTO_Y
+        )
+        if not perto_faixa:
             separados.append(candidato)
             continue
 
@@ -585,7 +591,7 @@ def unir_dois_candidatos(a, b):
     return unido
 
 
-def pode_juntar_candidatos(a, b, largura_linha_px):
+def pode_juntar_candidatos(a, b, largura_linha_px, y_cruzamento=None):
     origens_split = {a.get("origem_split"), b.get("origem_split")}
     if origens_split == {"SPLIT_ANTES", "SPLIT_DEPOIS"}:
         return False
@@ -601,12 +607,22 @@ def pode_juntar_candidatos(a, b, largura_linha_px):
         distancia_max = max(8, largura_linha_px * 0.6)
 
     unido = unir_dois_candidatos(a, b)
-    _, _, largura_unida, altura_unida = unido["bbox"]
+    _, y_unida, largura_unida, altura_unida = unido["bbox"]
+    if y_cruzamento is not None:
+        a_antes = a["bbox"][1] >= y_cruzamento or a.get("origem_split") == "SPLIT_ANTES"
+        b_antes = b["bbox"][1] >= y_cruzamento or b.get("origem_split") == "SPLIT_ANTES"
+        a_depois = a["bbox"][1] + a["bbox"][3] <= y_cruzamento or a.get("origem_split") == "SPLIT_DEPOIS"
+        b_depois = b["bbox"][1] + b["bbox"][3] <= y_cruzamento or b.get("origem_split") == "SPLIT_DEPOIS"
+        if (a_antes and b_depois) or (b_antes and a_depois):
+            return False
+        uniao_cruza_y = y_unida < y_cruzamento < y_unida + altura_unida
+        if uniao_cruza_y and altura_unida > largura_linha_px * 5:
+            return False
     uniao_plausivel = largura_unida <= largura_linha_px * 10 and altura_unida <= largura_linha_px * 10
     return distancia <= distancia_max and uniao_plausivel
 
 
-def juntar_candidatos_verdes(candidatos, largura_linha_px):
+def juntar_candidatos_verdes(candidatos, largura_linha_px, y_cruzamento=None):
     candidatos = [dict(candidato) for candidato in candidatos]
     mudou = True
     while mudou:
@@ -622,7 +638,7 @@ def juntar_candidatos_verdes(candidatos, largura_linha_px):
                 if usados[j]:
                     continue
                 outro = candidatos[j]
-                if pode_juntar_candidatos(atual, outro, largura_linha_px):
+                if pode_juntar_candidatos(atual, outro, largura_linha_px, y_cruzamento):
                     atual = unir_dois_candidatos(atual, outro)
                     usados[j] = True
                     mudou = True
@@ -1740,7 +1756,11 @@ def analisar_verdes(frame_bgr):
         calcular_lado_preliminar(c, cruzamento, mascara_linha, largura_linha_px)
         for c in candidatos
     ]
-    candidatos = juntar_candidatos_verdes(candidatos, largura_linha_px)
+    candidatos = juntar_candidatos_verdes(
+        candidatos,
+        largura_linha_px,
+        cruzamento.get("y_cruzamento"),
+    )
     verdes = [validar_verde(c, cruzamento, mascara_linha, largura_linha_px) for c in candidatos]
     decisao, motivo, confianca, acao_permitida, origem_decisao = decidir_verdes(
         verdes,
