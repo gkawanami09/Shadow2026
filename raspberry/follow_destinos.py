@@ -150,6 +150,9 @@ def criar_estado_verde_ativo():
         "cooldown_ate": 0.0,
         "frames_confirmacao": 0,
         "frames_nenhum_confirmacao": 0,
+        "frames_suspeita_retorno": 0,
+        "houve_suspeita_retorno": False,
+        "ultima_decisao_util": "NENHUM",
         "frames_sem_verde": 0,
         "lado_busca_pos_verde": "CENTRO",
         "lado_giro_retorno": "CENTRO",
@@ -171,6 +174,9 @@ def limpar_confirmacao_verde(estado_verde):
     estado_verde["tempo_inicio_intencao"] = 0.0
     estado_verde["frames_confirmacao"] = 0
     estado_verde["frames_nenhum_confirmacao"] = 0
+    estado_verde["frames_suspeita_retorno"] = 0
+    estado_verde["houve_suspeita_retorno"] = False
+    estado_verde["ultima_decisao_util"] = "NENHUM"
     estado_verde["lado_busca_pos_verde"] = "CENTRO"
     estado_verde["lado_giro_retorno"] = "CENTRO"
     estado_verde["busca_pos_verde_ate"] = 0.0
@@ -199,13 +205,21 @@ def escolher_decisao_confirmada_verde(estado_verde, acoes_habilitadas):
     if (
         "ESQUERDA" in acoes_habilitadas
         and votos["ESQUERDA"] >= MIN_VOTOS_LADO_VERDE
+        and votos["RETORNO"] == 0
         and votos["DIREITA"] == 0
+        and not estado_verde["houve_suspeita_retorno"]
+        and estado_verde["frames_suspeita_retorno"] == 0
+        and estado_verde["ultima_decisao_util"] == "ESQUERDA"
     ):
         return "ESQUERDA"
     if (
         "DIREITA" in acoes_habilitadas
         and votos["DIREITA"] >= MIN_VOTOS_LADO_VERDE
+        and votos["RETORNO"] == 0
         and votos["ESQUERDA"] == 0
+        and not estado_verde["houve_suspeita_retorno"]
+        and estado_verde["frames_suspeita_retorno"] == 0
+        and estado_verde["ultima_decisao_util"] == "DIREITA"
     ):
         return "DIREITA"
     return "NENHUM"
@@ -225,11 +239,14 @@ def atualizar_estado_verde_ativo(
     acoes_habilitadas,
     agora,
     destino=None,
+    suspeita_retorno=False,
 ):
     modo = estado_verde["modo"]
 
     if modo == "NORMAL":
         if decisao_crua not in acoes_habilitadas:
+            return estado_verde
+        if suspeita_retorno and decisao_crua in ("ESQUERDA", "DIREITA"):
             return estado_verde
         limpar_confirmacao_verde(estado_verde)
         estado_verde["modo"] = "CONFIRMANDO_VERDE"
@@ -237,11 +254,21 @@ def atualizar_estado_verde_ativo(
         estado_verde["decisao_intencao"] = decisao_crua
         estado_verde["tempo_inicio"] = agora
         estado_verde["tempo_inicio_intencao"] = agora
+        estado_verde["ultima_decisao_util"] = decisao_crua
+        if suspeita_retorno:
+            estado_verde["frames_suspeita_retorno"] = 1
+            estado_verde["houve_suspeita_retorno"] = True
         registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
         return estado_verde
 
     if modo == "CONFIRMANDO_VERDE":
         intencao = estado_verde["decisao_intencao"]
+        estado_verde["ultima_decisao_util"] = (
+            decisao_crua if decisao_crua in acoes_habilitadas else "NENHUM"
+        )
+        if suspeita_retorno:
+            estado_verde["frames_suspeita_retorno"] += 1
+            estado_verde["houve_suspeita_retorno"] = True
         if decisao_crua == intencao:
             estado_verde["frames_nenhum_confirmacao"] = 0
             registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
@@ -257,11 +284,12 @@ def atualizar_estado_verde_ativo(
                 return estado_verde
         elif decisao_crua in acoes_habilitadas:
             estado_verde["frames_nenhum_confirmacao"] = 0
-            if intencao != "RETORNO" and decisao_crua == "RETORNO":
+            if decisao_crua == "RETORNO":
                 registrar_voto_verde(estado_verde, decisao_crua, acoes_habilitadas)
-                if estado_verde["votos"]["RETORNO"] >= MIN_VOTOS_RETORNO_VERDE:
-                    estado_verde["decisao_intencao"] = "RETORNO"
-                    estado_verde["decisao_em_confirmacao"] = "RETORNO"
+                estado_verde["decisao_intencao"] = "RETORNO"
+                estado_verde["decisao_em_confirmacao"] = "RETORNO"
+            elif intencao == "RETORNO":
+                estado_verde["frames_confirmacao"] += 1
             else:
                 limpar_confirmacao_verde(estado_verde)
                 entrar_cooldown_verde(estado_verde, agora, TEMPO_CONFIRMAR_VERDE)
@@ -1208,6 +1236,9 @@ def criar_stream_debug(
             f"verde_falso_depois={verde_falso_depois}",
             f"verde_tolerado={resultado_verde.get('tem_verde_tolerado_desalinhado', False)}",
             f"verde_parcial={resultado_verde.get('tem_verde_parcial_desalinhado', False)}",
+            f"suspeita_retorno={resultado_verde.get('suspeita_retorno', False)}",
+            f"retorno_E/D={resultado_verde.get('evidencias_retorno_esquerda', 0)}/{resultado_verde.get('evidencias_retorno_direita', 0)}",
+            f"motivo_retorno={resultado_verde.get('motivo_retorno', 'NA')}",
         ])
         cruzamento = resultado_verde.get("cruzamento") or {}
         linhas.extend([
@@ -1227,6 +1258,9 @@ def criar_stream_debug(
             f"decisao_intencao={estado_verde_ativo.get('decisao_intencao', 'NA')}",
             f"frames_confirmacao={estado_verde_ativo.get('frames_confirmacao', 0)}",
             f"frames_nenhum_confirmacao={estado_verde_ativo.get('frames_nenhum_confirmacao', 0)}",
+            f"frames_suspeita_retorno={estado_verde_ativo.get('frames_suspeita_retorno', 0)}",
+            f"houve_suspeita_retorno={estado_verde_ativo.get('houve_suspeita_retorno', False)}",
+            f"ultima_decisao_util={estado_verde_ativo.get('ultima_decisao_util', 'NENHUM')}",
         ])
 
     altura_linha = 18
@@ -1368,6 +1402,7 @@ def main():
                     args.verde_acoes,
                     agora,
                     destino_normal,
+                    suspeita_retorno=resultado_verde.get("suspeita_retorno", False),
                 )
             destino = (
                 aplicar_verde_ativo(destino_normal, estado_verde_ativo)

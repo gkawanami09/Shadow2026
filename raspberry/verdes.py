@@ -1258,6 +1258,89 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     return candidato
 
 
+def lado_evidencia_retorno(candidato):
+    for chave in ("lado", "lado_inferido", "lado_inferido_forte"):
+        lado = candidato.get(chave, "CENTRO")
+        if lado in ("ESQUERDA", "DIREITA"):
+            return lado
+    return "CENTRO"
+
+
+def candidato_evidencia_retorno(candidato):
+    """Reconhece um possivel lado do 180 sem aceitar verde claramente depois."""
+    candidato["evidencia_retorno"] = False
+    candidato["lado_evidencia_retorno"] = "CENTRO"
+    candidato["motivo_evidencia_retorno"] = "sem_evidencia"
+
+    posicao_antes = (
+        candidato.get("verde_antes_intersecao", False)
+        or candidato.get("posicao_cruzamento") in (
+            "ANTES",
+            "SOBREPOSTO",
+            "ANTES_TOLERADO",
+            "SOBREPOSTO_TOLERADO",
+        )
+    )
+    if (
+        not posicao_antes
+        or candidato.get("verde_depois_intersecao", False)
+        or candidato.get("falso_depois_cruzamento", False)
+    ):
+        candidato["motivo_evidencia_retorno"] = "fora_regiao_segura"
+        return False
+
+    cor_razoavel = (
+        VERDE_H_MIN <= candidato.get("mean_h", 0.0) <= VERDE_H_MAX
+        and candidato.get("mean_s", 0.0) >= VERDE_S_MIN
+        and candidato.get("mean_v", 0.0) >= VERDE_V_MIN
+        and candidato.get("proporcao_verde", 0.0) >= VERDE_PROPORCAO_MIN
+        and candidato.get("g_menos_r", 0.0) >= VERDE_G_MENOS_R_MIN
+        and candidato.get("g_menos_b", 0.0) >= VERDE_G_MENOS_B_MIN
+    )
+    if not cor_razoavel:
+        candidato["motivo_evidencia_retorno"] = "cor_insuficiente"
+        return False
+
+    central_forte = (
+        candidato.get("motivo") == "verde_central_inseguro"
+        and candidato.get("confianca", 0.0) >= 0.55
+    )
+    confianca_suficiente = (
+        candidato.get("confianca", 0.0) >= 0.55
+        or candidato.get("verde_parcial_desalinhado", False)
+        or candidato.get("tolerado_desalinhado", False)
+        or central_forte
+    )
+    lado = lado_evidencia_retorno(candidato)
+    if not confianca_suficiente or lado == "CENTRO":
+        candidato["motivo_evidencia_retorno"] = "lado_ou_confianca_insuficiente"
+        return False
+
+    candidato["evidencia_retorno"] = True
+    candidato["lado_evidencia_retorno"] = lado
+    if candidato.get("valido", False):
+        motivo = "verde_valido_antes"
+    elif candidato.get("verde_parcial_desalinhado", False):
+        motivo = "verde_parcial_antes"
+    elif candidato.get("tolerado_desalinhado", False):
+        motivo = "verde_tolerado_antes"
+    else:
+        motivo = "verde_inseguro_lado_inferido"
+    candidato["motivo_evidencia_retorno"] = motivo
+    return True
+
+
+def resumir_evidencias_retorno(candidatos):
+    evidencias = [
+        candidato
+        for candidato in candidatos
+        if candidato_evidencia_retorno(candidato)
+    ]
+    esquerda = [c for c in evidencias if c["lado_evidencia_retorno"] == "ESQUERDA"]
+    direita = [c for c in evidencias if c["lado_evidencia_retorno"] == "DIREITA"]
+    return esquerda, direita
+
+
 def decidir_verdes(candidatos, cruzamento):
     validos_antes = [
         candidato
@@ -1329,6 +1412,30 @@ def decidir_verdes(candidatos, cruzamento):
     ]
     validos_esquerda = [c for c in validos_para_acao if c.get("lado") == "ESQUERDA"]
     validos_direita = [c for c in validos_para_acao if c.get("lado") == "DIREITA"]
+    evidencias_esquerda, evidencias_direita = resumir_evidencias_retorno(candidatos)
+    evidencias_validas_esquerda = [c for c in evidencias_esquerda if c.get("valido", False)]
+    evidencias_validas_direita = [c for c in evidencias_direita if c.get("valido", False)]
+
+    if evidencias_esquerda and evidencias_direita:
+        if evidencias_validas_esquerda and evidencias_validas_direita:
+            confianca = min(
+                max(c["confianca"] for c in evidencias_validas_esquerda),
+                max(c["confianca"] for c in evidencias_validas_direita),
+            )
+            tolerado = any(
+                c.get("tolerado_desalinhado", False)
+                for c in evidencias_validas_esquerda + evidencias_validas_direita
+            )
+            origem = "VERDE_ANTES_TOLERADO" if tolerado else "VERDE_ANTES_INTERSECAO"
+            return "RETORNO", "verde_duplo_retorno_evidencia", confianca, True, origem
+        confianca = max(c.get("confianca", 0.0) for c in evidencias_esquerda + evidencias_direita)
+        return (
+            "INSEGURO",
+            "suspeita_retorno_bloqueia_lateral",
+            confianca,
+            False,
+            "INSEGURO_RETORNO",
+        )
 
     if validos_esquerda and validos_direita:
         confianca = min(max(max(c["confianca"] for c in validos_esquerda), max(c["confianca"] for c in validos_direita)), 1.0)
@@ -1449,6 +1556,16 @@ def analisar_verdes(frame_bgr):
         verdes,
         cruzamento,
     )
+    evidencias_retorno_esquerda, evidencias_retorno_direita = resumir_evidencias_retorno(
+        verdes,
+    )
+    suspeita_retorno = bool(evidencias_retorno_esquerda and evidencias_retorno_direita)
+    if decisao == "RETORNO":
+        motivo_retorno = "dois_lados_validos"
+    elif suspeita_retorno:
+        motivo_retorno = "lado_oposto_ainda_inseguro"
+    else:
+        motivo_retorno = "sem_suspeita_retorno"
     tem_verde_valido_antes = any(
         candidato.get("valido", False)
         and (
@@ -1478,6 +1595,10 @@ def analisar_verdes(frame_bgr):
         "tem_verde_parcial_desalinhado": any(
             candidato.get("verde_parcial_desalinhado", False) for candidato in verdes
         ),
+        "suspeita_retorno": suspeita_retorno,
+        "evidencias_retorno_esquerda": len(evidencias_retorno_esquerda),
+        "evidencias_retorno_direita": len(evidencias_retorno_direita),
+        "motivo_retorno": motivo_retorno,
         "cruzamento": cruzamento,
         "verdes": verdes,
         "mascaras": {
@@ -1538,6 +1659,9 @@ def imprimir_log_detalhado(resultado):
             f"margem_lado_usada={verde.get('margem_lado_usada')} "
             f"lado_inferido_forte={verde.get('lado_inferido_forte', 'CENTRO')} "
             f"motivo_lado_inferido_forte={verde.get('motivo_lado_inferido_forte', 'nao_avaliado')} "
+            f"evidencia_retorno={verde.get('evidencia_retorno', False)} "
+            f"lado_evidencia_retorno={verde.get('lado_evidencia_retorno', 'CENTRO')} "
+            f"motivo_evidencia_retorno={verde.get('motivo_evidencia_retorno', 'sem_evidencia')} "
             f"tolerado_desalinhado={verde.get('tolerado_desalinhado', False)} "
             f"motivo_tolerancia={verde.get('motivo_tolerancia', 'nao_tolerado')} "
             f"recuperado_desalinhado={verde.get('recuperado_desalinhado', False)} "
