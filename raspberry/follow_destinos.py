@@ -58,10 +58,13 @@ MAX_FRAMES_NENHUM_CONFIRMAR_VERDE = 6
 TEMPO_ARMAR_VERDE = 1.05
 
 TEMPO_AVANCAR_APOS_VERDE = 0.45
+TEMPO_AVANCAR_RETORNO_CEGO = 2.50
+VEL_AVANCAR_RETORNO_CEGO = 80
 
 TEMPO_EXECUTAR_LADO_VERDE = 1.20
-TEMPO_EXECUTAR_RETORNO_VERDE = 2.10
-TEMPO_MINIMO_CEGO_RETORNO_VERDE = 1.80
+TEMPO_EXECUTAR_RETORNO_VERDE = 4.20
+TEMPO_MINIMO_CEGO_RETORNO_VERDE = 4.20
+LADO_GIRO_RETORNO_VERDE = "ESQUERDA"
 
 TEMPO_RECUPERAR_LINHA_RETORNO_VERDE = 0.80
 TEMPO_MAX_BUSCA_LINHA_POS_VERDE = 1.20
@@ -228,6 +231,8 @@ def escolher_decisao_confirmada_verde(estado_verde, acoes_habilitadas):
 def confirmar_decisao_verde(estado_verde, decisao, agora):
     estado_verde["decisao_confirmada"] = decisao
     estado_verde["lado_busca_pos_verde"] = decisao
+    if decisao == "RETORNO":
+        estado_verde["lado_giro_retorno"] = LADO_GIRO_RETORNO_VERDE
     estado_verde["frames_linha_pos_verde"] = 0
     estado_verde["modo"] = "AVANCANDO_APOS_VERDE"
     estado_verde["tempo_inicio"] = agora
@@ -315,7 +320,12 @@ def atualizar_estado_verde_ativo(
         return estado_verde
 
     if modo == "AVANCANDO_APOS_VERDE":
-        if agora - estado_verde["tempo_inicio"] >= TEMPO_AVANCAR_APOS_VERDE:
+        tempo_avancar = (
+            TEMPO_AVANCAR_RETORNO_CEGO
+            if estado_verde["decisao_confirmada"] == "RETORNO"
+            else TEMPO_AVANCAR_APOS_VERDE
+        )
+        if agora - estado_verde["tempo_inicio"] >= tempo_avancar:
             estado_verde["modo"] = "EXECUTANDO_VERDE"
             estado_verde["tempo_inicio"] = agora
         return estado_verde
@@ -785,13 +795,12 @@ def escolher_destino_busca_pos_verde(destino_normal, estado_verde):
 
 
 def comando_giro_retorno_verde(estado_verde, memoria):
-    lado = estado_verde.get("lado_giro_retorno", "CENTRO")
-    if lado not in ("ESQUERDA", "DIREITA"):
-        lado_memoria = memoria.get("ultimo_lado_recuperacao", "CENTRO")
-        lado = lado_memoria if lado_memoria in ("ESQUERDA", "DIREITA") else "ESQUERDA"
-        estado_verde["lado_giro_retorno"] = lado
-    giro = "GIRAR_ESQ" if lado == "ESQUERDA" else "GIRAR_DIR"
-    return f"{giro} {DEST_VEL_RECUPERAR}"
+    estado_verde["lado_giro_retorno"] = LADO_GIRO_RETORNO_VERDE
+    return f"GIRAR_ESQ {DEST_VEL_RECUPERAR}"
+
+
+def comando_avancar_retorno_cego():
+    return f"LADO {VEL_AVANCAR_RETORNO_CEGO} {VEL_AVANCAR_RETORNO_CEGO}"
 
 
 def comando_busca_linha_pos_verde(estado_verde, destino, memoria):
@@ -811,6 +820,8 @@ def aplicar_verde_ativo(destino_normal, estado_verde):
     modo = estado_verde["modo"]
     decisao = estado_verde["decisao_confirmada"]
     if modo == "AVANCANDO_APOS_VERDE":
+        if decisao == "RETORNO":
+            return destino_normal
         return escolher_destino_preferindo_frente(destino_normal)
     if modo == "EXECUTANDO_VERDE" and decisao in ("ESQUERDA", "DIREITA"):
         return escolher_destino_preferindo_lado(destino_normal, decisao)
@@ -818,10 +829,13 @@ def aplicar_verde_ativo(destino_normal, estado_verde):
 
 
 def aplicar_comando_verde_ativo(comando_normal, destino, estado_verde, memoria):
-    if estado_verde["modo"] != "EXECUTANDO_VERDE":
+    modo = estado_verde["modo"]
+    decisao = estado_verde["decisao_confirmada"]
+    if modo == "AVANCANDO_APOS_VERDE" and decisao == "RETORNO":
+        return comando_avancar_retorno_cego()
+    if modo != "EXECUTANDO_VERDE":
         return comando_normal
 
-    decisao = estado_verde["decisao_confirmada"]
     if decisao == "RETORNO":
         return comando_giro_retorno_verde(estado_verde, memoria)
 
@@ -1256,6 +1270,7 @@ def criar_stream_debug(
             f"verde_bloqueia_tanque_90={modo_verde in MODOS_VERDE_BLOQUEIAM_TANQUE_90}",
             f"decisao_confirmada={estado_verde_ativo.get('decisao_confirmada', 'NA')}",
             f"decisao_intencao={estado_verde_ativo.get('decisao_intencao', 'NA')}",
+            f"lado_giro_retorno={estado_verde_ativo.get('lado_giro_retorno', 'CENTRO')}",
             f"frames_confirmacao={estado_verde_ativo.get('frames_confirmacao', 0)}",
             f"frames_nenhum_confirmacao={estado_verde_ativo.get('frames_nenhum_confirmacao', 0)}",
             f"frames_suspeita_retorno={estado_verde_ativo.get('frames_suspeita_retorno', 0)}",
