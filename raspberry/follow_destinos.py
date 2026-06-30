@@ -1252,6 +1252,9 @@ def criar_stream_debug(
             f"verde_tolerado={resultado_verde.get('tem_verde_tolerado_desalinhado', False)}",
             f"verde_parcial={resultado_verde.get('tem_verde_parcial_desalinhado', False)}",
             f"suspeita_retorno={resultado_verde.get('suspeita_retorno', False)}",
+            f"contexto_retorno={resultado_verde.get('contexto_retorno', False)}",
+            f"retorno_com_falso_depois={resultado_verde.get('retorno_com_falso_depois', False)}",
+            f"verdes_falsos_depois_count={resultado_verde.get('verdes_falsos_depois_count', 0)}",
             f"retorno_E/D={resultado_verde.get('evidencias_retorno_esquerda', 0)}/{resultado_verde.get('evidencias_retorno_direita', 0)}",
             f"motivo_retorno={resultado_verde.get('motivo_retorno', 'NA')}",
         ])
