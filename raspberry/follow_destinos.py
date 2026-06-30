@@ -1248,7 +1248,13 @@ def criar_stream_debug(
                 f"acao={verde.get('usado_para_acao', False)} "
                 f"ret={verde.get('usado_para_retorno', False)} "
                 f"falso={verde.get('falso_depois_cruzamento', False)} "
-                f"forte_dep={verde.get('depois_forte_intersecao', False)}",
+                f"forte_dep={verde.get('depois_forte_intersecao', False)} "
+                f"int_frente={verde.get('tem_intersecao_a_frente', False)} "
+                f"dy={_numero_stream(verde.get('distancia_y_verde_cruzamento'), 0)} "
+                f"ramo={verde.get('ramo_preto_compativel', False)} "
+                f"bloq={verde.get('bloqueado_sem_intersecao_a_frente', False)} "
+                f"mot_int={verde.get('motivo_intersecao_a_frente', 'NA')} "
+                f"mot_bloq={verde.get('motivo_bloqueio_acao', 'NA')}",
                 (x, max(15, y - 6)),
                 cor,
                 0.36,
@@ -1297,6 +1303,7 @@ def criar_stream_debug(
             f"contexto_retorno={resultado_verde.get('contexto_retorno', False)}",
             f"qtd_acao_E/D={resultado_verde.get('qtd_acao_esq', 0)}/{resultado_verde.get('qtd_acao_dir', 0)}",
             f"qtd_falso_depois={resultado_verde.get('qtd_falso_depois', 0)}",
+            f"qtd_bloqueado_sem_intersecao={resultado_verde.get('qtd_bloqueado_sem_intersecao', 0)}",
             f"retorno_seguro={resultado_verde.get('retorno_seguro', False)}",
             f"contexto_retorno_seguro={resultado_verde.get('contexto_retorno_seguro', False)}",
             f"retorno_com_falso_depois={resultado_verde.get('retorno_com_falso_depois', False)}",
