@@ -1251,10 +1251,15 @@ def criar_stream_debug(
                 f"forte_dep={verde.get('depois_forte_intersecao', False)} "
                 f"int_frente={verde.get('tem_intersecao_a_frente', False)} "
                 f"dy={_numero_stream(verde.get('distancia_y_verde_cruzamento'), 0)} "
-                f"ramo={verde.get('ramo_preto_compativel', False)} "
+                f"ramo_global={verde.get('ramo_lateral_global', False)} "
+                f"ramo_local={verde.get('ramo_lateral_local', False)} "
+                f"px_ramo={verde.get('pixels_ramo_lateral_local', 0)} "
+                f"px_entre={verde.get('pixels_linha_entre_verde_cruzamento', 0)} "
+                f"px_prox={verde.get('pixels_linha_proxima', 0)} "
                 f"bloq={verde.get('bloqueado_sem_intersecao_a_frente', False)} "
                 f"mot_int={verde.get('motivo_intersecao_a_frente', 'NA')} "
-                f"mot_bloq={verde.get('motivo_bloqueio_acao', 'NA')}",
+                f"mot_bloq={verde.get('motivo_bloqueio_acao', 'NA')} "
+                f"area_rel={_numero_stream(verde.get('area_rel_quadro'), 3)}",
                 (x, max(15, y - 6)),
                 cor,
                 0.36,

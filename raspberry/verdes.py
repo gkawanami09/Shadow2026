@@ -78,8 +78,9 @@ ALTURA_MIN_VERDE = 3
 MULT_LARGURA_CRUZAMENTO = 2.6
 LARGURA_LINHA_FALLBACK = 30.0
 INTERVALO_DEBUG_CAMERA = 0.60
-DIST_MAX_VERDE_CRUZAMENTO = 90
-DIST_MIN_VERDE_CRUZAMENTO = -20
+DIST_MAX_VERDE_CRUZAMENTO_ACAO = 65
+DIST_MIN_VERDE_CRUZAMENTO_ACAO = 5
+AREA_MAX_VERDE_LATERAL_SEGURA = 0.18
 
 
 def limitar(valor, minimo, maximo):
@@ -1485,6 +1486,36 @@ def candidato_evidencia_retorno_flexivel(
     return False
 
 
+def medir_ramo_lateral_local(candidato, cruzamento, mascara_linha):
+    altura, largura = mascara_linha.shape[:2]
+    y_cruzamento = int(cruzamento["y_cruzamento"])
+    largura_linha = float(cruzamento.get("largura_linha_px", LARGURA_LINHA_FALLBACK))
+    centro_cruzamento = cruzamento.get("centro")
+    cx_cruzamento = float(centro_cruzamento[0]) if centro_cruzamento is not None else largura / 2.0
+    cx_verde = float(candidato["centro"][0])
+    margem = max(8.0, largura_linha)
+    y1 = int(limitar(y_cruzamento - max(6.0, largura_linha * 0.5), 0, altura))
+    y2 = int(limitar(y_cruzamento + max(10.0, largura_linha * 1.2), 0, altura))
+    if candidato.get("lado") == "DIREITA":
+        x1 = int(limitar(cx_cruzamento + largura_linha * 0.7, 0, largura))
+        x2 = int(limitar(cx_verde + margem, 0, largura))
+    elif candidato.get("lado") == "ESQUERDA":
+        x1 = int(limitar(cx_verde - margem, 0, largura))
+        x2 = int(limitar(cx_cruzamento - largura_linha * 0.7, 0, largura))
+    else:
+        x1 = x2 = 0
+    pixels = int(cv2.countNonZero(mascara_linha[y1:y2, x1:x2])) if x2 > x1 and y2 > y1 else 0
+    limite = max(12, int(largura_linha * 1.2))
+    return {
+        "ramo_lateral_local": bool(x2 > x1 and pixels >= limite),
+        "pixels_ramo_lateral_local": pixels,
+        "roi_ramo_lateral_x1": x1,
+        "roi_ramo_lateral_x2": x2,
+        "roi_ramo_lateral_y1": y1,
+        "roi_ramo_lateral_y2": y2,
+    }
+
+
 def analisar_intersecao_a_frente_do_verde(candidato, cruzamento, mascara_linha):
     """Valida localmente se o marcador pertence ao cruzamento atual."""
     resultado = {
@@ -1495,6 +1526,15 @@ def analisar_intersecao_a_frente_do_verde(candidato, cruzamento, mascara_linha):
         "verde_muito_longe_do_cruzamento": False,
         "ramo_preto_compativel": False,
         "pixels_linha_entre_verde_cruzamento": 0,
+        "pixels_linha_proxima_nao_usado_para_intersecao": True,
+        "ramo_lateral_global": False,
+        "ramo_lateral_local": False,
+        "conexao_lateral_local": False,
+        "pixels_ramo_lateral_local": 0,
+        "roi_lateral_x1": None,
+        "roi_lateral_x2": None,
+        "roi_lateral_y1": None,
+        "roi_lateral_y2": None,
         "id_cruzamento_referencia": None,
     }
     y_cruzamento = cruzamento.get("y_cruzamento")
@@ -1507,37 +1547,59 @@ def analisar_intersecao_a_frente_do_verde(candidato, cruzamento, mascara_linha):
     dy = float(cy - y_cruzamento)
     resultado["distancia_y_verde_cruzamento"] = dy
     resultado["id_cruzamento_referencia"] = y_cruzamento
-    resultado["cruzamento_na_frente_do_verde"] = dy >= DIST_MIN_VERDE_CRUZAMENTO
-    resultado["verde_muito_longe_do_cruzamento"] = dy > DIST_MAX_VERDE_CRUZAMENTO
-    if dy < DIST_MIN_VERDE_CRUZAMENTO:
-        resultado["motivo_intersecao_a_frente"] = "cruzamento_atras_do_verde"
+    resultado["cruzamento_na_frente_do_verde"] = dy >= DIST_MIN_VERDE_CRUZAMENTO_ACAO
+    resultado["verde_muito_longe_do_cruzamento"] = dy > DIST_MAX_VERDE_CRUZAMENTO_ACAO
+    if dy < DIST_MIN_VERDE_CRUZAMENTO_ACAO:
+        resultado["motivo_intersecao_a_frente"] = "verde_nao_esta_antes_do_cruzamento"
         return resultado
-    if dy > DIST_MAX_VERDE_CRUZAMENTO:
-        resultado["motivo_intersecao_a_frente"] = "verde_muito_longe_do_cruzamento"
+    if dy > DIST_MAX_VERDE_CRUZAMENTO_ACAO:
+        resultado["motivo_intersecao_a_frente"] = "verde_longe_demais_do_cruzamento"
         return resultado
 
     altura, largura = mascara_linha.shape[:2]
     largura_linha = float(cruzamento.get("largura_linha_px", LARGURA_LINHA_FALLBACK))
     margem = int(max(8, largura_linha))
-    x1 = int(limitar(x - margem, 0, largura))
-    x2 = int(limitar(x + w + margem, 0, largura))
+    centro_cruzamento = cruzamento.get("centro")
+    cx_cruzamento = float(centro_cruzamento[0]) if centro_cruzamento is not None else largura / 2.0
+    cx_verde = float(candidato["centro"][0])
+    if candidato.get("lado") == "DIREITA":
+        x1 = int(limitar(cx_cruzamento + largura_linha * 0.5, 0, largura))
+        x2 = int(limitar(min(cx_verde, x + w) + margem, 0, largura))
+    elif candidato.get("lado") == "ESQUERDA":
+        x1 = int(limitar(max(cx_verde, x) - margem, 0, largura))
+        x2 = int(limitar(cx_cruzamento - largura_linha * 0.5, 0, largura))
+    else:
+        x1 = x2 = 0
     y1 = int(limitar(min(y_cruzamento, y), 0, altura))
     y2 = int(limitar(max(y_cruzamento, y + h), 0, altura))
     pixels_linha = int(cv2.countNonZero(mascara_linha[y1:y2, x1:x2])) if x2 > x1 and y2 > y1 else 0
     resultado["pixels_linha_entre_verde_cruzamento"] = pixels_linha
+    resultado["roi_lateral_x1"] = x1
+    resultado["roi_lateral_x2"] = x2
+    resultado["roi_lateral_y1"] = y1
+    resultado["roi_lateral_y2"] = y2
     limite_pixels = max(10, int(largura_linha * 0.8))
-    tem_conexao_preta = pixels_linha >= limite_pixels or candidato.get("pixels_linha_proxima", 0) >= limite_pixels
+    tem_conexao_preta = bool(x2 > x1 and pixels_linha >= limite_pixels)
+    resultado["conexao_lateral_local"] = tem_conexao_preta
 
     lado = candidato.get("lado")
-    ramo_lateral = (
+    ramo_lateral_global = bool(
         lado == "ESQUERDA" and cruzamento.get("ramo_esquerda", False)
         or lado == "DIREITA" and cruzamento.get("ramo_direita", False)
     )
-    resultado["ramo_preto_compativel"] = bool(tem_conexao_preta and ramo_lateral)
+    resultado["ramo_lateral_global"] = ramo_lateral_global
+    medicao_local = medir_ramo_lateral_local(candidato, cruzamento, mascara_linha)
+    resultado.update(medicao_local)
+    ramo_lateral_local = medicao_local["ramo_lateral_local"]
+    resultado["ramo_preto_compativel"] = bool(
+        ramo_lateral_global and ramo_lateral_local and tem_conexao_preta
+    )
     if lado not in ("ESQUERDA", "DIREITA"):
         resultado["motivo_intersecao_a_frente"] = "lado_sem_acao_lateral"
-    elif not ramo_lateral:
+    elif not ramo_lateral_global:
         resultado["motivo_intersecao_a_frente"] = "ramo_lateral_incompativel"
+    elif not ramo_lateral_local:
+        resultado["motivo_intersecao_a_frente"] = "ramo_lateral_local_ausente"
     elif not tem_conexao_preta:
         resultado["motivo_intersecao_a_frente"] = "sem_conexao_preta_ate_cruzamento"
     else:
@@ -1565,9 +1627,15 @@ def candidato_acao_segura(candidato, cruzamento, mascara_linha):
         and posicao_segura
         and candidato.get("lado") in ("ESQUERDA", "DIREITA")
     )
+    if base_segura and candidato.get("area_rel_quadro", 0.0) > AREA_MAX_VERDE_LATERAL_SEGURA:
+        candidato["bloqueado_sem_intersecao_a_frente"] = True
+        candidato["motivo_bloqueio_acao"] = "verde_grande_demais_para_lateral_segura"
+        return False
     if base_segura and not candidato.get("tem_intersecao_a_frente", False):
         candidato["bloqueado_sem_intersecao_a_frente"] = True
-        candidato["motivo_bloqueio_acao"] = "sem_intersecao_a_frente_do_verde"
+        candidato["motivo_bloqueio_acao"] = candidato.get(
+            "motivo_intersecao_a_frente", "sem_intersecao_a_frente_do_verde"
+        )
     return bool(base_segura and candidato.get("tem_intersecao_a_frente", False))
 
 
@@ -1996,6 +2064,12 @@ def imprimir_log_detalhado(resultado):
             f"motivo_intersecao_a_frente={verde.get('motivo_intersecao_a_frente', 'nao_analisado')} "
             f"distancia_y_verde_cruzamento={verde.get('distancia_y_verde_cruzamento')} "
             f"ramo_preto_compativel={verde.get('ramo_preto_compativel', False)} "
+            f"ramo_lateral_global={verde.get('ramo_lateral_global', False)} "
+            f"ramo_lateral_local={verde.get('ramo_lateral_local', False)} "
+            f"pixels_ramo_lateral_local={verde.get('pixels_ramo_lateral_local', 0)} "
+            f"pixels_linha_entre_verde_cruzamento={verde.get('pixels_linha_entre_verde_cruzamento', 0)} "
+            f"pixels_linha_proxima_nao_usado_para_intersecao={verde.get('pixels_linha_proxima_nao_usado_para_intersecao', True)} "
+            f"roi_lateral=({verde.get('roi_lateral_x1')},{verde.get('roi_lateral_y1')})-({verde.get('roi_lateral_x2')},{verde.get('roi_lateral_y2')}) "
             f"bloqueado_sem_intersecao_a_frente={verde.get('bloqueado_sem_intersecao_a_frente', False)} "
             f"motivo_bloqueio_acao={verde.get('motivo_bloqueio_acao', 'nenhum')} "
             f"depois_forte_intersecao={verde.get('depois_forte_intersecao', False)} "
