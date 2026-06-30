@@ -84,11 +84,9 @@ TANQUE_90_TEMPO_MAX = 0.75
 TANQUE_90_VEL = DEST_VEL_RECUPERAR
 
 MODOS_VERDE_BLOQUEIAM_TANQUE_90 = {
-    "CONFIRMANDO_VERDE",
     "AVANCANDO_APOS_VERDE",
     "EXECUTANDO_VERDE",
     "RECUPERANDO_LINHA",
-    "COOLDOWN_VERDE",
 }
 
 
@@ -1198,8 +1196,10 @@ def criar_stream_debug(
             f"y_cruzamento={cruzamento.get('y_cruzamento', 'NA')}",
         ])
     if estado_verde_ativo is not None:
+        modo_verde = estado_verde_ativo.get("modo", "NA")
         linhas.extend([
-            f"modo_verde={estado_verde_ativo.get('modo', 'NA')}",
+            f"modo_verde={modo_verde}",
+            f"verde_bloqueia_tanque_90={modo_verde in MODOS_VERDE_BLOQUEIAM_TANQUE_90}",
             f"decisao_confirmada={estado_verde_ativo.get('decisao_confirmada', 'NA')}",
             f"decisao_intencao={estado_verde_ativo.get('decisao_intencao', 'NA')}",
             f"frames_confirmacao={estado_verde_ativo.get('frames_confirmacao', 0)}",
@@ -1405,10 +1405,7 @@ def main():
                 and destino.get("ok", False)
                 and lado_destino(destino) == estado_verde_ativo["decisao_confirmada"]
             )
-            if confirmando_verde:
-                estado = "CONFIRMANDO_VERDE"
-                comando = aplicar_comando_confirmando_verde(destino_normal, memoria)
-            elif executando_retorno_verde:
+            if executando_retorno_verde:
                 estado = "VERDE_RETORNO_CEGO"
                 comando = comando_giro_retorno_verde(estado_verde_ativo, memoria)
             elif recuperando_linha_verde:
@@ -1426,6 +1423,9 @@ def main():
                 comando = comando_tanque_90(memoria)
                 memoria["correcao_anterior"] = 0
                 memoria["vel_anterior"] = (0, 0)
+            elif confirmando_verde:
+                estado = "CONFIRMANDO_VERDE"
+                comando = aplicar_comando_confirmando_verde(destino_normal, memoria)
             elif memoria["em_recuperacao"] and destino["ok"]:
                 if memoria["frames_destino_confiavel"] < DEST_FRAMES_DESTINO_CONFIAVEL:
                     estado = "FOLLOW_CONFIRMAR"
