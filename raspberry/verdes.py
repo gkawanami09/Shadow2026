@@ -48,6 +48,10 @@ MARGEM_VERDE_SOBREPOSTO_Y = 60
 CONFIANCA_MIN_VERDE_DESALINHADO = 0.60
 AREA_MIN_VERDE_DESALINHADO = 20
 AREA_MAX_VERDE_DESALINHADO = 0.25
+FATOR_AREA_MIN_VERDE_PARCIAL_DESALINHADO = 0.45
+AREA_MIN_VERDE_PARCIAL_ABS = 12
+CONFIANCA_MIN_VERDE_PARCIAL_DESALINHADO = 0.50
+FILL_RATIO_MIN_VERDE_PARCIAL = 0.18
 
 PRETO_MARGEM_VERDE_MULT = 0.80
 PRETO_MIN_PIXELS_ABS = 10
@@ -168,14 +172,18 @@ def remover_verde_da_mascara_linha(mascara_linha, mascara_verde):
     return cv2.bitwise_and(mascara_linha, mascara_verde_invertida)
 
 
-def encontrar_candidatos_verdes(frame_bgr, mascara_verde):
+def encontrar_candidatos_verdes(
+    frame_bgr,
+    mascara_verde,
+    area_minima_absoluta=AREA_MIN_VERDE_ABSOLUTA,
+):
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
     contornos, _ = cv2.findContours(mascara_verde, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     candidatos = []
     for contorno in contornos:
         area = float(cv2.contourArea(contorno))
         x, y, w, h = cv2.boundingRect(contorno)
-        if area < AREA_MIN_VERDE_ABSOLUTA or w < LARGURA_MIN_VERDE or h < ALTURA_MIN_VERDE:
+        if area < area_minima_absoluta or w < LARGURA_MIN_VERDE or h < ALTURA_MIN_VERDE:
             continue
 
         regiao_mascara = mascara_verde[y:y + h, x:x + w]
@@ -257,7 +265,11 @@ def separar_candidatos_verdes_por_cruzamento(
                 y_inicio:y + h,
                 x:x + w,
             ]
-            for parte in encontrar_candidatos_verdes(frame_bgr, mascara_antes):
+            for parte in encontrar_candidatos_verdes(
+                frame_bgr,
+                mascara_antes,
+                area_minima_absoluta=AREA_MIN_VERDE_PARCIAL_ABS,
+            ):
                 parte["origem_split"] = "SPLIT_ANTES"
                 parte["bbox_original"] = bbox_original
                 parte["area_original"] = float(area_original)
@@ -270,7 +282,11 @@ def separar_candidatos_verdes_por_cruzamento(
                 y:y_fim,
                 x:x + w,
             ]
-            for parte in encontrar_candidatos_verdes(frame_bgr, mascara_depois):
+            for parte in encontrar_candidatos_verdes(
+                frame_bgr,
+                mascara_depois,
+                area_minima_absoluta=AREA_MIN_VERDE_PARCIAL_ABS,
+            ):
                 parte["origem_split"] = "SPLIT_DEPOIS"
                 parte["bbox_original"] = bbox_original
                 parte["area_original"] = float(area_original)
@@ -722,6 +738,63 @@ def candidato_perto_intersecao_desalinhado(candidato, cruzamento):
     return centro_proximo or atravessa_cruzamento or sobrepoe_faixa
 
 
+def candidato_parcial_desalinhado_recuperavel(
+    candidato,
+    cruzamento,
+    area_minima_y,
+    area_rel_quadro,
+    toca_borda,
+):
+    """Aceita area reduzida somente com cor e contexto de pista fortes."""
+    if not candidato_perto_intersecao_desalinhado(candidato, cruzamento):
+        return False
+
+    _, y, _, h = candidato["bbox"]
+    y_cruzamento = cruzamento.get("y_cruzamento")
+    bbox_cruza_faixa = (
+        y_cruzamento is not None
+        and y <= int(y_cruzamento) <= y + h
+    )
+    posicao_segura = candidato.get("posicao_cruzamento") in (
+        "ANTES",
+        "SOBREPOSTO",
+        "SOBREPOSTO_TOLERADO",
+    ) or bbox_cruza_faixa
+    if not posicao_segura or candidato.get("falso_depois_cruzamento", False):
+        return False
+
+    area = candidato.get("area", 0.0)
+    area_minima_parcial = area_minima_y * FATOR_AREA_MIN_VERDE_PARCIAL_DESALINHADO
+    if area < AREA_MIN_VERDE_PARCIAL_ABS or area < area_minima_parcial:
+        return False
+    if area_rel_quadro > AREA_MAX_VERDE_DESALINHADO or toca_borda:
+        return False
+
+    cor_verde_forte = (
+        VERDE_H_MIN <= candidato.get("mean_h", 0.0) <= VERDE_H_MAX
+        and candidato.get("mean_s", 0.0) >= VERDE_S_MIN
+        and candidato.get("mean_v", 0.0) >= VERDE_V_MIN
+        and candidato.get("proporcao_verde", 0.0) >= VERDE_PROPORCAO_MIN
+        and candidato.get("g_menos_r", 0.0) >= VERDE_G_MENOS_R_MIN
+        and candidato.get("g_menos_b", 0.0) >= VERDE_G_MENOS_B_MIN
+    )
+    preto_ao_redor = any(
+        candidato.get(chave, False)
+        for chave in ("preto_acima", "preto_abaixo", "preto_esquerda", "preto_direita")
+    )
+    cruzamento_confiavel = (
+        cruzamento.get("detectado", False)
+        and cruzamento.get("confianca", 0.0) >= 0.45
+    )
+    return cor_verde_forte and (preto_ao_redor or cruzamento_confiavel)
+
+
+def confianca_minima_candidato_desalinhado(candidato):
+    if candidato.get("verde_parcial_desalinhado", False):
+        return CONFIANCA_MIN_VERDE_PARCIAL_DESALINHADO
+    return CONFIANCA_MIN_VERDE_DESALINHADO
+
+
 def inferir_lado_verde_desalinhado(
     candidato,
     cruzamento=None,
@@ -788,6 +861,10 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["tolerado_desalinhado"] = False
     candidato["motivo_tolerancia"] = "nao_tolerado"
     candidato["recuperado_desalinhado"] = False
+    candidato["verde_parcial_desalinhado"] = False
+    candidato["area_minima_original"] = float(candidato["area_minima_y"])
+    candidato["area_minima_usada"] = float(candidato["area_minima_y"])
+    candidato["fator_area_parcial"] = 1.0
     candidato["largura_frame"] = int(largura)
     origem_split = candidato.get("origem_split", "ORIGINAL")
     posicao_split = None
@@ -822,12 +899,6 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         candidato,
         cruzamento,
     )
-    pode_tolerar_desalinhado = (
-        origem_split != "SPLIT_DEPOIS"
-        and area_segura_desalinhado
-        and perto_intersecao_desalinhado
-        and not toca_borda
-    )
     tolerancia_posicao_pendente = False
 
     # Classifique a posicao antes dos filtros geometricos. Assim um candidato
@@ -845,6 +916,20 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["dy_centro_cruzamento"] = posicao_cruzamento["dy_centro_cruzamento"]
     candidato["frac_bbox_antes"] = posicao_cruzamento["frac_bbox_antes"]
 
+    parcial_recuperavel = candidato_parcial_desalinhado_recuperavel(
+        candidato,
+        cruzamento,
+        candidato["area_minima_y"],
+        area_rel_quadro,
+        toca_borda,
+    )
+    pode_tolerar_desalinhado = (
+        origem_split != "SPLIT_DEPOIS"
+        and perto_intersecao_desalinhado
+        and not toca_borda
+        and (area_segura_desalinhado or parcial_recuperavel)
+    )
+
     y_rel = cy / max(altura, 1)
     if y_rel < VERDE_Y_MIN_REL or y_rel > VERDE_Y_MAX_REL:
         if pode_tolerar_desalinhado:
@@ -856,27 +941,42 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
             return candidato
 
     confianca = 0.0
-    cor_boa = (
+    cor_base_boa = (
         VERDE_H_MIN <= candidato["mean_h"] <= VERDE_H_MAX
         and candidato["mean_s"] >= VERDE_S_MIN
         and candidato["mean_v"] >= VERDE_V_MIN
         and candidato["proporcao_verde"] >= VERDE_PROPORCAO_MIN
-        and candidato["fill_ratio"] >= VERDE_FILL_RATIO_MIN
         and candidato["g_menos_r"] >= VERDE_G_MENOS_R_MIN
         and candidato["g_menos_b"] >= VERDE_G_MENOS_B_MIN
     )
-    if cor_boa:
+    fill_ratio_normal = candidato["fill_ratio"] >= VERDE_FILL_RATIO_MIN
+    fill_ratio_parcial = (
+        candidato["fill_ratio"] >= FILL_RATIO_MIN_VERDE_PARCIAL
+        and parcial_recuperavel
+    )
+    if cor_base_boa and (fill_ratio_normal or fill_ratio_parcial):
         confianca += 0.25
+        if not fill_ratio_normal:
+            candidato["tolerado_desalinhado"] = True
+            candidato["recuperado_desalinhado"] = True
+            candidato["verde_parcial_desalinhado"] = True
+            candidato["motivo_tolerancia"] = "fill_ratio_parcial_recuperado"
     else:
         candidato["motivo"] = "cor_hsv_invalida"
         candidato["confianca"] = limitar(confianca, 0.0, 1.0)
         return candidato
 
     if candidato["area"] < candidato["area_minima_y"]:
-        if pode_tolerar_desalinhado and candidato["area"] >= AREA_MIN_VERDE_DESALINHADO:
+        if parcial_recuperavel:
             candidato["tolerado_desalinhado"] = True
             candidato["recuperado_desalinhado"] = True
-            candidato["motivo_tolerancia"] = "area_perspectiva_recuperada_perto_intersecao"
+            candidato["verde_parcial_desalinhado"] = True
+            candidato["area_minima_usada"] = max(
+                AREA_MIN_VERDE_PARCIAL_ABS,
+                candidato["area_minima_y"] * FATOR_AREA_MIN_VERDE_PARCIAL_DESALINHADO,
+            )
+            candidato["fator_area_parcial"] = FATOR_AREA_MIN_VERDE_PARCIAL_DESALINHADO
+            candidato["motivo_tolerancia"] = "area_parcial_recuperada_perto_intersecao"
         else:
             candidato["motivo"] = "area_pequena_perspectiva"
             candidato["confianca"] = limitar(confianca, 0.0, 1.0)
@@ -937,7 +1037,7 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     if sobre_linha > max(8, candidato["area"] * 0.25):
         if (
             pode_tolerar_desalinhado
-            and confianca >= CONFIANCA_MIN_VERDE_DESALINHADO
+            and confianca >= confianca_minima_candidato_desalinhado(candidato)
         ):
             candidato["tolerado_desalinhado"] = True
         else:
@@ -954,7 +1054,10 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["linha_referencia"] = referencia_linha
     candidato["x_referencia"] = referencia_linha["x_linha"]
     if referencia_linha["origem"] == "centro_imagem_fallback":
-        if pode_tolerar_desalinhado and confianca >= CONFIANCA_MIN_VERDE_DESALINHADO:
+        if (
+            pode_tolerar_desalinhado
+            and confianca >= confianca_minima_candidato_desalinhado(candidato)
+        ):
             candidato["tolerado_desalinhado"] = True
             candidato["recuperado_desalinhado"] = True
             candidato["motivo_tolerancia"] = "referencia_frame_recuperada_perto_intersecao"
@@ -987,7 +1090,7 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         if (
             lado_inferido in ("ESQUERDA", "DIREITA")
             and pode_tolerar_desalinhado
-            and confianca >= CONFIANCA_MIN_VERDE_DESALINHADO
+            and confianca >= confianca_minima_candidato_desalinhado(candidato)
         ):
             lado = lado_inferido
             candidato["lado"] = lado
@@ -997,7 +1100,7 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         else:
             if (
                 pode_tolerar_desalinhado
-                and confianca >= CONFIANCA_MIN_VERDE_DESALINHADO
+                and confianca >= confianca_minima_candidato_desalinhado(candidato)
             ):
                 candidato["tolerado_desalinhado"] = True
                 candidato["recuperado_desalinhado"] = True
@@ -1028,8 +1131,11 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     if verde_grande_mas_plausivel:
         confianca -= 0.05
         candidato["observacao_tamanho"] = "verde_grande_mas_plausivel"
+    if candidato["verde_parcial_desalinhado"]:
+        confianca -= 0.10
     if candidato["tolerado_desalinhado"] or tolerancia_posicao_pendente:
-        if confianca < CONFIANCA_MIN_VERDE_DESALINHADO:
+        confianca_minima = confianca_minima_candidato_desalinhado(candidato)
+        if confianca < confianca_minima:
             candidato["motivo"] = "confianca_baixa_desalinhado"
             candidato["confianca"] = limitar(confianca, 0.0, 1.0)
             return candidato
@@ -1102,8 +1208,20 @@ def decidir_verdes(candidatos, cruzamento):
         candidato
         for candidato in candidatos
         if not candidato.get("valido", False)
-        and candidato.get("motivo") == "verde_central_inseguro"
-        and candidato.get("confianca", 0.0) >= CONFIANCA_MIN_VERDE_DESALINHADO
+        and (
+            (
+                candidato.get("motivo") == "verde_central_inseguro"
+                and (
+                    candidato.get("verde_parcial_desalinhado", False)
+                    or candidato.get("confianca", 0.0)
+                    >= confianca_minima_candidato_desalinhado(candidato)
+                )
+            )
+            or (
+                candidato.get("verde_parcial_desalinhado", False)
+                and candidato.get("motivo") == "confianca_baixa_desalinhado"
+            )
+        )
         and (
             candidato.get("verde_antes_intersecao", False)
             or candidato.get("posicao_cruzamento") in (
@@ -1163,7 +1281,11 @@ def analisar_verdes(frame_bgr):
     mascara_linha = remover_verde_da_mascara_linha(mascara_linha_original, mascara_verde)
     cruzamento = analisar_cruzamento(mascara_linha)
     largura_linha_px = cruzamento["largura_linha_px"]
-    candidatos = encontrar_candidatos_verdes(frame_bgr, mascara_verde)
+    candidatos = encontrar_candidatos_verdes(
+        frame_bgr,
+        mascara_verde,
+        area_minima_absoluta=AREA_MIN_VERDE_PARCIAL_ABS,
+    )
     candidatos = separar_candidatos_verdes_por_cruzamento(
         frame_bgr,
         mascara_verde,
@@ -1205,6 +1327,9 @@ def analisar_verdes(frame_bgr):
         "tem_verde_falso_depois": bool(tem_verde_falso_depois),
         "tem_verde_tolerado_desalinhado": any(
             candidato.get("tolerado_desalinhado", False) for candidato in verdes
+        ),
+        "tem_verde_parcial_desalinhado": any(
+            candidato.get("verde_parcial_desalinhado", False) for candidato in verdes
         ),
         "cruzamento": cruzamento,
         "verdes": verdes,
@@ -1264,6 +1389,10 @@ def imprimir_log_detalhado(resultado):
             f"tolerado_desalinhado={verde.get('tolerado_desalinhado', False)} "
             f"motivo_tolerancia={verde.get('motivo_tolerancia', 'nao_tolerado')} "
             f"recuperado_desalinhado={verde.get('recuperado_desalinhado', False)} "
+            f"verde_parcial_desalinhado={verde.get('verde_parcial_desalinhado', False)} "
+            f"area_minima_original={verde.get('area_minima_original')} "
+            f"area_minima_usada={verde.get('area_minima_usada')} "
+            f"fator_area_parcial={verde.get('fator_area_parcial', 1.0)} "
             f"verde_antes_intersecao={verde.get('verde_antes_intersecao', False)} "
             f"verde_depois_intersecao={verde.get('verde_depois_intersecao', False)} "
             f"falso_depois_cruzamento={verde.get('falso_depois_cruzamento', False)} "

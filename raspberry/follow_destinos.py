@@ -1145,7 +1145,8 @@ def criar_stream_debug(
                 f"{rotulo} {verde.get('lado', 'NA')} c={_numero_stream(verde.get('confianca'))} "
                 f"pos={verde.get('posicao_cruzamento', 'NA')} {verde.get('motivo', 'NA')} "
                 f"tol={verde.get('tolerado_desalinhado', False)} "
-                f"rec={verde.get('recuperado_desalinhado', False)}",
+                f"rec={verde.get('recuperado_desalinhado', False)} "
+                f"parcial={verde.get('verde_parcial_desalinhado', False)}",
                 (x, max(15, y - 6)),
                 cor,
                 0.36,
@@ -1185,6 +1186,7 @@ def criar_stream_debug(
             f"verde_valido_antes={verde_valido_antes}",
             f"verde_falso_depois={verde_falso_depois}",
             f"verde_tolerado={resultado_verde.get('tem_verde_tolerado_desalinhado', False)}",
+            f"verde_parcial={resultado_verde.get('tem_verde_parcial_desalinhado', False)}",
         ])
         cruzamento = resultado_verde.get("cruzamento") or {}
         linhas.extend([
