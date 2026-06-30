@@ -39,9 +39,10 @@ except ImportError:
     enviar_comando = None
 
 try:
-    from verdes import analisar_verdes
+    from verdes import analisar_verdes, estabilizar_decisao_lado_verde
 except ImportError:
     analisar_verdes = None
+    estabilizar_decisao_lado_verde = None
 
 
 TEMPO_SEGURAR_DECISAO_LOG = 0.80
@@ -1129,14 +1130,20 @@ def criar_stream_debug(
             )
             if verde.get("valido", False) and not falso_depois:
                 cor = (0, 220, 0)
-                rotulo = f"OK_{verde.get('lado', 'NA')}"
+                recuperado = verde.get("lado_inferido_forte") in ("ESQUERDA", "DIREITA")
+                sufixo = "_RECUPERADO" if recuperado else ""
+                rotulo = f"OK_{verde.get('lado', 'NA')}{sufixo}"
             elif falso_depois:
                 cor = (0, 0, 255)
                 rotulo = "FALSO_DEPOIS"
             else:
                 cor = (0, 220, 255)
                 motivo = str(verde.get("motivo", "INVALIDO"))
-                rotulo = "INSEGURO" if "insegur" in motivo.lower() else "INVALIDO"
+                rotulo = (
+                    "INSEGURO_CENTRO_SEM_LADO"
+                    if motivo == "verde_central_inseguro"
+                    else "INSEGURO" if "insegur" in motivo.lower() else "INVALIDO"
+                )
             cv2.rectangle(debug, (x, y), (x + w, y + h), cor, 2)
             _texto_stream(
                 debug,
@@ -1301,12 +1308,20 @@ def main():
         controle_varredura = {"etapa": 0, "ultima_troca": time.monotonic()}
         estado_log = criar_estado_log()
         estado_verde_ativo = criar_estado_verde_ativo()
+        historico_lado_verde = {"lado": "CENTRO", "instante": 0.0, "confianca": 0.0}
         estado_anterior, ultimo_debug = None, 0
 
         while True:
             frame = capturar_frame_bgr(camera)
+            agora = time.monotonic()
             analisar_verde = args.verde_sombra or args.verde_ativo
             resultado_verde = analisar_verdes(frame) if analisar_verde else None
+            if resultado_verde is not None and estabilizar_decisao_lado_verde is not None:
+                resultado_verde = estabilizar_decisao_lado_verde(
+                    resultado_verde,
+                    historico_lado_verde,
+                    agora,
+                )
             decisao_verde_crua = (
                 resultado_verde.get("decisao", "NENHUM")
                 if resultado_verde is not None
@@ -1327,7 +1342,6 @@ def main():
                 acao_permitida,
                 origem_decisao,
             )
-            agora = time.monotonic()
             resultado = detectar_linha(frame)
             destino_normal = escolher_destino(resultado)
             if args.verde_ativo:

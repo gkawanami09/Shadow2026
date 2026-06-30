@@ -59,6 +59,13 @@ PRETO_MIN_PIXELS_REL = 0.10
 PRETO_MIN_LADOS_AO_REDOR = 1
 
 MARGEM_CENTRO_LINHA_MULT = 0.80
+MARGEM_CENTRO_VERDE_INTERSECAO_MULT = 0.35
+MARGEM_CENTRO_VERDE_INTERSECAO_MAX = 18
+MARGEM_INFERIR_LADO_FORTE_PX = 8
+MARGEM_INFERIR_LADO_FORTE_MULT_LINHA = 0.18
+CONFIANCA_MIN_INFERIR_LADO_CENTRO = 0.75
+TEMPO_SEGURAR_VERDE_LADO_FORTE = 0.35
+CONFIANCA_MIN_SEGURAR_LADO_VERDE = 0.75
 BUSCA_LINHA_DY = (0, 10, 20, -10, -20, 35, -35)
 
 AREA_MIN_VERDE_ABSOLUTA = 20
@@ -839,6 +846,42 @@ def inferir_lado_verde_desalinhado(
     return "CENTRO", "evidencia_lateral_insuficiente"
 
 
+def inferir_lado_verde_centro_forte(candidato, cruzamento, largura_frame):
+    """Usa a posicao do bbox para recuperar lado sem ampliar falsos positivos."""
+    x, _, w, _ = candidato["bbox"]
+    cx = candidato["centro"][0]
+    x_referencia = candidato.get("x_referencia")
+    if x_referencia is None and cruzamento.get("centro") is not None:
+        x_referencia = cruzamento["centro"][0]
+    if x_referencia is None:
+        x_referencia = largura_frame / 2
+
+    largura_linha = (candidato.get("linha_referencia") or {}).get(
+        "largura_linha_px",
+        cruzamento.get("largura_linha_px", LARGURA_LINHA_FALLBACK),
+    )
+    margem = max(
+        MARGEM_INFERIR_LADO_FORTE_PX,
+        float(largura_linha) * MARGEM_INFERIR_LADO_FORTE_MULT_LINHA,
+    )
+    margem_pequena = max(3.0, margem * 0.50)
+    delta_centro = float(cx - x_referencia)
+    delta_borda_esquerda = float(x - x_referencia)
+    delta_borda_direita = float((x + w) - x_referencia)
+
+    candidato["delta_centro_lado"] = delta_centro
+    candidato["x_referencia_lado"] = float(x_referencia)
+    candidato["margem_lado_usada"] = float(margem)
+
+    direita = delta_centro >= margem or delta_borda_esquerda > -margem_pequena
+    esquerda = delta_centro <= -margem or delta_borda_direita < margem_pequena
+    if direita and not esquerda:
+        return "DIREITA", "bbox_forte_direita_referencia"
+    if esquerda and not direita:
+        return "ESQUERDA", "bbox_forte_esquerda_referencia"
+    return "CENTRO", "bbox_sem_maioria_lateral"
+
+
 def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato = dict(candidato)
     x, y, w, h = candidato["bbox"]
@@ -858,6 +901,11 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["lado_original"] = candidato.get("lado", "CENTRO")
     candidato["lado_inferido"] = candidato.get("lado", "CENTRO")
     candidato["motivo_lado_inferido"] = "nao_avaliado"
+    candidato["delta_centro_lado"] = None
+    candidato["x_referencia_lado"] = None
+    candidato["margem_lado_usada"] = None
+    candidato["lado_inferido_forte"] = "CENTRO"
+    candidato["motivo_lado_inferido_forte"] = "nao_avaliado"
     candidato["tolerado_desalinhado"] = False
     candidato["motivo_tolerancia"] = "nao_tolerado"
     candidato["recuperado_desalinhado"] = False
@@ -1069,7 +1117,24 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     x_linha = referencia_linha["x_linha"]
     largura_linha_local = referencia_linha["largura_linha_px"]
 
-    margem_centro = max(10, largura_linha_local * MARGEM_CENTRO_LINHA_MULT)
+    margem_centro_normal = max(10, largura_linha_local * MARGEM_CENTRO_LINHA_MULT)
+    perto_intersecao_lado = (
+        candidato.get("posicao_cruzamento") in (
+            "ANTES",
+            "SOBREPOSTO",
+            "SOBREPOSTO_TOLERADO",
+        )
+        or candidato.get("tolerado_desalinhado", False)
+        or candidato.get("verde_parcial_desalinhado", False)
+    )
+    if perto_intersecao_lado:
+        margem_centro = min(
+            margem_centro_normal,
+            max(8, largura_linha_local * MARGEM_CENTRO_VERDE_INTERSECAO_MULT),
+            MARGEM_CENTRO_VERDE_INTERSECAO_MAX,
+        )
+    else:
+        margem_centro = margem_centro_normal
     candidato["margem_centro_linha"] = float(margem_centro)
     if cx < x_linha - margem_centro:
         lado = "ESQUERDA"
@@ -1087,6 +1152,24 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["motivo_lado_inferido"] = motivo_lado_inferido
 
     if lado == "CENTRO":
+        confianca_projetada = confianca + 0.10
+        if cruzamento_pode_ser_referencia(cruzamento, largura):
+            confianca_projetada += 0.05
+        pode_inferir_forte = (
+            perto_intersecao_lado
+            and (
+                confianca_projetada >= CONFIANCA_MIN_INFERIR_LADO_CENTRO
+                or candidato.get("verde_parcial_desalinhado", False)
+                or candidato.get("tolerado_desalinhado", False)
+            )
+        )
+        lado_forte, motivo_lado_forte = inferir_lado_verde_centro_forte(
+            candidato,
+            cruzamento,
+            largura,
+        )
+        candidato["lado_inferido_forte"] = lado_forte
+        candidato["motivo_lado_inferido_forte"] = motivo_lado_forte
         if (
             lado_inferido in ("ESQUERDA", "DIREITA")
             and pode_tolerar_desalinhado
@@ -1097,6 +1180,14 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
             candidato["tolerado_desalinhado"] = True
             candidato["recuperado_desalinhado"] = True
             candidato["motivo_tolerancia"] = "lado_centro_inferido"
+        elif pode_inferir_forte and lado_forte in ("ESQUERDA", "DIREITA"):
+            lado = lado_forte
+            candidato["lado"] = lado
+            candidato["lado_inferido"] = lado
+            candidato["motivo_lado_inferido"] = motivo_lado_forte
+            candidato["tolerado_desalinhado"] = True
+            candidato["recuperado_desalinhado"] = True
+            candidato["motivo_tolerancia"] = "lado_centro_inferido_bbox_forte"
         else:
             if (
                 pode_tolerar_desalinhado
@@ -1110,7 +1201,10 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
                 candidato["verde_depois_intersecao"] = False
                 candidato["falso_depois_cruzamento"] = False
             candidato["motivo"] = "verde_central_inseguro"
-            candidato["confianca"] = limitar(confianca, 0.0, 1.0)
+            confianca_centro = confianca_projetada
+            if candidato.get("verde_parcial_desalinhado", False):
+                confianca_centro -= 0.10
+            candidato["confianca"] = limitar(confianca_centro, 0.0, 1.0)
             return candidato
 
     coerente_esquerda = candidato["preto_acima"] or candidato["preto_direita"] or candidato["preto_abaixo"]
@@ -1274,6 +1368,59 @@ def decidir_verdes(candidatos, cruzamento):
     return "NENHUM", "sem_verde_valido", 0.0, False, "SEM_VERDE_VALIDO"
 
 
+def estabilizar_decisao_lado_verde(resultado, historico, agora):
+    """Segura por poucos frames um lado valido quando surge CENTRO inseguro."""
+    decisao = resultado.get("decisao", "NENHUM")
+    if decisao in ("ESQUERDA", "DIREITA") and resultado.get("acao_permitida", False):
+        historico["lado"] = decisao
+        historico["instante"] = agora
+        historico["confianca"] = resultado.get("confianca", 0.0)
+        return resultado
+
+    if decisao != "INSEGURO" or resultado.get("motivo") != "verde_inseguro_lado":
+        return resultado
+    lado_anterior = historico.get("lado")
+    if lado_anterior not in ("ESQUERDA", "DIREITA"):
+        return resultado
+    if agora - historico.get("instante", float("-inf")) > TEMPO_SEGURAR_VERDE_LADO_FORTE:
+        return resultado
+
+    candidatos_fortes_antes = [
+        candidato
+        for candidato in resultado.get("verdes", [])
+        if candidato.get("confianca", 0.0) >= CONFIANCA_MIN_SEGURAR_LADO_VERDE
+        and (
+            candidato.get("verde_antes_intersecao", False)
+            or candidato.get("posicao_cruzamento") in (
+                "ANTES",
+                "SOBREPOSTO",
+                "SOBREPOSTO_TOLERADO",
+            )
+        )
+        and not candidato.get("verde_depois_intersecao", False)
+        and not candidato.get("falso_depois_cruzamento", False)
+    ]
+    if not candidatos_fortes_antes:
+        return resultado
+    lado_oposto = "ESQUERDA" if lado_anterior == "DIREITA" else "DIREITA"
+    if any(candidato.get("lado") == lado_oposto for candidato in candidatos_fortes_antes):
+        return resultado
+
+    estabilizado = dict(resultado)
+    estabilizado.update({
+        "decisao": lado_anterior,
+        "motivo": "verde_lado_estabilizado_historico",
+        "confianca": max(
+            resultado.get("confianca", 0.0),
+            historico.get("confianca", 0.0),
+        ),
+        "acao_permitida": True,
+        "origem_decisao": "VERDE_ANTES_TOLERADO",
+        "lado_estabilizado_historico": True,
+    })
+    return estabilizado
+
+
 def analisar_verdes(frame_bgr):
     resultado_linha = detectar_linha(frame_bgr)
     mascara_linha_original = criar_mascara_linha_global(resultado_linha)
@@ -1386,6 +1533,11 @@ def imprimir_log_detalhado(resultado):
             f"lado_original={verde.get('lado_original', 'CENTRO')} "
             f"lado_inferido={verde.get('lado_inferido', 'CENTRO')} "
             f"motivo_lado_inferido={verde.get('motivo_lado_inferido', 'nao_avaliado')} "
+            f"delta_centro_lado={verde.get('delta_centro_lado')} "
+            f"x_referencia_lado={verde.get('x_referencia_lado')} "
+            f"margem_lado_usada={verde.get('margem_lado_usada')} "
+            f"lado_inferido_forte={verde.get('lado_inferido_forte', 'CENTRO')} "
+            f"motivo_lado_inferido_forte={verde.get('motivo_lado_inferido_forte', 'nao_avaliado')} "
             f"tolerado_desalinhado={verde.get('tolerado_desalinhado', False)} "
             f"motivo_tolerancia={verde.get('motivo_tolerancia', 'nao_tolerado')} "
             f"recuperado_desalinhado={verde.get('recuperado_desalinhado', False)} "
