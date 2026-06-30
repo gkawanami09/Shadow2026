@@ -80,8 +80,8 @@ TANQUE_90_DISTANCIA_LATERAL_MIN = 90
 TANQUE_90_SCORE_FRENTE_MAX = 900
 TANQUE_90_DISTANCIA_FRENTE_MAX = 150
 TANQUE_90_CONTINUIDADE_FRENTE_MAX = 0.55
-TANQUE_90_TEMPO_MIN = 0.18
-TANQUE_90_TEMPO_MAX = 0.75
+TANQUE_90_TEMPO_MIN = 0.25
+TANQUE_90_TEMPO_MAX = 0.95
 TANQUE_90_VEL = DEST_VEL_RECUPERAR
 
 MODOS_VERDE_BLOQUEIAM_TANQUE_90 = {
@@ -654,6 +654,18 @@ def iniciar_tanque_90(memoria, lado, agora):
     memoria["tanque_90_lado"] = lado
     memoria["tanque_90_inicio"] = agora
     memoria["motivo_tanque_90"] = "LATERAL_FORTE_FRENTE_FRACA"
+    memoria["ultimo_lado_recuperacao"] = lado
+    memoria["lado_recuperacao_pendente"] = lado
+    memoria["frames_confirmacao_lado_recuperacao"] = 0
+    memoria["ultimo_lado_tanque_90"] = lado
+
+
+def memorizar_lado_tanque_90(memoria):
+    lado_tanque = memoria.get("tanque_90_lado", "CENTRO")
+    if lado_tanque in ("ESQUERDA", "DIREITA"):
+        memoria["ultimo_lado_recuperacao"] = lado_tanque
+        memoria["ultimo_lado_tanque_90"] = lado_tanque
+    return lado_tanque
 
 
 def atualizar_tanque_90(memoria, destino, agora):
@@ -661,6 +673,7 @@ def atualizar_tanque_90(memoria, destino, agora):
         return False
     decorrido = agora - memoria.get("tanque_90_inicio", agora)
     if decorrido >= TANQUE_90_TEMPO_MAX:
+        memorizar_lado_tanque_90(memoria)
         memoria["tanque_90_ativo"] = False
         memoria["tanque_90_lado"] = "CENTRO"
         memoria["motivo_tanque_90"] = "TEMPO_MAX"
@@ -676,6 +689,7 @@ def atualizar_tanque_90(memoria, destino, agora):
         and destino.get("continuidade", 0) > TANQUE_90_CONTINUIDADE_FRENTE_MAX
     )
     if decorrido >= TANQUE_90_TEMPO_MIN and frente_central_confiavel:
+        memorizar_lado_tanque_90(memoria)
         memoria["tanque_90_ativo"] = False
         memoria["tanque_90_lado"] = "CENTRO"
         memoria["motivo_tanque_90"] = "FRENTE_RECUPERADA"
@@ -1168,6 +1182,7 @@ def criar_stream_debug(
     linhas = [
         f"estado={estado if estado is not None else 'NA'}",
         f"comando={comando if comando is not None else 'NA'}",
+        f"comando_final={comando if comando is not None else 'NA'}",
         f"tipo_destino={destino.get('tipo', 'NA')}",
         f"motivo={motivo_recuperacao if motivo_recuperacao is not None else destino.get('motivo', 'NA')}",
         f"erro_x={destino.get('erro_x', resultado_linha.get('erro', 'NA'))}",
@@ -1176,6 +1191,7 @@ def criar_stream_debug(
         f"ultimo_lado_recuperacao={memoria.get('ultimo_lado_recuperacao', 'NA')}",
         f"tanque_90_ativo={memoria.get('tanque_90_ativo', False)}",
         f"tanque_90_lado={memoria.get('tanque_90_lado', 'CENTRO')}",
+        f"ultimo_lado_tanque_90={memoria.get('ultimo_lado_tanque_90', 'CENTRO')}",
         f"tanque_90_tempo={max(0.0, time.monotonic() - memoria.get('tanque_90_inicio', time.monotonic())):.2f}" if memoria.get("tanque_90_ativo", False) else "tanque_90_tempo=0.00",
         f"motivo_tanque_90={memoria.get('motivo_tanque_90', 'NA')}",
     ]
@@ -1304,6 +1320,7 @@ def main():
             "lado_recuperacao_pendente": "CENTRO", "frames_confirmacao_lado_recuperacao": 0,
             "tanque_90_ativo": False, "tanque_90_lado": "CENTRO", "tanque_90_inicio": 0.0,
             "motivo_tanque_90": "INATIVO", "tanque_90_aguarda_rearme": False,
+            "ultimo_lado_tanque_90": "CENTRO",
         }
         controle_varredura = {"etapa": 0, "ultima_troca": time.monotonic()}
         estado_log = criar_estado_log()
@@ -1369,6 +1386,7 @@ def main():
             if not curva_90_detectada:
                 memoria["tanque_90_aguarda_rearme"] = False
             if verde_bloqueia_tanque_90 and memoria["tanque_90_ativo"]:
+                memorizar_lado_tanque_90(memoria)
                 memoria["tanque_90_ativo"] = False
                 memoria["tanque_90_lado"] = "CENTRO"
                 memoria["motivo_tanque_90"] = "BLOQUEADO_POR_VERDE"
@@ -1463,7 +1481,7 @@ def main():
                 estado = "FOLLOW_CONFIRMAR"
                 comando = comando_confirmar_sem_destino(memoria)
 
-            if args.verde_ativo:
+            if args.verde_ativo and not memoria["tanque_90_ativo"]:
                 comando = aplicar_comando_verde_ativo(
                     comando,
                     destino,
