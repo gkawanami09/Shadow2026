@@ -64,6 +64,7 @@ VEL_AVANCAR_RETORNO_CEGO = 80
 TEMPO_EXECUTAR_LADO_VERDE = 1.20
 TEMPO_EXECUTAR_RETORNO_VERDE = 4.20
 TEMPO_MINIMO_CEGO_RETORNO_VERDE = 4.20
+VEL_EXECUTAR_RETORNO_VERDE = 38
 LADO_GIRO_RETORNO_VERDE = "ESQUERDA"
 
 TEMPO_RECUPERAR_LINHA_RETORNO_VERDE = 0.80
@@ -796,7 +797,7 @@ def escolher_destino_busca_pos_verde(destino_normal, estado_verde):
 
 def comando_giro_retorno_verde(estado_verde, memoria):
     estado_verde["lado_giro_retorno"] = LADO_GIRO_RETORNO_VERDE
-    return f"GIRAR_ESQ {DEST_VEL_RECUPERAR}"
+    return f"GIRAR_ESQ {VEL_EXECUTAR_RETORNO_VERDE}"
 
 
 def comando_avancar_retorno_cego():
