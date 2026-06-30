@@ -45,6 +45,9 @@ VERDE_FRAC_MIN_BBOX_ANTES = 0.45
 MARGEM_SEPARAR_VERDE_INTERSECAO = 8
 MARGEM_VERDE_DESALINHADO_Y = 45
 MARGEM_VERDE_SOBREPOSTO_Y = 60
+MARGEM_DEPOIS_FORTE_Y = 18
+FRAC_BBOX_ANTES_MIN_PARA_TOLERAR = 0.25
+FRAC_BBOX_ANTES_FORTE_DEPOIS_MAX = 0.20
 CONFIANCA_MIN_VERDE_DESALINHADO = 0.60
 AREA_MIN_VERDE_DESALINHADO = 20
 AREA_MAX_VERDE_DESALINHADO = 0.25
@@ -687,7 +690,7 @@ def analisar_posicao_verde_em_relacao_cruzamento(candidato, cruzamento):
 
     # Na imagem, a regiao antes da intersecao fica abaixo do y do cruzamento.
     y_limite_antes = y_cruzamento + margem
-    altura_antes = max(0, (y + h) - y_limite_antes)
+    altura_antes = limitar((y + h) - y_limite_antes, 0, h)
     frac_bbox_antes = altura_antes / max(h, 1)
     dy_centro = cy - y_cruzamento
 
@@ -745,6 +748,59 @@ def candidato_perto_intersecao_desalinhado(candidato, cruzamento):
     return centro_proximo or atravessa_cruzamento or sobrepoe_faixa
 
 
+def candidato_claramente_depois_intersecao(candidato, cruzamento):
+    candidato["motivo_depois_forte"] = "nao_e_depois_forte"
+    if not cruzamento.get("detectado") or cruzamento.get("y_cruzamento") is None:
+        candidato["motivo_depois_forte"] = "sem_cruzamento"
+        return False
+
+    _, y, _, h = candidato["bbox"]
+    cy = candidato["centro"][1]
+    y_cruzamento = int(cruzamento["y_cruzamento"])
+    dy_centro = candidato.get("dy_centro_cruzamento")
+    if dy_centro is None:
+        dy_centro = cy - y_cruzamento
+    frac_bbox_antes = candidato.get("frac_bbox_antes")
+    if frac_bbox_antes is None:
+        frac_bbox_antes = 0.0
+
+    centro_forte_depois = (
+        dy_centro <= -MARGEM_DEPOIS_FORTE_Y
+        and frac_bbox_antes <= FRAC_BBOX_ANTES_FORTE_DEPOIS_MAX
+    )
+    bbox_inteiro_depois = (
+        y + h <= y_cruzamento
+        and frac_bbox_antes <= FRAC_BBOX_ANTES_FORTE_DEPOIS_MAX
+    )
+    if centro_forte_depois:
+        candidato["motivo_depois_forte"] = "centro_acima_com_baixa_fracao_antes"
+        return True
+    if bbox_inteiro_depois:
+        candidato["motivo_depois_forte"] = "bbox_inteiro_acima_cruzamento"
+        return True
+    return False
+
+
+def candidato_pode_ser_sobreposto_real(candidato, cruzamento):
+    if candidato.get("depois_forte_intersecao", False):
+        return False
+    y_cruzamento = cruzamento.get("y_cruzamento")
+    _, y, _, h = candidato["bbox"]
+    bbox_cruza_cruzamento = (
+        y_cruzamento is not None
+        and y <= int(y_cruzamento) <= y + h
+    )
+    if bbox_cruza_cruzamento:
+        return True
+    if (candidato.get("frac_bbox_antes") or 0.0) >= FRAC_BBOX_ANTES_MIN_PARA_TOLERAR:
+        return True
+    return candidato.get("posicao_cruzamento") in (
+        "ANTES",
+        "SOBREPOSTO",
+        "SOBREPOSTO_TOLERADO",
+    )
+
+
 def candidato_parcial_desalinhado_recuperavel(
     candidato,
     cruzamento,
@@ -753,6 +809,11 @@ def candidato_parcial_desalinhado_recuperavel(
     toca_borda,
 ):
     """Aceita area reduzida somente com cor e contexto de pista fortes."""
+    if (
+        candidato.get("depois_forte_intersecao", False)
+        or candidato_claramente_depois_intersecao(candidato, cruzamento)
+    ):
+        return False
     if not candidato_perto_intersecao_desalinhado(candidato, cruzamento):
         return False
 
@@ -910,6 +971,9 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["motivo_tolerancia"] = "nao_tolerado"
     candidato["recuperado_desalinhado"] = False
     candidato["verde_parcial_desalinhado"] = False
+    candidato["depois_forte_intersecao"] = False
+    candidato["motivo_depois_forte"] = "nao_avaliado"
+    candidato["bloqueado_por_depois_forte"] = False
     candidato["area_minima_original"] = float(candidato["area_minima_y"])
     candidato["area_minima_usada"] = float(candidato["area_minima_y"])
     candidato["fator_area_parcial"] = 1.0
@@ -930,6 +994,9 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         if origem_split == "SPLIT_DEPOIS":
             candidato["valido"] = False
             candidato["falso_depois_cruzamento"] = True
+            candidato["depois_forte_intersecao"] = True
+            candidato["motivo_depois_forte"] = "parte_separada_depois_cruzamento"
+            candidato["bloqueado_por_depois_forte"] = True
             candidato["motivo"] = "verde_depois_intersecao_ignorado"
             candidato["confianca"] = 0.0
             return candidato
@@ -964,6 +1031,22 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["dy_centro_cruzamento"] = posicao_cruzamento["dy_centro_cruzamento"]
     candidato["frac_bbox_antes"] = posicao_cruzamento["frac_bbox_antes"]
 
+    depois_forte = candidato_claramente_depois_intersecao(candidato, cruzamento)
+    candidato["depois_forte_intersecao"] = depois_forte
+    if depois_forte:
+        candidato["valido"] = False
+        candidato["verde_antes_intersecao"] = False
+        candidato["verde_depois_intersecao"] = True
+        candidato["falso_depois_cruzamento"] = True
+        candidato["tolerado_desalinhado"] = False
+        candidato["recuperado_desalinhado"] = False
+        candidato["verde_parcial_desalinhado"] = False
+        candidato["bloqueado_por_depois_forte"] = True
+        candidato["motivo"] = "verde_depois_forte_intersecao_ignorado"
+        candidato["motivo_tolerancia"] = "bloqueado_depois_forte"
+        candidato["confianca"] = 0.0
+        return candidato
+
     parcial_recuperavel = candidato_parcial_desalinhado_recuperavel(
         candidato,
         cruzamento,
@@ -974,6 +1057,8 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     pode_tolerar_desalinhado = (
         origem_split != "SPLIT_DEPOIS"
         and perto_intersecao_desalinhado
+        and candidato_pode_ser_sobreposto_real(candidato, cruzamento)
+        and not depois_forte
         and not toca_borda
         and (area_segura_desalinhado or parcial_recuperavel)
     )
@@ -1285,6 +1370,7 @@ def candidato_evidencia_retorno(candidato):
         not posicao_antes
         or candidato.get("verde_depois_intersecao", False)
         or candidato.get("falso_depois_cruzamento", False)
+        or candidato.get("depois_forte_intersecao", False)
     ):
         candidato["motivo_evidencia_retorno"] = "fora_regiao_segura"
         return False
@@ -1662,6 +1748,9 @@ def imprimir_log_detalhado(resultado):
             f"evidencia_retorno={verde.get('evidencia_retorno', False)} "
             f"lado_evidencia_retorno={verde.get('lado_evidencia_retorno', 'CENTRO')} "
             f"motivo_evidencia_retorno={verde.get('motivo_evidencia_retorno', 'sem_evidencia')} "
+            f"depois_forte_intersecao={verde.get('depois_forte_intersecao', False)} "
+            f"motivo_depois_forte={verde.get('motivo_depois_forte', 'nao_avaliado')} "
+            f"bloqueado_por_depois_forte={verde.get('bloqueado_por_depois_forte', False)} "
             f"tolerado_desalinhado={verde.get('tolerado_desalinhado', False)} "
             f"motivo_tolerancia={verde.get('motivo_tolerancia', 'nao_tolerado')} "
             f"recuperado_desalinhado={verde.get('recuperado_desalinhado', False)} "
