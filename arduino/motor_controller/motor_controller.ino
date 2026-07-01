@@ -9,6 +9,13 @@ char buffer_comando[TAMANHO_COMANDO];
 byte tamanho_comando = 0;
 unsigned long ultimo_comando_ms = 0;
 
+// O Raspberry envia comandos de motor muitas vezes por segundo e, no loop de
+// controle, nao le as respostas. Se o Arduino responder "OK LADO..." a cada
+// frame, o buffer serial pode encher e os Serial.print/println podem bloquear.
+// Mantemos respostas apenas para comandos de diagnostico/seguranca como PING,
+// STATUS, PARAR e erros.
+const bool RESPONDER_COMANDOS_CONTINUOS = false;
+
 void configurar_pinos() {
   pinMode(FE_IN1, OUTPUT);
   pinMode(FE_IN2, OUTPUT);
@@ -97,10 +104,39 @@ bool ler_inteiro(const char* texto, int* valor) {
 }
 
 void responder_ok_motor(const char* nome_motor, int velocidade) {
+  if (!RESPONDER_COMANDOS_CONTINUOS) return;
   Serial.print("OK MOTOR ");
   Serial.print(nome_motor);
   Serial.print(" ");
   Serial.println(limitar_velocidade(velocidade));
+}
+
+void responder_ok_lado(int velocidade_esquerda, int velocidade_direita) {
+  if (!RESPONDER_COMANDOS_CONTINUOS) return;
+  Serial.print("OK LADO ");
+  Serial.print(limitar_velocidade(velocidade_esquerda));
+  Serial.print(" ");
+  Serial.println(limitar_velocidade(velocidade_direita));
+}
+
+void responder_ok_rodas(int vel_fe, int vel_te, int vel_fd, int vel_td) {
+  if (!RESPONDER_COMANDOS_CONTINUOS) return;
+  Serial.print("OK RODAS ");
+  Serial.print(limitar_velocidade(vel_fe));
+  Serial.print(" ");
+  Serial.print(limitar_velocidade(vel_te));
+  Serial.print(" ");
+  Serial.print(limitar_velocidade(vel_fd));
+  Serial.print(" ");
+  Serial.println(limitar_velocidade(vel_td));
+}
+
+void responder_ok_movimento(const char* tipo, int velocidade) {
+  if (!RESPONDER_COMANDOS_CONTINUOS) return;
+  Serial.print("OK ");
+  Serial.print(tipo);
+  Serial.print(" ");
+  Serial.println(velocidade);
 }
 
 void processar_comando(char* comando) {
@@ -144,7 +180,7 @@ void processar_comando(char* comando) {
       Serial.println("ERRO PARAMETROS_INVALIDOS");
     } else {
       controlar_lados(valor1, valor2);
-      Serial.print("OK LADO "); Serial.print(limitar_velocidade(valor1)); Serial.print(" "); Serial.println(limitar_velocidade(valor2));
+      responder_ok_lado(valor1, valor2);
     }
     return;
   }
@@ -155,7 +191,7 @@ void processar_comando(char* comando) {
       Serial.println("ERRO PARAMETROS_INVALIDOS");
     } else {
       controlar_rodas(valor1, valor2, valor3, valor4);
-      Serial.print("OK RODAS "); Serial.print(limitar_velocidade(valor1)); Serial.print(" "); Serial.print(limitar_velocidade(valor2)); Serial.print(" "); Serial.print(limitar_velocidade(valor3)); Serial.print(" "); Serial.println(limitar_velocidade(valor4));
+      responder_ok_rodas(valor1, valor2, valor3, valor4);
     }
     return;
   }
@@ -170,7 +206,7 @@ void processar_comando(char* comando) {
     if (strcmp(tipo, "TRAS") == 0) controlar_rodas(-valor1, -valor1, -valor1, -valor1);
     if (strcmp(tipo, "GIRAR_ESQ") == 0) controlar_lados(-valor1, valor1);
     if (strcmp(tipo, "GIRAR_DIR") == 0) controlar_lados(valor1, -valor1);
-    Serial.print("OK "); Serial.print(tipo); Serial.print(" "); Serial.println(valor1);
+    responder_ok_movimento(tipo, valor1);
     return;
   }
 
