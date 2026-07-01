@@ -5,6 +5,11 @@ import time
 from serial.tools import list_ports
 
 
+SERIAL_WRITE_TIMEOUT = 0.20
+SERIAL_INTER_BYTE_TIMEOUT = 0.05
+
+
+
 def detectar_porta_serial():
     """Retorna a porta mais provavel do Arduino, ou None se nao encontrar."""
     portas = list(list_ports.comports())
@@ -25,14 +30,25 @@ def detectar_porta_serial():
     return None
 
 
+
 def abrir_serial(porta=None, baud_rate=115200, timeout=2.0):
-    """Abre e retorna uma conexao serial com o Arduino."""
+    """Abre e retorna uma conexao serial com o Arduino.
+
+    O write_timeout evita que o loop do robo fique preso indefinidamente caso o
+    Arduino reinicie/desconecte por ruido ou queda de tensao dos motores.
+    """
     porta_escolhida = porta or detectar_porta_serial()
     if not porta_escolhida:
         raise RuntimeError("Nao foi possivel detectar a porta serial.")
 
     try:
-        conexao = serial.Serial(porta_escolhida, baud_rate, timeout=timeout)
+        conexao = serial.Serial(
+            porta_escolhida,
+            baud_rate,
+            timeout=timeout,
+            write_timeout=SERIAL_WRITE_TIMEOUT,
+            inter_byte_timeout=SERIAL_INTER_BYTE_TIMEOUT,
+        )
     except serial.SerialException as erro:
         raise RuntimeError(f"Erro ao abrir serial: {erro}") from erro
 
@@ -40,19 +56,30 @@ def abrir_serial(porta=None, baud_rate=115200, timeout=2.0):
     return conexao
 
 
+
 def enviar_comando(conexao, comando, esperar_resposta=True):
-    """Envia um comando terminado por nova linha e retorna a resposta."""
+    """Envia um comando terminado por nova linha e retorna a resposta.
+
+    No loop de controle, normalmente ``esperar_resposta`` fica falso. Nesse caso
+    nao fazemos flush a cada frame, porque flush pode bloquear se o Arduino
+    resetar/desconectar enquanto os motores puxam corrente.
+    """
     comando = comando.strip()
     if not comando:
         raise ValueError("O comando nao pode estar vazio.")
 
-    conexao.write((comando + "\n").encode("utf-8"))
-    conexao.flush()
-    if not esperar_resposta:
-        return None
+    try:
+        conexao.write((comando + "\n").encode("utf-8"))
+        if not esperar_resposta:
+            return None
+        conexao.flush()
+        resposta = conexao.readline().decode("utf-8", errors="replace").strip()
+        return resposta
+    except serial.SerialTimeoutException as erro:
+        raise RuntimeError(f"Timeout escrevendo na serial. Arduino pode ter resetado/desconectado: {erro}") from erro
+    except serial.SerialException as erro:
+        raise RuntimeError(f"Erro de comunicacao serial. Verifique Arduino, USB e alimentacao dos motores: {erro}") from erro
 
-    resposta = conexao.readline().decode("utf-8", errors="replace").strip()
-    return resposta
 
 
 def enviar_comando_ler_respostas(conexao, comando, timeout=1.0):
@@ -68,6 +95,7 @@ def enviar_comando_ler_respostas(conexao, comando, timeout=1.0):
         else:
             time.sleep(0.01)
     return respostas
+
 
 
 def limitar_velocidade(velocidade, limite=120):
