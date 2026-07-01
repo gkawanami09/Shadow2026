@@ -592,3 +592,38 @@ DEST_LADO_RECUPERACAO_CONFIRMAR_FRAMES = 2
 # Debug.
 DEST_SALVAR_DEBUG_EVENTOS = True
 DEST_INTERVALO_DEBUG = 0.50
+
+# ===============================
+# obr_follow_v2.py
+# Todos os parametros abaixo sao exclusivos do novo controlador.
+# Nao alterar as constantes acima deste bloco.
+# ===============================
+
+# Serial: drain + rate-limit para evitar congelamento do buffer UART do Arduino.
+OBR_V2_KEEPALIVE_INTERVAL   = 0.20   # s: envia mesmo sem mudanca (< watchdog 1 s do Arduino)
+OBR_V2_CMD_VEL_THRESHOLD    = 5      # unidades de velocidade: mudanca minima para reenvio
+
+# Verde: estabilidade temporal (substitui margem de centro estrita de verdes.py).
+OBR_V2_GREEN_STABILITY_N    = 4      # frames consecutivos para GREEN_CONFIRMED
+OBR_V2_GREEN_MARGIN_MULT    = 0.10   # zona morta central como fracao da largura do frame
+OBR_V2_GREEN_ASPECT_MIN     = 0.40   # relaxado vs VERDE_ASPECTO_MIN=0.45
+OBR_V2_GREEN_ASPECT_MAX     = 2.50   # relaxado vs VERDE_ASPECTO_MAX=2.20
+OBR_V2_GREEN_FILL_MIN       = 0.20   # relaxado vs VERDE_FILL_RATIO_MIN=0.25
+
+# Tempos maximos dos estados de linha.
+OBR_V2_MAX_GAP_TIME         = 0.50   # s: GAP_CROSS → LOST_LINE
+OBR_V2_GAP_MAX_LOSS_TIME    = 0.30   # s: perda mais curta que isso → tenta GAP_CROSS
+OBR_V2_MAX_SHARP_TURN_TIME  = 1.00   # s: SHARP_TURN → LINE_FOLLOW (timeout)
+OBR_V2_MAX_LOST_TIME        = 3.00   # s: LOST_LINE → SAFE_STOP
+
+# Tempos maximos dos estados de verde.
+OBR_V2_MAX_GREEN_CAND_TIME  = 2.00   # s: GREEN_CANDIDATE → NO_GREEN (timeout)
+OBR_V2_MAX_GREEN_CONF_TIME  = 1.50   # s: avanco cauteloso em GREEN_CONFIRMED
+OBR_V2_MAX_GREEN_ACT_TIME   = 2.50   # s: GREEN_ACTION → GREEN_COOLDOWN (timeout)
+OBR_V2_MAX_GREEN_RETORNO_ACT_TIME = 4.50  # s: GREEN_ACTION para RETORNO
+OBR_V2_GREEN_ACT_MIN_TIME   = 0.80   # s: tempo minimo em GREEN_ACTION antes de sair por linha
+OBR_V2_MAX_GREEN_COOL_TIME  = 2.00   # s: duracao minima de GREEN_COOLDOWN
+OBR_V2_GREEN_COOL_FRAMES    = 3      # frames sem verde para sair de GREEN_COOLDOWN
+
+# Loop.
+OBR_V2_LOOP_TARGET_S        = 0.033  # s: periodo alvo do loop (30 FPS)
