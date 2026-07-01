@@ -45,14 +45,11 @@ VERDE_FRAC_MIN_BBOX_ANTES = 0.45
 MARGEM_SEPARAR_VERDE_INTERSECAO = 8
 MARGEM_VERDE_DESALINHADO_Y = 45
 MARGEM_VERDE_SOBREPOSTO_Y = 60
-MARGEM_DEPOIS_FORTE_Y = 18
-FRAC_BBOX_ANTES_MIN_PARA_TOLERAR = 0.25
-FRAC_BBOX_ANTES_FORTE_DEPOIS_MAX = 0.20
 CONFIANCA_MIN_VERDE_DESALINHADO = 0.60
 AREA_MIN_VERDE_DESALINHADO = 20
 AREA_MAX_VERDE_DESALINHADO = 0.25
-FATOR_AREA_MIN_VERDE_PARCIAL_DESALINHADO = 0.32
-AREA_MIN_VERDE_PARCIAL_ABS = 8
+FATOR_AREA_MIN_VERDE_PARCIAL_DESALINHADO = 0.45
+AREA_MIN_VERDE_PARCIAL_ABS = 12
 CONFIANCA_MIN_VERDE_PARCIAL_DESALINHADO = 0.50
 FILL_RATIO_MIN_VERDE_PARCIAL = 0.18
 
@@ -71,16 +68,13 @@ TEMPO_SEGURAR_VERDE_LADO_FORTE = 0.55
 CONFIANCA_MIN_SEGURAR_LADO_VERDE = 0.65
 BUSCA_LINHA_DY = (0, 10, 20, -10, -20, 35, -35)
 
-AREA_MIN_VERDE_ABSOLUTA = 14
-LARGURA_MIN_VERDE = 3
-ALTURA_MIN_VERDE = 3
+AREA_MIN_VERDE_ABSOLUTA = 20
+LARGURA_MIN_VERDE = 4
+ALTURA_MIN_VERDE = 4
 
 MULT_LARGURA_CRUZAMENTO = 2.6
 LARGURA_LINHA_FALLBACK = 30.0
 INTERVALO_DEBUG_CAMERA = 0.60
-DIST_MAX_VERDE_CRUZAMENTO_ACAO = 65
-DIST_MIN_VERDE_CRUZAMENTO_ACAO = 5
-AREA_MAX_VERDE_LATERAL_SEGURA = 0.18
 
 
 def limitar(valor, minimo, maximo):
@@ -262,11 +256,7 @@ def separar_candidatos_verdes_por_cruzamento(
 
     for candidato in candidatos:
         x, y, w, h = candidato["bbox"]
-        cruza_faixa_split = (
-            y <= y_cruzamento + MARGEM_SEPARAR_VERDE_INTERSECAO
-            and y + h >= y_cruzamento - MARGEM_SEPARAR_VERDE_INTERSECAO
-        )
-        if not cruza_faixa_split:
+        if not (y < y_cruzamento < y + h):
             separados.append(candidato)
             continue
 
@@ -592,13 +582,9 @@ def unir_dois_candidatos(a, b):
     return unido
 
 
-def pode_juntar_candidatos(a, b, largura_linha_px, y_cruzamento=None):
+def pode_juntar_candidatos(a, b, largura_linha_px):
     origens_split = {a.get("origem_split"), b.get("origem_split")}
-    if "SPLIT_DEPOIS" in origens_split and len(origens_split) > 1:
-        return False
-    if a.get("falso_depois_cruzamento") or b.get("falso_depois_cruzamento"):
-        return False
-    if a.get("verde_depois_intersecao", False) != b.get("verde_depois_intersecao", False):
+    if origens_split == {"SPLIT_ANTES", "SPLIT_DEPOIS"}:
         return False
 
     lado_a = a.get("lado_preliminar", "CENTRO")
@@ -612,22 +598,12 @@ def pode_juntar_candidatos(a, b, largura_linha_px, y_cruzamento=None):
         distancia_max = max(8, largura_linha_px * 0.6)
 
     unido = unir_dois_candidatos(a, b)
-    _, y_unida, largura_unida, altura_unida = unido["bbox"]
-    if y_cruzamento is not None:
-        a_antes = a["bbox"][1] >= y_cruzamento or a.get("origem_split") == "SPLIT_ANTES"
-        b_antes = b["bbox"][1] >= y_cruzamento or b.get("origem_split") == "SPLIT_ANTES"
-        a_depois = a["bbox"][1] + a["bbox"][3] <= y_cruzamento or a.get("origem_split") == "SPLIT_DEPOIS"
-        b_depois = b["bbox"][1] + b["bbox"][3] <= y_cruzamento or b.get("origem_split") == "SPLIT_DEPOIS"
-        if (a_antes and b_depois) or (b_antes and a_depois):
-            return False
-        uniao_cruza_y = y_unida < y_cruzamento < y_unida + altura_unida
-        if uniao_cruza_y and altura_unida > largura_linha_px * 5:
-            return False
+    _, _, largura_unida, altura_unida = unido["bbox"]
     uniao_plausivel = largura_unida <= largura_linha_px * 10 and altura_unida <= largura_linha_px * 10
     return distancia <= distancia_max and uniao_plausivel
 
 
-def juntar_candidatos_verdes(candidatos, largura_linha_px, y_cruzamento=None):
+def juntar_candidatos_verdes(candidatos, largura_linha_px):
     candidatos = [dict(candidato) for candidato in candidatos]
     mudou = True
     while mudou:
@@ -643,7 +619,7 @@ def juntar_candidatos_verdes(candidatos, largura_linha_px, y_cruzamento=None):
                 if usados[j]:
                     continue
                 outro = candidatos[j]
-                if pode_juntar_candidatos(atual, outro, largura_linha_px, y_cruzamento):
+                if pode_juntar_candidatos(atual, outro, largura_linha_px):
                     atual = unir_dois_candidatos(atual, outro)
                     usados[j] = True
                     mudou = True
@@ -711,7 +687,7 @@ def analisar_posicao_verde_em_relacao_cruzamento(candidato, cruzamento):
 
     # Na imagem, a regiao antes da intersecao fica abaixo do y do cruzamento.
     y_limite_antes = y_cruzamento + margem
-    altura_antes = limitar((y + h) - y_limite_antes, 0, h)
+    altura_antes = max(0, (y + h) - y_limite_antes)
     frac_bbox_antes = altura_antes / max(h, 1)
     dy_centro = cy - y_cruzamento
 
@@ -769,59 +745,6 @@ def candidato_perto_intersecao_desalinhado(candidato, cruzamento):
     return centro_proximo or atravessa_cruzamento or sobrepoe_faixa
 
 
-def candidato_claramente_depois_intersecao(candidato, cruzamento):
-    candidato["motivo_depois_forte"] = "nao_e_depois_forte"
-    if not cruzamento.get("detectado") or cruzamento.get("y_cruzamento") is None:
-        candidato["motivo_depois_forte"] = "sem_cruzamento"
-        return False
-
-    _, y, _, h = candidato["bbox"]
-    cy = candidato["centro"][1]
-    y_cruzamento = int(cruzamento["y_cruzamento"])
-    dy_centro = candidato.get("dy_centro_cruzamento")
-    if dy_centro is None:
-        dy_centro = cy - y_cruzamento
-    frac_bbox_antes = candidato.get("frac_bbox_antes")
-    if frac_bbox_antes is None:
-        frac_bbox_antes = 0.0
-
-    centro_forte_depois = (
-        dy_centro <= -MARGEM_DEPOIS_FORTE_Y
-        and frac_bbox_antes <= FRAC_BBOX_ANTES_FORTE_DEPOIS_MAX
-    )
-    bbox_inteiro_depois = (
-        y + h <= y_cruzamento
-        and frac_bbox_antes <= FRAC_BBOX_ANTES_FORTE_DEPOIS_MAX
-    )
-    if centro_forte_depois:
-        candidato["motivo_depois_forte"] = "centro_acima_com_baixa_fracao_antes"
-        return True
-    if bbox_inteiro_depois:
-        candidato["motivo_depois_forte"] = "bbox_inteiro_acima_cruzamento"
-        return True
-    return False
-
-
-def candidato_pode_ser_sobreposto_real(candidato, cruzamento):
-    if candidato.get("depois_forte_intersecao", False):
-        return False
-    y_cruzamento = cruzamento.get("y_cruzamento")
-    _, y, _, h = candidato["bbox"]
-    bbox_cruza_cruzamento = (
-        y_cruzamento is not None
-        and y <= int(y_cruzamento) <= y + h
-    )
-    if bbox_cruza_cruzamento:
-        return True
-    if (candidato.get("frac_bbox_antes") or 0.0) >= FRAC_BBOX_ANTES_MIN_PARA_TOLERAR:
-        return True
-    return candidato.get("posicao_cruzamento") in (
-        "ANTES",
-        "SOBREPOSTO",
-        "SOBREPOSTO_TOLERADO",
-    )
-
-
 def candidato_parcial_desalinhado_recuperavel(
     candidato,
     cruzamento,
@@ -830,11 +753,6 @@ def candidato_parcial_desalinhado_recuperavel(
     toca_borda,
 ):
     """Aceita area reduzida somente com cor e contexto de pista fortes."""
-    if (
-        candidato.get("depois_forte_intersecao", False)
-        or candidato_claramente_depois_intersecao(candidato, cruzamento)
-    ):
-        return False
     if not candidato_perto_intersecao_desalinhado(candidato, cruzamento):
         return False
 
@@ -992,17 +910,10 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["motivo_tolerancia"] = "nao_tolerado"
     candidato["recuperado_desalinhado"] = False
     candidato["verde_parcial_desalinhado"] = False
-    candidato["depois_forte_intersecao"] = False
-    candidato["motivo_depois_forte"] = "nao_avaliado"
-    candidato["bloqueado_por_depois_forte"] = False
     candidato["area_minima_original"] = float(candidato["area_minima_y"])
     candidato["area_minima_usada"] = float(candidato["area_minima_y"])
     candidato["fator_area_parcial"] = 1.0
     candidato["largura_frame"] = int(largura)
-    candidato["altura_frame"] = int(altura)
-    candidato["toca_borda"] = bool(
-        x <= 0 or y <= 0 or x + w >= largura or y + h >= altura
-    )
     origem_split = candidato.get("origem_split", "ORIGINAL")
     posicao_split = None
     if origem_split in ("SPLIT_ANTES", "SPLIT_DEPOIS"):
@@ -1019,9 +930,6 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
         if origem_split == "SPLIT_DEPOIS":
             candidato["valido"] = False
             candidato["falso_depois_cruzamento"] = True
-            candidato["depois_forte_intersecao"] = True
-            candidato["motivo_depois_forte"] = "parte_separada_depois_cruzamento"
-            candidato["bloqueado_por_depois_forte"] = True
             candidato["motivo"] = "verde_depois_intersecao_ignorado"
             candidato["confianca"] = 0.0
             return candidato
@@ -1030,7 +938,7 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["area_rel_quadro"] = float(area_rel_quadro)
     verde_grande_mas_plausivel = area_rel_quadro > VERDE_AREA_MAX_REL_QUADRO
     candidato["verde_grande_mas_plausivel"] = bool(verde_grande_mas_plausivel)
-    toca_borda = candidato["toca_borda"]
+    toca_borda = x <= 0 or y <= 0 or x + w >= largura or y + h >= altura
     area_segura_desalinhado = (
         candidato["area"] >= AREA_MIN_VERDE_DESALINHADO
         and area_rel_quadro <= AREA_MAX_VERDE_DESALINHADO
@@ -1056,22 +964,6 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["dy_centro_cruzamento"] = posicao_cruzamento["dy_centro_cruzamento"]
     candidato["frac_bbox_antes"] = posicao_cruzamento["frac_bbox_antes"]
 
-    depois_forte = candidato_claramente_depois_intersecao(candidato, cruzamento)
-    candidato["depois_forte_intersecao"] = depois_forte
-    if depois_forte:
-        candidato["valido"] = False
-        candidato["verde_antes_intersecao"] = False
-        candidato["verde_depois_intersecao"] = True
-        candidato["falso_depois_cruzamento"] = True
-        candidato["tolerado_desalinhado"] = False
-        candidato["recuperado_desalinhado"] = False
-        candidato["verde_parcial_desalinhado"] = False
-        candidato["bloqueado_por_depois_forte"] = True
-        candidato["motivo"] = "verde_depois_forte_intersecao_ignorado"
-        candidato["motivo_tolerancia"] = "bloqueado_depois_forte"
-        candidato["confianca"] = 0.0
-        return candidato
-
     parcial_recuperavel = candidato_parcial_desalinhado_recuperavel(
         candidato,
         cruzamento,
@@ -1082,8 +974,6 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     pode_tolerar_desalinhado = (
         origem_split != "SPLIT_DEPOIS"
         and perto_intersecao_desalinhado
-        and candidato_pode_ser_sobreposto_real(candidato, cruzamento)
-        and not depois_forte
         and not toca_borda
         and (area_segura_desalinhado or parcial_recuperavel)
     )
@@ -1368,16 +1258,12 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     return candidato
 
 
-def lado_bruto_para_retorno(candidato):
-    for chave in ("lado", "lado_inferido", "lado_inferido_forte", "lado_preliminar"):
+def lado_evidencia_retorno(candidato):
+    for chave in ("lado", "lado_inferido", "lado_inferido_forte"):
         lado = candidato.get(chave, "CENTRO")
         if lado in ("ESQUERDA", "DIREITA"):
             return lado
     return "CENTRO"
-
-
-def lado_evidencia_retorno(candidato):
-    return lado_bruto_para_retorno(candidato)
 
 
 def candidato_evidencia_retorno(candidato):
@@ -1399,7 +1285,6 @@ def candidato_evidencia_retorno(candidato):
         not posicao_antes
         or candidato.get("verde_depois_intersecao", False)
         or candidato.get("falso_depois_cruzamento", False)
-        or candidato.get("depois_forte_intersecao", False)
     ):
         candidato["motivo_evidencia_retorno"] = "fora_regiao_segura"
         return False
@@ -1445,277 +1330,56 @@ def candidato_evidencia_retorno(candidato):
     return True
 
 
-def candidato_perto_para_retorno(candidato, cruzamento):
-    if not cruzamento or not cruzamento.get("detectado", False):
-        return False
-    y_cruzamento = cruzamento.get("y_cruzamento")
-    if y_cruzamento is None:
-        return False
-
-    x, y, w, h = candidato["bbox"]
-    del x, w
-    dy_centro = candidato.get("dy_centro_cruzamento")
-    if dy_centro is None:
-        dy_centro = candidato["centro"][1] - y_cruzamento
-    if dy_centro < -MARGEM_VERDE_SOBREPOSTO_Y * 1.4:
-        return False
-
-    cruza_y = y <= y_cruzamento <= y + h
-    return bool(
-        cruza_y
-        or abs(dy_centro) <= MARGEM_VERDE_SOBREPOSTO_Y
-        or candidato_perto_intersecao_desalinhado(candidato, cruzamento)
-    )
-
-
-def candidato_evidencia_retorno_flexivel(
-    candidato,
-    cruzamento,
-    contexto_retorno=False,
-):
-    candidato["usado_como_evidencia_retorno"] = False
-    candidato["relaxado_depois_para_retorno"] = False
-    candidato["bloqueado_lateral_mas_usado_retorno"] = False
-    if candidato_retorno_seguro(candidato):
-        candidato["evidencia_retorno"] = True
-        candidato["lado_evidencia_retorno"] = candidato["lado"]
-        candidato["motivo_evidencia_retorno"] = "verde_valido_antes_seguro"
-        candidato["usado_como_evidencia_retorno"] = True
-        return True
-    candidato["motivo_evidencia_retorno"] = "candidato_retorno_inseguro"
-    return False
-
-
-def medir_ramo_lateral_local(candidato, cruzamento, mascara_linha):
-    altura, largura = mascara_linha.shape[:2]
-    y_cruzamento = int(cruzamento["y_cruzamento"])
-    largura_linha = float(cruzamento.get("largura_linha_px", LARGURA_LINHA_FALLBACK))
-    centro_cruzamento = cruzamento.get("centro")
-    cx_cruzamento = float(centro_cruzamento[0]) if centro_cruzamento is not None else largura / 2.0
-    cx_verde = float(candidato["centro"][0])
-    margem = max(8.0, largura_linha)
-    y1 = int(limitar(y_cruzamento - max(6.0, largura_linha * 0.5), 0, altura))
-    y2 = int(limitar(y_cruzamento + max(10.0, largura_linha * 1.2), 0, altura))
-    if candidato.get("lado") == "DIREITA":
-        x1 = int(limitar(cx_cruzamento + largura_linha * 0.7, 0, largura))
-        x2 = int(limitar(cx_verde + margem, 0, largura))
-    elif candidato.get("lado") == "ESQUERDA":
-        x1 = int(limitar(cx_verde - margem, 0, largura))
-        x2 = int(limitar(cx_cruzamento - largura_linha * 0.7, 0, largura))
-    else:
-        x1 = x2 = 0
-    pixels = int(cv2.countNonZero(mascara_linha[y1:y2, x1:x2])) if x2 > x1 and y2 > y1 else 0
-    limite = max(12, int(largura_linha * 1.2))
-    return {
-        "ramo_lateral_local": bool(x2 > x1 and pixels >= limite),
-        "pixels_ramo_lateral_local": pixels,
-        "roi_ramo_lateral_x1": x1,
-        "roi_ramo_lateral_x2": x2,
-        "roi_ramo_lateral_y1": y1,
-        "roi_ramo_lateral_y2": y2,
-    }
-
-
-def analisar_intersecao_a_frente_do_verde(candidato, cruzamento, mascara_linha):
-    """Valida localmente se o marcador pertence ao cruzamento atual."""
-    resultado = {
-        "tem_intersecao_a_frente": False,
-        "motivo_intersecao_a_frente": "cruzamento_nao_detectado",
-        "distancia_y_verde_cruzamento": None,
-        "cruzamento_na_frente_do_verde": False,
-        "verde_muito_longe_do_cruzamento": False,
-        "ramo_preto_compativel": False,
-        "pixels_linha_entre_verde_cruzamento": 0,
-        "pixels_linha_proxima_nao_usado_para_intersecao": True,
-        "ramo_lateral_global": False,
-        "ramo_lateral_local": False,
-        "conexao_lateral_local": False,
-        "pixels_ramo_lateral_local": 0,
-        "roi_lateral_x1": None,
-        "roi_lateral_x2": None,
-        "roi_lateral_y1": None,
-        "roi_lateral_y2": None,
-        "id_cruzamento_referencia": None,
-    }
-    y_cruzamento = cruzamento.get("y_cruzamento")
-    if not cruzamento.get("detectado", False) or y_cruzamento is None:
-        return resultado
-
-    x, y, w, h = candidato["bbox"]
-    _, cy = candidato["centro"]
-    y_cruzamento = int(y_cruzamento)
-    dy = float(cy - y_cruzamento)
-    resultado["distancia_y_verde_cruzamento"] = dy
-    resultado["id_cruzamento_referencia"] = y_cruzamento
-    resultado["cruzamento_na_frente_do_verde"] = dy >= DIST_MIN_VERDE_CRUZAMENTO_ACAO
-    resultado["verde_muito_longe_do_cruzamento"] = dy > DIST_MAX_VERDE_CRUZAMENTO_ACAO
-    if dy < DIST_MIN_VERDE_CRUZAMENTO_ACAO:
-        resultado["motivo_intersecao_a_frente"] = "verde_nao_esta_antes_do_cruzamento"
-        return resultado
-    if dy > DIST_MAX_VERDE_CRUZAMENTO_ACAO:
-        resultado["motivo_intersecao_a_frente"] = "verde_longe_demais_do_cruzamento"
-        return resultado
-
-    altura, largura = mascara_linha.shape[:2]
-    largura_linha = float(cruzamento.get("largura_linha_px", LARGURA_LINHA_FALLBACK))
-    margem = int(max(8, largura_linha))
-    centro_cruzamento = cruzamento.get("centro")
-    cx_cruzamento = float(centro_cruzamento[0]) if centro_cruzamento is not None else largura / 2.0
-    cx_verde = float(candidato["centro"][0])
-    if candidato.get("lado") == "DIREITA":
-        x1 = int(limitar(cx_cruzamento + largura_linha * 0.5, 0, largura))
-        x2 = int(limitar(min(cx_verde, x + w) + margem, 0, largura))
-    elif candidato.get("lado") == "ESQUERDA":
-        x1 = int(limitar(max(cx_verde, x) - margem, 0, largura))
-        x2 = int(limitar(cx_cruzamento - largura_linha * 0.5, 0, largura))
-    else:
-        x1 = x2 = 0
-    y1 = int(limitar(min(y_cruzamento, y), 0, altura))
-    y2 = int(limitar(max(y_cruzamento, y + h), 0, altura))
-    pixels_linha = int(cv2.countNonZero(mascara_linha[y1:y2, x1:x2])) if x2 > x1 and y2 > y1 else 0
-    resultado["pixels_linha_entre_verde_cruzamento"] = pixels_linha
-    resultado["roi_lateral_x1"] = x1
-    resultado["roi_lateral_x2"] = x2
-    resultado["roi_lateral_y1"] = y1
-    resultado["roi_lateral_y2"] = y2
-    limite_pixels = max(10, int(largura_linha * 0.8))
-    tem_conexao_preta = bool(x2 > x1 and pixels_linha >= limite_pixels)
-    resultado["conexao_lateral_local"] = tem_conexao_preta
-
-    lado = candidato.get("lado")
-    ramo_lateral_global = bool(
-        lado == "ESQUERDA" and cruzamento.get("ramo_esquerda", False)
-        or lado == "DIREITA" and cruzamento.get("ramo_direita", False)
-    )
-    resultado["ramo_lateral_global"] = ramo_lateral_global
-    medicao_local = medir_ramo_lateral_local(candidato, cruzamento, mascara_linha)
-    resultado.update(medicao_local)
-    ramo_lateral_local = medicao_local["ramo_lateral_local"]
-    resultado["ramo_preto_compativel"] = bool(
-        ramo_lateral_global and ramo_lateral_local and tem_conexao_preta
-    )
-    if lado not in ("ESQUERDA", "DIREITA"):
-        resultado["motivo_intersecao_a_frente"] = "lado_sem_acao_lateral"
-    elif not ramo_lateral_global:
-        resultado["motivo_intersecao_a_frente"] = "ramo_lateral_incompativel"
-    elif not ramo_lateral_local:
-        resultado["motivo_intersecao_a_frente"] = "ramo_lateral_local_ausente"
-    elif not tem_conexao_preta:
-        resultado["motivo_intersecao_a_frente"] = "sem_conexao_preta_ate_cruzamento"
-    else:
-        resultado["tem_intersecao_a_frente"] = True
-        resultado["motivo_intersecao_a_frente"] = "intersecao_a_frente_confirmada"
-    return resultado
-
-
-def candidato_acao_segura(candidato, cruzamento, mascara_linha):
-    candidato.update(analisar_intersecao_a_frente_do_verde(candidato, cruzamento, mascara_linha))
-    candidato["bloqueado_sem_intersecao_a_frente"] = False
-    candidato["motivo_bloqueio_acao"] = "nenhum"
-    posicao_segura = (
-        candidato.get("verde_antes_intersecao", False)
-        or candidato.get("posicao_cruzamento") in (
-            "ANTES", "SOBREPOSTO", "SOBREPOSTO_TOLERADO", "ANTES_TOLERADO",
-        )
-    )
-    base_segura = bool(
-        candidato.get("valido", False)
-        and not candidato.get("verde_depois_intersecao", False)
-        and not candidato.get("falso_depois_cruzamento", False)
-        and not candidato.get("depois_forte_intersecao", False)
-        and candidato.get("origem_split") != "SPLIT_DEPOIS"
-        and posicao_segura
-        and candidato.get("lado") in ("ESQUERDA", "DIREITA")
-    )
-    if base_segura and candidato.get("area_rel_quadro", 0.0) > AREA_MAX_VERDE_LATERAL_SEGURA:
-        candidato["bloqueado_sem_intersecao_a_frente"] = True
-        candidato["motivo_bloqueio_acao"] = "verde_grande_demais_para_lateral_segura"
-        return False
-    if base_segura and not candidato.get("tem_intersecao_a_frente", False):
-        candidato["bloqueado_sem_intersecao_a_frente"] = True
-        candidato["motivo_bloqueio_acao"] = candidato.get(
-            "motivo_intersecao_a_frente", "sem_intersecao_a_frente_do_verde"
-        )
-    return bool(base_segura and candidato.get("tem_intersecao_a_frente", False))
-
-
-def candidato_retorno_seguro(candidato, y_cruzamento=None):
-    """Aceita para RETORNO apenas um verde real antes/sobre a intersecao."""
-    if not candidato.get("valido", False):
-        return False
-    if (
-        candidato.get("verde_depois_intersecao", False)
-        or candidato.get("falso_depois_cruzamento", False)
-        or candidato.get("depois_forte_intersecao", False)
-        or candidato.get("origem_split") == "SPLIT_DEPOIS"
-    ):
-        return False
-    posicao_segura = (
-        candidato.get("verde_antes_intersecao", False)
-        or candidato.get("posicao_cruzamento") in (
-            "ANTES", "SOBREPOSTO", "SOBREPOSTO_TOLERADO", "ANTES_TOLERADO",
-        )
-    )
-    if not posicao_segura or candidato.get("lado") not in ("ESQUERDA", "DIREITA"):
-        return False
-    if not candidato.get("tem_intersecao_a_frente", False):
-        return False
-    if y_cruzamento is not None and candidato.get("id_cruzamento_referencia") != int(y_cruzamento):
-        return False
-    return bool(
-        candidato.get("confianca", 0.0) >= 0.55
-        or candidato.get("tolerado_desalinhado", False)
-        or candidato.get("verde_parcial_desalinhado", False)
-    )
-
-
-def calcular_contexto_retorno(candidatos, cruzamento):
-    if not cruzamento.get("detectado", False) or cruzamento.get("y_cruzamento") is None:
-        return False
-    y_cruzamento = cruzamento["y_cruzamento"]
-    lados = {
-        candidato["lado"] for candidato in candidatos
-        if candidato_retorno_seguro(candidato, y_cruzamento)
-    }
-    return {"ESQUERDA", "DIREITA"}.issubset(lados)
-
-
-def resumir_evidencias_retorno(candidatos, cruzamento=None, contexto_retorno=False):
+def resumir_evidencias_retorno(candidatos):
     evidencias = [
         candidato
         for candidato in candidatos
-        if candidato_evidencia_retorno_flexivel(
-            candidato,
-            cruzamento,
-            contexto_retorno=contexto_retorno,
-        )
+        if candidato_evidencia_retorno(candidato)
     ]
     esquerda = [c for c in evidencias if c["lado_evidencia_retorno"] == "ESQUERDA"]
     direita = [c for c in evidencias if c["lado_evidencia_retorno"] == "DIREITA"]
     return esquerda, direita
 
 
-def decidir_verdes(candidatos, cruzamento, mascara_linha):
-    for candidato in candidatos:
-        candidato["usado_para_acao"] = False
-        candidato["usado_para_retorno"] = False
-    validos_para_acao = [
-        candidato for candidato in candidatos
-        if candidato_acao_segura(candidato, cruzamento, mascara_linha)
+def decidir_verdes(candidatos, cruzamento):
+    validos_antes = [
+        candidato
+        for candidato in candidatos
+        if candidato.get("valido", False)
+        and (
+            candidato.get("verde_antes_intersecao", False)
+            or candidato.get("posicao_cruzamento") in (
+                "SOBREPOSTO",
+                "ANTES_TOLERADO",
+                "SOBREPOSTO_TOLERADO",
+            )
+        )
+        and not candidato.get("verde_depois_intersecao", False)
+        and not candidato.get("falso_depois_cruzamento", False)
     ]
-    contexto_retorno = calcular_contexto_retorno(candidatos, cruzamento)
+    validos_sobrepostos = [
+        candidato
+        for candidato in candidatos
+        if candidato.get("valido", False)
+        and candidato.get("posicao_cruzamento") == "SOBREPOSTO"
+        and not candidato.get("verde_depois_intersecao", False)
+        and not candidato.get("falso_depois_cruzamento", False)
+    ]
     validos_tolerados = [
         candidato
-        for candidato in validos_para_acao
+        for candidato in validos_antes
         if candidato.get("tolerado_desalinhado", False)
+    ]
+    validos_para_acao = validos_antes + [
+        candidato
+        for candidato in validos_sobrepostos
+        if not any(candidato is valido_antes for valido_antes in validos_antes)
     ]
     falsos_depois = [
         candidato
         for candidato in candidatos
         if candidato.get("verde_depois_intersecao", False)
         or candidato.get("falso_depois_cruzamento", False)
-        or candidato.get("depois_forte_intersecao", False)
-        or candidato.get("origem_split") == "SPLIT_DEPOIS"
     ]
     inseguros_antes_fortes = [
         candidato
@@ -1748,47 +1412,37 @@ def decidir_verdes(candidatos, cruzamento, mascara_linha):
     ]
     validos_esquerda = [c for c in validos_para_acao if c.get("lado") == "ESQUERDA"]
     validos_direita = [c for c in validos_para_acao if c.get("lado") == "DIREITA"]
-    evidencias_esquerda, evidencias_direita = resumir_evidencias_retorno(
-        candidatos,
-        cruzamento,
-        contexto_retorno=contexto_retorno,
-    )
+    evidencias_esquerda, evidencias_direita = resumir_evidencias_retorno(candidatos)
+    evidencias_validas_esquerda = [c for c in evidencias_esquerda if c.get("valido", False)]
+    evidencias_validas_direita = [c for c in evidencias_direita if c.get("valido", False)]
 
     if evidencias_esquerda and evidencias_direita:
-        for candidato in evidencias_esquerda + evidencias_direita:
-            candidato["usado_para_acao"] = True
-            candidato["usado_para_retorno"] = True
-        tem_falso_depois = any(
-            c.get("falso_depois_cruzamento", False)
-            or c.get("verde_depois_intersecao", False)
-            or c.get("depois_forte_intersecao", False)
-            for c in candidatos
+        if evidencias_validas_esquerda and evidencias_validas_direita:
+            confianca = min(
+                max(c["confianca"] for c in evidencias_validas_esquerda),
+                max(c["confianca"] for c in evidencias_validas_direita),
+            )
+            tolerado = any(
+                c.get("tolerado_desalinhado", False)
+                for c in evidencias_validas_esquerda + evidencias_validas_direita
+            )
+            origem = "VERDE_ANTES_TOLERADO" if tolerado else "VERDE_ANTES_INTERSECAO"
+            return "RETORNO", "verde_duplo_retorno_evidencia", confianca, True, origem
+        confianca = max(c.get("confianca", 0.0) for c in evidencias_esquerda + evidencias_direita)
+        return (
+            "INSEGURO",
+            "suspeita_retorno_bloqueia_lateral",
+            confianca,
+            False,
+            "INSEGURO_RETORNO",
         )
-        confianca = min(
-            max(max(c.get("confianca", 0.0), 0.55) for c in evidencias_esquerda),
-            max(max(c.get("confianca", 0.0), 0.55) for c in evidencias_direita),
-        )
-        tolerado = any(
-            c.get("tolerado_desalinhado", False)
-            or c.get("relaxado_depois_para_retorno", False)
-            for c in evidencias_esquerda + evidencias_direita
-        )
-        origem = "VERDE_ANTES_TOLERADO" if tolerado else "VERDE_ANTES_INTERSECAO"
-        motivo = (
-            "verde_duplo_retorno_com_falso_depois_ignorado"
-            if tem_falso_depois
-            else "verde_duplo_retorno_evidencia"
-        )
-        return "RETORNO", motivo, confianca, True, origem
 
     if validos_esquerda and validos_direita:
-        # Dois lados so formam RETORNO no bloco seguro acima. Se um deles nao
-        # atingir os requisitos, nao escolha arbitrariamente uma lateral.
-        confianca = max(c.get("confianca", 0.0) for c in validos_para_acao)
-        return "INSEGURO", "dois_lados_sem_retorno_seguro", confianca, False, "INSEGURO"
+        confianca = min(max(max(c["confianca"] for c in validos_esquerda), max(c["confianca"] for c in validos_direita)), 1.0)
+        origem = "VERDE_ANTES_TOLERADO" if validos_tolerados else "VERDE_ANTES_INTERSECAO"
+        return "RETORNO", "verde_duplo_valido", confianca, True, origem
     if validos_esquerda and not validos_direita:
         melhor_esquerda = max(validos_esquerda, key=lambda candidato: candidato["confianca"])
-        melhor_esquerda["usado_para_acao"] = True
         return (
             "ESQUERDA",
             "verde_esquerda_valido",
@@ -1798,7 +1452,6 @@ def decidir_verdes(candidatos, cruzamento, mascara_linha):
         )
     if validos_direita and not validos_esquerda:
         melhor_direita = max(validos_direita, key=lambda candidato: candidato["confianca"])
-        melhor_direita["usado_para_acao"] = True
         return (
             "DIREITA",
             "verde_direita_valido",
@@ -1897,20 +1550,14 @@ def analisar_verdes(frame_bgr):
         calcular_lado_preliminar(c, cruzamento, mascara_linha, largura_linha_px)
         for c in candidatos
     ]
-    candidatos = juntar_candidatos_verdes(
-        candidatos,
-        largura_linha_px,
-        cruzamento.get("y_cruzamento"),
-    )
+    candidatos = juntar_candidatos_verdes(candidatos, largura_linha_px)
     verdes = [validar_verde(c, cruzamento, mascara_linha, largura_linha_px) for c in candidatos]
     decisao, motivo, confianca, acao_permitida, origem_decisao = decidir_verdes(
-        verdes, cruzamento, mascara_linha,
-    )
-    contexto_retorno = calcular_contexto_retorno(verdes, cruzamento)
-    evidencias_retorno_esquerda, evidencias_retorno_direita = resumir_evidencias_retorno(
         verdes,
         cruzamento,
-        contexto_retorno=contexto_retorno,
+    )
+    evidencias_retorno_esquerda, evidencias_retorno_direita = resumir_evidencias_retorno(
+        verdes,
     )
     suspeita_retorno = bool(evidencias_retorno_esquerda and evidencias_retorno_direita)
     if decisao == "RETORNO":
@@ -1934,30 +1581,6 @@ def analisar_verdes(frame_bgr):
         or candidato.get("falso_depois_cruzamento", False)
         for candidato in verdes
     )
-    verdes_falsos_depois_count = sum(
-        1
-        for candidato in verdes
-        if candidato.get("verde_depois_intersecao", False)
-        or candidato.get("falso_depois_cruzamento", False)
-        or candidato.get("depois_forte_intersecao", False)
-    )
-    qtd_acao_esq = sum(
-        1 for candidato in verdes
-        if candidato.get("usado_para_acao", False) and candidato.get("lado") == "ESQUERDA"
-    )
-    qtd_acao_dir = sum(
-        1 for candidato in verdes
-        if candidato.get("usado_para_acao", False) and candidato.get("lado") == "DIREITA"
-    )
-    retorno_seguro = bool(
-        decisao == "RETORNO"
-        and evidencias_retorno_esquerda
-        and evidencias_retorno_direita
-    )
-    qtd_bloqueado_sem_intersecao = sum(
-        1 for candidato in verdes
-        if candidato.get("bloqueado_sem_intersecao_a_frente", False)
-    )
     return {
         "decisao": decisao,
         "motivo": motivo,
@@ -1973,15 +1596,6 @@ def analisar_verdes(frame_bgr):
             candidato.get("verde_parcial_desalinhado", False) for candidato in verdes
         ),
         "suspeita_retorno": suspeita_retorno,
-        "contexto_retorno": contexto_retorno,
-        "contexto_retorno_seguro": contexto_retorno,
-        "retorno_seguro": retorno_seguro,
-        "qtd_acao_esq": qtd_acao_esq,
-        "qtd_acao_dir": qtd_acao_dir,
-        "qtd_falso_depois": verdes_falsos_depois_count,
-        "qtd_bloqueado_sem_intersecao": qtd_bloqueado_sem_intersecao,
-        "retorno_com_falso_depois": decisao == "RETORNO" and tem_verde_falso_depois,
-        "verdes_falsos_depois_count": verdes_falsos_depois_count,
         "evidencias_retorno_esquerda": len(evidencias_retorno_esquerda),
         "evidencias_retorno_direita": len(evidencias_retorno_direita),
         "motivo_retorno": motivo_retorno,
@@ -2018,19 +1632,12 @@ def imprimir_log_detalhado(resultado):
         f"confianca={resultado['confianca']:.2f} acao_permitida={resultado['acao_permitida']} "
         f"origem_decisao={resultado['origem_decisao']} "
         f"tem_verde_valido_antes={resultado['tem_verde_valido_antes']} "
-        f"tem_verde_falso_depois={resultado['tem_verde_falso_depois']} "
-        f"qtd_acao_esq={resultado.get('qtd_acao_esq', 0)} "
-        f"qtd_acao_dir={resultado.get('qtd_acao_dir', 0)} "
-        f"qtd_falso_depois={resultado.get('qtd_falso_depois', 0)} "
-        f"qtd_bloqueado_sem_intersecao={resultado.get('qtd_bloqueado_sem_intersecao', 0)} "
-        f"retorno_seguro={resultado.get('retorno_seguro', False)} "
-        f"contexto_retorno_seguro={resultado.get('contexto_retorno_seguro', False)}"
+        f"tem_verde_falso_depois={resultado['tem_verde_falso_depois']}"
     )
     for indice, verde in enumerate(resultado["verdes"], start=1):
         referencia = verde.get("linha_referencia") or {}
         print(
-            f"verde#{indice} lado={verde['lado']} lado_preliminar={verde.get('lado_preliminar', 'CENTRO')} "
-            f"bbox={verde['bbox']} area={verde['area']:.0f} "
+            f"verde#{indice} lado={verde['lado']} bbox={verde['bbox']} area={verde['area']:.0f} "
             f"valido={verde['valido']} motivo={verde['motivo']} conf={verde['confianca']:.2f} "
             f"preto_acima={verde.get('preto_acima', False)} preto_abaixo={verde.get('preto_abaixo', False)} "
             f"preto_esquerda={verde.get('preto_esquerda', False)} preto_direita={verde.get('preto_direita', False)} "
@@ -2055,26 +1662,6 @@ def imprimir_log_detalhado(resultado):
             f"evidencia_retorno={verde.get('evidencia_retorno', False)} "
             f"lado_evidencia_retorno={verde.get('lado_evidencia_retorno', 'CENTRO')} "
             f"motivo_evidencia_retorno={verde.get('motivo_evidencia_retorno', 'sem_evidencia')} "
-            f"usado_como_evidencia_retorno={verde.get('usado_como_evidencia_retorno', False)} "
-            f"relaxado_depois_para_retorno={verde.get('relaxado_depois_para_retorno', False)} "
-            f"bloqueado_lateral_mas_usado_retorno={verde.get('bloqueado_lateral_mas_usado_retorno', False)} "
-            f"usado_para_acao={verde.get('usado_para_acao', False)} "
-            f"usado_para_retorno={verde.get('usado_para_retorno', False)} "
-            f"tem_intersecao_a_frente={verde.get('tem_intersecao_a_frente', False)} "
-            f"motivo_intersecao_a_frente={verde.get('motivo_intersecao_a_frente', 'nao_analisado')} "
-            f"distancia_y_verde_cruzamento={verde.get('distancia_y_verde_cruzamento')} "
-            f"ramo_preto_compativel={verde.get('ramo_preto_compativel', False)} "
-            f"ramo_lateral_global={verde.get('ramo_lateral_global', False)} "
-            f"ramo_lateral_local={verde.get('ramo_lateral_local', False)} "
-            f"pixels_ramo_lateral_local={verde.get('pixels_ramo_lateral_local', 0)} "
-            f"pixels_linha_entre_verde_cruzamento={verde.get('pixels_linha_entre_verde_cruzamento', 0)} "
-            f"pixels_linha_proxima_nao_usado_para_intersecao={verde.get('pixels_linha_proxima_nao_usado_para_intersecao', True)} "
-            f"roi_lateral=({verde.get('roi_lateral_x1')},{verde.get('roi_lateral_y1')})-({verde.get('roi_lateral_x2')},{verde.get('roi_lateral_y2')}) "
-            f"bloqueado_sem_intersecao_a_frente={verde.get('bloqueado_sem_intersecao_a_frente', False)} "
-            f"motivo_bloqueio_acao={verde.get('motivo_bloqueio_acao', 'nenhum')} "
-            f"depois_forte_intersecao={verde.get('depois_forte_intersecao', False)} "
-            f"motivo_depois_forte={verde.get('motivo_depois_forte', 'nao_avaliado')} "
-            f"bloqueado_por_depois_forte={verde.get('bloqueado_por_depois_forte', False)} "
             f"tolerado_desalinhado={verde.get('tolerado_desalinhado', False)} "
             f"motivo_tolerancia={verde.get('motivo_tolerancia', 'nao_tolerado')} "
             f"recuperado_desalinhado={verde.get('recuperado_desalinhado', False)} "

@@ -62,9 +62,8 @@ TEMPO_AVANCAR_RETORNO_CEGO = 0.80
 VEL_AVANCAR_RETORNO_CEGO = 80
 
 TEMPO_EXECUTAR_LADO_VERDE = 1.20
-TEMPO_EXECUTAR_RETORNO_VERDE = 2
-TEMPO_MINIMO_CEGO_RETORNO_VERDE = 2
-VEL_EXECUTAR_RETORNO_VERDE = 80
+TEMPO_EXECUTAR_RETORNO_VERDE = 4.20
+TEMPO_MINIMO_CEGO_RETORNO_VERDE = 4.20
 LADO_GIRO_RETORNO_VERDE = "ESQUERDA"
 
 TEMPO_RECUPERAR_LINHA_RETORNO_VERDE = 0.80
@@ -87,9 +86,6 @@ TANQUE_90_CONTINUIDADE_FRENTE_MAX = 0.55
 TANQUE_90_TEMPO_MIN = 0.25
 TANQUE_90_TEMPO_MAX = 0.95
 TANQUE_90_VEL = DEST_VEL_RECUPERAR
-TANQUE_90_FRAMES_CONFIRMAR_LADO = 2
-TANQUE_90_MARGEM_SCORE_LADO = 1.25
-TEMPO_HISTORICO_RETORNO_VERDE = 0.60
 
 MODOS_VERDE_BLOQUEIAM_TANQUE_90 = {
     "AVANCANDO_APOS_VERDE",
@@ -402,14 +398,6 @@ def filtrar_decisao_verde_para_acao(decisao, acao_permitida, origem_decisao):
     return "NENHUM"
 
 
-def aplicar_historico_retorno_verde(resultado_verde, historico, agora):
-    # RETORNO exige os dois lados seguros no mesmo resultado visual. Memoria
-    # entre frames pode atravessar intersecoes e nunca deve criar uma acao.
-    if resultado_verde is not None:
-        resultado_verde["retorno_por_historico"] = False
-    return resultado_verde
-
-
 def formatar_log_simples(decisao):
     if decisao == "NENHUM" or decisao == "SEGUE_LINHA":
         return "[LOG] SEGUE_LINHA"
@@ -673,29 +661,7 @@ def escolher_lado_tanque_90(validos_por_lado):
             melhores[lado] = max(fortes, key=lambda item: item.get("score", 0))
     if len(melhores) != 1:
         return None
-    lado = next(iter(melhores))
-    lado_oposto = "DIREITA" if lado == "ESQUERDA" else "ESQUERDA"
-    score_escolhido = melhores[lado].get("score", 0)
-    score_oposto = max(
-        (item.get("score", 0) for item in validos_por_lado.get(lado_oposto, [])),
-        default=0,
-    )
-    if score_oposto > 0 and score_escolhido < score_oposto * TANQUE_90_MARGEM_SCORE_LADO:
-        return None
-    return lado
-
-
-def atualizar_confirmacao_lado_tanque_90(memoria, lado):
-    if lado not in ("ESQUERDA", "DIREITA"):
-        memoria["tanque_90_lado_pendente"] = "CENTRO"
-        memoria["tanque_90_frames_lado"] = 0
-        return False
-    if memoria.get("tanque_90_lado_pendente") == lado:
-        memoria["tanque_90_frames_lado"] = memoria.get("tanque_90_frames_lado", 0) + 1
-    else:
-        memoria["tanque_90_lado_pendente"] = lado
-        memoria["tanque_90_frames_lado"] = 1
-    return memoria["tanque_90_frames_lado"] >= TANQUE_90_FRAMES_CONFIRMAR_LADO
+    return next(iter(melhores))
 
 
 def frente_parece_falsa_em_curva_90(destino, validos_por_lado, largura_frame):
@@ -730,7 +696,6 @@ def iniciar_tanque_90(memoria, lado, agora):
     memoria["lado_recuperacao_pendente"] = lado
     memoria["frames_confirmacao_lado_recuperacao"] = 0
     memoria["ultimo_lado_tanque_90"] = lado
-    memoria["tanque_90_lado_pendente"] = lado
 
 
 def memorizar_lado_tanque_90(memoria):
@@ -831,7 +796,7 @@ def escolher_destino_busca_pos_verde(destino_normal, estado_verde):
 
 def comando_giro_retorno_verde(estado_verde, memoria):
     estado_verde["lado_giro_retorno"] = LADO_GIRO_RETORNO_VERDE
-    return f"GIRAR_ESQ {VEL_EXECUTAR_RETORNO_VERDE}"
+    return f"GIRAR_ESQ {DEST_VEL_RECUPERAR}"
 
 
 def comando_avancar_retorno_cego():
@@ -1242,24 +1207,7 @@ def criar_stream_debug(
                 f"pos={verde.get('posicao_cruzamento', 'NA')} {verde.get('motivo', 'NA')} "
                 f"tol={verde.get('tolerado_desalinhado', False)} "
                 f"rec={verde.get('recuperado_desalinhado', False)} "
-                f"parcial={verde.get('verde_parcial_desalinhado', False)} "
-                f"area={_numero_stream(verde.get('area'), 0)} "
-                f"split={verde.get('origem_split', 'ORIGINAL')} "
-                f"acao={verde.get('usado_para_acao', False)} "
-                f"ret={verde.get('usado_para_retorno', False)} "
-                f"falso={verde.get('falso_depois_cruzamento', False)} "
-                f"forte_dep={verde.get('depois_forte_intersecao', False)} "
-                f"int_frente={verde.get('tem_intersecao_a_frente', False)} "
-                f"dy={_numero_stream(verde.get('distancia_y_verde_cruzamento'), 0)} "
-                f"ramo_global={verde.get('ramo_lateral_global', False)} "
-                f"ramo_local={verde.get('ramo_lateral_local', False)} "
-                f"px_ramo={verde.get('pixels_ramo_lateral_local', 0)} "
-                f"px_entre={verde.get('pixels_linha_entre_verde_cruzamento', 0)} "
-                f"px_prox={verde.get('pixels_linha_proxima', 0)} "
-                f"bloq={verde.get('bloqueado_sem_intersecao_a_frente', False)} "
-                f"mot_int={verde.get('motivo_intersecao_a_frente', 'NA')} "
-                f"mot_bloq={verde.get('motivo_bloqueio_acao', 'NA')} "
-                f"area_rel={_numero_stream(verde.get('area_rel_quadro'), 3)}",
+                f"parcial={verde.get('verde_parcial_desalinhado', False)}",
                 (x, max(15, y - 6)),
                 cor,
                 0.36,
@@ -1288,8 +1236,6 @@ def criar_stream_debug(
         f"ultimo_lado_tanque_90={memoria.get('ultimo_lado_tanque_90', 'CENTRO')}",
         f"tanque_90_tempo={max(0.0, time.monotonic() - memoria.get('tanque_90_inicio', time.monotonic())):.2f}" if memoria.get("tanque_90_ativo", False) else "tanque_90_tempo=0.00",
         f"motivo_tanque_90={memoria.get('motivo_tanque_90', 'NA')}",
-        f"tanque_90_lado_pendente={memoria.get('tanque_90_lado_pendente', 'CENTRO')}",
-        f"tanque_90_frames_lado={memoria.get('tanque_90_frames_lado', 0)}",
     ]
     if not destino.get("ok", False):
         linhas.append("DESTINO PERDIDO")
@@ -1305,14 +1251,6 @@ def criar_stream_debug(
             f"verde_tolerado={resultado_verde.get('tem_verde_tolerado_desalinhado', False)}",
             f"verde_parcial={resultado_verde.get('tem_verde_parcial_desalinhado', False)}",
             f"suspeita_retorno={resultado_verde.get('suspeita_retorno', False)}",
-            f"contexto_retorno={resultado_verde.get('contexto_retorno', False)}",
-            f"qtd_acao_E/D={resultado_verde.get('qtd_acao_esq', 0)}/{resultado_verde.get('qtd_acao_dir', 0)}",
-            f"qtd_falso_depois={resultado_verde.get('qtd_falso_depois', 0)}",
-            f"qtd_bloqueado_sem_intersecao={resultado_verde.get('qtd_bloqueado_sem_intersecao', 0)}",
-            f"retorno_seguro={resultado_verde.get('retorno_seguro', False)}",
-            f"contexto_retorno_seguro={resultado_verde.get('contexto_retorno_seguro', False)}",
-            f"retorno_com_falso_depois={resultado_verde.get('retorno_com_falso_depois', False)}",
-            f"verdes_falsos_depois_count={resultado_verde.get('verdes_falsos_depois_count', 0)}",
             f"retorno_E/D={resultado_verde.get('evidencias_retorno_esquerda', 0)}/{resultado_verde.get('evidencias_retorno_direita', 0)}",
             f"motivo_retorno={resultado_verde.get('motivo_retorno', 'NA')}",
         ])
@@ -1432,16 +1370,11 @@ def main():
             "tanque_90_ativo": False, "tanque_90_lado": "CENTRO", "tanque_90_inicio": 0.0,
             "motivo_tanque_90": "INATIVO", "tanque_90_aguarda_rearme": False,
             "ultimo_lado_tanque_90": "CENTRO",
-            "tanque_90_lado_pendente": "CENTRO", "tanque_90_frames_lado": 0,
         }
         controle_varredura = {"etapa": 0, "ultima_troca": time.monotonic()}
         estado_log = criar_estado_log()
         estado_verde_ativo = criar_estado_verde_ativo()
         historico_lado_verde = {"lado": "CENTRO", "instante": 0.0, "confianca": 0.0}
-        historico_retorno_verde = {
-            "esquerda_instante": float("-inf"), "direita_instante": float("-inf"),
-            "esquerda_conf": 0.0, "direita_conf": 0.0,
-        }
         estado_anterior, ultimo_debug = None, 0
 
         while True:
@@ -1449,13 +1382,12 @@ def main():
             agora = time.monotonic()
             analisar_verde = args.verde_sombra or args.verde_ativo
             resultado_verde = analisar_verdes(frame) if analisar_verde else None
-            resultado_verde = aplicar_historico_retorno_verde(
-                resultado_verde,
-                historico_retorno_verde,
-                agora,
-            )
-            # Decisoes de lado sao sempre do quadro/intersecao atual. Recuperar o
-            # lado anterior pode contaminar uma nova intersecao.
+            if resultado_verde is not None and estabilizar_decisao_lado_verde is not None:
+                resultado_verde = estabilizar_decisao_lado_verde(
+                    resultado_verde,
+                    historico_lado_verde,
+                    agora,
+                )
             decisao_verde_crua = (
                 resultado_verde.get("decisao", "NENHUM")
                 if resultado_verde is not None
@@ -1503,13 +1435,11 @@ def main():
             )
             if not curva_90_detectada:
                 memoria["tanque_90_aguarda_rearme"] = False
-                atualizar_confirmacao_lado_tanque_90(memoria, None)
             if verde_bloqueia_tanque_90 and memoria["tanque_90_ativo"]:
                 memorizar_lado_tanque_90(memoria)
                 memoria["tanque_90_ativo"] = False
                 memoria["tanque_90_lado"] = "CENTRO"
                 memoria["motivo_tanque_90"] = "BLOQUEADO_POR_VERDE"
-                atualizar_confirmacao_lado_tanque_90(memoria, None)
             elif memoria["tanque_90_ativo"]:
                 atualizar_tanque_90(memoria, destino_normal, agora)
             elif (
@@ -1518,7 +1448,7 @@ def main():
                 and curva_90_detectada
             ):
                 lado_tanque_90 = escolher_lado_tanque_90(destino_normal["validos_por_lado"])
-                if atualizar_confirmacao_lado_tanque_90(memoria, lado_tanque_90):
+                if lado_tanque_90 is not None:
                     iniciar_tanque_90(memoria, lado_tanque_90, agora)
             executando_retorno_verde = (
                 args.verde_ativo
