@@ -431,19 +431,19 @@ def imprimir_log_simples(decisao, estado_log, agora):
         estado_log["ultimo_tempo"] = agora
 
 
-def enviar_seguro(conexao, comando, motores_ativos):
+def enviar_seguro(conexao, comando, motores_ativos, esperar_resposta=False):
     if not motores_ativos:
         return None
     if enviar_comando is None:
         raise RuntimeError("Suporte serial indisponivel.")
     if conexao is None or not conexao.is_open:
         raise RuntimeError("Conexao serial indisponivel.")
-    return enviar_comando(conexao, comando)
+    return enviar_comando(conexao, comando, esperar_resposta=esperar_resposta)
 
 
 def enviar_parar_final(conexao, motores_ativos):
     try:
-        enviar_seguro(conexao, "PARAR", motores_ativos)
+        enviar_seguro(conexao, "PARAR", motores_ativos, esperar_resposta=True)
     except Exception as erro:
         print(f"Aviso: nao foi possivel enviar PARAR final: {erro}")
 
@@ -1378,6 +1378,7 @@ def main():
         estado_anterior, ultimo_debug = None, 0
 
         while True:
+            inicio_frame = time.perf_counter()
             frame = capturar_frame_bgr(camera)
             agora = time.monotonic()
             analisar_verde = args.verde_sombra or args.verde_ativo
@@ -1408,7 +1409,12 @@ def main():
                 acao_permitida,
                 origem_decisao,
             )
-            resultado = detectar_linha(frame)
+            # Reutiliza resultado_linha calculado dentro de analisar_verdes quando
+            # o verde esta ativo, evitando uma segunda chamada a detectar_linha().
+            if resultado_verde is not None:
+                resultado = resultado_verde["resultado_linha"]
+            else:
+                resultado = detectar_linha(frame)
             destino_normal = escolher_destino(resultado)
             if args.verde_ativo:
                 atualizar_estado_verde_ativo(
@@ -1579,7 +1585,12 @@ def main():
                     caminho_stream = salvar_stream_debug(stream_debug)
                     if not args.log:
                         print(f"Stream debug salvo: {caminho_stream}")
-            time.sleep(DEST_INTERVALO)
+            elapsed = time.perf_counter() - inicio_frame
+            restante = DEST_INTERVALO - elapsed
+            if restante > 0:
+                time.sleep(restante)
+            elif not args.log:
+                print(f"[AVISO] loop lento: {elapsed * 1000:.1f} ms (limite {DEST_INTERVALO * 1000:.0f} ms)")
     except KeyboardInterrupt:
         if not args.log:
             print("CTRL+C recebido. Parando robo.")
