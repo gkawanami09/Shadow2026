@@ -873,6 +873,7 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
     candidato["motivo_tolerancia"] = "nao_tolerado"
     candidato["recuperado_desalinhado"] = False
     candidato["verde_parcial_desalinhado"] = False
+    candidato["depois_tolerado_pendente"] = False
     candidato["area_minima_original"] = float(candidato["area_minima_y"])
     candidato["area_minima_usada"] = float(candidato["area_minima_y"])
     candidato["fator_area_parcial"] = 1.0
@@ -1011,6 +1012,9 @@ def validar_verde(candidato, cruzamento, mascara_linha, largura_linha_px):
             tolerancia_posicao_pendente = True
             candidato["tolerado_desalinhado"] = True
             candidato["motivo_tolerancia"] = "bbox_perto_cruzamento_desalinhado"
+            # Candidato veio de DEPOIS: mesmo promovido a SOBREPOSTO_TOLERADO,
+            # nao pode virar acao lateral ESQUERDA/DIREITA.
+            candidato["depois_tolerado_pendente"] = True
         else:
             candidato["valido"] = False
             candidato["falso_depois_cruzamento"] = True
@@ -1373,8 +1377,16 @@ def decidir_verdes(candidatos, cruzamento):
         and not candidato.get("verde_depois_intersecao", False)
         and not candidato.get("falso_depois_cruzamento", False)
     ]
-    validos_esquerda = [c for c in validos_para_acao if c.get("lado") == "ESQUERDA"]
-    validos_direita = [c for c in validos_para_acao if c.get("lado") == "DIREITA"]
+    validos_esquerda = [
+        c for c in validos_para_acao
+        if c.get("lado") == "ESQUERDA"
+        and not c.get("depois_tolerado_pendente", False)
+    ]
+    validos_direita = [
+        c for c in validos_para_acao
+        if c.get("lado") == "DIREITA"
+        and not c.get("depois_tolerado_pendente", False)
+    ]
     evidencias_esquerda, evidencias_direita = resumir_evidencias_retorno(candidatos)
     evidencias_validas_esquerda = [c for c in evidencias_esquerda if c.get("valido", False)]
     evidencias_validas_direita = [c for c in evidencias_direita if c.get("valido", False)]
