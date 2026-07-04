@@ -9,6 +9,7 @@ deteccao diagonal apos curvas.
 import argparse
 import time
 
+import cv2
 from camera_test import capturar_frame_bgr, iniciar_camera
 from config import (
     BAUD_RATE, CAMERA_HEIGHT, CAMERA_WIDTH, SERIAL_PORT, TIMEOUT_SERIAL,

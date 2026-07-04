@@ -1,0 +1,8 @@
+# Shadow2026 line follower — pinned Python deps.
+# picamera2 + libcamera are NOT pip-installed: they come from apt
+# (sudo apt install -y python3-picamera2 python3-libcamera), see RUNBOOK.md.
+numpy<=1.26.4
+opencv-python
+numba
+pyserial
+scikit-image

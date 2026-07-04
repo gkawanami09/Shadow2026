@@ -1,0 +1,144 @@
+"""
+vision/green.py — green marker detection, validation and temporal latching.
+Ported from Overengineering² Reading Dossier, Hotspot 4
+  Original source: robot_v.3/Python/main/line_cam.py
+    - check_green               (lines 115-138) — verbatim (drawing dropped)
+    - check_black               (lines 141-175) — verbatim, @njit(cache=True)
+    - determine_turn_direction  (lines 178-195) — verbatim
+    - average_direction         (lines 476-484) — verbatim
+    - temporal latching         (lines 732-758) — wrapped in
+      latch_turn_direction(); IMU_REPLACEMENT: the four rotation_y=="ramp_up"
+      variants (memory .8 s / line_crop .75) are dead without an IMU and were
+      removed; flat values kept: vote window 0.2 s, memory 0.5 s,
+      line_crop .45 latched / .48 normal.
+Validation rule: a marker ≥ 2500 px² must have black (ROI mean > 125) on
+exactly 2 of 4 sides, one of them the top; top+left ⇒ turn_right,
+top+right ⇒ turn_left; both ⇒ turn_around; marker bottom in the lowest 5 %
+of the frame suppresses the turn (already under the robot).
+"""
+
+import cv2
+import numpy as np
+from numba import njit
+
+from config import (GREEN_MARKER_MEMORY, GREEN_MIN_AREA, GREEN_ROI_MEAN,
+                    GREEN_VOTE_THRESHOLD, GREEN_VOTE_WINDOW, LINE_CROP_GREEN,
+                    LINE_CROP_NORMAL, camera_x, camera_y)
+from shared.mp_manager import (add_time_value, get_time_average, line_crop,
+                               timer, turn_dir)
+
+
+def check_green(contours_grn, black_image):
+    black_around_sign = np.zeros((len(contours_grn), 5), dtype=np.int16)  # [[b,t,l,r,lp], [b,t,l,r,lp]]
+
+    for i, contour in enumerate(contours_grn):
+        area = cv2.contourArea(contour)
+        if area <= GREEN_MIN_AREA:
+            continue
+
+        green_box = cv2.boxPoints(cv2.minAreaRect(contour))
+        black_around_sign = check_black(black_around_sign, i, green_box, black_image.copy())
+
+    turn_left, turn_right, left_bottom, right_bottom = determine_turn_direction(black_around_sign)
+
+    if turn_left and not turn_right and not left_bottom:
+        return "left"
+    elif turn_right and not turn_left and not right_bottom:
+        return "right"
+    elif turn_left and turn_right and not (left_bottom and right_bottom):
+        return "turn_around"
+    else:
+        return "straight"
+
+
+@njit(cache=True)
+def check_black(black_around_sign, i, green_box, black_image):
+    green_box = green_box[green_box[:, 1].argsort()]
+
+    marker_height = green_box[-1][1] - green_box[0][1]
+
+    black_around_sign[i, 4] = int(green_box[2][1])
+
+    # Bottom
+    roi_b = black_image[int(green_box[2][1]):np.minimum(int(green_box[2][1] + (marker_height * 0.8)), camera_y), np.minimum(int(green_box[2][0]), int(green_box[3][0])):np.maximum(int(green_box[2][0]), int(green_box[3][0]))]
+    if roi_b.size > 0:
+        if np.mean(roi_b[:]) > GREEN_ROI_MEAN:
+            black_around_sign[i, 0] = 1
+
+    # Top
+    roi_t = black_image[np.maximum(int(green_box[1][1] - (marker_height * 0.8)), 0):int(green_box[1][1]), np.minimum(np.maximum(int(green_box[0][0]), 0), np.maximum(int(green_box[1][0]), 0)):np.maximum(np.maximum(int(green_box[0][0]), 0), np.maximum(int(green_box[1][0]), 0))]
+    if roi_t.size > 0:
+        if np.mean(roi_t[:]) > GREEN_ROI_MEAN:
+            black_around_sign[i, 1] = 1
+
+    green_box = green_box[green_box[:, 0].argsort()]
+
+    # Left
+    roi_l = black_image[np.minimum(int(green_box[0][1]), int(green_box[1][1])):np.maximum(int(green_box[0][1]), int(green_box[1][1])), np.maximum(int(green_box[1][0] - (marker_height * 0.8)), 0):int(green_box[1][0])]
+    if roi_l.size > 0:
+        if np.mean(roi_l[:]) > GREEN_ROI_MEAN:
+            black_around_sign[i, 2] = 1
+
+    # Right
+    roi_r = black_image[np.minimum(int(green_box[2][1]), int(green_box[3][1])):np.maximum(int(green_box[2][1]), int(green_box[3][1])), int(green_box[2][0]):np.minimum(int(green_box[2][0] + (marker_height * 0.8)), camera_x)]
+    if roi_r.size > 0:
+        if np.mean(roi_r[:]) > GREEN_ROI_MEAN:
+            black_around_sign[i, 3] = 1
+
+    return black_around_sign
+
+
+def determine_turn_direction(black_around_sign):
+    turn_left = False
+    turn_right = False
+    left_bottom = False
+    right_bottom = False
+
+    for i in black_around_sign:
+        if np.sum(i[:4]) == 2:
+            if i[1] == 1 and i[2] == 1:
+                turn_right = True
+                if i[4] > camera_y * 0.95:
+                    right_bottom = True
+            elif i[1] == 1 and i[3] == 1:
+                turn_left = True
+                if i[4] > camera_y * 0.95:
+                    left_bottom = True
+
+    return turn_left, turn_right, left_bottom, right_bottom
+
+
+def average_direction(turn_direction):
+    turn_dir_num = 0
+
+    if turn_direction == "left":
+        turn_dir_num = -1
+    elif turn_direction == "right":
+        turn_dir_num = 1
+
+    return turn_dir_num
+
+
+def latch_turn_direction(turn_direction, time_turn_direction):
+    """0.2 s vote average + 0.5 s memory latch; publishes turn_dir/line_crop.
+    Returns the updated time array (caller keeps it between frames)."""
+    time_turn_direction = add_time_value(time_turn_direction, average_direction(turn_direction))
+    avg_turn_dir = get_time_average(time_turn_direction, GREEN_VOTE_WINDOW)
+
+    # IMU_REPLACEMENT: variantes de ramp_up removidas (sem IMU)
+    if avg_turn_dir > GREEN_VOTE_THRESHOLD:
+        timer.set_timer("right_marker", GREEN_MARKER_MEMORY)
+    elif avg_turn_dir < -GREEN_VOTE_THRESHOLD:
+        timer.set_timer("left_marker", GREEN_MARKER_MEMORY)
+
+    if not timer.get_timer("right_marker") and not turn_direction == "turn_around" and avg_turn_dir >= 0:
+        turn_dir.value = "right"
+        line_crop.value = LINE_CROP_GREEN
+    elif not timer.get_timer("left_marker") and not turn_direction == "turn_around" and avg_turn_dir <= 0:
+        turn_dir.value = "left"
+        line_crop.value = LINE_CROP_GREEN
+    else:
+        turn_dir.value = turn_direction
+        line_crop.value = LINE_CROP_NORMAL
+
+    return time_turn_direction
