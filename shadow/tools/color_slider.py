@@ -67,6 +67,13 @@ def build_trackbars(group_name, mode):
     cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(WINDOW, config.camera_x * 2, config.camera_y * 2 + 80)
 
+    # No backend Qt/Wayland do Raspberry Pi OS, namedWindow() pode apenas
+    # agendar a criação da janela. Exibi-la e processar os eventos garante que
+    # o handle nativo exista antes de createTrackbar().
+    placeholder = np.zeros((config.camera_y * 2, config.camera_x, 3), dtype=np.uint8)
+    cv2.imshow(WINDOW, placeholder)
+    cv2.waitKey(1)
+
     if mode == "bgr_ceiling":
         values = read_ini(group_name, BGR_DEFAULTS[group_name])
         for label, val, vmax in zip(("B max", "G max", "R max"), values, (255, 255, 255)):
