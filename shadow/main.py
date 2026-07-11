@@ -91,7 +91,7 @@ def main():
             frame = np.ndarray((config.camera_y, config.camera_x, 3),
                                dtype=np.uint8, buffer=shm.buf)
             while all(p.is_alive() for p in children):
-                cv2.imshow("Shadow2026 — camera de linha", frame.copy())
+                cv2.imshow("Shadow2026 - camera de linha", frame.copy())
                 if cv2.waitKey(30) & 0xFF == ord("q"):
                     break
                 if status.value != last_status:
