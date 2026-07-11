@@ -2,7 +2,7 @@
 vision/green.py — green marker detection, validation and temporal latching.
 Ported from Overengineering² Reading Dossier, Hotspot 4
   Original source: robot_v.3/Python/main/line_cam.py
-    - check_green               (lines 115-138) — verbatim (drawing dropped)
+    - check_green               (lines 115-138) — verbatim
     - check_black               (lines 141-175) — verbatim, @njit(cache=True)
     - determine_turn_direction  (lines 178-195) — verbatim
     - average_direction         (lines 476-484) — verbatim
@@ -28,7 +28,7 @@ from shared.mp_manager import (add_time_value, get_time_average, line_crop,
                                timer, turn_dir)
 
 
-def check_green(contours_grn, black_image):
+def check_green(contours_grn, black_image, debug_img=None):
     black_around_sign = np.zeros((len(contours_grn), 5), dtype=np.int16)  # [[b,t,l,r,lp], [b,t,l,r,lp]]
 
     for i, contour in enumerate(contours_grn):
@@ -37,6 +37,9 @@ def check_green(contours_grn, black_image):
             continue
 
         green_box = cv2.boxPoints(cv2.minAreaRect(contour))
+        if debug_img is not None:
+            draw_box = np.intp(green_box)
+            cv2.drawContours(debug_img, [draw_box], -1, (0, 0, 255), 2)
         black_around_sign = check_black(black_around_sign, i, green_box, black_image.copy())
 
     turn_left, turn_right, left_bottom, right_bottom = determine_turn_direction(black_around_sign)

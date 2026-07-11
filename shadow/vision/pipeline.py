@@ -206,7 +206,8 @@ def vision_loop(debug=False):
 
             # Check for green turn signs
             if len(contours_grn) > 0:
-                turn_direction = check_green(contours_grn, black_image)
+                turn_direction = check_green(
+                    contours_grn, black_image, debug_img=cv2_img if debug else None)
             else:
                 turn_direction = "straight"
 
