@@ -11,8 +11,9 @@ Shadow2026 adaptations:
   Hotspot 1 dark-ahead detector and is fully portable.
 """
 
-from config import (RAMP_AHEAD_HOLD, RAMP_AHEAD_SPEED_ARC, RAMP_AHEAD_SPEED_PIVOT,
-                    RAMP_AHEAD_SPEED_STRAIGHT, max_turn_angle)
+from config import (LINE_FOLLOW_SPEED, RAMP_AHEAD_HOLD, RAMP_AHEAD_SPEED_ARC,
+                    RAMP_AHEAD_SPEED_PIVOT, RAMP_AHEAD_SPEED_STRAIGHT,
+                    max_turn_angle)
 from shared.mp_manager import ramp_ahead, timer
 
 
@@ -28,4 +29,4 @@ def get_speed(angle):
         else:
             return RAMP_AHEAD_SPEED_STRAIGHT
 
-    return 1
+    return LINE_FOLLOW_SPEED

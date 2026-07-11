@@ -59,6 +59,7 @@ right_correction = 1                      # [OE2] control.py:77
 # ----------------------------------------------------------------------------
 # Velocidades / get_speed  [OE2 Hotspot 2]
 # ----------------------------------------------------------------------------
+LINE_FOLLOW_SPEED = .5                    # PWM 60: .5 * MAX_PWM (120)
 RAMP_AHEAD_HOLD = 2                       # [OE2] control.py:288 — s segurando velocidade reduzida
 RAMP_AHEAD_SPEED_PIVOT = .65              # [OE2] control.py:291
 RAMP_AHEAD_SPEED_ARC = .4                 # [OE2] control.py:293
