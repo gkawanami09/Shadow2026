@@ -73,7 +73,7 @@ RAMP_SWAP_TRIGGER = 90                    # [OE2] line_cam.py:642 — media da b
 RAMP_SWAP_MARGIN = 30                     # [OE2] line_cam.py:649 — melhora minima p/ trocar teto
 BLACK_AVG_SIDE_MASK = 21                  # [OE2] line_cam.py:680 — mascara lateral se imagem limpa
 LINE_CROP_INITIAL = .6                    # [OE2] mp_manager.py:53
-LINE_CROP_NORMAL = .55                    # [OE2] line_cam.py:758
+LINE_CROP_NORMAL = .6                    # [OE2] line_cam.py:758
 LINE_CROP_GREEN = .45                     # [OE2] line_cam.py:746/752 — durante curva verde
 SIMILARITY_CHECK_EVERY = 30               # [OE2] line_cam.py:584 — SSIM a cada 30 frames
 
