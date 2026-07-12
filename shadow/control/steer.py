@@ -20,7 +20,9 @@ This module deliberately does NOT import shared/mp_manager, so bench tools
 
 import time
 
-from config import MAX_PWM, left_correction, max_turn_angle, right_correction
+from config import (FRONT_ANCHORED_STEERING, FRONT_ANCHOR_FULL_ANGLE,
+                    FRONT_ANCHOR_REAR_SCALE, FRONT_ANCHOR_START_ANGLE,
+                    MAX_PWM, left_correction, max_turn_angle, right_correction)
 
 # Instancia definida por init_steering() no processo de controle (ou nos tools).
 arduino = None
@@ -76,26 +78,32 @@ def steer(angle=190., speed=.8):
         arduino.parar()
         return
 
-    arduino.lado(round(speed_left * MAX_PWM), round(speed_right * MAX_PWM))
+    # Para erros grandes, desloca progressivamente o centro de giro para a
+    # frente do chassi. No limite, as rodas dianteiras ficam quase paradas e
+    # somente a traseira gira em sentidos opostos. Isso faz a traseira buscar
+    # o alinhamento apontado pela bolinha inferior sem um caso especial de 90°.
+    if FRONT_ANCHORED_STEERING and -180 <= angle <= 180 and \
+            abs(angle) > FRONT_ANCHOR_START_ANGLE:
+        span = max(FRONT_ANCHOR_FULL_ANGLE - FRONT_ANCHOR_START_ANGLE, 1)
+        blend = min((abs(angle) - FRONT_ANCHOR_START_ANGLE) / span, 1.)
+        rear_speed = min(speed * FRONT_ANCHOR_REAR_SCALE, 1.)
 
+        if angle > 0:  # direita: traseira esquerda avanca, direita recua
+            anchor_te, anchor_td = rear_speed, -rear_speed
+        else:          # esquerda: traseira direita avanca, esquerda recua
+            anchor_te, anchor_td = -rear_speed, rear_speed
 
-def drive_mecanum(forward_pwm, lateral_pwm, rotation_pwm, max_pwm):
-    """Mistura mecanum em X: +lateral=direita, +rotation=giro direita.
+        front_left = speed_left * (1 - blend)
+        front_right = speed_right * (1 - blend)
+        rear_left = speed_left * (1 - blend) + anchor_te * blend
+        rear_right = speed_right * (1 - blend) + anchor_td * blend
 
-    Reescala o vetor completo em vez de cortar rodas isoladas, preservando a
-    direcao pedida e garantindo |PWM| <= max_pwm.
-    """
-    wheels = [
-        forward_pwm + lateral_pwm + rotation_pwm,   # FE
-        forward_pwm - lateral_pwm + rotation_pwm,   # TE
-        forward_pwm - lateral_pwm - rotation_pwm,   # FD
-        forward_pwm + lateral_pwm - rotation_pwm,   # TD
-    ]
-    peak = max(abs(v) for v in wheels)
-    if peak > max_pwm:
-        scale = max_pwm / peak
-        wheels = [v * scale for v in wheels]
-    arduino.rodas(*(round(v) for v in wheels))
+        arduino.rodas(round(front_left * MAX_PWM),
+                      round(rear_left * MAX_PWM),
+                      round(front_right * MAX_PWM),
+                      round(rear_right * MAX_PWM))
+    else:
+        arduino.lado(round(speed_left * MAX_PWM), round(speed_right * MAX_PWM))
 
 
 def sleep_steering(duration):
