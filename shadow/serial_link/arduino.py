@@ -115,6 +115,13 @@ class Arduino:
             f"PWM acima do teto de seguranca ({esq}, {dir_}) > {config.MAX_PWM}"
         self._send_cmd(f"LADO {esq} {dir_}")
 
+    def rodas(self, fe, te, fd, td):
+        """RODAS <FE> <TE> <FD> <TD> — velocidades assinadas individuais."""
+        values = tuple(int(round(v)) for v in (fe, te, fd, td))
+        assert all(abs(v) <= config.MAX_PWM for v in values), \
+            f"PWM acima do teto de seguranca {values} > {config.MAX_PWM}"
+        self._send_cmd(f"RODAS {' '.join(map(str, values))}")
+
     def parar(self):
         self._send_cmd("PARAR")
 

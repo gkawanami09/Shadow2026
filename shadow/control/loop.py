@@ -29,9 +29,11 @@ import time
 
 from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT, MIN_LINE_SIZE_DEFAULT,
+                    MECANUM_CAMERA_CONTROL,
                     STUCK_COOLDOWN, STUCK_SIM_THRESHOLD, STUCK_SIM_WINDOW,
                     VISION_READY_TIMEOUT)
 from control.gap_orient import drive_back_until_line, orientate_gap
+from control.mecanum import MecanumCameraController
 from control.red_stop import stop_for_red
 from control.speed import get_speed
 from control.steer import init_steering, sleep_steering, steer
@@ -40,6 +42,8 @@ from control.turn_around import turn_around
 from serial_link.arduino import Arduino
 from shared.mp_manager import (add_time_value, empty_time_arr, fill_array,
                                get_time_average, line_angle, line_detected,
+                               line_geometry_valid, line_heading_error,
+                               line_lateral_error,
                                line_similarity, line_status, min_line_size,
                                ramp_ahead, red_detected, status, terminate,
                                timer, turn_dir, vision_ready)
@@ -51,6 +55,7 @@ def control_loop():
     steer()  # motores parados desde o inicio
 
     last_turn_dir = "l"
+    mecanum_controller = MecanumCameraController()
 
     time_last_angles = empty_time_arr()
     time_line_similarity = fill_array(0, 1200)
@@ -99,7 +104,13 @@ def control_loop():
 
                 status.value = 'Seguindo Linha'
 
-                steer(line_angle.value, get_speed(line_angle.value))
+                if (MECANUM_CAMERA_CONTROL and line_geometry_valid.value
+                        and turn_dir.value == "straight"):
+                    mecanum_controller.update(
+                        line_lateral_error.value, line_heading_error.value)
+                else:
+                    mecanum_controller.reset()
+                    steer(line_angle.value, get_speed(line_angle.value))
 
                 time_last_angles = add_time_value(time_last_angles, line_angle.value)
                 time_line_similarity = add_time_value(time_line_similarity, line_similarity.value)

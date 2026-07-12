@@ -79,6 +79,25 @@ def steer(angle=190., speed=.8):
     arduino.lado(round(speed_left * MAX_PWM), round(speed_right * MAX_PWM))
 
 
+def drive_mecanum(forward_pwm, lateral_pwm, rotation_pwm, max_pwm):
+    """Mistura mecanum em X: +lateral=direita, +rotation=giro direita.
+
+    Reescala o vetor completo em vez de cortar rodas isoladas, preservando a
+    direcao pedida e garantindo |PWM| <= max_pwm.
+    """
+    wheels = [
+        forward_pwm + lateral_pwm + rotation_pwm,   # FE
+        forward_pwm - lateral_pwm + rotation_pwm,   # TE
+        forward_pwm - lateral_pwm - rotation_pwm,   # FD
+        forward_pwm + lateral_pwm - rotation_pwm,   # TD
+    ]
+    peak = max(abs(v) for v in wheels)
+    if peak > max_pwm:
+        scale = max_pwm / peak
+        wheels = [v * scale for v in wheels]
+    arduino.rodas(*(round(v) for v in wheels))
+
+
 def sleep_steering(duration):
     """time.sleep() que mantém o watchdog do Uno alimentado (keepalive)."""
     end = time.monotonic() + duration

@@ -32,13 +32,15 @@ import numpy as np
 from skimage.metrics import structural_similarity
 
 import config
-from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
+from config import (BLACK_AVG_SIDE_MASK, BOTTOM_CENTER_MIN_Y, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
                     RAMP_SWAP_TRIGGER, SIMILARITY_CHECK_EVERY, VISION_MAX_FRAMES,
                     camera_x, camera_y)
 from shared.mp_manager import (add_time_value, average_line_angle, average_line_point,
                                black_average, config_manager, empty_time_arr,
                                get_time_average, last_bottom_point, line_angle,
                                line_angle_y, line_crop, line_detected,
+                               line_geometry_valid, line_heading_error,
+                               line_lateral_error,
                                line_similarity, line_size, line_status,
                                min_line_size, ramp_ahead, red_detected, status,
                                terminate, timer, turn_dir, vision_ready)
@@ -235,6 +237,21 @@ def vision_loop(debug=False):
                     turn_dir.value, last_bottom_point_x, last_average_line_point)
                 line_angle_y.value = int(poi[1])
 
+                dy = float(bottom_point[1] - poi[1])
+                geometry_valid = (bottom_point[1] >= camera_y * BOTTOM_CENTER_MIN_Y
+                                  and dy > 5)
+                if geometry_valid:
+                    line_lateral_error.value = float(np.clip(
+                        (bottom_point[0] - camera_x / 2) / (camera_x / 2), -1, 1))
+                    line_heading_error.value = float(np.clip(
+                        np.arctan2(poi[0] - bottom_point[0], dy) / (np.pi / 2),
+                        -1, 1))
+                    line_geometry_valid.value = True
+                else:
+                    line_lateral_error.value = 0.0
+                    line_heading_error.value = 0.0
+                    line_geometry_valid.value = False
+
 
                 time_line_angle = add_time_value(time_line_angle, line_angle.value)
                 time_last_bottom_point_x = add_time_value(time_last_bottom_point_x, bottom_point[0])
@@ -262,9 +279,19 @@ def vision_loop(debug=False):
                     cv2.circle(cv2_img, (int(bottom_point[0]), int(bottom_point[1])), 5, (255, 255, 0), 1, cv2.LINE_AA)
                     cv2.circle(cv2_img, (camera_x // 2, camera_y - 4),
                                5, (255, 0, 0), -1, cv2.LINE_AA)
+                    if line_geometry_valid.value:
+                        cv2.putText(
+                            cv2_img,
+                            f'mec lat={line_lateral_error.value:+.2f} '
+                            f'head={line_heading_error.value:+.2f}',
+                            (5, 30), cv2.FONT_HERSHEY_SIMPLEX, .4,
+                            (255, 0, 255), 1)
 
             else:
                 line_detected.value = False
+                line_geometry_valid.value = False
+                line_lateral_error.value = 0.0
+                line_heading_error.value = 0.0
                 line_angle.value = 0
                 line_size.value = 0
                 line_angle_y.value = -1

@@ -82,6 +82,19 @@ BOTTOM_CENTER_CONTROL = True
 BOTTOM_CENTER_WEIGHT = .7
 BOTTOM_CENTER_MIN_Y = .75
 
+# Controle holonomico das rodas mecanum durante o segue-linha normal. Os erros
+# sao normalizados em [-1, 1]; a mistura final e reescalada para nunca passar
+# de PWM 60. Manobras especiais continuam usando o controle diferencial.
+MECANUM_CAMERA_CONTROL = True
+MECANUM_FOLLOW_MAX_PWM = 60
+MECANUM_LATERAL_KP = 35.0
+MECANUM_LATERAL_KD = .8
+MECANUM_ROTATION_KP = 45.0
+MECANUM_ROTATION_KD = 1.0
+MECANUM_LATERAL_MAX_PWM = 35
+MECANUM_ROTATION_MAX_PWM = 45
+MECANUM_DERIVATIVE_FILTER = .25
+
 SIMILARITY_CHECK_EVERY = 30               # [OE2] line_cam.py:584 — SSIM a cada 30 frames
 
 # ----------------------------------------------------------------------------
