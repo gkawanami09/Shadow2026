@@ -82,6 +82,15 @@ BOTTOM_CENTER_CONTROL = True
 BOTTOM_CENTER_WEIGHT = .7
 BOTTOM_CENTER_MIN_Y = .75
 
+# Curva preta de 90 graus sem verde: entrada inferior + uma unica saida
+# lateral + nenhuma continuacao no topo. Tempos medidos no Shadow a PWM 60.
+CORNER_90_CONFIRM_FRAMES = 5
+CORNER_90_FORWARD_TIME = .89
+CORNER_90_PIVOT_TIME = 1.15
+CORNER_90_REVERSE_TIME = .65
+CORNER_90_SPEED = .5
+CORNER_90_COOLDOWN = 1.5
+
 SIMILARITY_CHECK_EVERY = 30               # [OE2] line_cam.py:584 — SSIM a cada 30 frames
 
 # ----------------------------------------------------------------------------

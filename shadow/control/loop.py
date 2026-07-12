@@ -27,18 +27,19 @@ Shadow2026 adaptations:
 
 import time
 
-from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
+from config import (CONTROL_MAX_ITERATIONS, CORNER_90_COOLDOWN, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT, MIN_LINE_SIZE_DEFAULT,
                     STUCK_COOLDOWN, STUCK_SIM_THRESHOLD, STUCK_SIM_WINDOW,
                     VISION_READY_TIMEOUT)
 from control.gap_orient import drive_back_until_line, orientate_gap
+from control.corner_90 import execute_corner_90
 from control.red_stop import stop_for_red
 from control.speed import get_speed
 from control.steer import init_steering, sleep_steering, steer
 from control.stuck import avoid_stuck
 from control.turn_around import turn_around
 from serial_link.arduino import Arduino
-from shared.mp_manager import (add_time_value, empty_time_arr, fill_array,
+from shared.mp_manager import (add_time_value, corner_90_dir, empty_time_arr, fill_array,
                                get_time_average, line_angle, line_detected,
                                line_similarity, line_status, min_line_size,
                                ramp_ahead, red_detected, status, terminate,
@@ -58,6 +59,7 @@ def control_loop():
     timer.set_timer("ramp_ahead", .01)
     timer.set_timer("stuck_detected", .01)
     timer.set_timer("stuck_cooldown", 5)
+    timer.set_timer("corner_90_cooldown", .01)
 
     # espera a visao publicar o primeiro frame processado
     wait_start = time.perf_counter()
@@ -91,6 +93,13 @@ def control_loop():
 
             # still line detected
             if line_status.value == "line_detected":
+                if corner_90_dir.value in ("left", "right") and timer.get_timer("corner_90_cooldown"):
+                    direction = corner_90_dir.value
+                    corner_90_dir.value = "none"
+                    execute_corner_90(direction)
+                    timer.set_timer("corner_90_cooldown", CORNER_90_COOLDOWN)
+                    continue
+
                 if turn_dir.value == "turn_around":
                     status.value = f'Girando 180° para a {"direita" if last_turn_dir == "r" else "esquerda"}'
 

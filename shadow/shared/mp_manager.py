@@ -49,6 +49,7 @@ gap_center_y = manager.Value("i", -1)
 ramp_ahead = manager.Value("i", False)
 red_detected = manager.Value("i", False)
 turn_dir = manager.Value("i", "straight")  # "straight"; "left"; "right"; "turn_around"
+corner_90_dir = manager.Value("i", "none")  # "none"; "left"; "right"
 black_average = manager.Value("i", 0.)
 
 last_bottom_point = manager.Value("i", config.camera_x / 2)
