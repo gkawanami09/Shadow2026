@@ -60,6 +60,39 @@ def detect_corner_90(mask, debug_img=None):
                 continue
 
             direction = "left" if left_long else "right"
+
+            ix, iy = int(round(v_x)), int(round(h_y))
+            # Se houver preto vertical material acima do vertice, existe
+            # continuacao reta/intersecao e nao um L isolado.
+            above = mask[max(0, iy - CORNER_90_MIN_ARM_PX):max(0, iy - 18),
+                         max(0, ix - 12):min(mask.shape[1], ix + 13)]
+            if above.size and np.mean(np.any(above > 0, axis=1)) > .35:
+                continue
+
+            # Se o braco sai do quadro, outro vertice do zig-zag pode estar
+            # escondido. Sem visibilidade do fim, a deteccao fica inconclusiva.
+            y0, y1 = max(0, iy - 12), min(mask.shape[0], iy + 13)
+            if direction == "left":
+                border = mask[y0:y1, :6]
+            else:
+                border = mask[y0:y1, mask.shape[1] - 6:]
+            if border.size and np.mean(border > 0) > .08:
+                continue
+
+            # Procura uma segunda perna no extremo do braco. Ela caracteriza
+            # zig-zag; um L verdadeiro possui apenas o primeiro vertice.
+            arm_band = mask[y0:y1]
+            occupied_columns = np.where(np.any(arm_band > 0, axis=0))[0]
+            if occupied_columns.size:
+                far_x = (occupied_columns[0] if direction == "left"
+                         else occupied_columns[-1])
+                far_strip = mask[:, max(0, far_x - 12):min(mask.shape[1], far_x + 13)]
+                if far_strip.size:
+                    rows = np.any(far_strip > 0, axis=1)
+                    rows[max(0, iy - 18):min(mask.shape[0], iy + 19)] = False
+                    if np.count_nonzero(rows) >= CORNER_90_MIN_ARM_PX * .6:
+                        continue
+
             candidates.append((v_x, h_y, direction))
 
     if not candidates:
