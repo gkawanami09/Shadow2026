@@ -36,7 +36,7 @@ def init_steering(arduino_instance):
     arduino = arduino_instance
 
 
-def steer(angle=190., speed=.8, front_reverse_assist=0.):
+def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=False):
     """Command vocabulary (dossier Hotspot 2):
     angle == 190 -> full stop; angle == 200 -> straight backward at `speed`;
     angle in [-180, 180] -> forward, positive = steer right;
@@ -85,7 +85,7 @@ def steer(angle=190., speed=.8, front_reverse_assist=0.):
     # frente do chassi. No limite, as rodas dianteiras ficam quase paradas e
     # somente a traseira gira em sentidos opostos. Isso faz a traseira buscar
     # o alinhamento apontado pela bolinha inferior sem um caso especial de 90°.
-    if FRONT_ANCHORED_STEERING and -180 <= angle <= 180 and \
+    if FRONT_ANCHORED_STEERING and rear_pivot_enabled and -180 <= angle <= 180 and \
             abs(angle) > FRONT_ANCHOR_START_ANGLE:
         span = max(FRONT_ANCHOR_FULL_ANGLE - FRONT_ANCHOR_START_ANGLE, 1)
         blend = min((abs(angle) - FRONT_ANCHOR_START_ANGLE) / span,

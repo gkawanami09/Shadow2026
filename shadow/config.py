@@ -89,7 +89,7 @@ BOTTOM_CENTER_MIN_Y = .75
 FRONT_ANCHORED_STEERING = True
 FRONT_ANCHOR_START_ANGLE = 65
 FRONT_ANCHOR_FULL_ANGLE = 120
-FRONT_ANCHOR_REAR_SCALE = .85
+FRONT_ANCHOR_REAR_SCALE = 1.15
 # Nunca fixa completamente a frente: com blend 1.0 a camera vira o centro de
 # rotacao, a linha apenas gira na imagem e nao consegue chegar a bolinha. A
 # parcela restante faz a camera descrever um arco curto ate reencontrar a linha.

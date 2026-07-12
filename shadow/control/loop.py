@@ -119,8 +119,12 @@ def control_loop():
                 sign = 1 if angle > 0 else -1 if angle < 0 else 0
                 now = time.monotonic()
                 front_reverse_assist = 0.
+                # Marcadores verdes possuem uma direcao deliberada e precisam
+                # do giro tanque original. O pivo traseiro fica reservado ao
+                # alinhamento comum da linha, quando nao ha decisao verde.
+                rear_pivot_enabled = turn_dir.value == "straight"
 
-                if (line_detected.value
+                if (rear_pivot_enabled and line_detected.value
                         and abs(angle) >= PIVOT_STALL_MIN_ANGLE
                         and error >= PIVOT_BOTTOM_MIN_ERROR_PX):
                     if sign != pivot_sign:
@@ -146,7 +150,9 @@ def control_loop():
                     pivot_best_error = camera_x
                     pivot_last_progress = now
 
-                steer(angle, get_speed(angle), front_reverse_assist)
+                steer(angle, get_speed(angle),
+                      front_reverse_assist=front_reverse_assist,
+                      rear_pivot_enabled=rear_pivot_enabled)
 
                 time_last_angles = add_time_value(time_last_angles, line_angle.value)
             elif line_status.value == "stop":
