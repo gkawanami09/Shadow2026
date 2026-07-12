@@ -19,8 +19,6 @@ Shadow2026 adaptations:
     "line_detected" | "gap_detected" | "gap_avoid" | "stop".
   - program_continue() (run switch) -> terminate flag; on shutdown the finally
     block sends PARAR and closes the port.
-  - time_line_similarity is sampled here at 60 Hz (OE² sampled it inside
-    update_sensor_average, which was IR/IMU plumbing and was dropped).
   - Waits for the vision process (vision_ready) before entering the state
     machine, so a dark camera at boot doesn't trigger gap handling.
 """
@@ -29,18 +27,15 @@ import time
 
 from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT, MIN_LINE_SIZE_DEFAULT,
-                    STUCK_COOLDOWN, STUCK_SIM_THRESHOLD, STUCK_SIM_WINDOW,
                     VISION_READY_TIMEOUT)
 from control.gap_orient import drive_back_until_line, orientate_gap
 from control.red_stop import stop_for_red
 from control.speed import get_speed
 from control.steer import init_steering, sleep_steering, steer
-from control.stuck import avoid_stuck
 from control.turn_around import turn_around
 from serial_link.arduino import Arduino
-from shared.mp_manager import (add_time_value, empty_time_arr, fill_array,
-                               get_time_average, line_angle, line_detected,
-                               line_similarity, line_status, min_line_size,
+from shared.mp_manager import (add_time_value, empty_time_arr, line_angle,
+                               line_detected, line_status, min_line_size,
                                ramp_ahead, red_detected, status, terminate,
                                timer, turn_dir, vision_ready)
 
@@ -53,7 +48,6 @@ def control_loop():
     last_turn_dir = "l"
 
     time_last_angles = empty_time_arr()
-    time_line_similarity = fill_array(0, 1200)
 
     timer.set_timer("ramp_ahead", .01)
     timer.set_timer("stuck_detected", .01)
@@ -102,12 +96,6 @@ def control_loop():
                 steer(line_angle.value, get_speed(line_angle.value))
 
                 time_last_angles = add_time_value(time_last_angles, line_angle.value)
-                time_line_similarity = add_time_value(time_line_similarity, line_similarity.value)
-
-                if get_time_average(time_line_similarity, STUCK_SIM_WINDOW) > STUCK_SIM_THRESHOLD and timer.get_timer("stuck_cooldown"):
-                    avoid_stuck()
-                    timer.set_timer("stuck_cooldown", STUCK_COOLDOWN)
-
             elif line_status.value == "stop":
                 stop_for_red()
                 line_status.value = "line_detected"
