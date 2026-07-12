@@ -29,7 +29,8 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GAP_ENABLED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
-                    MIN_LINE_SIZE_DEFAULT, PIVOT_BOTTOM_MIN_ERROR_PX,
+                    LINE_LOSS_STEER_HOLD, MIN_LINE_SIZE_DEFAULT,
+                    PIVOT_BOTTOM_MIN_ERROR_PX,
                     PIVOT_PROGRESS_PX, PIVOT_STALL_MIN_ANGLE,
                     PIVOT_STALL_RAMP_TIME, PIVOT_STALL_TIME,
                     VISION_READY_TIMEOUT, camera_x)
@@ -80,6 +81,9 @@ def control_loop():
     pivot_sign = 0
     pivot_best_error = camera_x
     pivot_last_progress = time.monotonic()
+    last_follow_angle = 0
+    last_line_seen = time.monotonic()
+    last_rear_pivot_enabled = True
 
     try:
         while not terminate.value:
@@ -112,18 +116,40 @@ def control_loop():
 
                 status.value = 'Seguindo Linha'
 
-                angle = line_angle.value
+                now = time.monotonic()
+
+                if line_detected.value:
+                    last_line_seen = now
+                    if turn_dir.value == "left":
+                        # Verde: decisao explicita, sempre giro tanque.
+                        last_follow_angle = -180
+                    elif turn_dir.value == "right":
+                        last_follow_angle = 180
+                    else:
+                        last_follow_angle = line_angle.value
+                    last_rear_pivot_enabled = turn_dir.value == "straight"
+
+                if line_detected.value:
+                    angle = last_follow_angle
+                elif now - last_line_seen <= LINE_LOSS_STEER_HOLD:
+                    # A linha saiu da imagem durante a curva: termina o giro
+                    # atual em vez de substituir o comando por frente (0°).
+                    angle = last_follow_angle
+                else:
+                    # Sem gap e sem linha por tempo demais, parar e mais seguro
+                    # do que continuar reto para fora da pista.
+                    angle = 190
+
                 # O angulo pode mudar mesmo quando a linha apenas gira ao
                 # redor da camera. O erro que importa e a distancia horizontal
                 # do ponto inferior ate a bolinha central.
                 error = abs(last_bottom_point.value - camera_x / 2)
                 sign = 1 if angle > 0 else -1 if angle < 0 else 0
-                now = time.monotonic()
                 front_reverse_assist = 0.
                 # Marcadores verdes possuem uma direcao deliberada e precisam
                 # do giro tanque original. O pivo traseiro fica reservado ao
                 # alinhamento comum da linha, quando nao ha decisao verde.
-                rear_pivot_enabled = turn_dir.value == "straight"
+                rear_pivot_enabled = last_rear_pivot_enabled and angle != 190
 
                 if (rear_pivot_enabled and line_detected.value
                         and abs(angle) >= PIVOT_STALL_MIN_ANGLE
