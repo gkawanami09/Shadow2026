@@ -37,7 +37,7 @@ from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
                     camera_x, camera_y)
 from shared.mp_manager import (add_time_value, average_line_angle, average_line_point,
                                black_average, config_manager, empty_time_arr,
-                               get_time_average, last_bottom_point, line_angle,
+                               get_time_average, last_bottom_point, line_ahead, line_angle,
                                line_angle_y, line_crop, line_detected,
                                line_similarity, line_size, line_status,
                                min_line_size, ramp_ahead, red_detected, status,
@@ -159,6 +159,22 @@ def vision_loop(debug=False):
             ramp_ahead.value = dark_ahead
 
             black_average.value = np.mean(black_image[:])
+
+            # Continuidade material na direcao de marcha. Em vez de olhar so
+            # a area total, exige preto em muitas linhas horizontais do
+            # corredor central; assim uma faixa transversal de um L nao vira
+            # falsamente uma continuacao para frente.
+            ahead = black_image[
+                0:int(camera_y * config.GAP_AHEAD_Y_MAX),
+                int(camera_x * config.GAP_AHEAD_X_MIN):int(camera_x * config.GAP_AHEAD_X_MAX)
+            ]
+            if ahead.size:
+                row_fill = np.count_nonzero(ahead, axis=1) / ahead.shape[1]
+                line_ahead.value = bool(
+                    np.mean(row_fill >= config.GAP_AHEAD_ROW_FILL)
+                    >= config.GAP_AHEAD_ROW_PERSISTENCE)
+            else:
+                line_ahead.value = False
 
             # SSIM entre máscaras consecutivas (detecção de robô preso)
             if check_similarity_counter >= SIMILARITY_CHECK_EVERY:

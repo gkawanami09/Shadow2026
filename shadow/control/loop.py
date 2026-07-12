@@ -26,7 +26,8 @@ Shadow2026 adaptations:
 import time
 
 from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
-                    GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT, MIN_LINE_SIZE_DEFAULT,
+                    GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
+                    GAP_MISSING_CONFIRM_TIME, MIN_LINE_SIZE_DEFAULT,
                     VISION_READY_TIMEOUT)
 from control.gap_orient import drive_back_until_line, orientate_gap
 from control.red_stop import stop_for_red
@@ -34,8 +35,8 @@ from control.speed import get_speed
 from control.steer import init_steering, sleep_steering, steer
 from control.turn_around import turn_around
 from serial_link.arduino import Arduino
-from shared.mp_manager import (add_time_value, empty_time_arr, line_angle,
-                               line_detected, line_status, min_line_size,
+from shared.mp_manager import (add_time_value, empty_time_arr, line_ahead,
+                               line_angle, line_detected, line_status, min_line_size,
                                ramp_ahead, red_detected, status, terminate,
                                timer, turn_dir, vision_ready)
 
@@ -69,6 +70,7 @@ def control_loop():
 
     iteration_limit_time = time.perf_counter()
     max_iterations = CONTROL_MAX_ITERATIONS
+    line_missing_since = None
 
     try:
         while not terminate.value:
@@ -77,8 +79,14 @@ def control_loop():
             if line_status.value == "line_detected":
 
                 # IMU_REPLACEMENT: clausula `rotation_y == "none"` removida
-                if not line_detected.value and not ramp_ahead.value:
-                    line_status.value = "gap_detected"
+                if not line_detected.value and not line_ahead.value and not ramp_ahead.value:
+                    if line_missing_since is None:
+                        line_missing_since = time.monotonic()
+                    elif time.monotonic() - line_missing_since >= GAP_MISSING_CONFIRM_TIME:
+                        line_status.value = "gap_detected"
+                        line_missing_since = None
+                else:
+                    line_missing_since = None
 
                 if red_detected.value:
                     line_status.value = "stop"

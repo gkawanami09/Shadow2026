@@ -37,7 +37,7 @@ from config import (GAP_BLACK_AVG_MAX, GAP_COMMIT_SPEED, GAP_COMMIT_TIME,
                     T_SWEEP_RIGHT, camera_y)
 from control.steer import sleep_steering, steer
 from shared.mp_manager import (black_average, gap_angle, gap_center_x, gap_center_y,
-                               line_detected, line_size, line_status, min_line_size,
+                               line_ahead, line_detected, line_size, line_status, min_line_size,
                                status, terminate, timer)
 
 
@@ -85,6 +85,16 @@ def _timed_sweep(direction, duration):
 
 
 def orientate_gap():
+    # A validacao nunca pode movimentar o robo se a camera ainda enxerga uma
+    # continuacao vertical material. Isso tambem cobre o frame que chega entre
+    # a decisao do loop de controle e a entrada nesta funcao.
+    steer()
+    status.value = 'Validando gap — aguardando confirmacao visual'
+    sleep_steering(.1)
+    if line_ahead.value:
+        status.value = 'Validacao falhou — linha continua a frente'
+        return False
+
     if not line_detected.value or line_size.value < GAP_NOT_A_STUB_SIZE:
         status.value = 'Validando gap'
 
@@ -92,6 +102,10 @@ def orientate_gap():
         sleep_steering(.15)
         steer()
         sleep_steering(.2)
+
+        if line_ahead.value:
+            status.value = 'Validacao falhou — linha continua a frente'
+            return False
 
         steer(200, .7)
         sleep_steering(.3)

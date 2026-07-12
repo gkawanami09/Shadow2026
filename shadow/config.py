@@ -117,6 +117,15 @@ GAP_MIN_LINE_SIZE_COMMIT = 4000           # [OE2] control.py:640 — ao entrar e
 GAP_MIN_LINE_SIZE_RETREAT = 4500          # [OE2] control.py:1964 — na retirada do gap_avoid
 GAP_NOT_A_STUB_SIZE = 17000               # [OE2] control.py:483/570/615 — "linha inteira, nao toco"
 GAP_BLACK_AVG_MAX = 40                    # [OE2] control.py:512/645 — acima disso nao e gap
+# Trava contra falso gap: uma linha que ocupa varias linhas horizontais dentro
+# do corredor central representa continuacao material a frente. Uma barra
+# transversal isolada (o canto de um L) nao satisfaz a persistencia vertical.
+GAP_AHEAD_X_MIN = .38
+GAP_AHEAD_X_MAX = .62
+GAP_AHEAD_Y_MAX = .72
+GAP_AHEAD_ROW_FILL = .08
+GAP_AHEAD_ROW_PERSISTENCE = .38
+GAP_MISSING_CONFIRM_TIME = .12
 GAP_AVOID_TIMEOUT = .4                    # [OE2] control.py:1942 — timer da travessia cega
 GAP_AVOID_SPEED = .6                      # [OE2] control.py:1961
 GAP_AVOID_RETREAT_TIME = 1.35             # [OE2] control.py:1966
