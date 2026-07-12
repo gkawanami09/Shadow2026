@@ -32,11 +32,13 @@ import numpy as np
 from skimage.metrics import structural_similarity
 
 import config
-from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
+from config import (BLACK_AVG_SIDE_MASK, CORNER_90_CONFIRM_FRAMES,
+                    CORNER_90_ENABLED, CORNER_90_RELEASE_FRAMES, DEBUG_SHM_NAME,
+                    RAMP_SWAP_MARGIN,
                     RAMP_SWAP_TRIGGER, SIMILARITY_CHECK_EVERY, VISION_MAX_FRAMES,
                     camera_x, camera_y)
 from shared.mp_manager import (add_time_value, average_line_angle, average_line_point,
-                               black_average, config_manager, empty_time_arr,
+                               black_average, config_manager, corner_90_dir, empty_time_arr,
                                get_time_average, last_bottom_point, line_ahead, line_angle,
                                line_angle_y, line_crop, line_detected,
                                line_similarity, line_size, line_status,
@@ -44,6 +46,7 @@ from shared.mp_manager import (add_time_value, average_line_angle, average_line_
                                terminate, timer, turn_dir, vision_ready)
 from vision import line as line_module
 from vision.capture import LineCamera
+from vision.corner_90 import detect_corner_90
 from vision.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from vision.green import check_green, latch_turn_direction
 from vision.line import calculate_angle, determine_correct_line
@@ -122,6 +125,9 @@ def vision_loop(debug=False):
     timer.set_timer("left_marker", .05)
 
     check_similarity_counter = 0
+    corner_candidate = "none"
+    corner_candidate_frames = 0
+    corner_release_frames = 0
 
     try:
         while not terminate.value:
@@ -228,6 +234,32 @@ def vision_loop(debug=False):
                 turn_direction = "straight"
 
             time_turn_direction = latch_turn_direction(turn_direction, time_turn_direction)
+
+            # Um 90 so e publicado depois de geometria identica em varios
+            # frames. Curvas/zig-zags duvidosos permanecem no controle normal.
+            if (CORNER_90_ENABLED and line_status.value == "line_detected"
+                    and turn_direction == "straight"):
+                detected_corner = detect_corner_90(
+                    black_image, cv2_img if debug else None)
+            else:
+                detected_corner = "none"
+
+            if detected_corner != "none":
+                corner_release_frames = 0
+                if detected_corner == corner_candidate:
+                    corner_candidate_frames += 1
+                else:
+                    corner_candidate = detected_corner
+                    corner_candidate_frames = 1
+                if corner_candidate_frames >= CORNER_90_CONFIRM_FRAMES:
+                    corner_90_dir.value = detected_corner
+            else:
+                corner_candidate = "none"
+                corner_candidate_frames = 0
+                if corner_90_dir.value != "none":
+                    corner_release_frames += 1
+                    if corner_release_frames >= CORNER_90_RELEASE_FRAMES:
+                        corner_90_dir.value = "none"
 
             # Determine the correct line
             if len(contours_blk) > 0:

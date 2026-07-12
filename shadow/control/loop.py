@@ -25,7 +25,9 @@ Shadow2026 adaptations:
 
 import time
 
-from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
+from config import (CONTROL_MAX_ITERATIONS, CORNER_90_APPROACH_TIME,
+                    CORNER_90_ENABLED, CORNER_90_EXIT_ANGLE,
+                    CORNER_90_TURN_MIN_TIME, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
                     GAP_ENABLED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
@@ -42,7 +44,7 @@ from control.speed import get_speed
 from control.steer import init_steering, sleep_steering, steer
 from control.turn_around import turn_around
 from serial_link.arduino import Arduino
-from shared.mp_manager import (add_time_value, empty_time_arr, last_bottom_point,
+from shared.mp_manager import (add_time_value, corner_90_dir, empty_time_arr, last_bottom_point,
                                line_ahead, line_angle, line_detected,
                                line_status, min_line_size,
                                ramp_ahead, red_detected, status, terminate,
@@ -90,6 +92,10 @@ def control_loop():
     green_approach_until = 0.
     green_turn_started = None
     green_armed = True
+    corner_direction = None
+    corner_approach_until = 0.
+    corner_turn_started = None
+    corner_armed = True
 
     try:
         while not terminate.value:
@@ -127,12 +133,28 @@ def control_loop():
                 if turn_dir.value == "straight" and green_direction is None:
                     green_armed = True
 
+                if corner_90_dir.value == "none" and corner_direction is None:
+                    corner_armed = True
+
                 if (green_armed and green_direction is None
                         and turn_dir.value in ("left", "right")):
                     green_direction = turn_dir.value
                     green_approach_until = now + GREEN_APPROACH_TIME
                     green_turn_started = None
                     green_armed = False
+                    # Verde sempre tem prioridade sobre geometria preta.
+                    corner_direction = None
+                    corner_turn_started = None
+
+                if (CORNER_90_ENABLED and corner_armed
+                        and corner_direction is None
+                        and green_direction is None
+                        and turn_dir.value == "straight"
+                        and corner_90_dir.value in ("left", "right")):
+                    corner_direction = corner_90_dir.value
+                    corner_approach_until = now + CORNER_90_APPROACH_TIME
+                    corner_turn_started = None
+                    corner_armed = False
 
                 if line_detected.value:
                     last_line_seen = now
@@ -161,6 +183,27 @@ def control_loop():
                             and abs(line_angle.value) <= GREEN_TURN_EXIT_ANGLE):
                         green_direction = None
                         green_turn_started = None
+                        angle = line_angle.value
+                        last_rear_pivot_enabled = True
+                elif corner_direction is not None and now < corner_approach_until:
+                    angle = 0
+                    command_speed = LINE_FOLLOW_SPEED
+                    last_rear_pivot_enabled = False
+                    status.value = (
+                        f'90 confirmado {corner_direction} — avancando antes do giro')
+                elif corner_direction is not None:
+                    if corner_turn_started is None:
+                        corner_turn_started = now
+                    angle = -180 if corner_direction == "left" else 180
+                    last_rear_pivot_enabled = False
+                    status.value = f'90 confirmado {corner_direction} — girando tanque'
+
+                    if (now - corner_turn_started >= CORNER_90_TURN_MIN_TIME
+                            and corner_90_dir.value == "none"
+                            and line_detected.value
+                            and abs(line_angle.value) <= CORNER_90_EXIT_ANGLE):
+                        corner_direction = None
+                        corner_turn_started = None
                         angle = line_angle.value
                         last_rear_pivot_enabled = True
                 elif line_detected.value:

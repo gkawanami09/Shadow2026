@@ -121,6 +121,21 @@ GREEN_APPROACH_TIME = .7                  # s — avanca reto antes do giro verd
 GREEN_TURN_MIN_TIME = .2                  # s — evita encerrar o tanque no primeiro frame
 GREEN_TURN_EXIT_ANGLE = 35                # graus — linha realinhada apos o giro
 
+# Canto preto de 90 graus. Os limites sao conservadores: so substitui o
+# controle da bolinha depois de varios frames com dois bracos retos, longos e
+# perpendiculares formando um unico vertice.
+CORNER_90_ENABLED = True
+CORNER_90_CONFIRM_FRAMES = 5
+CORNER_90_RELEASE_FRAMES = 2
+CORNER_90_APPROACH_TIME = .7
+CORNER_90_TURN_MIN_TIME = .2
+CORNER_90_EXIT_ANGLE = 35
+CORNER_90_HOUGH_THRESHOLD = 42
+CORNER_90_MIN_ARM_PX = 72
+CORNER_90_MAX_AXIS_ERROR_DEG = 12
+CORNER_90_VERTEX_TOLERANCE_PX = 22
+CORNER_90_CLUSTER_TOLERANCE_PX = 45
+
 # ----------------------------------------------------------------------------
 # Vermelho  [OE2 Hotspot 5]
 # ----------------------------------------------------------------------------
