@@ -26,6 +26,7 @@ Shadow2026 adaptations:
 import time
 
 from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
+                    GAP_ENABLED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
                     MIN_LINE_SIZE_DEFAULT, PIVOT_BOTTOM_MIN_ERROR_PX,
@@ -87,7 +88,7 @@ def control_loop():
             if line_status.value == "line_detected":
 
                 # IMU_REPLACEMENT: clausula `rotation_y == "none"` removida
-                gap_allowed = time.monotonic() >= gap_retry_after
+                gap_allowed = GAP_ENABLED and time.monotonic() >= gap_retry_after
                 if (gap_allowed and not line_detected.value
                         and not line_ahead.value and not ramp_ahead.value):
                     if line_missing_since is None:

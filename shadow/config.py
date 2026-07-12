@@ -126,6 +126,7 @@ wait_time_red = 9                         # [OE2] control.py:14 — s parado no 
 # ----------------------------------------------------------------------------
 # Gap  [OE2 Hotspot 3]
 # ----------------------------------------------------------------------------
+GAP_ENABLED = False                       # temporariamente desabilitado para testes
 GAP_CORRECTION_CYCLES = 7                 # [OE2] control.py:520 — ciclos de square-up
 GAP_MIN_LINE_SIZE_ORIENT = 9000           # [OE2] control.py:563 — durante re-approach
 GAP_MIN_LINE_SIZE_COMMIT = 4000           # [OE2] control.py:640 — ao entrar em gap_avoid
