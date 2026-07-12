@@ -28,7 +28,9 @@ import time
 from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
-                    MIN_LINE_SIZE_DEFAULT, VISION_READY_TIMEOUT)
+                    MIN_LINE_SIZE_DEFAULT, PIVOT_PROGRESS_ANGLE,
+                    PIVOT_STALL_MIN_ANGLE, PIVOT_STALL_RAMP_TIME,
+                    PIVOT_STALL_TIME, VISION_READY_TIMEOUT)
 from control.gap_orient import drive_back_until_line, orientate_gap
 from control.red_stop import stop_for_red
 from control.speed import get_speed
@@ -73,6 +75,9 @@ def control_loop():
     max_iterations = CONTROL_MAX_ITERATIONS
     line_missing_since = None
     gap_retry_after = 0.0
+    pivot_sign = 0
+    pivot_best_error = 180
+    pivot_last_progress = time.monotonic()
 
     try:
         while not terminate.value:
@@ -105,7 +110,33 @@ def control_loop():
 
                 status.value = 'Seguindo Linha'
 
-                steer(line_angle.value, get_speed(line_angle.value))
+                angle = line_angle.value
+                error = abs(angle)
+                sign = 1 if angle > 0 else -1 if angle < 0 else 0
+                now = time.monotonic()
+                front_reverse_assist = 0.
+
+                if line_detected.value and error >= PIVOT_STALL_MIN_ANGLE:
+                    if sign != pivot_sign:
+                        pivot_sign = sign
+                        pivot_best_error = error
+                        pivot_last_progress = now
+                    elif error <= pivot_best_error - PIVOT_PROGRESS_ANGLE:
+                        pivot_best_error = error
+                        pivot_last_progress = now
+                    else:
+                        stalled_for = now - pivot_last_progress
+                        if stalled_for > PIVOT_STALL_TIME:
+                            front_reverse_assist = min(
+                                (stalled_for - PIVOT_STALL_TIME)
+                                / PIVOT_STALL_RAMP_TIME,
+                                1.)
+                else:
+                    pivot_sign = 0
+                    pivot_best_error = 180
+                    pivot_last_progress = now
+
+                steer(angle, get_speed(angle), front_reverse_assist)
 
                 time_last_angles = add_time_value(time_last_angles, line_angle.value)
             elif line_status.value == "stop":

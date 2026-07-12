@@ -23,7 +23,8 @@ import time
 from config import (FRONT_ANCHORED_STEERING, FRONT_ANCHOR_FULL_ANGLE,
                     FRONT_ANCHOR_MAX_BLEND, FRONT_ANCHOR_REAR_SCALE,
                     FRONT_ANCHOR_START_ANGLE,
-                    MAX_PWM, left_correction, max_turn_angle, right_correction)
+                    MAX_PWM, PIVOT_FRONT_REVERSE_SCALE, left_correction,
+                    max_turn_angle, right_correction)
 
 # Instancia definida por init_steering() no processo de controle (ou nos tools).
 arduino = None
@@ -34,7 +35,7 @@ def init_steering(arduino_instance):
     arduino = arduino_instance
 
 
-def steer(angle=190., speed=.8):
+def steer(angle=190., speed=.8, front_reverse_assist=0.):
     """Command vocabulary (dossier Hotspot 2):
     angle == 190 -> full stop; angle == 200 -> straight backward at `speed`;
     angle in [-180, 180] -> forward, positive = steer right;
@@ -99,6 +100,18 @@ def steer(angle=190., speed=.8):
         front_right = speed_right * (1 - blend)
         rear_left = speed_left * (1 - blend) + anchor_te * blend
         rear_right = speed_right * (1 - blend) + anchor_td * blend
+
+        # Se o pivo nao estiver aproximando a linha do centro, ajuda apenas a
+        # roda dianteira do lado interno da curva. O controle externo fornece
+        # assistencia continua em [0, 1], nunca uma manobra temporizada fixa.
+        assist = min(max(float(front_reverse_assist), 0.), 1.)
+        front_reverse = min(speed * PIVOT_FRONT_REVERSE_SCALE, 1.)
+        if angle > 0:  # direita: re somente na dianteira direita
+            front_right = ((1 - assist) * front_right
+                           - assist * front_reverse)
+        else:          # esquerda: re somente na dianteira esquerda
+            front_left = ((1 - assist) * front_left
+                          - assist * front_reverse)
 
         arduino.rodas(round(front_left * MAX_PWM),
                       round(rear_left * MAX_PWM),

@@ -95,6 +95,15 @@ FRONT_ANCHOR_REAR_SCALE = .85
 # parcela restante faz a camera descrever um arco curto ate reencontrar a linha.
 FRONT_ANCHOR_MAX_BLEND = .78
 
+# Assistencia adaptativa do pivo: se o erro para de diminuir, a roda dianteira
+# interna recebe uma re leve e progressiva. A ajuda desaparece assim que a
+# linha volta a se aproximar do centro.
+PIVOT_STALL_MIN_ANGLE = 85
+PIVOT_STALL_TIME = .35
+PIVOT_STALL_RAMP_TIME = .35
+PIVOT_PROGRESS_ANGLE = 6
+PIVOT_FRONT_REVERSE_SCALE = .45
+
 SIMILARITY_CHECK_EVERY = 30               # [OE2] line_cam.py:584 — SSIM a cada 30 frames
 
 # ----------------------------------------------------------------------------
