@@ -117,6 +117,9 @@ GREEN_ROI_MEAN = 125                      # [OE2] line_cam.py:150-173 — "lado 
 GREEN_VOTE_WINDOW = .2                    # [OE2] line_cam.py:733 — janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # [OE2] line_cam.py:735/739 — |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # [OE2] line_cam.py:736/740 — memoria do marcador (plano)
+GREEN_APPROACH_TIME = .7                  # s — avanca reto antes do giro verde
+GREEN_TURN_MIN_TIME = .2                  # s — evita encerrar o tanque no primeiro frame
+GREEN_TURN_EXIT_ANGLE = 35                # graus — linha realinhada apos o giro
 
 # ----------------------------------------------------------------------------
 # Vermelho  [OE2 Hotspot 5]

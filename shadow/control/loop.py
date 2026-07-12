@@ -29,6 +29,8 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GAP_ENABLED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
+                    GREEN_APPROACH_TIME, GREEN_TURN_EXIT_ANGLE,
+                    GREEN_TURN_MIN_TIME, LINE_FOLLOW_SPEED,
                     LINE_LOSS_STEER_HOLD, MIN_LINE_SIZE_DEFAULT,
                     PIVOT_BOTTOM_MIN_ERROR_PX,
                     PIVOT_PROGRESS_PX, PIVOT_STALL_MIN_ANGLE,
@@ -84,6 +86,10 @@ def control_loop():
     last_follow_angle = 0
     last_line_seen = time.monotonic()
     last_rear_pivot_enabled = True
+    green_direction = None
+    green_approach_until = 0.
+    green_turn_started = None
+    green_armed = True
 
     try:
         while not terminate.value:
@@ -118,18 +124,46 @@ def control_loop():
 
                 now = time.monotonic()
 
-                if line_detected.value:
-                    last_line_seen = now
-                    if turn_dir.value == "left":
-                        # Verde: decisao explicita, sempre giro tanque.
-                        last_follow_angle = -180
-                    elif turn_dir.value == "right":
-                        last_follow_angle = 180
-                    else:
-                        last_follow_angle = line_angle.value
-                    last_rear_pivot_enabled = turn_dir.value == "straight"
+                if turn_dir.value == "straight" and green_direction is None:
+                    green_armed = True
+
+                if (green_armed and green_direction is None
+                        and turn_dir.value in ("left", "right")):
+                    green_direction = turn_dir.value
+                    green_approach_until = now + GREEN_APPROACH_TIME
+                    green_turn_started = None
+                    green_armed = False
 
                 if line_detected.value:
+                    last_line_seen = now
+                    last_follow_angle = line_angle.value
+                    last_rear_pivot_enabled = turn_dir.value == "straight"
+
+                command_speed = get_speed(line_angle.value)
+
+                if green_direction is not None and now < green_approach_until:
+                    # A direcao ja foi memorizada: atravessa o marcador reto
+                    # antes de iniciar qualquer rotacao.
+                    angle = 0
+                    command_speed = LINE_FOLLOW_SPEED
+                    last_rear_pivot_enabled = False
+                    status.value = f'Verde {green_direction} — avancando antes do giro'
+                elif green_direction is not None:
+                    if green_turn_started is None:
+                        green_turn_started = now
+                    angle = -180 if green_direction == "left" else 180
+                    last_rear_pivot_enabled = False
+                    status.value = f'Verde {green_direction} — girando tanque'
+
+                    if (now - green_turn_started >= GREEN_TURN_MIN_TIME
+                            and turn_dir.value == "straight"
+                            and line_detected.value
+                            and abs(line_angle.value) <= GREEN_TURN_EXIT_ANGLE):
+                        green_direction = None
+                        green_turn_started = None
+                        angle = line_angle.value
+                        last_rear_pivot_enabled = True
+                elif line_detected.value:
                     angle = last_follow_angle
                 elif now - last_line_seen <= LINE_LOSS_STEER_HOLD:
                     # A linha saiu da imagem durante a curva: termina o giro
@@ -177,7 +211,7 @@ def control_loop():
                     pivot_best_error = camera_x
                     pivot_last_progress = now
 
-                steer(angle, get_speed(angle),
+                steer(angle, command_speed,
                       front_reverse_assist=front_reverse_assist,
                       rear_pivot_enabled=rear_pivot_enabled)
 
