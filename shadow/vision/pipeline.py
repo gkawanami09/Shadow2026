@@ -38,7 +38,7 @@ from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
 from shared.mp_manager import (add_time_value, average_line_angle, average_line_point,
                                black_average, config_manager, empty_time_arr,
                                get_time_average, last_bottom_point, line_ahead, line_angle,
-                               line_angle_y, line_bottom_y, line_crop, line_detected,
+                               line_angle_y, line_crop, line_detected,
                                line_similarity, line_size, line_status,
                                min_line_size, ramp_ahead, red_detected, status,
                                terminate, timer, turn_dir, vision_ready)
@@ -269,7 +269,6 @@ def vision_loop(debug=False):
 
                 # publica os escalares da API compartilhada (mission §4.1)
                 last_bottom_point.value = bottom_point[0]
-                line_bottom_y.value = int(bottom_point[1])
                 average_line_point.value = last_average_line_point
                 average_line_angle.value = float(get_time_average(time_line_angle, .3))
 
@@ -286,7 +285,6 @@ def vision_loop(debug=False):
                 line_angle.value = 0
                 line_size.value = 0
                 line_angle_y.value = -1
-                line_bottom_y.value = -1
                 reset_gap_values()
 
             if not vision_ready.value:

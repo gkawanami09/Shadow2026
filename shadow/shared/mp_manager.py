@@ -54,7 +54,6 @@ turn_dir = manager.Value("i", "straight")  # "straight"; "left"; "right"; "turn_
 black_average = manager.Value("i", 0.)
 
 last_bottom_point = manager.Value("i", config.camera_x / 2)
-line_bottom_y = manager.Value("i", -1)
 average_line_point = manager.Value("i", config.camera_x / 2)
 average_line_angle = manager.Value("i", 0.)
 
