@@ -28,17 +28,18 @@ import time
 from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
-                    MIN_LINE_SIZE_DEFAULT, PIVOT_PROGRESS_ANGLE,
-                    PIVOT_STALL_MIN_ANGLE, PIVOT_STALL_RAMP_TIME,
-                    PIVOT_STALL_TIME, VISION_READY_TIMEOUT)
+                    MIN_LINE_SIZE_DEFAULT, PIVOT_BOTTOM_MIN_ERROR_PX,
+                    PIVOT_PROGRESS_PX, PIVOT_STALL_MIN_ANGLE,
+                    PIVOT_STALL_RAMP_TIME, PIVOT_STALL_TIME,
+                    VISION_READY_TIMEOUT, camera_x)
 from control.gap_orient import drive_back_until_line, orientate_gap
 from control.red_stop import stop_for_red
 from control.speed import get_speed
 from control.steer import init_steering, sleep_steering, steer
 from control.turn_around import turn_around
 from serial_link.arduino import Arduino
-from shared.mp_manager import (add_time_value, empty_time_arr, line_ahead,
-                               line_angle, line_detected,
+from shared.mp_manager import (add_time_value, empty_time_arr, last_bottom_point,
+                               line_ahead, line_angle, line_detected,
                                line_status, min_line_size,
                                ramp_ahead, red_detected, status, terminate,
                                timer, turn_dir, vision_ready)
@@ -76,7 +77,7 @@ def control_loop():
     line_missing_since = None
     gap_retry_after = 0.0
     pivot_sign = 0
-    pivot_best_error = 180
+    pivot_best_error = camera_x
     pivot_last_progress = time.monotonic()
 
     try:
@@ -111,17 +112,22 @@ def control_loop():
                 status.value = 'Seguindo Linha'
 
                 angle = line_angle.value
-                error = abs(angle)
+                # O angulo pode mudar mesmo quando a linha apenas gira ao
+                # redor da camera. O erro que importa e a distancia horizontal
+                # do ponto inferior ate a bolinha central.
+                error = abs(last_bottom_point.value - camera_x / 2)
                 sign = 1 if angle > 0 else -1 if angle < 0 else 0
                 now = time.monotonic()
                 front_reverse_assist = 0.
 
-                if line_detected.value and error >= PIVOT_STALL_MIN_ANGLE:
+                if (line_detected.value
+                        and abs(angle) >= PIVOT_STALL_MIN_ANGLE
+                        and error >= PIVOT_BOTTOM_MIN_ERROR_PX):
                     if sign != pivot_sign:
                         pivot_sign = sign
                         pivot_best_error = error
                         pivot_last_progress = now
-                    elif error <= pivot_best_error - PIVOT_PROGRESS_ANGLE:
+                    elif error <= pivot_best_error - PIVOT_PROGRESS_PX:
                         pivot_best_error = error
                         pivot_last_progress = now
                     else:
@@ -131,9 +137,13 @@ def control_loop():
                                 (stalled_for - PIVOT_STALL_TIME)
                                 / PIVOT_STALL_RAMP_TIME,
                                 1.)
+                            side = 'direita' if angle > 0 else 'esquerda'
+                            status.value = (
+                                f'Ajudando pivo — re dianteira {side} '
+                                f'{round(front_reverse_assist * 100)}%')
                 else:
                     pivot_sign = 0
-                    pivot_best_error = 180
+                    pivot_best_error = camera_x
                     pivot_last_progress = now
 
                 steer(angle, get_speed(angle), front_reverse_assist)

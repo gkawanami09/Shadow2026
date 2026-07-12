@@ -23,8 +23,9 @@ import time
 from config import (FRONT_ANCHORED_STEERING, FRONT_ANCHOR_FULL_ANGLE,
                     FRONT_ANCHOR_MAX_BLEND, FRONT_ANCHOR_REAR_SCALE,
                     FRONT_ANCHOR_START_ANGLE,
-                    MAX_PWM, PIVOT_FRONT_REVERSE_SCALE, left_correction,
-                    max_turn_angle, right_correction)
+                    MAX_PWM, PIVOT_FRONT_REVERSE_MIN_PWM,
+                    PIVOT_FRONT_REVERSE_SCALE, left_correction, max_turn_angle,
+                    right_correction)
 
 # Instancia definida por init_steering() no processo de controle (ou nos tools).
 arduino = None
@@ -105,7 +106,8 @@ def steer(angle=190., speed=.8, front_reverse_assist=0.):
         # roda dianteira do lado interno da curva. O controle externo fornece
         # assistencia continua em [0, 1], nunca uma manobra temporizada fixa.
         assist = min(max(float(front_reverse_assist), 0.), 1.)
-        front_reverse = min(speed * PIVOT_FRONT_REVERSE_SCALE, 1.)
+        front_reverse = min(max(speed * PIVOT_FRONT_REVERSE_SCALE,
+                                PIVOT_FRONT_REVERSE_MIN_PWM / MAX_PWM), 1.)
         if angle > 0:  # direita: re somente na dianteira direita
             front_right = ((1 - assist) * front_right
                            - assist * front_reverse)
