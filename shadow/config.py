@@ -75,6 +75,15 @@ BLACK_AVG_SIDE_MASK = 21                  # [OE2] line_cam.py:680 — mascara la
 LINE_CROP_INITIAL = .6                    # [OE2] mp_manager.py:53
 LINE_CROP_NORMAL = .6                    # [OE2] line_cam.py:758
 LINE_CROP_GREEN = .45                     # [OE2] line_cam.py:746/752 — durante curva verde
+
+# Controle adaptado para a camera frontal. A lente fica 14 cm a frente do
+# centro de rotacao e enxerga aproximadamente 8 x 8 cm do plano do chao.
+FRONT_CAMERA_CONTROL = True
+CAMERA_TO_ROBOT_CENTER_CM = 14.0
+CAMERA_GROUND_WIDTH_CM = 8.0
+CAMERA_GROUND_DEPTH_CM = 8.0
+FRONT_LATERAL_GAIN = 1.0
+FRONT_HEADING_GAIN = 1.5
 SIMILARITY_CHECK_EVERY = 30               # [OE2] line_cam.py:584 — SSIM a cada 30 frames
 
 # ----------------------------------------------------------------------------
