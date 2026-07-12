@@ -21,7 +21,8 @@ This module deliberately does NOT import shared/mp_manager, so bench tools
 import time
 
 from config import (FRONT_ANCHORED_STEERING, FRONT_ANCHOR_FULL_ANGLE,
-                    FRONT_ANCHOR_REAR_SCALE, FRONT_ANCHOR_START_ANGLE,
+                    FRONT_ANCHOR_MAX_BLEND, FRONT_ANCHOR_REAR_SCALE,
+                    FRONT_ANCHOR_START_ANGLE,
                     MAX_PWM, left_correction, max_turn_angle, right_correction)
 
 # Instancia definida por init_steering() no processo de controle (ou nos tools).
@@ -85,7 +86,8 @@ def steer(angle=190., speed=.8):
     if FRONT_ANCHORED_STEERING and -180 <= angle <= 180 and \
             abs(angle) > FRONT_ANCHOR_START_ANGLE:
         span = max(FRONT_ANCHOR_FULL_ANGLE - FRONT_ANCHOR_START_ANGLE, 1)
-        blend = min((abs(angle) - FRONT_ANCHOR_START_ANGLE) / span, 1.)
+        blend = min((abs(angle) - FRONT_ANCHOR_START_ANGLE) / span,
+                    FRONT_ANCHOR_MAX_BLEND)
         rear_speed = min(speed * FRONT_ANCHOR_REAR_SCALE, 1.)
 
         if angle > 0:  # direita: traseira esquerda avanca, direita recua
