@@ -259,6 +259,8 @@ def vision_loop(debug=False):
                     cv2.circle(cv2_img, (int(last_average_line_point), 0), 5, (0, 255, 255), 1, cv2.LINE_AA)
                     cv2.circle(cv2_img, (int(poi[0]), int(poi[1])), 5, (0, 0, 255), 1, cv2.LINE_AA)
                     cv2.circle(cv2_img, (int(bottom_point[0]), int(bottom_point[1])), 5, (255, 255, 0), 1, cv2.LINE_AA)
+                    cv2.circle(cv2_img, (camera_x // 2, camera_y - 4),
+                               5, (255, 0, 0), -1, cv2.LINE_AA)
 
             else:
                 line_detected.value = False

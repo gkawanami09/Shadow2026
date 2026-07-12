@@ -76,6 +76,12 @@ LINE_CROP_INITIAL = .6                    # [OE2] mp_manager.py:53
 LINE_CROP_NORMAL = .6                    # [OE2] line_cam.py:758
 LINE_CROP_GREEN = .45                     # [OE2] line_cam.py:746/752 — durante curva verde
 
+# Mantem a linha sob o centro inferior da camera frontal. O ponto proximo tem
+# prioridade, mas parte do POI original preserva antecipacao de curvas.
+BOTTOM_CENTER_CONTROL = True
+BOTTOM_CENTER_WEIGHT = .7
+BOTTOM_CENTER_MIN_Y = .75
+
 SIMILARITY_CHECK_EVERY = 30               # [OE2] line_cam.py:584 — SSIM a cada 30 frames
 
 # ----------------------------------------------------------------------------

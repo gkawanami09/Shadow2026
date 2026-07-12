@@ -19,7 +19,8 @@ import cv2
 import numpy as np
 from numba import njit
 
-from config import camera_x, camera_y
+from config import (BOTTOM_CENTER_CONTROL, BOTTOM_CENTER_MIN_Y,
+                    BOTTOM_CENTER_WEIGHT, camera_x, camera_y)
 from shared.mp_manager import line_crop, timer, turn_dir
 
 x_last = camera_x / 2
@@ -248,4 +249,15 @@ def calculate_angle(blackline, blackline_crop, average_line_angle, turn_directio
                     multiple_bottom_side = camera_x
                 timer.set_timer("multiple_bottom", .6)
 
-    return int((final_poi[0] - camera_x / 2) / (camera_x / 2) * 180), final_poi, bottom_point
+    legacy_angle = int((final_poi[0] - camera_x / 2) / (camera_x / 2) * 180)
+
+    if BOTTOM_CENTER_CONTROL and bottom_point[1] >= camera_y * BOTTOM_CENTER_MIN_Y:
+        bottom_angle = int((bottom_point[0] - camera_x / 2) / (camera_x / 2) * 180)
+        line_angle = int(round(np.clip(
+            BOTTOM_CENTER_WEIGHT * bottom_angle
+            + (1 - BOTTOM_CENTER_WEIGHT) * legacy_angle,
+            -180, 180)))
+    else:
+        line_angle = legacy_angle
+
+    return line_angle, final_poi, bottom_point
