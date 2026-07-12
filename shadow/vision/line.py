@@ -15,73 +15,23 @@ Output: line_angle = int((poi_x − 224) / 224 × 180) ∈ [−180, +180] — a 
 horizontal pixel offset, positive = steer right.
 """
 
-import math
-
 import cv2
 import numpy as np
 from numba import njit
 
-from config import (CAMERA_GROUND_DEPTH_CM, CAMERA_GROUND_WIDTH_CM,
-                    CAMERA_TO_ROBOT_CENTER_CM, FRONT_CAMERA_CONTROL,
-                    FRONT_HEADING_GAIN, FRONT_LATERAL_GAIN, camera_x,
-                    camera_y)
+from config import camera_x, camera_y
 from shared.mp_manager import line_crop, timer, turn_dir
 
 x_last = camera_x / 2
 y_last = camera_y / 2
 multiple_bottom_side = camera_x / 2
-front_camera_debug = None
 
 
 def init_tracker():
-    global x_last, y_last, multiple_bottom_side, front_camera_debug
+    global x_last, y_last, multiple_bottom_side
     x_last = camera_x / 2
     y_last = camera_y / 2
     multiple_bottom_side = camera_x / 2
-    front_camera_debug = None
-
-
-def get_front_camera_debug():
-    return front_camera_debug
-
-
-def _pixel_to_ground(point):
-    x_cm = (float(point[0]) - camera_x / 2) / camera_x * CAMERA_GROUND_WIDTH_CM
-    y_cm = (camera_y - float(point[1])) / camera_y * CAMERA_GROUND_DEPTH_CM
-    return x_cm, y_cm
-
-
-def _front_camera_angle(final_poi, bottom_point, legacy_angle):
-    """Combina posicao proxima e direcao da linha a partir do centro do robo."""
-    global front_camera_debug
-
-    front_camera_debug = None
-    if not FRONT_CAMERA_CONTROL:
-        return legacy_angle
-
-    near_x, near_y = _pixel_to_ground(bottom_point)
-    far_x, far_y = _pixel_to_ground(final_poi)
-    forward_delta = far_y - near_y
-    if forward_delta <= .05:
-        return legacy_angle
-
-    lateral_angle = math.degrees(math.atan2(
-        near_x, CAMERA_TO_ROBOT_CENTER_CM + near_y))
-    heading_angle = math.degrees(math.atan2(far_x - near_x, forward_delta))
-    combined = int(round(np.clip(
-        FRONT_LATERAL_GAIN * lateral_angle
-        + FRONT_HEADING_GAIN * heading_angle,
-        -180, 180)))
-
-    front_camera_debug = {
-        "near": (int(bottom_point[0]), int(bottom_point[1])),
-        "far": (int(final_poi[0]), int(final_poi[1])),
-        "lateral": lateral_angle,
-        "heading": heading_angle,
-        "legacy": legacy_angle,
-        "combined": combined,
-    }
-    return combined
 
 
 def determine_correct_line(contours_blk):
@@ -298,6 +248,4 @@ def calculate_angle(blackline, blackline_crop, average_line_angle, turn_directio
                     multiple_bottom_side = camera_x
                 timer.set_timer("multiple_bottom", .6)
 
-    legacy_angle = int((final_poi[0] - camera_x / 2) / (camera_x / 2) * 180)
-    line_angle = _front_camera_angle(final_poi, bottom_point, legacy_angle)
-    return line_angle, final_poi, bottom_point
+    return int((final_poi[0] - camera_x / 2) / (camera_x / 2) * 180), final_poi, bottom_point

@@ -259,19 +259,6 @@ def vision_loop(debug=False):
                     cv2.circle(cv2_img, (int(last_average_line_point), 0), 5, (0, 255, 255), 1, cv2.LINE_AA)
                     cv2.circle(cv2_img, (int(poi[0]), int(poi[1])), 5, (0, 0, 255), 1, cv2.LINE_AA)
                     cv2.circle(cv2_img, (int(bottom_point[0]), int(bottom_point[1])), 5, (255, 255, 0), 1, cv2.LINE_AA)
-                    front_debug = line_module.get_front_camera_debug()
-                    if front_debug is not None:
-                        cv2.line(cv2_img, front_debug["near"], front_debug["far"],
-                                 (255, 0, 255), 2, cv2.LINE_AA)
-                        cv2.drawMarker(cv2_img, (camera_x // 2, camera_y - 1),
-                                       (0, 255, 255), cv2.MARKER_CROSS, 10, 1)
-                        cv2.putText(
-                            cv2_img,
-                            f'front lat={front_debug["lateral"]:.1f} '
-                            f'head={front_debug["heading"]:.1f} '
-                            f'old={front_debug["legacy"]} new={front_debug["combined"]}',
-                            (5, 30), cv2.FONT_HERSHEY_SIMPLEX, .35,
-                            (0, 255, 255), 1)
 
             else:
                 line_detected.value = False
