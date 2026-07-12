@@ -29,7 +29,8 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, FRONT_ANCHOR_READY_X_PX,
                     FRONT_ANCHOR_READY_Y, FRONT_ANCHOR_START_ANGLE,
-                    MIN_LINE_SIZE_DEFAULT, VISION_READY_TIMEOUT, camera_x, camera_y)
+                    GAP_REJECT_COOLDOWN, MIN_LINE_SIZE_DEFAULT,
+                    VISION_READY_TIMEOUT, camera_x, camera_y)
 from control.gap_orient import drive_back_until_line, orientate_gap
 from control.red_stop import stop_for_red
 from control.speed import get_speed
@@ -73,6 +74,8 @@ def control_loop():
     iteration_limit_time = time.perf_counter()
     max_iterations = CONTROL_MAX_ITERATIONS
     line_missing_since = None
+    gap_retry_after = 0.0
+    last_follow_angle = 0
 
     try:
         while not terminate.value:
@@ -81,7 +84,9 @@ def control_loop():
             if line_status.value == "line_detected":
 
                 # IMU_REPLACEMENT: clausula `rotation_y == "none"` removida
-                if not line_detected.value and not line_ahead.value and not ramp_ahead.value:
+                gap_allowed = time.monotonic() >= gap_retry_after
+                if (gap_allowed and not line_detected.value
+                        and not line_ahead.value and not ramp_ahead.value):
                     if line_missing_since is None:
                         line_missing_since = time.monotonic()
                     elif time.monotonic() - line_missing_since >= GAP_MISSING_CONFIRM_TIME:
@@ -103,7 +108,14 @@ def control_loop():
 
                 status.value = 'Seguindo Linha'
 
-                command_angle = line_angle.value
+                if line_detected.value:
+                    last_follow_angle = line_angle.value
+
+                # Depois que uma ponta larga foi confirmada como canto, a
+                # visao pode perder o contorno por alguns frames. Preserva a
+                # curva anterior em vez de mandar reto e reabrir o gap.
+                command_angle = (line_angle.value if line_detected.value
+                                 else last_follow_angle)
                 anchor_ready = (
                     line_bottom_y.value >= camera_y * FRONT_ANCHOR_READY_Y
                     and abs(last_bottom_point.value - camera_x / 2)
@@ -131,6 +143,10 @@ def control_loop():
                 if verified_gap:
                     timer.set_timer("gap_avoid", GAP_AVOID_TIMEOUT)
                 else:
+                    # Qualquer validacao negativa refere-se ao mesmo elemento
+                    # visual pelos proximos instantes; nao o valida novamente
+                    # a cada frame enquanto o robo ainda termina a curva.
+                    gap_retry_after = time.monotonic() + GAP_REJECT_COOLDOWN
                     line_status.value = "line_detected"
                     min_line_size.value = MIN_LINE_SIZE_DEFAULT
                     sleep_steering(.1)

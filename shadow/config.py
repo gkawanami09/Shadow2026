@@ -128,6 +128,7 @@ GAP_AHEAD_Y_MAX = .72
 GAP_AHEAD_ROW_FILL = .08
 GAP_AHEAD_ROW_PERSISTENCE = .38
 GAP_MISSING_CONFIRM_TIME = .12
+GAP_REJECT_COOLDOWN = 2.0
 # Campo calibrado em aproximadamente 8 cm / 448 px: 2 cm = 112 px.
 # Uma borda terminal maior que isso e uma intersecao/canto, nunca um gap.
 GAP_MAX_END_WIDTH_PX = 112
