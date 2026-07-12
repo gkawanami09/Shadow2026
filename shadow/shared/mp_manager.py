@@ -47,12 +47,14 @@ line_size = manager.Value("i", 0.)
 gap_angle = manager.Value("i", 0.)
 gap_center_x = manager.Value("i", -180)
 gap_center_y = manager.Value("i", -1)
+gap_end_width = manager.Value("i", -1)
 ramp_ahead = manager.Value("i", False)
 red_detected = manager.Value("i", False)
 turn_dir = manager.Value("i", "straight")  # "straight"; "left"; "right"; "turn_around"
 black_average = manager.Value("i", 0.)
 
 last_bottom_point = manager.Value("i", config.camera_x / 2)
+line_bottom_y = manager.Value("i", -1)
 average_line_point = manager.Value("i", config.camera_x / 2)
 average_line_angle = manager.Value("i", 0.)
 

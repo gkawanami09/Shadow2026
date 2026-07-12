@@ -90,6 +90,8 @@ FRONT_ANCHORED_STEERING = True
 FRONT_ANCHOR_START_ANGLE = 65
 FRONT_ANCHOR_FULL_ANGLE = 120
 FRONT_ANCHOR_REAR_SCALE = .85
+FRONT_ANCHOR_READY_X_PX = 55
+FRONT_ANCHOR_READY_Y = .90
 
 SIMILARITY_CHECK_EVERY = 30               # [OE2] line_cam.py:584 — SSIM a cada 30 frames
 
@@ -126,6 +128,9 @@ GAP_AHEAD_Y_MAX = .72
 GAP_AHEAD_ROW_FILL = .08
 GAP_AHEAD_ROW_PERSISTENCE = .38
 GAP_MISSING_CONFIRM_TIME = .12
+# Campo calibrado em aproximadamente 8 cm / 448 px: 2 cm = 112 px.
+# Uma borda terminal maior que isso e uma intersecao/canto, nunca um gap.
+GAP_MAX_END_WIDTH_PX = 112
 GAP_AVOID_TIMEOUT = .4                    # [OE2] control.py:1942 — timer da travessia cega
 GAP_AVOID_SPEED = .6                      # [OE2] control.py:1961
 GAP_AVOID_RETREAT_TIME = 1.35             # [OE2] control.py:1966

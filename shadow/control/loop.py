@@ -27,16 +27,18 @@ import time
 
 from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
-                    GAP_MISSING_CONFIRM_TIME, MIN_LINE_SIZE_DEFAULT,
-                    VISION_READY_TIMEOUT)
+                    GAP_MISSING_CONFIRM_TIME, FRONT_ANCHOR_READY_X_PX,
+                    FRONT_ANCHOR_READY_Y, FRONT_ANCHOR_START_ANGLE,
+                    MIN_LINE_SIZE_DEFAULT, VISION_READY_TIMEOUT, camera_x, camera_y)
 from control.gap_orient import drive_back_until_line, orientate_gap
 from control.red_stop import stop_for_red
 from control.speed import get_speed
 from control.steer import init_steering, sleep_steering, steer
 from control.turn_around import turn_around
 from serial_link.arduino import Arduino
-from shared.mp_manager import (add_time_value, empty_time_arr, line_ahead,
-                               line_angle, line_detected, line_status, min_line_size,
+from shared.mp_manager import (add_time_value, empty_time_arr, last_bottom_point,
+                               line_ahead, line_angle, line_bottom_y, line_detected,
+                               line_status, min_line_size,
                                ramp_ahead, red_detected, status, terminate,
                                timer, turn_dir, vision_ready)
 
@@ -101,7 +103,21 @@ def control_loop():
 
                 status.value = 'Seguindo Linha'
 
-                steer(line_angle.value, get_speed(line_angle.value))
+                command_angle = line_angle.value
+                anchor_ready = (
+                    line_bottom_y.value >= camera_y * FRONT_ANCHOR_READY_Y
+                    and abs(last_bottom_point.value - camera_x / 2)
+                    <= FRONT_ANCHOR_READY_X_PX
+                )
+                # Enquanto a linha/canto ainda nao chegou a bolinha, mantem um
+                # arco para frente. O pivô traseiro so e liberado quando o
+                # preto realmente ocupa a regiao inferior central.
+                if abs(command_angle) > FRONT_ANCHOR_START_ANGLE and not anchor_ready:
+                    command_angle = (FRONT_ANCHOR_START_ANGLE
+                                     if command_angle > 0
+                                     else -FRONT_ANCHOR_START_ANGLE)
+
+                steer(command_angle, get_speed(command_angle))
 
                 time_last_angles = add_time_value(time_last_angles, line_angle.value)
             elif line_status.value == "stop":

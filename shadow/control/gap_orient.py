@@ -32,12 +32,13 @@ import numpy as np
 
 from config import (GAP_BLACK_AVG_MAX, GAP_COMMIT_SPEED, GAP_COMMIT_TIME,
                     GAP_CORRECTION_CYCLES, GAP_MIN_LINE_SIZE_COMMIT,
-                    GAP_MIN_LINE_SIZE_ORIENT, GAP_NOT_A_STUB_SIZE,
+                    GAP_MAX_END_WIDTH_PX, GAP_MIN_LINE_SIZE_ORIENT, GAP_NOT_A_STUB_SIZE,
                     LINE_SEARCH_CREEP, MIN_LINE_SIZE_DEFAULT, SWEEP_SPEED,
                     T_SWEEP_RIGHT, camera_y)
 from control.steer import sleep_steering, steer
 from shared.mp_manager import (black_average, gap_angle, gap_center_x, gap_center_y,
-                               line_ahead, line_detected, line_size, line_status, min_line_size,
+                               gap_end_width, line_ahead, line_detected, line_size,
+                               line_status, min_line_size,
                                status, terminate, timer)
 
 
@@ -95,6 +96,10 @@ def orientate_gap():
         status.value = 'Validacao falhou — linha continua a frente'
         return False
 
+    if gap_end_width.value > GAP_MAX_END_WIDTH_PX:
+        status.value = 'Validacao falhou — ponta larga demais para gap'
+        return False
+
     if not line_detected.value or line_size.value < GAP_NOT_A_STUB_SIZE:
         status.value = 'Validando gap'
 
@@ -105,6 +110,10 @@ def orientate_gap():
 
         if line_ahead.value:
             status.value = 'Validacao falhou — linha continua a frente'
+            return False
+
+        if gap_end_width.value > GAP_MAX_END_WIDTH_PX:
+            status.value = 'Validacao falhou — ponta larga demais para gap'
             return False
 
         steer(200, .7)
@@ -125,6 +134,10 @@ def orientate_gap():
 
         correction_counter = 0
         while correction_counter < GAP_CORRECTION_CYCLES:
+
+            if gap_end_width.value > GAP_MAX_END_WIDTH_PX:
+                status.value = 'Validacao falhou — ponta larga demais para gap'
+                return False
 
             if y_gap < 10:
                 return False
@@ -241,6 +254,10 @@ def orientate_gap():
                 return False
 
             correction_counter += 1
+
+        if gap_end_width.value > GAP_MAX_END_WIDTH_PX:
+            status.value = 'Validacao falhou — ponta larga demais para gap'
+            return False
 
         status.value = 'Gap orientado — cruzando'
         line_status.value = "gap_avoid"

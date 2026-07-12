@@ -17,7 +17,7 @@ import cv2
 import numpy as np
 
 from config import camera_x, camera_y
-from shared.mp_manager import gap_angle, gap_center_x, gap_center_y
+from shared.mp_manager import gap_angle, gap_center_x, gap_center_y, gap_end_width
 
 
 def get_gap_angle(box):
@@ -37,6 +37,7 @@ def publish_gap_geometry(blackline, debug_img=None):
     p1, p2, angle = get_gap_angle(cv2.boxPoints(cv2.minAreaRect(blackline)))
     if p1[1] < camera_y * 0.95 and p2[1] < camera_y * 0.95:
         gap_angle.value = angle
+        gap_end_width.value = int(round(np.linalg.norm(p1 - p2)))
 
         center_gap_ponit = (p1 - p2) / 2 + p2
 
@@ -52,6 +53,7 @@ def reset_gap_values():
     gap_angle.value = -181
     gap_center_x.value = -181
     gap_center_y.value = -1
+    gap_end_width.value = -1
 
 
 def apply_gap_avoid_mask(black_image):
