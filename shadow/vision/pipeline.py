@@ -32,11 +32,11 @@ import numpy as np
 from skimage.metrics import structural_similarity
 
 import config
-from config import (BLACK_AVG_SIDE_MASK, CORNER_90_CONFIRM_FRAMES, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
+from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
                     RAMP_SWAP_TRIGGER, SIMILARITY_CHECK_EVERY, VISION_MAX_FRAMES,
                     camera_x, camera_y)
 from shared.mp_manager import (add_time_value, average_line_angle, average_line_point,
-                               black_average, config_manager, corner_90_dir, empty_time_arr,
+                               black_average, config_manager, empty_time_arr,
                                get_time_average, last_bottom_point, line_angle,
                                line_angle_y, line_crop, line_detected,
                                line_similarity, line_size, line_status,
@@ -122,8 +122,6 @@ def vision_loop(debug=False):
     timer.set_timer("left_marker", .05)
 
     check_similarity_counter = 0
-    corner_candidate = "none"
-    corner_candidate_frames = 0
 
     try:
         while not terminate.value:
@@ -237,15 +235,6 @@ def vision_loop(debug=False):
                     turn_dir.value, last_bottom_point_x, last_average_line_point)
                 line_angle_y.value = int(poi[1])
 
-                new_corner_candidate = line_module.get_corner_90_candidate()
-                if new_corner_candidate == corner_candidate and new_corner_candidate != "none":
-                    corner_candidate_frames += 1
-                else:
-                    corner_candidate = new_corner_candidate
-                    corner_candidate_frames = 1 if new_corner_candidate != "none" else 0
-
-                if corner_candidate_frames >= CORNER_90_CONFIRM_FRAMES:
-                    corner_90_dir.value = corner_candidate
 
                 time_line_angle = add_time_value(time_line_angle, line_angle.value)
                 time_last_bottom_point_x = add_time_value(time_last_bottom_point_x, bottom_point[0])
@@ -273,17 +262,8 @@ def vision_loop(debug=False):
                     cv2.circle(cv2_img, (int(bottom_point[0]), int(bottom_point[1])), 5, (255, 255, 0), 1, cv2.LINE_AA)
                     cv2.circle(cv2_img, (camera_x // 2, camera_y - 4),
                                5, (255, 0, 0), -1, cv2.LINE_AA)
-                    if corner_candidate != "none":
-                        cv2.putText(
-                            cv2_img,
-                            f'90 cand={corner_candidate} '
-                            f'{corner_candidate_frames}/{CORNER_90_CONFIRM_FRAMES}',
-                            (5, 30), cv2.FONT_HERSHEY_SIMPLEX, .4,
-                            (0, 165, 255), 1)
 
             else:
-                corner_candidate = "none"
-                corner_candidate_frames = 0
                 line_detected.value = False
                 line_angle.value = 0
                 line_size.value = 0

@@ -26,39 +26,13 @@ from shared.mp_manager import line_crop, timer, turn_dir
 x_last = camera_x / 2
 y_last = camera_y / 2
 multiple_bottom_side = camera_x / 2
-corner_90_candidate = "none"
 
 
 def init_tracker():
-    global x_last, y_last, multiple_bottom_side, corner_90_candidate
+    global x_last, y_last, multiple_bottom_side
     x_last = camera_x / 2
     y_last = camera_y / 2
     multiple_bottom_side = camera_x / 2
-    corner_90_candidate = "none"
-
-
-def get_corner_90_candidate():
-    return corner_90_candidate
-
-
-def _detect_corner_90(poi_no_crop, bottom_point, black_top, turn_direction):
-    """Reconhece um L: entra por baixo, sai por um lado e nao continua reto."""
-    if turn_direction != "straight" or black_top:
-        return "none"
-
-    enters_bottom = (bottom_point[1] >= camera_y * .9
-                     and abs(bottom_point[0] - camera_x / 2) <= camera_x * .35)
-    if not enters_bottom:
-        return "none"
-
-    left_edge = (poi_no_crop[1][0] <= camera_x * .02
-                 and poi_no_crop[1][1] < camera_y * .6)
-    right_edge = (poi_no_crop[2][0] >= camera_x * .98
-                  and poi_no_crop[2][1] < camera_y * .6)
-
-    if left_edge == right_edge:  # nenhuma saida ou saidas dos dois lados
-        return "none"
-    return "left" if left_edge else "right"
 
 
 def determine_correct_line(contours_blk):
@@ -202,7 +176,7 @@ def calculate_angle_numba(blackline, blackline_crop, last_bottom_point, average_
 
 
 def calculate_angle(blackline, blackline_crop, average_line_angle, turn_direction, last_bottom_point, average_line_point):
-    global multiple_bottom_side, corner_90_candidate
+    global multiple_bottom_side
 
     poi, poi_no_crop, is_crop, max_black_top, bottom_point = calculate_angle_numba(blackline, blackline_crop, last_bottom_point, average_line_point)
 
@@ -212,9 +186,6 @@ def calculate_angle(blackline, blackline_crop, average_line_angle, turn_directio
 
     black_l_high = poi_no_crop[1][1] < camera_y * .5
     black_r_high = poi_no_crop[2][1] < camera_y * .5
-
-    corner_90_candidate = _detect_corner_90(
-        poi_no_crop, bottom_point, black_top, turn_direction)
 
     if not timer.get_timer("multiple_bottom"):
         final_poi = [multiple_bottom_side, camera_y]
