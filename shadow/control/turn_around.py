@@ -17,15 +17,15 @@ Shadow2026 adaptations:
 
 import time
 
-from config import (T_180, T_180_CONFIRM_TIME, T_180_EXIT_ANGLE,
-                    T_180_EXIT_BOTTOM_PX, T_180_SEARCH_SPEED,
+from config import (T_180, T_180_CONFIRM_TIME, T_180_EXIT_BOTTOM_PX,
+                    T_180_SEARCH_SPEED,
                     T_180_SEARCH_TIMEOUT, T_180_SPEED, T_180_TEST_STOP,
                     TURN_AROUND_PREROLL, TURN_AROUND_REVERSE,
                     TURN_AROUND_REVERSE_EXTRA, TURN_AROUND_SMALL_LINE,
                     camera_x)
 from control.steer import sleep_steering, steer
-from shared.mp_manager import (last_bottom_point, line_angle, line_detected,
-                               line_size, status, terminate, timer)
+from shared.mp_manager import (last_bottom_point, line_detected, line_size,
+                               status, terminate, timer)
 
 
 def turn_around(last_turn_dir):
@@ -49,17 +49,15 @@ def turn_around(last_turn_dir):
         return last_turn_dir
 
     # Depois da parte cega, reduz a velocidade e continua no mesmo sentido ate
-    # a camera confirmar a linha centralizada. A posicao inferior e o sinal
-    # principal porque representa diretamente a bolinha azul; o angulo fica
-    # como alternativa para linhas que ainda nao alcancaram a borda inferior.
+    # a camera confirmar a linha centralizada. Somente a posicao inferior pode
+    # concluir o giro, pois ela representa diretamente a bolinha azul.
     steer(180 if last_turn_dir == "r" else -180, T_180_SEARCH_SPEED)
     status.value = 'Completando 180 — procurando linha no centro'
     search_end = time.monotonic() + T_180_SEARCH_TIMEOUT
     aligned_since = None
     while time.monotonic() < search_end:
         bottom_aligned = abs(last_bottom_point.value - camera_x / 2) <= T_180_EXIT_BOTTOM_PX
-        angle_aligned = abs(line_angle.value) <= T_180_EXIT_ANGLE
-        aligned = line_detected.value and (bottom_aligned or angle_aligned)
+        aligned = line_detected.value and bottom_aligned
         if aligned:
             if aligned_since is None:
                 aligned_since = time.monotonic()
