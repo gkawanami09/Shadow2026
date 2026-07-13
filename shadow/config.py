@@ -172,6 +172,7 @@ SWEEP_SPEED = .6                          # velocidade da varredura temporizada
 LINE_SEARCH_CREEP = 1.2                   # [OE2] control.py:670 — avanco final procurando linha
 T_180 = .70                               # s — ~0.64 s equivale ao giro verde de 90°; pequena margem
 T_180_SPEED = .7                          # velocidade do pivot de 180°
+T_180_TEST_STOP = True                    # teste: para definitivamente logo apos o giro cego
 T_180_SEARCH_TIMEOUT = 1.5                # s — complemento visual maximo
 T_180_EXIT_ANGLE = 40                     # graus — linha reencontrada e alinhada
 T_180_CONFIRM_TIME = .10                  # s — evita parar por um frame isolado
