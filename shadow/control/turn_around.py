@@ -15,10 +15,14 @@ Shadow2026 adaptations:
   timing variants.
 """
 
-from config import (T_180, T_180_SPEED, TURN_AROUND_PREROLL, TURN_AROUND_REVERSE,
-                    TURN_AROUND_REVERSE_EXTRA, TURN_AROUND_SMALL_LINE)
+import time
+
+from config import (T_180, T_180_CONFIRM_TIME, T_180_EXIT_ANGLE,
+                    T_180_SEARCH_TIMEOUT, T_180_SPEED, TURN_AROUND_PREROLL,
+                    TURN_AROUND_REVERSE, TURN_AROUND_REVERSE_EXTRA,
+                    TURN_AROUND_SMALL_LINE)
 from control.steer import sleep_steering, steer
-from shared.mp_manager import line_size, timer
+from shared.mp_manager import line_angle, line_detected, line_size, timer
 
 
 def turn_around(last_turn_dir):
@@ -30,6 +34,23 @@ def turn_around(last_turn_dir):
     # IMU_REPLACEMENT: pivot temporizado no lugar do giro por giroscopio
     steer(180 if last_turn_dir == "r" else -180, T_180_SPEED)
     sleep_steering(T_180)
+
+    # Depois da parte cega, continua no mesmo sentido ate a camera confirmar
+    # a linha centralizada. Exige estabilidade por alguns frames para nao
+    # encerrar ao cruzar uma mancha ou uma borda durante a rotacao.
+    search_end = time.monotonic() + T_180_SEARCH_TIMEOUT
+    aligned_since = None
+    while time.monotonic() < search_end:
+        aligned = line_detected.value and abs(line_angle.value) <= T_180_EXIT_ANGLE
+        if aligned:
+            if aligned_since is None:
+                aligned_since = time.monotonic()
+            elif time.monotonic() - aligned_since >= T_180_CONFIRM_TIME:
+                break
+        else:
+            aligned_since = None
+        sleep_steering(.01)
+
     steer()
 
     # re-aquisicao da linha (cauda identica ao OE²)
