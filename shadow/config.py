@@ -170,7 +170,7 @@ GAP_COMMIT_SPEED = .7                     # [OE2] control.py:641
 T_SWEEP_RIGHT = .35                       # s — varredura direita na busca do gap (esq = 2×)
 SWEEP_SPEED = .6                          # velocidade da varredura temporizada
 LINE_SEARCH_CREEP = 1.2                   # [OE2] control.py:670 — avanco final procurando linha
-T_180 = 1.2                               # s — parte cega; 1/3 menor que 1.8 s
+T_180 = 1.0                               # s — pouco acima do giro de 90° (~0.9 s)
 T_180_SPEED = .7                          # velocidade do pivot de 180°
 T_180_SEARCH_TIMEOUT = 1.5                # s — complemento visual maximo
 T_180_EXIT_ANGLE = 40                     # graus — linha reencontrada e alinhada
