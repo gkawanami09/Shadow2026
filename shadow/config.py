@@ -120,6 +120,8 @@ GREEN_MARKER_MEMORY = .5                  # [OE2] line_cam.py:736/740 — memori
 GREEN_APPROACH_TIME = .7                  # s — avanca reto antes do giro verde
 GREEN_TURN_MIN_TIME = .2                  # s — evita encerrar o tanque no primeiro frame
 GREEN_TURN_EXIT_ANGLE = 35                # graus — linha realinhada apos o giro
+GREEN_REVERSE_TIME = .5
+GREEN_REVERSE_SPEED = .4                  # PWM 48
 
 # Canto preto de 90 graus. Os limites sao conservadores: so substitui o
 # controle da bolinha depois de varios frames com dois bracos retos, longos e

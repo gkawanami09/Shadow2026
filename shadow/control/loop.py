@@ -33,6 +33,7 @@ from config import (CONTROL_MAX_ITERATIONS, CORNER_90_APPROACH_TIME,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
                     GREEN_APPROACH_TIME, GREEN_TURN_EXIT_ANGLE,
+                    GREEN_REVERSE_SPEED, GREEN_REVERSE_TIME,
                     GREEN_TURN_MIN_TIME, LINE_FOLLOW_SPEED,
                     LINE_LOSS_STEER_HOLD, MIN_LINE_SIZE_DEFAULT,
                     PIVOT_BOTTOM_MIN_ERROR_PX,
@@ -92,6 +93,7 @@ def control_loop():
     green_direction = None
     green_approach_until = 0.
     green_turn_started = None
+    green_reverse_until = None
     green_armed = True
     corner_direction = None
     corner_approach_until = 0.
@@ -143,6 +145,7 @@ def control_loop():
                     green_direction = turn_dir.value
                     green_approach_until = now + GREEN_APPROACH_TIME
                     green_turn_started = None
+                    green_reverse_until = None
                     green_armed = False
                     # Verde sempre tem prioridade sobre geometria preta.
                     corner_direction = None
@@ -167,7 +170,20 @@ def control_loop():
 
                 command_speed = get_speed(line_angle.value)
 
-                if green_direction is not None and now < green_approach_until:
+                if (green_direction is not None
+                        and green_reverse_until is not None):
+                    if now < green_reverse_until:
+                        angle = 200
+                        command_speed = GREEN_REVERSE_SPEED
+                        last_rear_pivot_enabled = False
+                        status.value = 'Verde concluido — dando re curta'
+                    else:
+                        green_direction = None
+                        green_turn_started = None
+                        green_reverse_until = None
+                        angle = line_angle.value if line_detected.value else 190
+                        last_rear_pivot_enabled = True
+                elif green_direction is not None and now < green_approach_until:
                     # A direcao ja foi memorizada: atravessa o marcador reto
                     # antes de iniciar qualquer rotacao.
                     angle = 0
@@ -185,10 +201,11 @@ def control_loop():
                             and turn_dir.value == "straight"
                             and line_detected.value
                             and abs(line_angle.value) <= GREEN_TURN_EXIT_ANGLE):
-                        green_direction = None
-                        green_turn_started = None
-                        angle = line_angle.value
-                        last_rear_pivot_enabled = True
+                        green_reverse_until = now + GREEN_REVERSE_TIME
+                        angle = 200
+                        command_speed = GREEN_REVERSE_SPEED
+                        last_rear_pivot_enabled = False
+                        status.value = 'Verde concluido — dando re curta'
                 elif corner_direction is not None and now < corner_approach_until:
                     angle = 0
                     command_speed = LINE_FOLLOW_SPEED
