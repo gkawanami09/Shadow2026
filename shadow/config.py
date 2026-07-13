@@ -123,25 +123,6 @@ GREEN_TURN_EXIT_ANGLE = 35                # graus — linha realinhada apos o gi
 GREEN_REVERSE_TIME = .5
 GREEN_REVERSE_SPEED = .4                  # PWM 48
 
-# Canto preto de 90 graus. Os limites sao conservadores: so substitui o
-# controle da bolinha depois de varios frames com dois bracos retos, longos e
-# perpendiculares formando um unico vertice.
-CORNER_90_ENABLED = True
-# A geometria ja possui varias travas independentes. Publica no primeiro frame
-# valido e segura o resultado tempo suficiente para o processo de controle
-# recebe-lo antes que o proprio movimento mude a imagem.
-CORNER_90_CONFIRM_FRAMES = 1
-CORNER_90_RELEASE_FRAMES = 10
-CORNER_90_APPROACH_TIME = .9
-CORNER_90_TURN_MIN_TIME = .2
-CORNER_90_EXIT_ANGLE = 35
-CORNER_90_REVERSE_TIME = .5
-CORNER_90_REVERSE_SPEED = .4              # PWM 48
-CORNER_90_HOUGH_THRESHOLD = 30
-CORNER_90_MIN_ARM_PX = 55
-CORNER_90_MAX_AXIS_ERROR_DEG = 20
-CORNER_90_VERTEX_TOLERANCE_PX = 30
-CORNER_90_CLUSTER_TOLERANCE_PX = 55
 
 # ----------------------------------------------------------------------------
 # Vermelho  [OE2 Hotspot 5]
