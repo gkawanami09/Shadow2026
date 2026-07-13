@@ -125,8 +125,11 @@ GREEN_TURN_EXIT_ANGLE = 35                # graus — linha realinhada apos o gi
 # controle da bolinha depois de varios frames com dois bracos retos, longos e
 # perpendiculares formando um unico vertice.
 CORNER_90_ENABLED = True
-CORNER_90_CONFIRM_FRAMES = 3
-CORNER_90_RELEASE_FRAMES = 2
+# A geometria ja possui varias travas independentes. Publica no primeiro frame
+# valido e segura o resultado tempo suficiente para o processo de controle
+# recebe-lo antes que o proprio movimento mude a imagem.
+CORNER_90_CONFIRM_FRAMES = 1
+CORNER_90_RELEASE_FRAMES = 10
 CORNER_90_APPROACH_TIME = .7
 CORNER_90_TURN_MIN_TIME = .2
 CORNER_90_EXIT_ANGLE = 35
