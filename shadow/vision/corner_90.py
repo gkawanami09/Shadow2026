@@ -61,7 +61,37 @@ def detect_corner_90(mask, debug_img=None):
 
             direction = "left" if left_long else "right"
 
+            # Qualquer outra perna vertical cruzando o mesmo braco horizontal
+            # em uma posicao distante forma um segundo vertice: zig-zag.
+            second_vertex = False
+            for ox1, oy1, ox2, oy2, _ in vertical:
+                other_x = (ox1 + ox2) / 2
+                other_min_y, other_max_y = sorted((oy1, oy2))
+                if (abs(other_x - v_x) > CORNER_90_CLUSTER_TOLERANCE_PX
+                        and h_min_x - tol <= other_x <= h_max_x + tol
+                        and other_min_y - tol <= h_y <= other_max_y + tol):
+                    second_vertex = True
+                    break
+            if second_vertex:
+                continue
+
             ix, iy = int(round(v_x)), int(round(h_y))
+
+            # O Hough pode quebrar o braco horizontal exatamente no segundo
+            # canto. Confirma tambem diretamente nos pixels se existe outra
+            # coluna longa fora da regiao do primeiro vertice.
+            outside_horizontal = mask.copy()
+            outside_horizontal[max(0, iy - 18):min(mask.shape[0], iy + 19)] = 0
+            vertical_support = np.count_nonzero(outside_horizontal, axis=0)
+            offset = CORNER_90_MIN_ARM_PX // 2
+            if direction == "right":
+                search_support = vertical_support[min(mask.shape[1], ix + offset):]
+            else:
+                search_support = vertical_support[:max(0, ix - offset)]
+            if (search_support.size
+                    and np.max(search_support) >= CORNER_90_MIN_ARM_PX * .6):
+                continue
+
             # Se houver preto vertical material acima do vertice, existe
             # continuacao reta/intersecao e nao um L isolado.
             above = mask[max(0, iy - CORNER_90_MIN_ARM_PX):max(0, iy - 18),
@@ -69,16 +99,7 @@ def detect_corner_90(mask, debug_img=None):
             if above.size and np.mean(np.any(above > 0, axis=1)) > .35:
                 continue
 
-            # Se o braco sai do quadro, outro vertice do zig-zag pode estar
-            # escondido. Sem visibilidade do fim, a deteccao fica inconclusiva.
             y0, y1 = max(0, iy - 12), min(mask.shape[0], iy + 13)
-            if direction == "left":
-                border = mask[y0:y1, :6]
-            else:
-                border = mask[y0:y1, mask.shape[1] - 6:]
-            if border.size and np.mean(border > 0) > .08:
-                continue
-
             # Procura uma segunda perna no extremo do braco. Ela caracteriza
             # zig-zag; um L verdadeiro possui apenas o primeiro vertice.
             arm_band = mask[y0:y1]

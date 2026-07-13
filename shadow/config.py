@@ -125,16 +125,16 @@ GREEN_TURN_EXIT_ANGLE = 35                # graus — linha realinhada apos o gi
 # controle da bolinha depois de varios frames com dois bracos retos, longos e
 # perpendiculares formando um unico vertice.
 CORNER_90_ENABLED = True
-CORNER_90_CONFIRM_FRAMES = 5
+CORNER_90_CONFIRM_FRAMES = 3
 CORNER_90_RELEASE_FRAMES = 2
 CORNER_90_APPROACH_TIME = .7
 CORNER_90_TURN_MIN_TIME = .2
 CORNER_90_EXIT_ANGLE = 35
-CORNER_90_HOUGH_THRESHOLD = 42
-CORNER_90_MIN_ARM_PX = 72
-CORNER_90_MAX_AXIS_ERROR_DEG = 12
-CORNER_90_VERTEX_TOLERANCE_PX = 22
-CORNER_90_CLUSTER_TOLERANCE_PX = 45
+CORNER_90_HOUGH_THRESHOLD = 30
+CORNER_90_MIN_ARM_PX = 55
+CORNER_90_MAX_AXIS_ERROR_DEG = 20
+CORNER_90_VERTEX_TOLERANCE_PX = 30
+CORNER_90_CLUSTER_TOLERANCE_PX = 55
 
 # ----------------------------------------------------------------------------
 # Vermelho  [OE2 Hotspot 5]
