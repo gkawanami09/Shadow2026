@@ -176,6 +176,7 @@ TURN_AROUND_PREROLL = .55                 # [OE2] control.py:714 — avanca sobr
 TURN_AROUND_REVERSE = .3                  # [OE2] control.py:719 — re-aquisicao da linha
 TURN_AROUND_REVERSE_EXTRA = .4            # [OE2] control.py:723 — extra se line_size < 5500
 TURN_AROUND_SMALL_LINE = 5500             # [OE2] control.py:722
+TURN_AROUND_GREEN_COOLDOWN = 1.0          # ignora memoria residual dos dois verdes
 
 # ----------------------------------------------------------------------------
 # Anti-travamento  [OE2 Hotspot 2]

@@ -39,7 +39,8 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     PIVOT_RECOVERY_SPEED, PIVOT_RECOVERY_TIMEOUT,
                     PIVOT_PROGRESS_PX, PIVOT_STALL_MIN_ANGLE,
                     PIVOT_STALL_RAMP_TIME, PIVOT_STALL_TIME,
-                    VISION_READY_TIMEOUT, FRONT_ANCHOR_FULL_ANGLE,
+                    TURN_AROUND_GREEN_COOLDOWN, VISION_READY_TIMEOUT,
+                    FRONT_ANCHOR_FULL_ANGLE,
                     FRONT_ANCHOR_START_ANGLE, camera_x)
 from control.gap_orient import drive_back_until_line, orientate_gap
 from control.red_stop import stop_for_red
@@ -98,6 +99,7 @@ def control_loop():
     green_turn_started = None
     green_reverse_until = None
     green_armed = True
+    green_rearm_after = 0.
 
     try:
         while not terminate.value:
@@ -126,13 +128,24 @@ def control_loop():
                     status.value = f'Girando 180° para a {"direita" if last_turn_dir == "r" else "esquerda"}'
 
                     last_turn_dir = turn_around(last_turn_dir)
+                    # O filtro visual pode degradar "dois verdes" para apenas
+                    # left/right por alguns frames. Nao iniciar uma segunda
+                    # manobra com essa leitura residual.
+                    green_direction = None
+                    green_turn_started = None
+                    green_reverse_until = None
+                    green_armed = False
+                    green_rearm_after = (
+                        time.monotonic() + TURN_AROUND_GREEN_COOLDOWN)
                     continue
 
                 status.value = 'Seguindo Linha'
 
                 now = time.monotonic()
 
-                if turn_dir.value == "straight" and green_direction is None:
+                if (time.monotonic() >= green_rearm_after
+                        and turn_dir.value == "straight"
+                        and green_direction is None):
                     green_armed = True
 
                 if (green_armed and green_direction is None
