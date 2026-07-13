@@ -34,9 +34,13 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GREEN_TURN_MIN_TIME, LINE_FOLLOW_SPEED,
                     LINE_LOSS_STEER_HOLD, MIN_LINE_SIZE_DEFAULT,
                     PIVOT_BOTTOM_MIN_ERROR_PX,
+                    PIVOT_RECOVERY_ASSIST_RAMP,
+                    PIVOT_RECOVERY_ASSIST_START, PIVOT_RECOVERY_EXIT_ANGLE,
+                    PIVOT_RECOVERY_SPEED, PIVOT_RECOVERY_TIMEOUT,
                     PIVOT_PROGRESS_PX, PIVOT_STALL_MIN_ANGLE,
                     PIVOT_STALL_RAMP_TIME, PIVOT_STALL_TIME,
-                    VISION_READY_TIMEOUT, camera_x)
+                    VISION_READY_TIMEOUT, FRONT_ANCHOR_FULL_ANGLE,
+                    FRONT_ANCHOR_START_ANGLE, camera_x)
 from control.gap_orient import drive_back_until_line, orientate_gap
 from control.red_stop import stop_for_red
 from control.speed import get_speed
@@ -84,6 +88,8 @@ def control_loop():
     pivot_sign = 0
     pivot_best_error = camera_x
     pivot_last_progress = time.monotonic()
+    pivot_last_direction = 0
+    pivot_line_lost_since = None
     last_follow_angle = 0
     last_line_seen = time.monotonic()
     last_rear_pivot_enabled = True
@@ -137,10 +143,27 @@ def control_loop():
                     green_reverse_until = None
                     green_armed = False
 
+                if green_direction is not None:
+                    # Recuperacao de linha do pivo nunca pode vazar para a
+                    # manobra deliberada do marcador verde.
+                    pivot_last_direction = 0
+                    pivot_line_lost_since = None
+
                 if line_detected.value:
                     last_line_seen = now
                     last_follow_angle = line_angle.value
                     last_rear_pivot_enabled = turn_dir.value == "straight"
+
+                    if (last_rear_pivot_enabled
+                            and abs(line_angle.value) > FRONT_ANCHOR_START_ANGLE):
+                        pivot_last_direction = 1 if line_angle.value > 0 else -1
+                        pivot_line_lost_since = None
+                    elif abs(line_angle.value) <= PIVOT_RECOVERY_EXIT_ANGLE:
+                        pivot_last_direction = 0
+                        pivot_line_lost_since = None
+                elif not last_rear_pivot_enabled:
+                    pivot_last_direction = 0
+                    pivot_line_lost_since = None
 
                 command_speed = get_speed(line_angle.value)
 
@@ -182,6 +205,22 @@ def control_loop():
                         status.value = 'Verde concluido — dando re curta'
                 elif line_detected.value:
                     angle = last_follow_angle
+                elif pivot_last_direction != 0:
+                    if pivot_line_lost_since is None:
+                        pivot_line_lost_since = now
+                    recovery_time = now - pivot_line_lost_since
+                    if recovery_time <= PIVOT_RECOVERY_TIMEOUT:
+                        # Mantem o lado conhecido e um erro suficientemente
+                        # alto para conservar o pivo traseiro durante a busca.
+                        angle = pivot_last_direction * max(
+                            abs(last_follow_angle), FRONT_ANCHOR_FULL_ANGLE)
+                        command_speed = PIVOT_RECOVERY_SPEED
+                        last_rear_pivot_enabled = True
+                    else:
+                        angle = 190
+                        pivot_last_direction = 0
+                        pivot_line_lost_since = None
+                        status.value = 'Linha nao reencontrada — parada de seguranca'
                 elif now - last_line_seen <= LINE_LOSS_STEER_HOLD:
                     # A linha saiu da imagem durante a curva: termina o giro
                     # atual em vez de substituir o comando por frente (0°).
@@ -202,7 +241,19 @@ def control_loop():
                 # alinhamento comum da linha, quando nao ha decisao verde.
                 rear_pivot_enabled = last_rear_pivot_enabled and angle != 190
 
-                if (rear_pivot_enabled and line_detected.value
+                if (not line_detected.value and rear_pivot_enabled
+                        and pivot_line_lost_since is not None):
+                    recovery_time = now - pivot_line_lost_since
+                    front_reverse_assist = min(
+                        PIVOT_RECOVERY_ASSIST_START
+                        + recovery_time / PIVOT_RECOVERY_ASSIST_RAMP,
+                        1.)
+                    side = 'direita' if angle > 0 else 'esquerda'
+                    status.value = (
+                        f'Procurando linha — re dianteira {side} '
+                        f'{round(front_reverse_assist * 100)}%')
+
+                elif (rear_pivot_enabled and line_detected.value
                         and abs(angle) >= PIVOT_STALL_MIN_ANGLE
                         and error >= PIVOT_BOTTOM_MIN_ERROR_PX):
                     if sign != pivot_sign:

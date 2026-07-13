@@ -90,7 +90,7 @@ BOTTOM_CENTER_MIN_Y = .75
 FRONT_ANCHORED_STEERING = True
 FRONT_ANCHOR_START_ANGLE = 65
 FRONT_ANCHOR_FULL_ANGLE = 120
-FRONT_ANCHOR_REAR_SCALE = 1.15
+FRONT_ANCHOR_REAR_SCALE = 1.30
 # Nunca fixa completamente a frente: com blend 1.0 a camera vira o centro de
 # rotacao, a linha apenas gira na imagem e nao consegue chegar a bolinha. A
 # parcela restante faz a camera descrever um arco curto ate reencontrar a linha.
@@ -106,6 +106,11 @@ PIVOT_PROGRESS_PX = 8
 PIVOT_BOTTOM_MIN_ERROR_PX = 45
 PIVOT_FRONT_REVERSE_SCALE = .8
 PIVOT_FRONT_REVERSE_MIN_PWM = 45
+PIVOT_RECOVERY_SPEED = .6                 # PWM base 72 durante busca da linha
+PIVOT_RECOVERY_ASSIST_START = .55
+PIVOT_RECOVERY_ASSIST_RAMP = .35          # s ate chegar a 100% da ajuda
+PIVOT_RECOVERY_TIMEOUT = 2.0              # seguranca contra giro indefinido
+PIVOT_RECOVERY_EXIT_ANGLE = 40
 
 SIMILARITY_CHECK_EVERY = 30               # [OE2] line_cam.py:584 — SSIM a cada 30 frames
 
