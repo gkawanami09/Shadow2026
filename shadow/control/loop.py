@@ -32,7 +32,7 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GREEN_APPROACH_TIME, GREEN_TURN_EXIT_ANGLE,
                     GREEN_REVERSE_SPEED, GREEN_REVERSE_TIME,
                     GREEN_TURN_MIN_TIME, LINE_FOLLOW_SPEED,
-                    LINE_LOSS_STEER_HOLD, MAX_PWM, MIN_LINE_SIZE_DEFAULT,
+                    LINE_LOSS_STEER_HOLD, MIN_LINE_SIZE_DEFAULT,
                     PIVOT_BOTTOM_MIN_ERROR_PX,
                     PIVOT_RECOVERY_ASSIST_RAMP,
                     PIVOT_RECOVERY_ASSIST_START, PIVOT_RECOVERY_EXIT_ANGLE,
@@ -178,21 +178,7 @@ def control_loop():
                     pivot_last_direction = 0
                     pivot_line_lost_since = None
 
-                # Conserva a forca da rampa durante correcoes e perdas breves.
-                # Usa o ultimo angulo real quando a visao publica zero por
-                # convencao ao perder o contorno.
-                speed_angle = (line_angle.value if line_detected.value
-                               else last_follow_angle)
-                command_speed = get_speed(speed_angle)
-
-                # Torna a aceleracao verificavel tanto no terminal quanto no
-                # debug. Manobras verdes abaixo substituem este status e sua
-                # velocidade, portanto continuam protegidas.
-                if (green_direction is None
-                        and command_speed > LINE_FOLLOW_SPEED):
-                    status.value = (
-                        f'Rampa confirmada — PWM '
-                        f'{round(command_speed * MAX_PWM)}')
+                command_speed = get_speed(line_angle.value)
 
                 if (green_direction is not None
                         and green_reverse_until is not None):
@@ -218,10 +204,6 @@ def control_loop():
                     if green_turn_started is None:
                         green_turn_started = now
                     angle = -180 if green_direction == "left" else 180
-                    # A memoria de rampa nunca altera o giro verde ja
-                    # calibrado; o angulo do tanque so e aplicado depois de
-                    # get_speed(), portanto a trava precisa ser explicita.
-                    command_speed = LINE_FOLLOW_SPEED
                     last_rear_pivot_enabled = False
                     status.value = f'Verde {green_direction} — girando tanque'
 
@@ -245,10 +227,7 @@ def control_loop():
                         # alto para conservar o pivo traseiro durante a busca.
                         angle = pivot_last_direction * max(
                             abs(last_follow_angle), FRONT_ANCHOR_FULL_ANGLE)
-                        # Fora da rampa preserva PWM 72; durante a memoria da
-                        # rampa mantem a base maior escolhida acima.
-                        command_speed = max(command_speed,
-                                            PIVOT_RECOVERY_SPEED)
+                        command_speed = PIVOT_RECOVERY_SPEED
                         last_rear_pivot_enabled = True
                     else:
                         angle = 190

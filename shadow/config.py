@@ -61,17 +61,10 @@ right_correction = 1                      # [OE2] control.py:77
 # ----------------------------------------------------------------------------
 LINE_FOLLOW_SPEED = .5                    # PWM 60: .5 * MAX_PWM (120)
 LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair brevemente da imagem
-RAMP_AHEAD_HOLD = 4.0                     # s — cobre a rampa apos detectar sua borda de entrada
-RAMP_ACCEL_SPEED = .85                    # PWM 102; correcoes podem chegar ao teto 120
-RAMP_DETECT_CONFIRM_TIME = .05            # s — dois frames bastam para a borda em movimento
-RAMP_DETECT_RELEASE_TIME = .25            # s — mantem o evento durante a passagem pela borda
-RAMP_DETECT_GAP_TIME = .08                # s — tolera poucos frames instaveis da camera
-RAMP_DETECT_BOOT_DELAY = 1.0              # s — ignora enquadramento inicial da camera
-RAMP_EDGE_MIN_COVERAGE = .38              # rampa .68+; 90 .34; curva .16 no modo sensivel
-RAMP_EDGE_BRIGHT_MIN = 130                # ambos os lados precisam continuar sendo piso claro
-RAMP_EDGE_DIFF_MIN = 8                    # aceita a borda suave observada no teste real
-RAMP_EDGE_OFFSET = 4                      # px acima/abaixo usados na comparacao
-RAMP_EDGE_X_MARGIN = .08                  # ignora 8% de cada lateral da imagem
+RAMP_AHEAD_HOLD = 2                       # [OE2] control.py:288 — s segurando velocidade reduzida
+RAMP_AHEAD_SPEED_PIVOT = .65              # [OE2] control.py:291
+RAMP_AHEAD_SPEED_ARC = .4                 # [OE2] control.py:293
+RAMP_AHEAD_SPEED_STRAIGHT = .3            # [OE2] control.py:295
 
 # ----------------------------------------------------------------------------
 # Deteccao de linha  [OE2 Hotspot 1]

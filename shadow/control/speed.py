@@ -11,18 +11,22 @@ Shadow2026 adaptations:
   Hotspot 1 dark-ahead detector and is fully portable.
 """
 
-from config import LINE_FOLLOW_SPEED, RAMP_ACCEL_SPEED, RAMP_AHEAD_HOLD
+from config import (LINE_FOLLOW_SPEED, RAMP_AHEAD_HOLD, RAMP_AHEAD_SPEED_ARC,
+                    RAMP_AHEAD_SPEED_PIVOT, RAMP_AHEAD_SPEED_STRAIGHT,
+                    max_turn_angle)
 from shared.mp_manager import ramp_ahead, timer
 
 
-def get_speed(_angle):
+def get_speed(angle):
     if ramp_ahead.value or not timer.get_timer("ramp_ahead"):
         if ramp_ahead.value:
             timer.set_timer("ramp_ahead", RAMP_AHEAD_HOLD)
 
-        # Na inclinacao, reduzir a base durante uma correcao tira justamente
-        # a forca necessaria para vencer a gravidade e favorece o deslizamento
-        # lateral. O diferencial de rodas continua sendo feito por steer().
-        return RAMP_ACCEL_SPEED
+        if abs(angle) > max_turn_angle:
+            return RAMP_AHEAD_SPEED_PIVOT
+        elif abs(angle) > max_turn_angle / 2:
+            return RAMP_AHEAD_SPEED_ARC
+        else:
+            return RAMP_AHEAD_SPEED_STRAIGHT
 
     return LINE_FOLLOW_SPEED
