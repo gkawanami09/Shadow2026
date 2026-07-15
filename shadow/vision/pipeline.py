@@ -32,9 +32,12 @@ import numpy as np
 from skimage.metrics import structural_similarity
 
 import config
-from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
-                    RAMP_DETECT_CONFIRM_TIME, RAMP_DETECT_GAP_TIME,
-                    RAMP_DETECT_RELEASE_TIME, RAMP_SWAP_TRIGGER,
+from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME,
+                    RAMP_DETECT_BOOT_DELAY, RAMP_DETECT_CONFIRM_TIME,
+                    RAMP_DETECT_GAP_TIME, RAMP_DETECT_RELEASE_TIME,
+                    RAMP_EDGE_BRIGHT_MIN, RAMP_EDGE_DIFF_MIN,
+                    RAMP_EDGE_MIN_COVERAGE, RAMP_EDGE_OFFSET,
+                    RAMP_EDGE_X_MARGIN, RAMP_SWAP_MARGIN, RAMP_SWAP_TRIGGER,
                     SIMILARITY_CHECK_EVERY, VISION_MAX_FRAMES, camera_x,
                     camera_y)
 from shared.mp_manager import (add_time_value, average_line_angle, average_line_point,
@@ -49,7 +52,7 @@ from vision.capture import LineCamera
 from vision.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from vision.green import check_green, latch_turn_direction
 from vision.line import calculate_angle, determine_correct_line
-from vision.ramp import RampDetector
+from vision.ramp import RampDetector, floor_edge_score
 from vision.red import check_contour_size
 
 # Cores carregadas do config.ini (fallback: valores do config.py)
@@ -120,6 +123,7 @@ def vision_loop(debug=False):
     ramp_detector = RampDetector(
         RAMP_DETECT_CONFIRM_TIME, RAMP_DETECT_RELEASE_TIME,
         RAMP_DETECT_GAP_TIME)
+    ramp_detection_ready_at = time.monotonic() + RAMP_DETECT_BOOT_DELAY
     ramp_was_active = False
     ramp_was_confirming = False
 
@@ -138,6 +142,10 @@ def vision_loop(debug=False):
             if time.perf_counter() - fps_limit_time <= 1 / VISION_MAX_FRAMES:
                 continue
             fps_limit_time = time.perf_counter()
+
+            ramp_edge_coverage, ramp_edge_y = floor_edge_score(
+                cv2_img, RAMP_EDGE_BRIGHT_MIN, RAMP_EDGE_DIFF_MIN,
+                RAMP_EDGE_OFFSET, RAMP_EDGE_X_MARGIN)
 
             hsv_image = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2HSV)
             green_image = cv2.inRange(hsv_image, green_min, green_max)
@@ -293,11 +301,14 @@ def vision_loop(debug=False):
                 line_angle_y.value = -1
                 reset_gap_values()
 
-            # O reconhecimento depende somente da evidencia ampla da camera.
-            # Linha/angulo oscilam justamente na entrada da rampa e, quando
-            # usados aqui, impediam a confirmacao. A seguranca de movimento
-            # continua no controle: ele so acelera com linha vista e reta.
-            ramp_ahead.value = ramp_detector.update(dark_ahead)
+            # Confirma a mudanca de plano pela borda clara da pista. Esta
+            # metrica independe da calibracao do preto e do angulo da linha.
+            # A seguranca de movimento permanece no controle: aceleracao so
+            # acontece quando a linha esta visivel e praticamente reta.
+            ramp_edge_candidate = bool(
+                time.monotonic() >= ramp_detection_ready_at
+                and ramp_edge_coverage >= RAMP_EDGE_MIN_COVERAGE)
+            ramp_ahead.value = ramp_detector.update(ramp_edge_candidate)
 
             if ramp_detector.confirming and not ramp_was_confirming:
                 print("[rampa] evidencia visual iniciada")
@@ -320,12 +331,20 @@ def vision_loop(debug=False):
                 counter = 0
 
             if debug:
+                cv2.putText(cv2_img,
+                            f"borda={ramp_edge_coverage:.2f}", (5, 46),
+                            cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
                 if ramp_ahead.value:
                     cv2.putText(cv2_img, "RAMPA CONFIRMADA", (5, 30),
                                 cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 140, 255), 1)
                 elif ramp_detector.confirming:
-                    cv2.putText(cv2_img, "rampa? confirmando", (5, 30),
+                    cv2.putText(cv2_img,
+                                f"rampa? borda={ramp_edge_coverage:.2f}",
+                                (5, 30),
                                 cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
+                if ramp_edge_candidate and ramp_edge_y >= 0:
+                    cv2.line(cv2_img, (0, ramp_edge_y),
+                             (camera_x - 1, ramp_edge_y), (0, 140, 255), 1)
                 cv2.putText(cv2_img, f"{fps} fps  ang={line_angle.value}  {line_status.value}",
                             (5, camera_y - 8), cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
                 cv2.putText(cv2_img, str(status.value), (5, 14),

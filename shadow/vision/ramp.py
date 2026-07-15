@@ -1,11 +1,48 @@
-"""Filtro temporal para a deteccao de rampa usando somente a camera.
+"""Geometria e filtro temporal para detectar rampa somente pela camera.
 
-O sinal instantaneo vem da mudanca ampla de iluminacao/perspectiva ja medida
-na parte superior da imagem. Este modulo nao interpreta um frame isolado como
-rampa: a evidencia precisa permanecer continua durante o tempo de confirmacao.
+O sinal instantaneo mede uma borda horizontal que separa dois trechos claros
+do piso. A exigencia de claridade dos dois lados rejeita a barra preta de um
+90 graus; a cobertura horizontal rejeita curvas e riscos pequenos.
 """
 
 import time
+
+import cv2
+import numpy as np
+
+
+def floor_edge_score(frame, bright_min, diff_min, offset, x_margin):
+    """Retorna ``(cobertura, y)`` da maior borda horizontal entre pisos claros.
+
+    ``cobertura`` e a fracao da largura util que apresenta, na mesma linha,
+    uma mudanca vertical de luminosidade. Pixels acima e abaixo precisam ser
+    claros, portanto uma faixa preta transversal nao conta como borda de
+    rampa.
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    height, width = gray.shape
+    offset = max(int(offset), 1)
+    if height <= 2 * offset:
+        return 0., -1
+
+    # Media vertical curta reduz textura/ruido sem unir a linha preta ao piso.
+    smooth = cv2.blur(gray, (1, 3))
+    upper = smooth[:-2 * offset]
+    lower = smooth[2 * offset:]
+
+    edge = ((np.abs(lower - upper) >= float(diff_min))
+            & (upper >= float(bright_min))
+            & (lower >= float(bright_min)))
+
+    margin = min(max(float(x_margin), 0.), .45)
+    x0 = int(width * margin)
+    x1 = int(width * (1 - margin))
+    if x1 <= x0:
+        return 0., -1
+
+    row_coverage = np.mean(edge[:, x0:x1], axis=1)
+    row = int(np.argmax(row_coverage))
+    return float(row_coverage[row]), row + offset
 
 
 class RampDetector:
