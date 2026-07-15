@@ -178,11 +178,12 @@ def control_loop():
                     pivot_last_direction = 0
                     pivot_line_lost_since = None
 
-                # Sem linha, line_angle vale zero por convencao. Nao deixar
-                # esse zero parecer uma reta e liberar aceleracao de rampa.
-                command_speed = (get_speed(line_angle.value)
-                                 if line_detected.value
-                                 else LINE_FOLLOW_SPEED)
+                # Conserva a forca da rampa durante correcoes e perdas breves.
+                # Usa o ultimo angulo real quando a visao publica zero por
+                # convencao ao perder o contorno.
+                speed_angle = (line_angle.value if line_detected.value
+                               else last_follow_angle)
+                command_speed = get_speed(speed_angle)
 
                 # Torna a aceleracao verificavel tanto no terminal quanto no
                 # debug. Manobras verdes abaixo substituem este status e sua
@@ -244,7 +245,10 @@ def control_loop():
                         # alto para conservar o pivo traseiro durante a busca.
                         angle = pivot_last_direction * max(
                             abs(last_follow_angle), FRONT_ANCHOR_FULL_ANGLE)
-                        command_speed = PIVOT_RECOVERY_SPEED
+                        # Fora da rampa preserva PWM 72; durante a memoria da
+                        # rampa mantem a base maior escolhida acima.
+                        command_speed = max(command_speed,
+                                            PIVOT_RECOVERY_SPEED)
                         last_rear_pivot_enabled = True
                     else:
                         angle = 190
