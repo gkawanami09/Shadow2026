@@ -197,7 +197,7 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-sudo systemctl daemon-reload
+sudo systemctl daemon-reloadD
 sudo systemctl enable --now shadow-line.service   # ativa
 sudo systemctl disable shadow-line.service        # desativa
 journalctl -u shadow-line -f                      # logs

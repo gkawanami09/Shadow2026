@@ -34,9 +34,9 @@ from skimage.metrics import structural_similarity
 import config
 from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
                     RAMP_DETECT_CONFIRM_TIME, RAMP_DETECT_GAP_TIME,
-                    RAMP_DETECT_MAX_ANGLE, RAMP_DETECT_RELEASE_TIME,
-                    RAMP_SWAP_TRIGGER, SIMILARITY_CHECK_EVERY,
-                    VISION_MAX_FRAMES, camera_x, camera_y)
+                    RAMP_DETECT_RELEASE_TIME, RAMP_SWAP_TRIGGER,
+                    SIMILARITY_CHECK_EVERY, VISION_MAX_FRAMES, camera_x,
+                    camera_y)
 from shared.mp_manager import (add_time_value, average_line_angle, average_line_point,
                                black_average, config_manager, empty_time_arr,
                                get_time_average, last_bottom_point, line_ahead, line_angle,
@@ -120,6 +120,8 @@ def vision_loop(debug=False):
     ramp_detector = RampDetector(
         RAMP_DETECT_CONFIRM_TIME, RAMP_DETECT_RELEASE_TIME,
         RAMP_DETECT_GAP_TIME)
+    ramp_was_active = False
+    ramp_was_confirming = False
 
     timer.set_timer("multiple_bottom", .05)
     timer.set_timer("multiple_side_l", .05)
@@ -291,16 +293,20 @@ def vision_loop(debug=False):
                 line_angle_y.value = -1
                 reset_gap_values()
 
-            # A mudanca visual so vira rampa depois de persistir em varios
-            # frames, com linha material a frente e direcao quase reta. Nos
-            # videos de calibracao isso rejeita a curva, o 90 e a descida.
-            ramp_candidate = bool(
-                dark_ahead
-                and line_detected.value
-                and line_ahead.value
-                and turn_dir.value == "straight"
-                and abs(line_angle.value) <= RAMP_DETECT_MAX_ANGLE)
-            ramp_ahead.value = ramp_detector.update(ramp_candidate)
+            # O reconhecimento depende somente da evidencia ampla da camera.
+            # Linha/angulo oscilam justamente na entrada da rampa e, quando
+            # usados aqui, impediam a confirmacao. A seguranca de movimento
+            # continua no controle: ele so acelera com linha vista e reta.
+            ramp_ahead.value = ramp_detector.update(dark_ahead)
+
+            if ramp_detector.confirming and not ramp_was_confirming:
+                print("[rampa] evidencia visual iniciada")
+            if ramp_ahead.value and not ramp_was_active:
+                print("[rampa] confirmada pela camera")
+            elif ramp_was_active and not ramp_ahead.value:
+                print("[rampa] evidencia visual encerrada")
+            ramp_was_confirming = ramp_detector.confirming
+            ramp_was_active = bool(ramp_ahead.value)
 
             if not vision_ready.value:
                 vision_ready.value = True

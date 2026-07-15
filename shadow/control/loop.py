@@ -178,7 +178,11 @@ def control_loop():
                     pivot_last_direction = 0
                     pivot_line_lost_since = None
 
-                command_speed = get_speed(line_angle.value)
+                # Sem linha, line_angle vale zero por convencao. Nao deixar
+                # esse zero parecer uma reta e liberar aceleracao de rampa.
+                command_speed = (get_speed(line_angle.value)
+                                 if line_detected.value
+                                 else LINE_FOLLOW_SPEED)
 
                 # Torna a aceleracao verificavel tanto no terminal quanto no
                 # debug. Manobras verdes abaixo substituem este status e sua
