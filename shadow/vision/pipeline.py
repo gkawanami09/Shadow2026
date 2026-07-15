@@ -345,7 +345,11 @@ def vision_loop(debug=False):
                 if ramp_edge_candidate and ramp_edge_y >= 0:
                     cv2.line(cv2_img, (0, ramp_edge_y),
                              (camera_x - 1, ramp_edge_y), (0, 140, 255), 1)
-                cv2.putText(cv2_img, f"{fps} fps  ang={line_angle.value}  {line_status.value}",
+                cv2.putText(cv2_img,
+                            f"{fps} fps ang={line_angle.value} "
+                            f"borda={ramp_edge_coverage:.2f} "
+                            f"ramp={int(bool(ramp_ahead.value))} "
+                            f"{line_status.value}",
                             (5, camera_y - 8), cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
                 cv2.putText(cv2_img, str(status.value), (5, 14),
                             cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)

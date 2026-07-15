@@ -61,16 +61,16 @@ right_correction = 1                      # [OE2] control.py:77
 # ----------------------------------------------------------------------------
 LINE_FOLLOW_SPEED = .5                    # PWM 60: .5 * MAX_PWM (120)
 LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair brevemente da imagem
-RAMP_AHEAD_HOLD = 3.5                     # s — cobre a rampa apos detectar sua borda de entrada
+RAMP_AHEAD_HOLD = 4.0                     # s — cobre a rampa apos detectar sua borda de entrada
 RAMP_ACCEL_SPEED = .65                    # PWM 78: aumento perceptivel somente em linha reta
 RAMP_ACCEL_MAX_ANGLE = 30                 # graus — acima disso volta ao PWM normal
-RAMP_DETECT_CONFIRM_TIME = .10            # s — borda persiste ~.5 s nas gravacoes
+RAMP_DETECT_CONFIRM_TIME = .05            # s — dois frames bastam para a borda em movimento
 RAMP_DETECT_RELEASE_TIME = .25            # s — mantem o evento durante a passagem pela borda
 RAMP_DETECT_GAP_TIME = .08                # s — tolera poucos frames instaveis da camera
 RAMP_DETECT_BOOT_DELAY = 1.0              # s — ignora enquadramento inicial da camera
-RAMP_EDGE_MIN_COVERAGE = .45              # rampa .66+; 90 .26; curva .05
+RAMP_EDGE_MIN_COVERAGE = .38              # rampa .68+; 90 .34; curva .16 no modo sensivel
 RAMP_EDGE_BRIGHT_MIN = 130                # ambos os lados precisam continuar sendo piso claro
-RAMP_EDGE_DIFF_MIN = 16                   # diferenca minima de luminosidade entre os planos
+RAMP_EDGE_DIFF_MIN = 8                    # aceita a borda suave observada no teste real
 RAMP_EDGE_OFFSET = 4                      # px acima/abaixo usados na comparacao
 RAMP_EDGE_X_MARGIN = .08                  # ignora 8% de cada lateral da imagem
 
