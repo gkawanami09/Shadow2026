@@ -32,7 +32,7 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GREEN_APPROACH_TIME, GREEN_TURN_EXIT_ANGLE,
                     GREEN_REVERSE_SPEED, GREEN_REVERSE_TIME,
                     GREEN_TURN_MIN_TIME, LINE_FOLLOW_SPEED,
-                    LINE_LOSS_STEER_HOLD, MIN_LINE_SIZE_DEFAULT,
+                    LINE_LOSS_STEER_HOLD, MAX_PWM, MIN_LINE_SIZE_DEFAULT,
                     PIVOT_BOTTOM_MIN_ERROR_PX,
                     PIVOT_RECOVERY_ASSIST_RAMP,
                     PIVOT_RECOVERY_ASSIST_START, PIVOT_RECOVERY_EXIT_ANGLE,
@@ -179,6 +179,15 @@ def control_loop():
                     pivot_line_lost_since = None
 
                 command_speed = get_speed(line_angle.value)
+
+                # Torna a aceleracao verificavel tanto no terminal quanto no
+                # debug. Manobras verdes abaixo substituem este status e sua
+                # velocidade, portanto continuam protegidas.
+                if (green_direction is None
+                        and command_speed > LINE_FOLLOW_SPEED):
+                    status.value = (
+                        f'Rampa confirmada — PWM '
+                        f'{round(command_speed * MAX_PWM)}')
 
                 if (green_direction is not None
                         and green_reverse_until is not None):

@@ -33,10 +33,10 @@ from skimage.metrics import structural_similarity
 
 import config
 from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
-                    RAMP_DETECT_CONFIRM_TIME, RAMP_DETECT_MAX_ANGLE,
-                    RAMP_DETECT_RELEASE_TIME, RAMP_SWAP_TRIGGER,
-                    SIMILARITY_CHECK_EVERY, VISION_MAX_FRAMES, camera_x,
-                    camera_y)
+                    RAMP_DETECT_CONFIRM_TIME, RAMP_DETECT_GAP_TIME,
+                    RAMP_DETECT_MAX_ANGLE, RAMP_DETECT_RELEASE_TIME,
+                    RAMP_SWAP_TRIGGER, SIMILARITY_CHECK_EVERY,
+                    VISION_MAX_FRAMES, camera_x, camera_y)
 from shared.mp_manager import (add_time_value, average_line_angle, average_line_point,
                                black_average, config_manager, empty_time_arr,
                                get_time_average, last_bottom_point, line_ahead, line_angle,
@@ -117,8 +117,9 @@ def vision_loop(debug=False):
     fps_limit_time = time.perf_counter()
 
     last_image = np.zeros((camera_y, camera_x), dtype=np.uint8)
-    ramp_detector = RampDetector(RAMP_DETECT_CONFIRM_TIME,
-                                 RAMP_DETECT_RELEASE_TIME)
+    ramp_detector = RampDetector(
+        RAMP_DETECT_CONFIRM_TIME, RAMP_DETECT_RELEASE_TIME,
+        RAMP_DETECT_GAP_TIME)
 
     timer.set_timer("multiple_bottom", .05)
     timer.set_timer("multiple_side_l", .05)
