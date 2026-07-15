@@ -33,8 +33,10 @@ from skimage.metrics import structural_similarity
 
 import config
 from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
-                    RAMP_SWAP_TRIGGER, SIMILARITY_CHECK_EVERY, VISION_MAX_FRAMES,
-                    camera_x, camera_y)
+                    RAMP_DETECT_CONFIRM_TIME, RAMP_DETECT_MAX_ANGLE,
+                    RAMP_DETECT_RELEASE_TIME, RAMP_SWAP_TRIGGER,
+                    SIMILARITY_CHECK_EVERY, VISION_MAX_FRAMES, camera_x,
+                    camera_y)
 from shared.mp_manager import (add_time_value, average_line_angle, average_line_point,
                                black_average, config_manager, empty_time_arr,
                                get_time_average, last_bottom_point, line_ahead, line_angle,
@@ -47,6 +49,7 @@ from vision.capture import LineCamera
 from vision.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from vision.green import check_green, latch_turn_direction
 from vision.line import calculate_angle, determine_correct_line
+from vision.ramp import RampDetector
 from vision.red import check_contour_size
 
 # Cores carregadas do config.ini (fallback: valores do config.py)
@@ -114,6 +117,8 @@ def vision_loop(debug=False):
     fps_limit_time = time.perf_counter()
 
     last_image = np.zeros((camera_y, camera_x), dtype=np.uint8)
+    ramp_detector = RampDetector(RAMP_DETECT_CONFIRM_TIME,
+                                 RAMP_DETECT_RELEASE_TIME)
 
     timer.set_timer("multiple_bottom", .05)
     timer.set_timer("multiple_side_l", .05)
@@ -155,8 +160,6 @@ def vision_loop(debug=False):
                     cv2.circle(cv2_img, (10, 10), 5, (0, 0, 0), -1, cv2.LINE_AA)
                     black_image[0:int(camera_y * .4), 0:camera_x] = black_image_2[0:int(camera_y * .4), 0:camera_x]
                     dark_ahead = True
-
-            ramp_ahead.value = dark_ahead
 
             black_average.value = np.mean(black_image[:])
 
@@ -287,6 +290,17 @@ def vision_loop(debug=False):
                 line_angle_y.value = -1
                 reset_gap_values()
 
+            # A mudanca visual so vira rampa depois de persistir em varios
+            # frames, com linha material a frente e direcao quase reta. Nos
+            # videos de calibracao isso rejeita a curva, o 90 e a descida.
+            ramp_candidate = bool(
+                dark_ahead
+                and line_detected.value
+                and line_ahead.value
+                and turn_dir.value == "straight"
+                and abs(line_angle.value) <= RAMP_DETECT_MAX_ANGLE)
+            ramp_ahead.value = ramp_detector.update(ramp_candidate)
+
             if not vision_ready.value:
                 vision_ready.value = True
                 print("[visão] primeiro frame processado — pipeline ativo")
@@ -299,6 +313,12 @@ def vision_loop(debug=False):
                 counter = 0
 
             if debug:
+                if ramp_ahead.value:
+                    cv2.putText(cv2_img, "RAMPA CONFIRMADA", (5, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 140, 255), 1)
+                elif ramp_detector.confirming:
+                    cv2.putText(cv2_img, "rampa? confirmando", (5, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
                 cv2.putText(cv2_img, f"{fps} fps  ang={line_angle.value}  {line_status.value}",
                             (5, camera_y - 8), cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
                 cv2.putText(cv2_img, str(status.value), (5, 14),

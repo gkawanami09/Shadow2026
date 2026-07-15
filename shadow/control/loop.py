@@ -204,6 +204,10 @@ def control_loop():
                     if green_turn_started is None:
                         green_turn_started = now
                     angle = -180 if green_direction == "left" else 180
+                    # A memoria de rampa nunca altera o giro verde ja
+                    # calibrado; o angulo do tanque so e aplicado depois de
+                    # get_speed(), portanto a trava precisa ser explicita.
+                    command_speed = LINE_FOLLOW_SPEED
                     last_rear_pivot_enabled = False
                     status.value = f'Verde {green_direction} — girando tanque'
 

@@ -61,10 +61,12 @@ right_correction = 1                      # [OE2] control.py:77
 # ----------------------------------------------------------------------------
 LINE_FOLLOW_SPEED = .5                    # PWM 60: .5 * MAX_PWM (120)
 LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair brevemente da imagem
-RAMP_AHEAD_HOLD = 2                       # [OE2] control.py:288 — s segurando velocidade reduzida
-RAMP_AHEAD_SPEED_PIVOT = .65              # [OE2] control.py:291
-RAMP_AHEAD_SPEED_ARC = .4                 # [OE2] control.py:293
-RAMP_AHEAD_SPEED_STRAIGHT = .3            # [OE2] control.py:295
+RAMP_AHEAD_HOLD = 2                       # s mantendo a aceleracao apos a evidencia visual
+RAMP_ACCEL_SPEED = .6                     # PWM 72: aumento conservador somente em linha reta
+RAMP_ACCEL_MAX_ANGLE = 30                 # graus — acima disso volta ao PWM normal
+RAMP_DETECT_CONFIRM_TIME = .45            # s — subida 2.87; descida .32; curva .22; 90 .27
+RAMP_DETECT_RELEASE_TIME = .20            # s — tolera poucos frames instaveis da camera
+RAMP_DETECT_MAX_ANGLE = 35                # graus — candidato precisa parecer uma reta
 
 # ----------------------------------------------------------------------------
 # Deteccao de linha  [OE2 Hotspot 1]

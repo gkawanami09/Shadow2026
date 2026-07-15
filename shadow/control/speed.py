@@ -11,9 +11,8 @@ Shadow2026 adaptations:
   Hotspot 1 dark-ahead detector and is fully portable.
 """
 
-from config import (LINE_FOLLOW_SPEED, RAMP_AHEAD_HOLD, RAMP_AHEAD_SPEED_ARC,
-                    RAMP_AHEAD_SPEED_PIVOT, RAMP_AHEAD_SPEED_STRAIGHT,
-                    max_turn_angle)
+from config import (LINE_FOLLOW_SPEED, RAMP_ACCEL_MAX_ANGLE, RAMP_ACCEL_SPEED,
+                    RAMP_AHEAD_HOLD)
 from shared.mp_manager import ramp_ahead, timer
 
 
@@ -22,11 +21,9 @@ def get_speed(angle):
         if ramp_ahead.value:
             timer.set_timer("ramp_ahead", RAMP_AHEAD_HOLD)
 
-        if abs(angle) > max_turn_angle:
-            return RAMP_AHEAD_SPEED_PIVOT
-        elif abs(angle) > max_turn_angle / 2:
-            return RAMP_AHEAD_SPEED_ARC
-        else:
-            return RAMP_AHEAD_SPEED_STRAIGHT
+        # Aumenta somente enquanto o robo estiver praticamente reto. Curvas,
+        # verdes e pivos preservam exatamente a velocidade normal.
+        if abs(angle) <= RAMP_ACCEL_MAX_ANGLE:
+            return RAMP_ACCEL_SPEED
 
     return LINE_FOLLOW_SPEED
