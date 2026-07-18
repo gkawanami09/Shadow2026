@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Mostra duas câmeras CSI simultaneamente, sem executar a visão do robô.
+Mostra duas câmeras CSI simultaneamente, sem executar a detecção do robô.
+
+A imagem esquerda é a câmera de resgate. Por padrão, somente ela recebe CLAHE
+e correção gamma no canal de luminosidade para recuperar detalhes escuros.
 
 Uso:
     python3 -m shadow.tools.dual_camera_viewer
@@ -17,6 +20,24 @@ import numpy as np
 
 
 WINDOW = "Shadow2026 - duas cameras"
+
+
+class RescueEnhancer:
+    """Melhora iluminação local preservando os canais de cor."""
+
+    def __init__(self, gamma):
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        values = np.arange(256, dtype=np.float32) / 255.0
+        self.gamma_lut = np.clip(
+            np.power(values, 1.0 / gamma) * 255.0, 0, 255).astype(np.uint8)
+
+    def apply(self, frame):
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        lightness, channel_a, channel_b = cv2.split(lab)
+        lightness = self.clahe.apply(lightness)
+        lightness = cv2.LUT(lightness, self.gamma_lut)
+        enhanced = cv2.merge((lightness, channel_a, channel_b))
+        return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
 
 
 def open_camera(camera_num, width, height, fps):
@@ -65,7 +86,7 @@ def close_camera(camera):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Mostra duas câmeras CSI lado a lado, sem processamento")
+        description="Mostra duas câmeras CSI lado a lado, sem detecção")
     parser.add_argument("--camera-a", type=int, default=0,
                         help="índice da câmera mostrada à esquerda (padrão: 0)")
     parser.add_argument("--camera-b", type=int, default=1,
@@ -76,12 +97,19 @@ def main():
                         help="altura de cada imagem (padrão: 480)")
     parser.add_argument("--fps", type=int, default=30,
                         help="FPS solicitado para cada câmera (padrão: 30)")
+    parser.add_argument("--rescue-gamma", type=float, default=1.5,
+                        help="clareamento da câmera esquerda; maior clareia "
+                             "mais (padrão: 1.5)")
+    parser.add_argument("--no-rescue-filter", action="store_true",
+                        help="mostra a câmera esquerda sem CLAHE/gamma")
     args = parser.parse_args()
 
     if args.camera_a == args.camera_b:
         parser.error("--camera-a e --camera-b precisam ser diferentes")
     if args.width <= 0 or args.height <= 0 or args.fps <= 0:
         parser.error("--width, --height e --fps precisam ser maiores que zero")
+    if args.rescue_gamma <= 0:
+        parser.error("--rescue-gamma precisa ser maior que zero")
 
     from picamera2 import Picamera2
 
@@ -98,6 +126,8 @@ def main():
 
     camera_a = None
     camera_b = None
+    rescue_enhancer = (
+        None if args.no_rescue_filter else RescueEnhancer(args.rescue_gamma))
 
     try:
         print(f"Abrindo câmeras {args.camera_a} e {args.camera_b}...")
@@ -108,11 +138,16 @@ def main():
         time.sleep(.2)
 
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
+        if rescue_enhancer is not None:
+            print("Filtro de resgate ativo na imagem esquerda: "
+                  f"CLAHE + gamma {args.rescue_gamma:.1f}")
         print("Visualização ativa — pressione q ou Esc para fechar.")
 
         while True:
             frame_a = get_bgr_frame(camera_a)
             frame_b = get_bgr_frame(camera_b)
+            if rescue_enhancer is not None:
+                frame_a = rescue_enhancer.apply(frame_a)
             combined = np.hstack((frame_a, frame_b))
 
             cv2.imshow(WINDOW, combined)
