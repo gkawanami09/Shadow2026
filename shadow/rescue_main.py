@@ -161,7 +161,6 @@ def _dataset_metadata(
     frame_sequence,
     frame_captured_at,
     result,
-    distance_mm,
     now,
 ):
     same_frame = bool(
@@ -219,7 +218,6 @@ def _dataset_metadata(
             "angle": int(command.angle),
             "speed": float(command.speed),
             "terminal": bool(command.terminal),
-            "ultrasonic_distance_mm": distance_mm,
         },
         "latest_detector_result": detector_data,
     }
@@ -253,9 +251,10 @@ def parse_args():
     parser.add_argument(
         "--no-enhance", action="store_true",
         help="desativa CLAHE + gamma nas propostas visuais")
+    # Compatibilidade com comandos antigos. O sensor permanece desativado
+    # independentemente desta flag.
     parser.add_argument(
-        "--no-ultrasonic", action="store_true",
-        help="nao usa o HC-SR04 como barreira auxiliar")
+        "--no-ultrasonic", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.video is not None and args.drive:
         parser.error("--drive nao pode ser usado junto com --video")
@@ -283,11 +282,7 @@ def main():
     last_state = None
     last_logged_detail = None
     last_log_at = 0.0
-    last_ultrasonic_poll = 0.0
     last_idle_control = 0.0
-    distance_mm = None
-    ultrasonic_sample_ready = False
-    ultrasonic_sample_at = 0.0
     pickup_connection_epoch = None
     capture_samples = deque(maxlen=60)
     detection_times = deque(maxlen=30)
@@ -387,18 +382,6 @@ def main():
                     source_sequence=frame_packet.sequence,
                 )
 
-            if (
-                args.drive
-                and arduino is not None
-                and not args.no_ultrasonic
-                and not pickup.started
-            ):
-                sample_done, sample_value = arduino.poll_ultrassom()
-                if sample_done:
-                    distance_mm = sample_value
-                    ultrasonic_sample_ready = True
-                    ultrasonic_sample_at = now
-
             result = detector_worker.poll(last_result_sequence)
             if not detector_worker.is_alive:
                 # poll() ja transforma uma excecao do worker em RuntimeError.
@@ -431,8 +414,6 @@ def main():
                     pickup_step = pickup.update(now)
                 command = pickup_step.motion_command()
                 command_updated = True
-                distance_mm = None
-                ultrasonic_sample_ready = False
             elif not armed:
                 remaining = max(armed_at - now, 0.0)
                 command = MotionCommand(
@@ -447,8 +428,8 @@ def main():
                 result_age = now - result.captured_at
 
                 if result_age > cfg.BALL_FRAME_STALE_S:
-                    # Nunca consultar sensor nem mover com uma imagem que ja
-                    # venceu enquanto era processada.
+                    # Nunca mover com uma imagem que venceu durante o
+                    # processamento.
                     command = controller.update(
                         result.detection,
                         result.frame_shape,
@@ -457,61 +438,19 @@ def main():
                     command_updated = True
                     latest_result = None
                     latest_detection = None
-                    distance_mm = None
-                    ultrasonic_sample_ready = False
                     fresh_gate.reset()
-                    if arduino is not None:
-                        arduino.cancelar_ultrassom()
                     last_idle_control = now
                 else:
                     latest_result = result
                     control_detection = fresh_gate.accept(result.detection)
                     latest_detection = control_detection
-                    if (
-                        control_detection is None
-                        or not control_detection.confirmed
-                    ):
-                        distance_mm = None
-                        ultrasonic_sample_ready = False
-                        if arduino is not None:
-                            arduino.cancelar_ultrassom()
-
-                    distance_for_update = None
-                    ultrasonic_polled = False
-                    if (
-                        ultrasonic_sample_ready
-                        and now - ultrasonic_sample_at
-                        <= cfg.BALL_FRAME_STALE_S
-                    ):
-                        distance_for_update = distance_mm
-                        ultrasonic_polled = True
-                        ultrasonic_sample_ready = False
-                    elif ultrasonic_sample_ready:
-                        ultrasonic_sample_ready = False
-                        distance_mm = None
 
                     command = controller.update(
                         control_detection,
                         result.frame_shape,
-                        distance_mm=distance_for_update,
-                        ultrasonic_polled=ultrasonic_polled,
                         now=now,
                     )
                     command_updated = True
-                    if (
-                        args.drive
-                        and arduino is not None
-                        and not args.no_ultrasonic
-                        and control_detection is not None
-                        and control_detection.confirmed
-                        and not command.terminal
-                        and not ultrasonic_sample_ready
-                        and now - last_ultrasonic_poll
-                        >= cfg.BALL_ULTRASONIC_POLL_S
-                        and arduino.iniciar_ultrassom(
-                            timeout=cfg.BALL_ULTRASONIC_TIMEOUT_S)
-                    ):
-                        last_ultrasonic_poll = now
             elif (
                 latest_result is not None
                 and now - latest_result.captured_at
@@ -525,11 +464,7 @@ def main():
                 command_updated = True
                 latest_result = None
                 latest_detection = None
-                distance_mm = None
-                ultrasonic_sample_ready = False
                 fresh_gate.reset()
-                if arduino is not None:
-                    arduino.cancelar_ultrassom()
                 last_idle_control = now
             elif (
                 latest_result is None
@@ -591,10 +526,6 @@ def main():
                 and command.state == controller.NEAR
                 and not pickup.started
             ):
-                if arduino is not None:
-                    arduino.cancelar_ultrassom()
-                ultrasonic_sample_ready = False
-                distance_mm = None
                 pickup.start()
                 pickup_connection_epoch = (
                     arduino.connection_epoch
@@ -675,7 +606,7 @@ def main():
                     overlay_detection,
                     command.state,
                     command.detail,
-                    distance_mm,
+                    None,
                     motors_enabled=args.drive,
                     performance_text=performance_text,
                 )
@@ -709,7 +640,6 @@ def main():
                                 last_frame_sequence,
                                 latest_frame_captured_at,
                                 last_metrics_result,
-                                distance_mm,
                                 time.monotonic(),
                             ),
                         )

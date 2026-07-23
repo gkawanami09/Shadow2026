@@ -1,3 +1,4 @@
+import ast
 import sys
 from pathlib import Path
 import unittest
@@ -66,6 +67,24 @@ class BallApproachControllerTests(unittest.TestCase):
         self.assertEqual(latched.state, controller.NEAR)
         self.assertEqual(latched.angle, 190)
 
+    def test_rescue_runtime_never_calls_ultrasonic_sensor(self):
+        source = (SHADOW_ROOT / "rescue_main.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        forbidden_calls = {
+            "distancia_ultrassom",
+            "iniciar_ultrassom",
+            "poll_ultrassom",
+            "cancelar_ultrassom",
+        }
+        called = {
+            node.func.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in forbidden_calls
+        }
+        self.assertEqual(called, set())
+
     def test_visual_radius_threshold_scales_with_camera_resolution(self):
         controller = BallApproachController(start_time=0.0)
         shape = (720, 960, 3)
@@ -111,52 +130,6 @@ class BallApproachControllerTests(unittest.TestCase):
         lost = controller.update(None, self.shape, now=0.2)
         self.assertEqual(lost.state, controller.LOST)
         self.assertEqual(lost.angle, 190)
-
-    def test_ultrasonic_is_only_accepted_with_centered_target(self):
-        controller = BallApproachController(start_time=0.0)
-        command = None
-        for index in range(cfg.BALL_ULTRASONIC_CONFIRM_READS):
-            now = 0.1 + index * 0.1
-            command = controller.update(
-                detection(timestamp=now), self.shape,
-                distance_mm=cfg.BALL_ULTRASONIC_STOP_MM - 5,
-                ultrasonic_polled=True,
-                now=now)
-        self.assertEqual(command.state, controller.NEAR)
-
-        off_center = BallApproachController(start_time=0.0)
-        for index in range(cfg.BALL_ULTRASONIC_CONFIRM_READS + 1):
-            now = 0.1 + index * 0.1
-            command = off_center.update(
-                detection(x=520, timestamp=now), self.shape,
-                distance_mm=cfg.BALL_ULTRASONIC_STOP_MM - 5,
-                ultrasonic_polled=True,
-                now=now)
-        self.assertEqual(command.state, off_center.FAULT)
-
-    def test_first_near_ultrasonic_echo_stops_provisionally(self):
-        controller = BallApproachController(start_time=0.0)
-        command = controller.update(
-            detection(timestamp=0.1),
-            self.shape,
-            distance_mm=cfg.BALL_ULTRASONIC_STOP_MM - 5,
-            ultrasonic_polled=True,
-            now=0.1)
-        self.assertEqual(command.state, controller.PROXIMITY_HOLD)
-        self.assertEqual(command.angle, 190)
-        self.assertEqual(command.speed, 0.0)
-
-    def test_ultrasonic_below_reliable_range_faults(self):
-        controller = BallApproachController(start_time=0.0)
-        command = controller.update(
-            detection(timestamp=0.1),
-            self.shape,
-            distance_mm=cfg.BALL_ULTRASONIC_MIN_VALID_MM - 1,
-            ultrasonic_polled=True,
-            now=0.1)
-        self.assertEqual(command.state, controller.FAULT)
-        self.assertTrue(command.terminal)
-        self.assertEqual(command.angle, 190)
 
     def test_stale_frame_never_moves(self):
         controller = BallApproachController(start_time=0.0)

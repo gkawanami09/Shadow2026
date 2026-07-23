@@ -148,8 +148,9 @@ BALL_APPROACH_SPEED_FAR = 0.45
 BALL_APPROACH_SPEED_NEAR = 0.35
 BALL_SLOW_RADIUS_PX = 48
 
-# Parada perto da esfera. Estes dois valores sao deliberadamente conservadores
-# e precisam ser calibrados com a camera montada no robo.
+# Parada perto da esfera, exclusivamente pela camera. O resgate nao consulta o
+# HC-SR04 porque a superficie esferica pode desviar o eco. Estes valores sao
+# deliberadamente conservadores e precisam ser calibrados com a camera montada.
 BALL_STOP_RADIUS_PX = 76
 BALL_STOP_BOTTOM_Y_RATIO = 0.78
 BALL_STOP_CENTER_ERROR = 0.12
@@ -167,15 +168,6 @@ BALL_PICKUP_FUTABA_GUARD_S = 0.10
 BALL_PICKUP_LEFT_DELTA = -50
 BALL_PICKUP_RIGHT_DELTA = 50
 BALL_PICKUP_GRIPPER_SETTLE_S = 0.50
-
-# Ultrassom e travas de seguranca. O HC-SR04 e somente uma barreira auxiliar:
-# esfera pequena pode nao devolver eco e parede pode devolver.
-BALL_ULTRASONIC_POLL_S = 0.20
-BALL_ULTRASONIC_TIMEOUT_S = 0.05
-BALL_ULTRASONIC_MIN_VALID_MM = 35
-BALL_ULTRASONIC_STOP_MM = 145
-BALL_ULTRASONIC_CONFIRM_READS = 2
-BALL_ULTRASONIC_HOLD_TIMEOUT_S = 1.0
 
 # Hough + filtros medidos no Pi podem ultrapassar 0.20 s. O timestamp agora e
 # tirado depois da captura; 0.75 s ainda impede movimento com imagem congelada,

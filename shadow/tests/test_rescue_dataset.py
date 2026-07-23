@@ -233,9 +233,9 @@ class RescueDatasetWriterTests(unittest.TestCase):
         command = MotionCommand("ALIGN", angle=180, speed=0.35)
 
         exact = _dataset_metadata(
-            args, command, 41, 10.0, result, None, 10.02)
+            args, command, 41, 10.0, result, 10.02)
         newer_frame = _dataset_metadata(
-            args, command, 42, 10.03, result, None, 10.04)
+            args, command, 42, 10.03, result, 10.04)
 
         self.assertTrue(
             exact["latest_detector_result"]["same_frame"])

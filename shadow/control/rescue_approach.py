@@ -24,7 +24,6 @@ class BallApproachController:
     WAIT_TARGET = "WAIT_TARGET"
     ALIGN = "ALIGN"
     APPROACH = "APPROACH"
-    PROXIMITY_HOLD = "PROXIMITY_HOLD"
     LOST = "LOST"
     NEAR = "NEAR"
     FAULT = "FAULT"
@@ -36,8 +35,6 @@ class BallApproachController:
         self.active_started = None
         self.last_seen = None
         self.visual_near_count = 0
-        self.ultrasonic_near_count = 0
-        self.ultrasonic_hold_started = None
         self.progress = deque()
         self._pixel_scale = 1.0
         self._terminal_detail = ""
@@ -46,8 +43,6 @@ class BallApproachController:
         self,
         detection,
         frame_shape,
-        distance_mm=None,
-        ultrasonic_polled=False,
         now=None,
     ):
         now = time.monotonic() if now is None else float(now)
@@ -60,8 +55,6 @@ class BallApproachController:
 
         if detection is None or not detection.confirmed:
             self.visual_near_count = 0
-            self.ultrasonic_near_count = 0
-            self.ultrasonic_hold_started = None
             self.progress.clear()
 
             if self.active_started is None:
@@ -86,8 +79,6 @@ class BallApproachController:
 
         if now - detection.timestamp > cfg.BALL_FRAME_STALE_S:
             self.visual_near_count = 0
-            self.ultrasonic_near_count = 0
-            self.ultrasonic_hold_started = None
             self.progress.clear()
             self.state = self.LOST
             return MotionCommand(
@@ -109,51 +100,12 @@ class BallApproachController:
         self.visual_near_count = (
             self.visual_near_count + 1 if visual_near else 0)
 
-        if ultrasonic_polled and distance_mm is not None:
-            if 0 < distance_mm < cfg.BALL_ULTRASONIC_MIN_VALID_MM:
-                return self._fault(
-                    "eco abaixo da faixa confiavel do ultrassom; PARAR")
-            if distance_mm <= cfg.BALL_ULTRASONIC_STOP_MM:
-                if self.ultrasonic_near_count == 0:
-                    self.ultrasonic_hold_started = now
-                self.ultrasonic_near_count += 1
-            else:
-                self.ultrasonic_near_count = 0
-                self.ultrasonic_hold_started = None
-
         if self.visual_near_count >= cfg.BALL_STOP_CONFIRM_FRAMES:
             reason = "proximidade visual confirmada"
             self.state = self.NEAR
             self._terminal_detail = reason
             return MotionCommand(
                 self.state, detail=reason, terminal=True)
-
-        if (
-            self.ultrasonic_near_count
-            >= cfg.BALL_ULTRASONIC_CONFIRM_READS
-        ):
-            if abs(error) <= cfg.BALL_STOP_CENTER_ERROR:
-                reason = (
-                    "barreira ultrassonica confirmada com alvo centralizado")
-                self.state = self.NEAR
-                self._terminal_detail = reason
-                return MotionCommand(
-                    self.state, detail=reason, terminal=True)
-            return self._fault(
-                "obstaculo proximo no ultrassom fora do eixo da bolinha")
-
-        if self.ultrasonic_near_count > 0:
-            hold_for = now - (self.ultrasonic_hold_started or now)
-            if hold_for >= cfg.BALL_ULTRASONIC_HOLD_TIMEOUT_S:
-                return self._fault(
-                    "nao foi possivel confirmar a leitura ultrassonica proxima")
-            self.state = self.PROXIMITY_HOLD
-            self.progress.clear()
-            detail = (
-                f"primeiro eco proximo ({distance_mm} mm); PARAR para confirmar"
-                if distance_mm is not None
-                else "eco proximo pendente; PARAR para confirmar")
-            return MotionCommand(self.state, detail=detail)
 
         if abs(error) > cfg.BALL_ALIGN_THRESHOLD:
             self.state = self.ALIGN

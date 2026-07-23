@@ -132,9 +132,10 @@ neural sendo treinada nesta etapa.
 
 ## Parada e segurança
 
-A parada principal usa simultaneamente raio aparente, posição inferior e
-centralização, confirmados em vários frames. O HC-SR04 é apenas uma barreira
-auxiliar e só pode parar quando a esfera ainda está confirmada e centralizada.
+A chegada perto da bolinha é decidida exclusivamente pela câmera: raio
+aparente, posição inferior e centralização precisam ser confirmados em vários
+frames. O resgate não consulta o HC-SR04, porque uma vítima esférica pode
+desviar o eco e uma parede pode gerar uma falsa proximidade.
 
 Outras travas:
 
@@ -148,10 +149,7 @@ Outras travas:
   mesmo tempo;
 - contagem regressiva de 3 segundos com preview já funcionando e `PARAR`;
 - perda da esfera = `PARAR`;
-- o primeiro eco ultrassônico próximo já produz uma parada provisória; o
-  segundo confirma a chegada ou acusa obstáculo fora do eixo;
-- a consulta ultrassônica é assíncrona: o comando é enviado e a resposta é
-  consultada em ciclos posteriores, sem pausar a janela durante o timeout;
+- nenhuma leitura ultrassônica pode alterar, pausar ou encerrar a aproximação;
 - frame antigo = `PARAR`;
 - o detector descarta backlog e nunca repete o mesmo resultado no controle;
 - captura travada não bloqueia o watchdog de imagem nem o envio de `PARAR`;
