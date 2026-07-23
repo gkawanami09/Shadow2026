@@ -5,6 +5,26 @@
 #define VELOCIDADE_MAXIMA_SEGURA 120
 #define TIMEOUT_COMUNICACAO_MS 1000
 
+// LED indicador controlado pela Raspberry Pi.
+#define LED_PIN 12
+
+// Sensor ultrassonico.
+#define ULTRASSOM_TRIG_PIN 8
+#define ULTRASSOM_ECHO_PIN 11
+#define ULTRASSOM_TIMEOUT_US 30000UL
+
+// PCA9685 no barramento I2C do Uno (SDA=A4, SCL=A5).
+#define PCA9685_ENDERECO 0x40
+#define PCA9685_FREQUENCIA_HZ 50
+#define SERVO_PULSO_MIN_US 500
+#define SERVO_PULSO_MAX_US 2500
+
+// Canais dos servos no PCA9685.
+#define SERVO_GARRA_ESQUERDA 0
+#define SERVO_GARRA_DIREITA 1
+#define SERVO_CACAMBA 2
+#define SERVO_FUTABA 3
+
 // Multiplicadores ajustaveis durante a calibracao.
 #define DIRECAO_FE 1
 #define DIRECAO_TE 1

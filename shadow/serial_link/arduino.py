@@ -128,6 +128,34 @@ class Arduino:
     def ping(self):
         self._send_cmd("PING", force=True)
 
+    def servo(self, nome, angulo):
+        """Move um servo do PCA9685 sem alterar o keepalive dos motores."""
+        nome = str(nome).upper()
+        if nome not in ("GARRA_ESQ", "GARRA_DIR", "CACAMBA", "FUTABA"):
+            raise ValueError(f"Servo invalido: {nome}")
+        angulo = int(round(angulo))
+        if not 0 <= angulo <= 180:
+            raise ValueError(f"Angulo fora de 0..180: {angulo}")
+        self._send_aux_cmd(f"SERVO {nome} {angulo}")
+
+    def led(self, modo):
+        """Define o LED como APAGADO ou ACESO."""
+        modo = str(modo).upper()
+        if modo not in ("APAGADO", "ACESO"):
+            raise ValueError(f"Modo de LED invalido: {modo}")
+        self._send_aux_cmd(f"LED {modo}")
+
+    def distancia_ultrassom(self, timeout=0.2):
+        """Solicita uma leitura e retorna a distancia em mm, ou None sem eco."""
+        resposta = self._query("ULTRASSOM", "OK ULTRASSOM ", timeout)
+        if resposta is None:
+            return None
+        try:
+            distancia_mm = int(resposta.split()[-1])
+        except (ValueError, IndexError):
+            return None
+        return None if distancia_mm < 0 else distancia_mm
+
     def refresh(self):
         """Re-send the last command if the keepalive interval elapsed
         (call inside any sleep while motors are running)."""
@@ -159,6 +187,31 @@ class Arduino:
         self._last_cmd = cmd
         self._last_send_t = now
         self._drain()
+
+    def _send_aux_cmd(self, cmd):
+        """Envia periferico sem substituir o ultimo comando dos motores."""
+        self._write_line(cmd)
+        self._drain()
+
+    def _query(self, cmd, prefix, timeout):
+        """Envia uma consulta e aguarda somente a resposta correspondente."""
+        self._drain()
+        self._write_line(cmd)
+        deadline = time.monotonic() + timeout
+        while self._connected and time.monotonic() < deadline:
+            try:
+                if self._ser.in_waiting:
+                    line = self._ser.readline().decode(errors="replace").strip()
+                    if line.startswith(prefix):
+                        return line
+                    if line.startswith("ERRO"):
+                        print(f"[serial] firmware respondeu: {line}")
+                else:
+                    time.sleep(0.002)
+            except (serial.SerialException, OSError):
+                self._connected = False
+                break
+        return None
 
     def _write_line(self, cmd):
         if not self._connected:

@@ -101,3 +101,41 @@ def enviar_comando_ler_respostas(conexao, comando, timeout=1.0):
 def limitar_velocidade(velocidade, limite=120):
     """Limita uma velocidade ao intervalo seguro definido."""
     return max(-limite, min(limite, int(velocidade)))
+
+
+def controlar_servo(conexao, nome, angulo):
+    """Move um servo do PCA9685 e retorna a resposta textual do Arduino."""
+    nome = str(nome).upper()
+    if nome not in ("GARRA_ESQ", "GARRA_DIR", "CACAMBA", "FUTABA"):
+        raise ValueError(f"Servo invalido: {nome}")
+    angulo = int(round(angulo))
+    if not 0 <= angulo <= 180:
+        raise ValueError(f"Angulo fora de 0..180: {angulo}")
+    return enviar_comando(conexao, f"SERVO {nome} {angulo}")
+
+
+def controlar_led(conexao, modo):
+    """Define o LED como APAGADO ou ACESO."""
+    modo = str(modo).upper()
+    if modo not in ("APAGADO", "ACESO"):
+        raise ValueError(f"Modo de LED invalido: {modo}")
+    return enviar_comando(conexao, f"LED {modo}")
+
+
+def ler_ultrassom(conexao, timeout=0.2):
+    """Retorna a distancia em milimetros, ou None quando nao houver eco."""
+    conexao.write(b"ULTRASSOM\n")
+    conexao.flush()
+    limite = time.monotonic() + timeout
+    while time.monotonic() < limite:
+        if conexao.in_waiting:
+            resposta = conexao.readline().decode("utf-8", errors="replace").strip()
+            if resposta.startswith("OK ULTRASSOM "):
+                try:
+                    distancia_mm = int(resposta.split()[-1])
+                except (ValueError, IndexError):
+                    return None
+                return None if distancia_mm < 0 else distancia_mm
+        else:
+            time.sleep(0.002)
+    return None

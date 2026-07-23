@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <Wire.h>
 
 #include "config.h"
 
@@ -8,6 +9,13 @@ const byte TAMANHO_COMANDO = 64;
 char buffer_comando[TAMANHO_COMANDO];
 byte tamanho_comando = 0;
 unsigned long ultimo_comando_ms = 0;
+
+enum ModoLed {
+  LED_APAGADO,
+  LED_ACESO
+};
+
+ModoLed modo_led = LED_ACESO;
 
 void configurar_pinos() {
   pinMode(FE_IN1, OUTPUT);
@@ -22,6 +30,91 @@ void configurar_pinos() {
   pinMode(TD_IN1, OUTPUT);
   pinMode(TD_IN2, OUTPUT);
   pinMode(TD_PWM, OUTPUT);
+
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
+
+  pinMode(ULTRASSOM_TRIG_PIN, OUTPUT);
+  pinMode(ULTRASSOM_ECHO_PIN, INPUT);
+  digitalWrite(ULTRASSOM_TRIG_PIN, LOW);
+}
+
+void escrever_pca9685(byte registrador, byte valor) {
+  Wire.beginTransmission(PCA9685_ENDERECO);
+  Wire.write(registrador);
+  Wire.write(valor);
+  Wire.endTransmission();
+}
+
+void configurar_pca9685() {
+  Wire.begin();
+
+  // Coloca o PCA9685 em sleep para configurar 50 Hz e depois o reativa.
+  escrever_pca9685(0x00, 0x10);
+  byte prescale = (byte)(25000000UL / (4096UL * PCA9685_FREQUENCIA_HZ) - 1UL);
+  escrever_pca9685(0xFE, prescale);
+  escrever_pca9685(0x00, 0x20);
+  delay(1);
+  escrever_pca9685(0x00, 0xA0);
+
+  // Nao movimenta os servos durante o boot. Cada canal e ativado somente
+  // quando a Raspberry enviar o primeiro comando SERVO correspondente.
+  for (byte canal = 0; canal < 4; canal++) {
+    byte base = 0x06 + 4 * canal;
+    escrever_pca9685(base, 0);
+    escrever_pca9685(base + 1, 0);
+    escrever_pca9685(base + 2, 0);
+    escrever_pca9685(base + 3, 0x10);
+  }
+}
+
+void definir_servo(byte canal, int angulo) {
+  long pulso_us = map(angulo, 0, 180, SERVO_PULSO_MIN_US, SERVO_PULSO_MAX_US);
+  unsigned int contador = (unsigned int)(pulso_us * 4096L / 20000L);
+  byte base = 0x06 + 4 * canal;
+
+  escrever_pca9685(base, 0);
+  escrever_pca9685(base + 1, 0);
+  escrever_pca9685(base + 2, contador & 0xFF);
+  escrever_pca9685(base + 3, (contador >> 8) & 0x0F);
+}
+
+bool canal_servo_por_nome(const char* nome, byte* canal) {
+  if (strcmp(nome, "GARRA_ESQ") == 0 || strcmp(nome, "CH0") == 0) {
+    *canal = SERVO_GARRA_ESQUERDA;
+  } else if (strcmp(nome, "GARRA_DIR") == 0 || strcmp(nome, "CH1") == 0) {
+    *canal = SERVO_GARRA_DIREITA;
+  } else if (strcmp(nome, "CACAMBA") == 0 || strcmp(nome, "CH2") == 0) {
+    *canal = SERVO_CACAMBA;
+  } else if (strcmp(nome, "FUTABA") == 0 || strcmp(nome, "CH3") == 0) {
+    *canal = SERVO_FUTABA;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+void definir_modo_led(ModoLed novo_modo) {
+  modo_led = novo_modo;
+  digitalWrite(LED_PIN, modo_led == LED_ACESO ? HIGH : LOW);
+}
+
+long medir_distancia_mm() {
+  digitalWrite(ULTRASSOM_TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(ULTRASSOM_TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(ULTRASSOM_TRIG_PIN, LOW);
+
+  unsigned long duracao = pulseIn(
+    ULTRASSOM_ECHO_PIN,
+    HIGH,
+    ULTRASSOM_TIMEOUT_US
+  );
+  if (duracao == 0) return -1;
+
+  // Velocidade do som: aproximadamente 0,343 mm/us; ida e volta.
+  return (long)(duracao * 343UL / 2000UL);
 }
 
 int limitar_velocidade(int velocidade) {
@@ -128,6 +221,45 @@ void processar_comando(char* comando) {
   char* extra = strtok(NULL, " \t");
   int valor1, valor2, valor3, valor4;
 
+  if (strcmp(tipo, "SERVO") == 0) {
+    byte canal;
+    if (primeiro == NULL || segundo == NULL || terceiro != NULL ||
+        !ler_inteiro(segundo, &valor1) || valor1 < 0 || valor1 > 180) {
+      Serial.println("ERRO PARAMETROS_INVALIDOS");
+    } else if (!canal_servo_por_nome(primeiro, &canal)) {
+      Serial.println("ERRO SERVO_INVALIDO");
+    } else {
+      definir_servo(canal, valor1);
+      Serial.print("OK SERVO "); Serial.print(primeiro); Serial.print(" "); Serial.println(valor1);
+    }
+    return;
+  }
+
+  if (strcmp(tipo, "LED") == 0) {
+    if (primeiro == NULL || segundo != NULL) {
+      Serial.println("ERRO PARAMETROS_INVALIDOS");
+    } else if (strcmp(primeiro, "APAGADO") == 0) {
+      definir_modo_led(LED_APAGADO);
+      Serial.println("OK LED APAGADO");
+    } else if (strcmp(primeiro, "ACESO") == 0) {
+      definir_modo_led(LED_ACESO);
+      Serial.println("OK LED ACESO");
+    } else {
+      Serial.println("ERRO PARAMETROS_INVALIDOS");
+    }
+    return;
+  }
+
+  if (strcmp(tipo, "ULTRASSOM") == 0) {
+    if (primeiro != NULL) {
+      Serial.println("ERRO PARAMETROS_INVALIDOS");
+    } else {
+      Serial.print("OK ULTRASSOM ");
+      Serial.println(medir_distancia_mm());
+    }
+    return;
+  }
+
   if (strcmp(tipo, "MOTOR") == 0) {
     if (primeiro == NULL || segundo == NULL || terceiro != NULL || !ler_inteiro(segundo, &valor1)) {
       Serial.println("ERRO PARAMETROS_INVALIDOS");
@@ -179,6 +311,7 @@ void processar_comando(char* comando) {
 
 void setup() {
   configurar_pinos();
+  configurar_pca9685();
   parar_todos_motores();
   Serial.begin(BAUD_RATE);
   ultimo_comando_ms = millis();
