@@ -23,9 +23,8 @@ int posicao_servo_atual[4] = {
   0
 };
 bool futaba_ativo = false;
-int futaba_pulso_atual_us = FUTABA_PULSO_CENTRO_US;
-int futaba_pulso_alto_us = -1;
-int futaba_pulso_baixo_us = -1;
+int futaba_potencia_atual = 0;
+unsigned long futaba_desligar_em_ms = 0;
 
 void escrever_pca9685(byte registrador, byte valor);
 void definir_servo(byte canal, int angulo);
@@ -109,29 +108,36 @@ void definir_servo_pulso(byte canal, int pulso_us) {
   escrever_pca9685(base + 3, (contador >> 8) & 0x0F);
 }
 
-void mover_futaba_suave(int destino_us) {
-  destino_us = constrain(
-    destino_us,
-    FUTABA_PULSO_MIN_TESTE_US,
-    FUTABA_PULSO_MAX_TESTE_US
+void parar_futaba() {
+  desligar_canal_pca9685(SERVO_FUTABA);
+  futaba_ativo = false;
+  futaba_potencia_atual = 0;
+  futaba_desligar_em_ms = 0;
+}
+
+void acionar_futaba(int potencia, unsigned long tempo_ms) {
+  potencia = constrain(potencia, -100, 100);
+  int magnitude = abs(potencia);
+  int desvio_us = map(
+    magnitude,
+    1,
+    100,
+    FUTABA_DESVIO_MIN_US,
+    FUTABA_DESVIO_MAX_US
   );
+  int pulso_us = FUTABA_PULSO_NEUTRO_US +
+    (potencia > 0 ? desvio_us : -desvio_us);
 
-  if (!futaba_ativo) {
-    futaba_pulso_atual_us = FUTABA_PULSO_CENTRO_US;
-    definir_servo_pulso(SERVO_FUTABA, futaba_pulso_atual_us);
-    futaba_ativo = true;
-  }
+  definir_servo_pulso(SERVO_FUTABA, pulso_us);
+  futaba_ativo = true;
+  futaba_potencia_atual = potencia;
+  futaba_desligar_em_ms = millis() + tempo_ms;
+}
 
-  while (futaba_pulso_atual_us != destino_us) {
-    int diferenca = destino_us - futaba_pulso_atual_us;
-    int passo = constrain(
-      diferenca,
-      -FUTABA_PASSO_RAMPA_US,
-      FUTABA_PASSO_RAMPA_US
-    );
-    futaba_pulso_atual_us += passo;
-    definir_servo_pulso(SERVO_FUTABA, futaba_pulso_atual_us);
-    delay(FUTABA_ATRASO_RAMPA_MS);
+void atualizar_futaba() {
+  if (futaba_ativo &&
+      (long)(millis() - futaba_desligar_em_ms) >= 0) {
+    parar_futaba();
   }
 }
 
@@ -253,15 +259,14 @@ bool ler_inteiro(const char* texto, int* valor) {
   return true;
 }
 
-bool ler_pulso_futaba(const char* texto, int* valor) {
+bool ler_tempo_futaba(const char* texto, unsigned long* valor) {
   char* fim;
   long numero = strtol(texto, &fim, 10);
-  if (*texto == '\0' || *fim != '\0' ||
-      numero < FUTABA_PULSO_MIN_TESTE_US ||
-      numero > FUTABA_PULSO_MAX_TESTE_US) {
+  if (*texto == '\0' || *fim != '\0' || numero < 1 ||
+      numero > FUTABA_TEMPO_MAX_MS) {
     return false;
   }
-  *valor = (int)numero;
+  *valor = (unsigned long)numero;
   return true;
 }
 
@@ -282,6 +287,7 @@ void processar_comando(char* comando) {
   }
   if (strcmp(tipo, "PARAR") == 0 && strtok(NULL, " \t") == NULL) {
     parar_todos_motores();
+    parar_futaba();
     Serial.println("OK PARADO");
     return;
   }
@@ -298,46 +304,27 @@ void processar_comando(char* comando) {
   int valor1, valor2, valor3, valor4;
 
   if (strcmp(tipo, "FUTABA") == 0) {
+    unsigned long tempo_futaba_ms;
+
     if (primeiro == NULL || terceiro != NULL) {
       Serial.println("ERRO PARAMETROS_INVALIDOS");
       return;
     }
 
-    if (strcmp(primeiro, "ATIVAR") == 0 && segundo == NULL) {
-      mover_futaba_suave(FUTABA_PULSO_CENTRO_US);
-      Serial.print("OK FUTABA ATIVO PULSO "); Serial.println(futaba_pulso_atual_us);
-    } else if (strcmp(primeiro, "DESATIVAR") == 0 && segundo == NULL) {
-      desligar_canal_pca9685(SERVO_FUTABA);
-      futaba_ativo = false;
-      Serial.println("OK FUTABA DESATIVADO");
+    if ((strcmp(primeiro, "PARAR") == 0 ||
+         strcmp(primeiro, "DESATIVAR") == 0) && segundo == NULL) {
+      parar_futaba();
+      Serial.println("OK FUTABA PARADO");
     } else if (strcmp(primeiro, "STATUS") == 0 && segundo == NULL) {
       Serial.print("OK FUTABA ");
       Serial.print(futaba_ativo ? "ATIVO" : "DESATIVADO");
-      Serial.print(" PULSO "); Serial.print(futaba_pulso_atual_us);
-      Serial.print(" ALTO "); Serial.print(futaba_pulso_alto_us);
-      Serial.print(" BAIXO "); Serial.println(futaba_pulso_baixo_us);
-    } else if (strcmp(primeiro, "PULSO") == 0 && segundo != NULL &&
-               ler_pulso_futaba(segundo, &valor1)) {
-      mover_futaba_suave(valor1);
-      Serial.print("OK FUTABA PULSO "); Serial.println(futaba_pulso_atual_us);
-    } else if ((strcmp(primeiro, "MAIS") == 0 || strcmp(primeiro, "MENOS") == 0) &&
-               segundo != NULL && ler_inteiro(segundo, &valor1) &&
-               valor1 > 0) {
-      if (strcmp(primeiro, "MENOS") == 0) valor1 = -valor1;
-      mover_futaba_suave(futaba_pulso_atual_us + valor1);
-      Serial.print("OK FUTABA PULSO "); Serial.println(futaba_pulso_atual_us);
-    } else if (strcmp(primeiro, "MARCAR_ALTO") == 0 && segundo == NULL && futaba_ativo) {
-      futaba_pulso_alto_us = futaba_pulso_atual_us;
-      Serial.print("OK FUTABA ALTO "); Serial.println(futaba_pulso_alto_us);
-    } else if (strcmp(primeiro, "MARCAR_BAIXO") == 0 && segundo == NULL && futaba_ativo) {
-      futaba_pulso_baixo_us = futaba_pulso_atual_us;
-      Serial.print("OK FUTABA BAIXO "); Serial.println(futaba_pulso_baixo_us);
-    } else if (strcmp(primeiro, "ALTO") == 0 && segundo == NULL && futaba_pulso_alto_us >= 0) {
-      mover_futaba_suave(futaba_pulso_alto_us);
-      Serial.print("OK FUTABA ALTO "); Serial.println(futaba_pulso_atual_us);
-    } else if (strcmp(primeiro, "BAIXO") == 0 && segundo == NULL && futaba_pulso_baixo_us >= 0) {
-      mover_futaba_suave(futaba_pulso_baixo_us);
-      Serial.print("OK FUTABA BAIXO "); Serial.println(futaba_pulso_atual_us);
+      Serial.print(" POTENCIA "); Serial.println(futaba_potencia_atual);
+    } else if (segundo != NULL && ler_inteiro(primeiro, &valor1) &&
+               valor1 >= -100 && valor1 <= 100 && valor1 != 0 &&
+               ler_tempo_futaba(segundo, &tempo_futaba_ms)) {
+      acionar_futaba(valor1, tempo_futaba_ms);
+      Serial.print("OK FUTABA POTENCIA "); Serial.print(valor1);
+      Serial.print(" TEMPO_MS "); Serial.println(tempo_futaba_ms);
     } else {
       Serial.println("ERRO PARAMETROS_INVALIDOS");
     }
@@ -449,6 +436,8 @@ void setup() {
 }
 
 void loop() {
+  atualizar_futaba();
+
   if (millis() - ultimo_comando_ms > TIMEOUT_COMUNICACAO_MS) {
     parar_todos_motores();
   }

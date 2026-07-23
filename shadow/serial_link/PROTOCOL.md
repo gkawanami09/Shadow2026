@@ -34,13 +34,9 @@ O `shadow/` **não** substitui esse firmware — apenas fala com ele
 | `SERVO <nome> <delta>` | move relativamente a ultima posicao; nomes ativos `GARRA_ESQ`, `GARRA_DIR` ou `CACAMBA`; delta -180..180 | `OK SERVO <nome> DELTA <d> POS <alvo>` |
 | `LED APAGADO\|ACESO` | controla o LED indicador em D12; inicia aceso no boot | `OK LED <modo>` |
 | `ULTRASSOM` | mede o sensor com TRIG D8 e ECHO D11 | `OK ULTRASSOM <mm>`; `-1` = sem eco |
-| `FUTABA ATIVAR` | ativa CH3 no pulso central seguro de 1500 us | `OK FUTABA ATIVO PULSO 1500` |
-| `FUTABA PULSO <500..2500>` | move suavemente para um pulso de calibracao | `OK FUTABA PULSO <us>` |
-| `FUTABA MAIS\|MENOS <passo>` | ajusta o pulso atual em microssegundos | `OK FUTABA PULSO <us>` |
-| `FUTABA MARCAR_ALTO\|MARCAR_BAIXO` | guarda temporariamente a posicao atual | `OK FUTABA ALTO\|BAIXO <us>` |
-| `FUTABA ALTO\|BAIXO` | vai suavemente para a posicao marcada | `OK FUTABA ALTO\|BAIXO <us>` |
-| `FUTABA STATUS` | informa ativacao, pulso e marcacoes | `OK FUTABA ...` |
-| `FUTABA DESATIVAR` | desliga completamente a saida CH3 | `OK FUTABA DESATIVADO` |
+| `FUTABA <potencia> <tempo_ms>` | aciona CH3 com potencia assinada -100..100 por 1..3000 ms e corta o sinal automaticamente | `OK FUTABA POTENCIA <p> TEMPO_MS <ms>` |
+| `FUTABA STATUS` | informa se esta ativo e a potencia atual | `OK FUTABA <estado> POTENCIA <p>` |
+| `FUTABA PARAR` | corta imediatamente a saida CH3 | `OK FUTABA PARADO` |
 
 Erros: `ERRO PARAMETROS_INVALIDOS`, `ERRO MOTOR_INVALIDO`, `ERRO SERVO_INVALIDO`, `ERRO SERVO_DESATIVADO`, `ERRO COMANDO_INVALIDO`.
 
@@ -51,9 +47,10 @@ CH2=cacamba e CH3=Futaba. No boot, a garra esquerda vai para 180 graus e a
 direita para 0 graus (extremos abertos); a cacamba vai para 90 graus e o canal
 do Futaba permanece totalmente desligado.
 
-As marcacoes `ALTO` e `BAIXO` ficam somente na RAM e sao apagadas quando o Uno
-reinicia. Depois da calibracao, os pulsos confirmados devem ser fixados no
-`config.h` para uso autonomo.
+Potencia positiva e negativa giram em sentidos opostos. O firmware nunca mantem
+o servo continuo ligado por mais de 3000 ms por comando. Para o servo instalado,
+o neutro foi calibrado em 1660 us e a zona morta e compensada em 80 us: valores
+positivos comandam subida e negativos comandam descida.
 
 ## Como o Python usa o protocolo
 

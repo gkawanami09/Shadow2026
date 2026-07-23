@@ -24,12 +24,11 @@
 #define SERVO_POSICAO_INICIAL_GARRA_DIR 0
 #define SERVO_POSICAO_INICIAL_CACAMBA 90
 
-// Calibracao segura do servo de elevacao (CH3).
-#define FUTABA_PULSO_CENTRO_US 1500
-#define FUTABA_PULSO_MIN_TESTE_US 500
-#define FUTABA_PULSO_MAX_TESTE_US 2500
-#define FUTABA_PASSO_RAMPA_US 10
-#define FUTABA_ATRASO_RAMPA_MS 5
+// Servo continuo de elevacao (CH3): potencia assinada e tempo limitado.
+#define FUTABA_PULSO_NEUTRO_US 1660
+#define FUTABA_DESVIO_MIN_US 80
+#define FUTABA_DESVIO_MAX_US 400
+#define FUTABA_TEMPO_MAX_MS 3000UL
 
 // Canais dos servos no PCA9685.
 #define SERVO_GARRA_ESQUERDA 0

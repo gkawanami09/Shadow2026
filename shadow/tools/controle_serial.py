@@ -21,16 +21,10 @@ Digite exatamente o comando que deseja enviar, por exemplo:
   SERVO GARRA_ESQ 20     move 20 graus no sentido positivo
   SERVO GARRA_DIR -20    move 20 graus no sentido contrario
   SERVO CACAMBA 10
-  FUTABA ATIVAR
-  FUTABA PULSO 1500
-  FUTABA MAIS 25
-  FUTABA MENOS 25
-  FUTABA MARCAR_ALTO
-  FUTABA MARCAR_BAIXO
-  FUTABA ALTO
-  FUTABA BAIXO
+  FUTABA 25 200         gira positivo por 200 ms
+  FUTABA -25 200        gira negativo por 200 ms
+  FUTABA PARAR          corta o sinal imediatamente
   FUTABA STATUS
-  FUTABA DESATIVAR
   LED ACESO
   LED APAGADO
   ULTRASSOM

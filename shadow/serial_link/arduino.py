@@ -158,6 +158,20 @@ class Arduino:
             return None
         return None if distancia_mm < 0 else distancia_mm
 
+    def futaba(self, potencia, tempo_ms):
+        """Aciona o servo continuo com potencia -100..100 por ate 3000 ms."""
+        potencia = int(round(potencia))
+        tempo_ms = int(round(tempo_ms))
+        if potencia == 0 or not -100 <= potencia <= 100:
+            raise ValueError("Potencia do Futaba deve estar em -100..-1 ou 1..100")
+        if not 1 <= tempo_ms <= 3000:
+            raise ValueError("Tempo do Futaba deve estar em 1..3000 ms")
+        self._send_aux_cmd(f"FUTABA {potencia} {tempo_ms}")
+
+    def parar_futaba(self):
+        """Corta imediatamente o sinal do canal continuo CH3."""
+        self._send_aux_cmd("FUTABA PARAR")
+
     def comando_serial(self, comando, timeout=0.5):
         """Envia uma linha livre e retorna a primeira resposta do firmware.
 

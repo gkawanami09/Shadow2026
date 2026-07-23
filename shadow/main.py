@@ -67,6 +67,15 @@ def main():
                         help="roda apenas o processo de visão (bring-up)")
     args = parser.parse_args()
 
+    motor_lock = None
+    if not args.vision_only:
+        from control.motor_lock import MotorLockError, MotorOwnerLock
+        motor_lock = MotorOwnerLock("segue-linha")
+        try:
+            motor_lock.acquire()
+        except MotorLockError as err:
+            parser.error(str(err))
+
     # importa mp_manager APOS o parse (instancia o Manager)
     from shared.mp_manager import status, terminate
 
@@ -122,6 +131,8 @@ def main():
                 shm.unlink()
             except FileNotFoundError:
                 pass
+        if motor_lock is not None:
+            motor_lock.release()
         print("Encerrado.")
 
 
