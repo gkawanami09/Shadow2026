@@ -149,12 +149,33 @@ BALL_APPROACH_SPEED_NEAR = 0.35
 BALL_SLOW_RADIUS_PX = 48
 
 # Parada perto da esfera, exclusivamente pela camera. O resgate nao consulta o
-# HC-SR04 porque a superficie esferica pode desviar o eco. Estes valores sao
-# deliberadamente conservadores e precisam ser calibrados com a camera montada.
+# HC-SR04 porque a superficie esferica pode desviar o eco. O gate normal usa o
+# circulo externo e tambem espera a linha inferior 0.84, inclusive para a esfera
+# preta, evitando a parada antecipada observada a cerca de 20 cm. A faixa
+# especial abaixo cobre a esfera prateada muito perto: nessa pose o circulo
+# externo fica cortado e o tracker pode escolher um reflexo interno pequeno,
+# como no frame medido x=424, y=379, r=37 em 640x480.
 BALL_STOP_RADIUS_PX = 76
-BALL_STOP_BOTTOM_Y_RATIO = 0.78
+BALL_STOP_BOTTOM_Y_RATIO = 0.84
 BALL_STOP_CENTER_ERROR = 0.12
 BALL_STOP_CONFIRM_FRAMES = 3
+
+# Gate da esfera prateada cortada na parte inferior da imagem. Alem da
+# deteccao selecionada, exige varios candidatos e dois circulos externos
+# grandes que envolvam o reflexo rastreado no mesmo frame; assim um brilho
+# pequeno no piso nao pode se combinar com circulos de outro objeto.
+BALL_CLOSE_MIN_CONFIDENCE = 0.80
+BALL_CLOSE_MIN_HITS = 6
+BALL_CLOSE_MIN_RADIUS_PX = 28
+BALL_CLOSE_CENTER_Y_RATIO = 0.74
+BALL_CLOSE_BOTTOM_Y_RATIO = 0.84
+BALL_CLOSE_CENTER_ERROR = 0.42
+BALL_CLOSE_MIN_CANDIDATES = 6
+BALL_CLOSE_LARGEST_RADIUS_PX = 105
+BALL_CLOSE_SECOND_RADIUS_PX = 85
+BALL_CLOSE_ASSOCIATION_RADIUS_RATIO = 1.15
+BALL_CLOSE_OUTER_MIN_CONFIDENCE = 0.66
+BALL_CLOSE_OUTER_CENTER_ERROR = 0.24
 
 # Coleta depois que a aproximacao visual termina. Re e avanco usam a mesma
 # velocidade conservadora ja validada perto da esfera. O Futaba e continuo:
@@ -179,3 +200,4 @@ BALL_MAX_WAIT_S = 30.0
 BALL_MAX_ACTIVE_S = 45.0
 BALL_PROGRESS_WINDOW_S = 3.0
 BALL_PROGRESS_MIN_RADIUS_PX = 3.0
+BALL_PROGRESS_MIN_BOTTOM_Y_PX = 8.0

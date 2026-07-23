@@ -61,6 +61,7 @@ class AsyncDetectionResult:
     candidate_count: int
     candidate_radii: tuple
     diagnostic: str
+    candidate_circles: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -367,13 +368,24 @@ class LatestFrameBallDetector:
                     float(frame_width) / max(detector_width, 1),
                     float(frame_height) / max(detector_height, 1),
                 )
-                candidate_radii = tuple(sorted(
+                scale_x = float(frame_width) / max(detector_width, 1)
+                scale_y = float(frame_height) / max(detector_height, 1)
+                candidate_circles = tuple(sorted(
                     (
-                        round(float(candidate.radius) * radius_scale, 1)
+                        (
+                            round(float(candidate.center_x) * scale_x, 1),
+                            round(float(candidate.center_y) * scale_y, 1),
+                            round(float(candidate.radius) * radius_scale, 1),
+                            str(candidate.kind),
+                            round(float(candidate.confidence), 3),
+                        )
                         for candidate in candidates
                     ),
+                    key=lambda circle: circle[2],
                     reverse=True,
-                )[:4])
+                )[:8])
+                candidate_radii = tuple(
+                    circle[2] for circle in candidate_circles[:4])
                 completed_at = self._clock()
                 result = AsyncDetectionResult(
                     sequence=sequence,
@@ -392,6 +404,7 @@ class LatestFrameBallDetector:
                     candidate_count=candidate_count,
                     candidate_radii=candidate_radii,
                     diagnostic=diagnostic,
+                    candidate_circles=candidate_circles,
                 )
             except Exception as err:
                 with self._condition:

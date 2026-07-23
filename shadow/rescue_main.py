@@ -208,6 +208,9 @@ def _dataset_metadata(
             "hough_proposals": int(result.hough_proposals),
             "candidate_count": int(result.candidate_count),
             "candidate_radii": list(result.candidate_radii),
+            "candidate_circles": [
+                list(circle) for circle in result.candidate_circles
+            ],
             "diagnostic": result.diagnostic,
             "detection": detection_data,
         }
@@ -231,6 +234,8 @@ def _dataset_metadata(
             "angle": int(command.angle),
             "speed": float(command.speed),
             "terminal": bool(command.terminal),
+            "pickup_in_range": bool(command.pickup_in_range),
+            "pickup_confirmations": int(command.pickup_confirmations),
         },
         "latest_detector_result": detector_data,
     }
@@ -461,6 +466,8 @@ def main():
                     command = controller.update(
                         control_detection,
                         result.frame_shape,
+                        candidate_count=result.candidate_count,
+                        candidate_circles=result.candidate_circles,
                         now=now,
                     )
                     command_updated = True
@@ -623,6 +630,8 @@ def main():
                     None,
                     motors_enabled=args.drive,
                     performance_text=performance_text,
+                    pickup_in_range=command.pickup_in_range,
+                    pickup_confirmations=command.pickup_confirmations,
                 )
                 cv2.imshow(WINDOW, annotated)
 

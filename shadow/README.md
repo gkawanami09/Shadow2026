@@ -10,9 +10,10 @@ RoboCup Junior Rescue Line, Eindhoven 2024) para o hardware do **Shadow2026**:
 - LiPo 7.4 V 2200 mAh
 
 O executável de segue-linha continua **sem** IMU, TPU e sensores IR. O resgate
-fica isolado em `rescue_main.py`, usa somente a câmera frontal para decidir a
-proximidade e então aciona o Futaba e as garras, sem alterar `main.py`. O
-HC-SR04 não participa de nenhuma decisão do resgate.
+fica isolado em `rescue_main.py`, usa somente a câmera frontal e uma faixa
+visual inferior para decidir a proximidade, e então aciona o Futaba e as
+garras, sem alterar `main.py`. A câmera de linha e o HC-SR04 não participam de
+nenhuma decisão do resgate.
 
 ## O que ele faz
 

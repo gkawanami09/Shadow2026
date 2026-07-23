@@ -718,6 +718,8 @@ def annotate_rescue_frame(
     distance_mm=None,
     motors_enabled=False,
     performance_text="",
+    pickup_in_range=False,
+    pickup_confirmations=0,
 ):
     """Retorna uma copia anotada para debug; nao participa da decisao."""
     annotated = frame.copy()
@@ -732,6 +734,51 @@ def annotate_rescue_frame(
         (width // 2, height),
         (0, 180, 255),
         1)
+
+    gate_half_width = int(round(
+        width / 2.0 * cfg.BALL_CLOSE_OUTER_CENTER_ERROR))
+    gate_left = max(width // 2 - gate_half_width, 0)
+    gate_right = min(width // 2 + gate_half_width, width - 1)
+    gate_center_y = int(round(
+        height * cfg.BALL_CLOSE_CENTER_Y_RATIO))
+    gate_bottom_y = int(round(
+        height * cfg.BALL_CLOSE_BOTTOM_Y_RATIO))
+    confirmation_count = int(np.clip(
+        pickup_confirmations, 0, cfg.BALL_STOP_CONFIRM_FRAMES))
+    if confirmation_count >= cfg.BALL_STOP_CONFIRM_FRAMES:
+        gate_color = (0, 255, 0)
+    elif pickup_in_range:
+        gate_color = (0, 165, 255)
+    else:
+        gate_color = (0, 255, 255)
+    gate_thickness = 2 if pickup_in_range else 1
+    cv2.rectangle(
+        annotated,
+        (gate_left, gate_center_y),
+        (gate_right, height - 1),
+        gate_color,
+        gate_thickness,
+    )
+    cv2.line(
+        annotated,
+        (gate_left, gate_bottom_y),
+        (gate_right, gate_bottom_y),
+        gate_color,
+        gate_thickness,
+    )
+    cv2.putText(
+        annotated,
+        (
+            "FAIXA GARRA "
+            f"{confirmation_count}/{cfg.BALL_STOP_CONFIRM_FRAMES}"
+        ),
+        (gate_left + 4, max(gate_center_y - 7, 15)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.43,
+        gate_color,
+        1,
+        cv2.LINE_AA,
+    )
 
     if detection is not None:
         color = (0, 255, 0) if detection.confirmed else (0, 180, 255)

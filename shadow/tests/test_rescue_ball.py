@@ -10,10 +10,12 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import rescue_config as cfg
 from vision.rescue_ball import (
+    BallDetection,
     BallDetector,
     RescueEnhancer,
     _Candidate,
     _Proposal,
+    annotate_rescue_frame,
 )
 
 
@@ -48,6 +50,50 @@ def with_color_cast(frame, bgr_gains):
         0,
         255,
     ).astype(np.uint8)
+
+
+class RescueOverlayTests(unittest.TestCase):
+    def test_pickup_gate_shows_outside_confirming_and_ready(self):
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        detection = BallDetection(
+            "silver", 424, 379, 37, 0.91, True, 181, 1.0)
+        gate_y = int(round(
+            frame.shape[0] * cfg.BALL_CLOSE_BOTTOM_Y_RATIO))
+        gate_left = int(round(
+            frame.shape[1] / 2
+            - frame.shape[1] / 2 * cfg.BALL_CLOSE_OUTER_CENTER_ERROR
+        ))
+        sample_x = gate_left + 10
+
+        outside = annotate_rescue_frame(
+            frame, detection, "APPROACH")
+        confirming = annotate_rescue_frame(
+            frame,
+            detection,
+            "NEAR_CONFIRM",
+            pickup_in_range=True,
+            pickup_confirmations=2,
+        )
+        ready = annotate_rescue_frame(
+            frame,
+            detection,
+            "NEAR",
+            pickup_in_range=True,
+            pickup_confirmations=cfg.BALL_STOP_CONFIRM_FRAMES,
+        )
+
+        self.assertTupleEqual(
+            tuple(outside[gate_y, sample_x]),
+            (0, 255, 255),
+        )
+        self.assertTupleEqual(
+            tuple(confirming[gate_y, sample_x]),
+            (0, 165, 255),
+        )
+        self.assertTupleEqual(
+            tuple(ready[gate_y, sample_x]),
+            (0, 255, 0),
+        )
 
 
 class RescueBallDetectorTests(unittest.TestCase):

@@ -7,7 +7,7 @@ integração no controle de linha é enviar `LED ACESO` ao iniciar esse modo.
 ## Escopo
 
 ```text
-WAIT_TARGET -> ALIGN -> APPROACH -> NEAR
+WAIT_TARGET -> ALIGN -> APPROACH -> NEAR_CONFIRM -> NEAR
                     \-> LOST/FAULT (PARAR)
 NEAR -> PICKUP_BACKUP -> PICKUP_FUTABA -> PICKUP_GRIPPERS -> PICKUP_COMPLETE
 ```
@@ -15,6 +15,8 @@ NEAR -> PICKUP_BACKUP -> PICKUP_FUTABA -> PICKUP_GRIPPERS -> PICKUP_COMPLETE
 - `WAIT_TARGET`: motores parados até uma esfera aparecer de forma consistente.
 - `ALIGN`: pivô lento, sem avanço, para centralizar a esfera.
 - `APPROACH`: avanço em arco; a velocidade diminui à medida que a esfera cresce.
+- `NEAR_CONFIRM`: para imediatamente e confirma por três frames que a esfera
+  entrou na faixa visual da garra.
 - `NEAR`: parada confirmada e transferência única para a coleta.
 - `LOST`: qualquer perda ou imagem antiga produz `PARAR` imediatamente.
 - `FAULT`: timeout ou falta de progresso produz `PARAR` travado.
@@ -42,7 +44,9 @@ tempo, o segue-linha antigo abre `Picamera2()` sem índice. Por isso:
 6. sensores diferentes ainda usam descoberta automática do maior campo;
 7. a saída preserva toda a proporção em até `640x480`, sem esticar círculos;
 8. a câmera frontal é rotacionada em 180° por estar montada de ponta-cabeça;
-9. `shadow/main.py` e `shadow/rescue_main.py` nunca devem rodar juntos.
+9. somente esta câmera frontal participa do resgate; a câmera de segue-linha
+   não é aberta por `rescue_main.py`;
+10. `shadow/main.py` e `shadow/rescue_main.py` nunca devem rodar juntos.
 
 Antes de liberar motores, execute:
 
@@ -65,6 +69,18 @@ caminho rápido de contornos ou `H` para fallback Hough, número de candidatos
 aceitos/propostas Hough brutas, motivo principal de rejeição, até quatro raios
 aceitos e frames descartados. Por exemplo, `H1/5:ok r42` significa que cinco
 círculos foram propostos, um passou pelos filtros e seu raio no preview é 42 px.
+
+O preview também desenha a `FAIXA GARRA`: o corredor inferior fica amarelo
+enquanto a esfera está fora, laranja em `1/3` e `2/3`, e verde em `3/3`.
+Quando a esfera prateada está tão perto que sai parcialmente do quadro, o
+tracker pode escolher um reflexo interno pequeno. Nesse caso, a faixa exige
+também confiança, histórico e pelo menos dois círculos externos grandes entre
+os candidatos do mesmo frame. Os dois círculos precisam envolver espacialmente
+o reflexo rastreado, ser classificados como prateados e manter o centro do
+envelope dentro do corredor da garra; círculos grandes de outro objeto ou uma
+esfera deslocada para o lado não podem armar a coleta.
+O watchdog também considera a descida da esfera na imagem, além do aumento do
+raio, para não declarar falta de progresso durante essa aproximação final.
 
 Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 `640x480`. O detector aplica:
@@ -134,10 +150,11 @@ neural sendo treinada nesta etapa.
 
 ## Parada e segurança
 
-A chegada perto da bolinha é decidida exclusivamente pela câmera: raio
-aparente, posição inferior e centralização precisam ser confirmados em vários
-frames. O resgate não consulta o HC-SR04, porque uma vítima esférica pode
-desviar o eco e uma parede pode gerar uma falsa proximidade.
+A chegada perto da bolinha é decidida exclusivamente pela câmera frontal:
+posição inferior, centralização e evidências do envelope externo precisam ser
+confirmadas em três frames. O primeiro indício já produz `PARAR`, antes de
+confirmar e armar a coleta. O resgate não consulta o HC-SR04, porque uma vítima
+esférica pode desviar o eco e uma parede pode gerar uma falsa proximidade.
 
 Outras travas:
 

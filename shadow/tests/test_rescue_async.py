@@ -141,6 +141,7 @@ class LatestFrameDetectorTests(unittest.TestCase):
             self.assertEqual(result.hough_proposals, 0)
             self.assertEqual(result.candidate_count, 0)
             self.assertEqual(result.candidate_radii, ())
+            self.assertEqual(result.candidate_circles, ())
             self.assertEqual(result.diagnostic, "")
             self.assertIsNone(worker.poll(after_sequence=result.sequence))
         finally:
@@ -200,6 +201,36 @@ class LatestFrameDetectorTests(unittest.TestCase):
             self.assertFalse(result.hough_used)
             self.assertGreaterEqual(result.candidate_count, 1)
             self.assertTrue(result.candidate_radii)
+            self.assertTrue(result.candidate_circles)
+        finally:
+            worker.close()
+
+    def test_candidate_circles_are_mapped_to_preview_resolution(self):
+        class CandidateDetector(ImmediateDetector):
+            def __init__(self):
+                self.last_candidates = []
+
+            def detect(self, frame, timestamp):
+                from vision.rescue_ball import _Candidate
+
+                self.last_candidates = [
+                    _Candidate("silver", 100, 120, 30, 0.9),
+                ]
+                return super().detect(frame, timestamp)
+
+        worker = LatestFrameBallDetector(
+            CandidateDetector(), max_width=640, max_height=480)
+        try:
+            frame = np.zeros((720, 960, 3), dtype=np.uint8)
+            worker.submit(frame, captured_at=10.0)
+            result = wait_result(worker)
+
+            self.assertEqual(result.candidate_count, 1)
+            self.assertTupleEqual(
+                result.candidate_circles[0],
+                (150.0, 180.0, 45.0, "silver", 0.9),
+            )
+            self.assertTupleEqual(result.candidate_radii, (45.0,))
         finally:
             worker.close()
 
