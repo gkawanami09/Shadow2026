@@ -156,18 +156,19 @@ BALL_STOP_BOTTOM_Y_RATIO = 0.78
 BALL_STOP_CENTER_ERROR = 0.12
 BALL_STOP_CONFIRM_FRAMES = 3
 
-# Coleta depois que a aproximacao visual termina. A re usa a mesma velocidade
-# conservadora ja validada perto da esfera. O Futaba e continuo: -20 e potencia
-# de descida por 1500 ms, nao um angulo. A margem garante que CH3 ja foi
-# desligado pelo firmware antes de mover as duas garras.
-BALL_PICKUP_REVERSE_S = 0.50
+# Coleta depois que a aproximacao visual termina. Re e avanco usam a mesma
+# velocidade conservadora ja validada perto da esfera. O Futaba e continuo:
+# -20 e potencia de descida por 1500 ms, nao um angulo. A margem garante que
+# CH3 ja foi desligado pelo firmware antes do avanco com as duas garras.
+BALL_PICKUP_REVERSE_S = 1.50
 BALL_PICKUP_REVERSE_SPEED = BALL_APPROACH_SPEED_NEAR
 BALL_PICKUP_FUTABA_POWER = -20
 BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
 BALL_PICKUP_LEFT_DELTA = -50
 BALL_PICKUP_RIGHT_DELTA = 50
-BALL_PICKUP_GRIPPER_SETTLE_S = 0.50
+BALL_PICKUP_FORWARD_S = 1.50
+BALL_PICKUP_FORWARD_SPEED = BALL_APPROACH_SPEED_NEAR
 
 # Hough + filtros medidos no Pi podem ultrapassar 0.20 s. O timestamp agora e
 # tirado depois da captura; 0.75 s ainda impede movimento com imagem congelada,

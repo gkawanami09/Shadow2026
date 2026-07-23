@@ -32,7 +32,7 @@ class PickupStep:
 
 
 class BallPickupSequencer:
-    """Re -> Futaba para baixo -> garras, sempre com deadlines monotonic."""
+    """Re -> Futaba -> avanco com garras, sempre com deadlines monotonic."""
 
     IDLE = "PICKUP_IDLE"
     BACKUP_START = "PICKUP_BACKUP_START"
@@ -130,7 +130,10 @@ class BallPickupSequencer:
             self._deadline = None
             return PickupStep(
                 self.GRIPPERS_START,
-                "Futaba embaixo; acionando as duas garras",
+                "Futaba embaixo; avancando e fechando as duas garras",
+                angle=0,
+                speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+                motor_action="forward",
                 stop_futaba=True,
                 gripper_action=(
                     cfg.BALL_PICKUP_LEFT_DELTA,
@@ -141,14 +144,18 @@ class BallPickupSequencer:
         if self.state == self.GRIPPERS_START:
             return PickupStep(
                 self.GRIPPERS_START,
-                "aguardando confirmacao do envio das garras",
+                "aguardando confirmacao do avanco e das garras",
+                angle=0,
+                speed=cfg.BALL_PICKUP_FORWARD_SPEED,
             )
 
         if self.state == self.GRIPPERS_WAIT:
             if now < self._deadline:
                 return PickupStep(
                     self.GRIPPERS_WAIT,
-                    "aguardando as garras chegarem a posicao",
+                    "avancando enquanto as garras fecham",
+                    angle=0,
+                    speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 )
             self.state = self.COMPLETE
             self._terminal_detail = "sequencia de coleta concluida"
@@ -179,7 +186,7 @@ class BallPickupSequencer:
         )
 
     def mark_reverse_started(self, now=None):
-        """Conta os 0,5 s depois que a escrita serial da re retornou."""
+        """Conta a re depois que a escrita serial correspondente retornou."""
         if self.state != self.BACKUP_PENDING:
             raise RuntimeError(
                 "confirmacao da re fora do estado de partida")
@@ -188,13 +195,13 @@ class BallPickupSequencer:
         self._deadline = now + cfg.BALL_PICKUP_REVERSE_S
 
     def mark_grippers_started(self, now=None):
-        """Inicia a acomodacao depois que o lote das garras foi escrito."""
+        """Inicia o avanco depois que motor e garras foram escritos."""
         if self.state != self.GRIPPERS_START:
             raise RuntimeError(
                 "confirmacao das garras fora do estado de partida")
         now = time.monotonic() if now is None else float(now)
         self.state = self.GRIPPERS_WAIT
-        self._deadline = now + cfg.BALL_PICKUP_GRIPPER_SETTLE_S
+        self._deadline = now + cfg.BALL_PICKUP_FORWARD_S
 
     def fail(self, detail):
         self.state = self.FAULT

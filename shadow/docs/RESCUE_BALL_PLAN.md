@@ -18,11 +18,11 @@ NEAR -> PICKUP_BACKUP -> PICKUP_FUTABA -> PICKUP_GRIPPERS -> PICKUP_COMPLETE
 - `NEAR`: parada confirmada e transferência única para a coleta.
 - `LOST`: qualquer perda ou imagem antiga produz `PARAR` imediatamente.
 - `FAULT`: timeout ou falta de progresso produz `PARAR` travado.
-- `PICKUP_BACKUP`: ré reta por 0,50 s a velocidade 0,35.
+- `PICKUP_BACKUP`: ré reta por 1,50 s a velocidade 0,35.
 - `PICKUP_FUTABA`: rodas zeradas e `FUTABA -20 1500`; aguarda 1,50 s
   mais 0,10 s de margem.
 - `PICKUP_GRIPPERS`: envia esquerda `-50` e direita `+50` no mesmo pacote
-  USB e aguarda 0,50 s para acomodação.
+  USB e avança reto por 1,50 s a velocidade 0,35 enquanto elas fecham.
 - `PICKUP_COMPLETE`: envia `PARAR` e encerra.
 
 Ainda não há busca cega por rotação, transporte, depósito ou navegação completa
@@ -100,7 +100,9 @@ deslocamentos relativos e não podem ser repetidos.
 programa usa `LADO 0 0` para zerar as quatro rodas. O keepalive repete esse
 comando enquanto CH3 desce, sem interromper os 1500 ms. Depois do prazo, o
 programa envia `FUTABA PARAR` por segurança e as duas linhas das garras em uma
-única escrita serial.
+única escrita serial. Confirmado o lote das garras, inicia o avanço reto; o
+cronômetro de 1,50 s começa somente depois que todas essas escritas retornam.
+Se as garras não receberem o comando, o avanço não começa.
 
 O PCA9685 precisa de alimentação externa regulada adequada para os servos, com
 GND comum ao Arduino. Não alimente Futaba e garras pelo pino 5 V do Uno.
@@ -199,7 +201,8 @@ Outras travas:
 
 6. Ainda com as rodas suspensas e sem bolinha presa, confirme no log a ordem:
    `PICKUP_BACKUP`, `PICKUP_FUTABA`, `PICKUP_GRIPPERS`,
-   `PICKUP_COMPLETE`. Mantenha acesso imediato à alimentação.
+   `PICKUP_COMPLETE`. Em `PICKUP_GRIPPERS`, as rodas devem avançar por 1,50 s
+   enquanto os servos fecham. Mantenha acesso imediato à alimentação.
 
 7. Teste no chão em velocidade baixa.
 

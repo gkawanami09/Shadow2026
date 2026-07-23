@@ -20,8 +20,8 @@ HC-SR04 não participa de nenhuma decisão do resgate.
 2. **Cruza gaps** — valida, alinha em até 7 ciclos e cruza às cegas
 3. **Marcadores verdes** — 90° esquerda/direita e 180° no verde duplo
 4. **Linha vermelha** — para 9 s
-5. **Resgate separado** — encontra a esfera, aproxima, recua 0,5 s, baixa o
-   Futaba e aciona as duas garras
+5. **Resgate separado** — encontra a esfera, aproxima, recua 1,5 s, baixa o
+   Futaba e avança 1,5 s enquanto fecha as duas garras
 
 ## Comece por aqui
 

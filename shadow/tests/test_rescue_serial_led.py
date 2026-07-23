@@ -248,6 +248,28 @@ class RescueSerialLedTests(unittest.TestCase):
         )
         self.assertNotIn(b"PARAR\n", arduino._ser.writes)
 
+    def test_grippers_do_not_replace_forward_motor_keepalive(self):
+        arduino = self._connected_arduino()
+        arduino.parar_futaba()
+        arduino.garras(-50, 50)
+        arduino.lado(42, 42)
+
+        with patch(
+            "serial_link.arduino.time.monotonic",
+            return_value=arduino._last_send_t + 0.30,
+        ):
+            arduino.refresh(fail_closed=True)
+
+        self.assertEqual(
+            arduino._ser.writes,
+            [
+                b"FUTABA PARAR\n",
+                b"SERVO GARRA_ESQ -50\nSERVO GARRA_DIR 50\n",
+                b"LADO 42 42\n",
+                b"LADO 42 42\n",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -128,6 +128,8 @@ def _apply_pickup_actions(
         elif step.motor_action == "stop":
             if steer_action() is False:
                 return "PARAR nao foi enviado pela serial"
+        elif step.motor_action not in ("", "forward"):
+            return f"acao de motor desconhecida: {step.motor_action}"
         if link_changed():
             return link_error()
 
@@ -148,6 +150,17 @@ def _apply_pickup_actions(
             esquerda, direita = step.gripper_action
             if arduino.garras(esquerda, direita) is False:
                 return "comando simultaneo das garras nao foi enviado"
+            if link_changed():
+                return link_error()
+
+        # O avanco da coleta e aplicado por ultimo: primeiro confirmamos que o
+        # Futaba parou e que as garras receberam o lote. Os poucos
+        # milissegundos entre as escritas ainda deixam os servos fechando
+        # durante todo o deslocamento, mas uma falha nas garras nunca produz
+        # nem um pulso de avanco.
+        if step.motor_action == "forward":
+            if steer_action(step.angle, step.speed) is False:
+                return "comando de avanco nao foi enviado pela serial"
             if link_changed():
                 return link_error()
     except Exception as err:
@@ -532,7 +545,8 @@ def main():
                     if arduino is not None else None
                 )
                 print(
-                    "[coleta] bolinha proxima: iniciando re, Futaba e garras")
+                    "[coleta] bolinha proxima: iniciando re, Futaba, "
+                    "garras e avanco final")
 
             log_now = time.monotonic()
             should_log = (
