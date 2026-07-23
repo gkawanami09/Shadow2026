@@ -75,6 +75,39 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertTrue(result.confirmed)
         self.assertTrue(detector.last_hough_used)
 
+    def test_strong_contour_skips_hough_during_acquisition(self):
+        detector = BallDetector("silver")
+        strong = _Candidate("silver", 320, 300, 42, 0.90)
+        detector._evaluate_proposals = lambda *_args: [strong]
+
+        def unexpected_hough(*_args):
+            raise AssertionError(
+                "Hough nao deve atrasar um contorno forte na aquisicao")
+
+        detector._hough_proposals = unexpected_hough
+        result = None
+        for index in range(cfg.BALL_ACQUIRE_HITS):
+            result = detector.detect(
+                base_frame(), timestamp=0.1 + index * 0.03)
+
+        self.assertFalse(detector.last_hough_used)
+        self.assertEqual(result.hits, cfg.BALL_ACQUIRE_HITS)
+        self.assertTrue(result.confirmed)
+
+    def test_weak_contour_still_uses_hough_fallback(self):
+        detector = BallDetector("silver")
+        weak = _Candidate("silver", 320, 300, 42, 0.65)
+        from_hough = _Candidate("silver", 321, 300, 43, 0.90)
+        evaluations = iter(([weak], [from_hough]))
+        detector._evaluate_proposals = lambda *_args: next(evaluations)
+        detector._hough_proposals = lambda *_args: [object()]
+        detector._deduplicate = lambda proposals: proposals
+
+        result = detector.detect(base_frame(), timestamp=0.1)
+
+        self.assertTrue(detector.last_hough_used)
+        self.assertAlmostEqual(result.confidence, 0.90)
+
     def test_incompatible_contour_cannot_block_hough_reacquisition(self):
         detector = BallDetector("any")
         detector._tracked = _Candidate("silver", 100, 300, 40, 0.9)
@@ -118,6 +151,70 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertTrue(result.confirmed)
         self.assertEqual(result.kind, "silver")
         self.assertAlmostEqual(result.center_x, 480, delta=18)
+
+    def test_detects_silver_at_runtime_detector_resolution(self):
+        frame = cv2.resize(
+            silver_ball_frame(),
+            (cfg.RESCUE_DETECTOR_MAX_WIDTH,
+             cfg.RESCUE_DETECTOR_MAX_HEIGHT),
+            interpolation=cv2.INTER_AREA,
+        )
+        detector = BallDetector("silver")
+        result = self._confirmed(detector, frame)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertEqual(result.kind, "silver")
+        self.assertAlmostEqual(
+            result.center_x,
+            cfg.RESCUE_DETECTOR_MAX_WIDTH / 2,
+            delta=8,
+        )
+        self.assertFalse(detector.last_hough_used)
+
+    def test_hough_fallback_still_detects_at_runtime_resolution(self):
+        frame = cv2.resize(
+            silver_ball_frame(),
+            (cfg.RESCUE_DETECTOR_MAX_WIDTH,
+             cfg.RESCUE_DETECTOR_MAX_HEIGHT),
+            interpolation=cv2.INTER_AREA,
+        )
+        detector = BallDetector("silver")
+        detector._contour_proposals = lambda *_args: []
+        result = self._confirmed(detector, frame)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertTrue(detector.last_hough_used)
+
+    def test_runtime_resolution_rejects_existing_negative_scenes(self):
+        rectangle = base_frame()
+        cv2.rectangle(
+            rectangle, (250, 250), (390, 315), (20, 20, 20), -1)
+        line = base_frame()
+        cv2.rectangle(line, (0, 280), (639, 310), (20, 20, 20), -1)
+
+        for original in (base_frame(), line, rectangle):
+            frame = cv2.resize(
+                original,
+                (cfg.RESCUE_DETECTOR_MAX_WIDTH,
+                 cfg.RESCUE_DETECTOR_MAX_HEIGHT),
+                interpolation=cv2.INTER_AREA,
+            )
+            detector = BallDetector("any")
+            results = [
+                detector.detect(frame, timestamp=index * 0.03)
+                for index in range(cfg.BALL_ACQUIRE_HITS + 1)
+            ]
+            self.assertFalse(any(
+                result is not None and result.confirmed
+                for result in results
+            ))
+
+    def test_hough_telemetry_survives_internal_track_reset(self):
+        detector = BallDetector("any")
+        for index in range(cfg.BALL_MAX_TRACK_MISSES + 1):
+            self.assertIsNone(
+                detector.detect(base_frame(), timestamp=index * 0.03))
+        self.assertTrue(detector.last_hough_used)
 
     def test_detector_scales_correctly_for_wide_full_fov(self):
         resized = cv2.resize(

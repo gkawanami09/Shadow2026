@@ -169,20 +169,23 @@ class BallDetector:
             roi_bottom,
         )
 
-        # Hough e o trecho mais caro em fundos texturizados. Ele permanece nos
-        # frames de aquisicao e volta imediatamente se nenhum contorno for
-        # compativel com o alvo rastreado. Assim um artefato circular distante
-        # nao impede a recuperacao da esfera verdadeira.
-        contour_matches_track = any(
-            self._track_match(candidate)[0] for candidate in candidates)
-        self.last_hough_used = (
-            self._hits < cfg.BALL_ACQUIRE_HITS
-            or not candidates
-            or (
-                self._tracked is not None
-                and not contour_matches_track
+        # Hough e, de longe, o trecho mais caro no Raspberry Pi. Um contorno
+        # forte ja passou por circularidade, suporte de borda e classificacao
+        # de aparencia; os 3 hits temporais continuam sendo obrigatorios. Hough
+        # fica como fallback para contorno ausente/fraco ou incompatibilidade
+        # com o alvo rastreado.
+        strong_contours = [
+            candidate for candidate in candidates
+            if candidate.confidence >= cfg.BALL_CONTOUR_FAST_CONFIDENCE
+        ]
+        if self._tracked is None:
+            strong_track_match = bool(strong_contours)
+        else:
+            strong_track_match = any(
+                self._track_match(candidate)[0]
+                for candidate in strong_contours
             )
-        )
+        self.last_hough_used = not strong_track_match
         if self.last_hough_used:
             hough_proposals = self._hough_proposals(
                 gray_blur, roi_top, roi_bottom, self._pixel_scale)
@@ -481,7 +484,11 @@ class BallDetector:
             # mover, a esfera precisa cumprir novamente todos os hits.
             self._hits = 0
             if self._misses > cfg.BALL_MAX_TRACK_MISSES:
+                used_hough = self.last_hough_used
                 self.reset()
+                # reset() externo limpa telemetria; aqui o frame atual acabou
+                # de usar Hough e o overlay deve continuar mostrando H0.
+                self.last_hough_used = used_hough
             return None
 
         compatible = False

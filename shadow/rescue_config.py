@@ -30,10 +30,11 @@ RESCUE_KNOWN_SENSOR_MODES = {
     },
 }
 
-# O detector roda em uma thread com caixa de um unico frame. Estes limites
-# tambem cobrem videos de teste que tenham resolucao maior que a camera real.
-RESCUE_DETECTOR_MAX_WIDTH = 640
-RESCUE_DETECTOR_MAX_HEIGHT = 480
+# O preview permanece 640x480/full-FoV, mas a visao trabalha em 320x240. No Pi,
+# o Hough a 640x480 levou 1.5--2.0 s e toda deteccao chegava stale; reduzir a
+# matriz nao recorta o campo de visao e as coordenadas voltam para o preview.
+RESCUE_DETECTOR_MAX_WIDTH = 320
+RESCUE_DETECTOR_MAX_HEIGHT = 240
 RESCUE_ARM_DELAY_S = 3.0
 RESCUE_WORKER_JOIN_TIMEOUT_S = 2.0
 
@@ -75,6 +76,9 @@ BALL_HOUGH_MIN_DIST_PX = 28
 BALL_HOUGH_PARAM1 = 105
 BALL_HOUGH_PARAM2 = 18
 BALL_HOUGH_MIN_CONFIDENCE = 0.66
+# Um contorno forte ja passou por circularidade, borda e aparencia. Nessa
+# situacao, Hough redundante durante os 3 hits de aquisicao so adiciona atraso.
+BALL_CONTOUR_FAST_CONFIDENCE = 0.78
 
 # Aparencia no frame original (classificacao nunca usa o gamma).
 BALL_BLACK_V_MAX = 105

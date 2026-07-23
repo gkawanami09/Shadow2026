@@ -1,6 +1,6 @@
 """Worker de visao com politica latest-frame para manter o preview fluido."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import threading
 import time
 
@@ -54,6 +54,8 @@ class AsyncDetectionResult:
     processing_s: float
     dropped_frames: int
     generation: int
+    hough_used: bool
+    candidate_count: int
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,48 @@ class CapturedFrame:
     sequence: int
     frame: object
     captured_at: float
+
+
+class FreshDetectionGate:
+    """Exige resultados frescos e distintos, mesmo se o tracker veio de stale."""
+
+    def __init__(self, required_hits):
+        self.required_hits = max(int(required_hits), 1)
+        self._fresh_hits = 0
+        self._last_tracker_hits = None
+
+    def reset(self):
+        self._fresh_hits = 0
+        self._last_tracker_hits = None
+
+    def accept(self, detection):
+        if detection is None:
+            self.reset()
+            return None
+
+        tracker_hits = int(detection.hits)
+        if (
+            self._fresh_hits == 0
+            or tracker_hits <= 1
+            or (
+                self._last_tracker_hits is not None
+                and tracker_hits <= self._last_tracker_hits
+            )
+        ):
+            self._fresh_hits = 1
+        else:
+            self._fresh_hits += 1
+        self._last_tracker_hits = tracker_hits
+
+        confirmed = (
+            detection.confirmed
+            and self._fresh_hits >= self.required_hits
+        )
+        return replace(
+            detection,
+            confirmed=confirmed,
+            hits=self._fresh_hits,
+        )
 
 
 class LatestFrameSource:
@@ -280,6 +324,10 @@ class LatestFrameBallDetector:
                         frame, detector_size, interpolation=cv2.INTER_AREA)
                 detection = self.detector.detect(
                     detector_frame, timestamp=captured_at)
+                hough_used = bool(
+                    getattr(self.detector, "last_hough_used", False))
+                candidate_count = len(
+                    getattr(self.detector, "last_candidates", ()))
                 detection = _scale_detection(
                     detection, detector_frame.shape, frame.shape)
                 completed_at = self._clock()
@@ -293,6 +341,8 @@ class LatestFrameBallDetector:
                     processing_s=completed_at - started_at,
                     dropped_frames=dropped_frames,
                     generation=generation,
+                    hough_used=hough_used,
+                    candidate_count=candidate_count,
                 )
             except Exception as err:
                 with self._condition:

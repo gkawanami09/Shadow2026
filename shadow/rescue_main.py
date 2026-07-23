@@ -30,6 +30,7 @@ from control.rescue_approach import (  # noqa: E402
     MotionCommand,
 )
 from vision.rescue_async import (  # noqa: E402
+    FreshDetectionGate,
     LatestFrameBallDetector,
     LatestFrameSource,
 )
@@ -192,6 +193,7 @@ def main():
             max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
             max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
         )
+        fresh_gate = FreshDetectionGate(cfg.BALL_ACQUIRE_HITS)
 
         loop_started = time.monotonic()
         armed_at = (
@@ -209,6 +211,7 @@ def main():
         last_result_sequence = 0
         latest_frame = None
         latest_result = None
+        latest_detection = None
         last_metrics_result = None
 
         if args.drive:
@@ -286,17 +289,20 @@ def main():
                     )
                     command_updated = True
                     latest_result = None
+                    latest_detection = None
                     distance_mm = None
                     ultrasonic_sample_ready = False
+                    fresh_gate.reset()
                     if arduino is not None:
                         arduino.cancelar_ultrassom()
-                    detector_worker.reset_tracking()
                     last_idle_control = now
                 else:
                     latest_result = result
+                    control_detection = fresh_gate.accept(result.detection)
+                    latest_detection = control_detection
                     if (
-                        result.detection is None
-                        or not result.detection.confirmed
+                        control_detection is None
+                        or not control_detection.confirmed
                     ):
                         distance_mm = None
                         ultrasonic_sample_ready = False
@@ -318,7 +324,7 @@ def main():
                         distance_mm = None
 
                     command = controller.update(
-                        result.detection,
+                        control_detection,
                         result.frame_shape,
                         distance_mm=distance_for_update,
                         ultrasonic_polled=ultrasonic_polled,
@@ -329,8 +335,8 @@ def main():
                         args.drive
                         and arduino is not None
                         and not args.no_ultrasonic
-                        and result.detection is not None
-                        and result.detection.confirmed
+                        and control_detection is not None
+                        and control_detection.confirmed
                         and not command.terminal
                         and not ultrasonic_sample_ready
                         and now - last_ultrasonic_poll
@@ -351,11 +357,12 @@ def main():
                 )
                 command_updated = True
                 latest_result = None
+                latest_detection = None
                 distance_mm = None
                 ultrasonic_sample_ready = False
+                fresh_gate.reset()
                 if arduino is not None:
                     arduino.cancelar_ultrassom()
-                detector_worker.reset_tracking()
                 last_idle_control = now
             elif (
                 latest_result is None
@@ -395,9 +402,10 @@ def main():
                 time.monotonic() - latest_result.captured_at
                 if latest_result is not None else None)
             overlay_detection = (
-                latest_result.detection
+                latest_detection
                 if (
                     latest_result is not None
+                    and latest_detection is not None
                     and result_age <= cfg.BALL_FRAME_STALE_S
                 )
                 else None)
@@ -408,10 +416,20 @@ def main():
             dropped = (
                 last_metrics_result.dropped_frames
                 if last_metrics_result is not None else 0)
+            vision_mode = (
+                "H" if (
+                    last_metrics_result is not None
+                    and last_metrics_result.hough_used
+                ) else "C"
+            )
+            candidate_count = (
+                last_metrics_result.candidate_count
+                if last_metrics_result is not None else 0)
             performance_text = (
                 f"cam {_sequence_rate(capture_samples):.1f} fps | "
                 f"visao {detector_fps:.1f} fps | "
-                f"{processing_ms:.0f} ms | drop {dropped}")
+                f"{processing_ms:.0f} ms | {vision_mode}{candidate_count} | "
+                f"drop {dropped}")
 
             if (
                 args.debug

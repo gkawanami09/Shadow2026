@@ -4,18 +4,21 @@ import threading
 import time
 import unittest
 
+import cv2
 import numpy as np
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
+import rescue_config as cfg  # noqa: E402
 from vision.rescue_async import (  # noqa: E402
+    FreshDetectionGate,
     LatestFrameBallDetector,
     LatestFrameSource,
     _fit_detector_size,
     _scale_detection,
 )
-from vision.rescue_ball import BallDetection  # noqa: E402
+from vision.rescue_ball import BallDetection, BallDetector  # noqa: E402
 
 
 def wait_result(worker, after_sequence=0, timeout=1.0):
@@ -41,6 +44,57 @@ class ImmediateDetector:
             3,
             timestamp,
         )
+
+
+class FreshDetectionGateTests(unittest.TestCase):
+    @staticmethod
+    def detection(tracker_hits, confirmed=True):
+        return BallDetection(
+            "silver", 20, 20, 10, 0.9,
+            confirmed, tracker_hits, float(tracker_hits))
+
+    def test_requires_three_distinct_fresh_results(self):
+        gate = FreshDetectionGate(required_hits=3)
+        first = gate.accept(self.detection(1, confirmed=False))
+        second = gate.accept(self.detection(2, confirmed=False))
+        third = gate.accept(self.detection(3, confirmed=True))
+
+        self.assertFalse(first.confirmed)
+        self.assertFalse(second.confirmed)
+        self.assertTrue(third.confirmed)
+        self.assertEqual((first.hits, second.hits, third.hits), (1, 2, 3))
+
+    def test_stale_reset_does_not_trust_old_tracker_hits(self):
+        gate = FreshDetectionGate(required_hits=3)
+        self.assertFalse(gate.accept(self.detection(20)).confirmed)
+        gate.reset()
+
+        first = gate.accept(self.detection(21))
+        second = gate.accept(self.detection(22))
+        third = gate.accept(self.detection(23))
+
+        self.assertFalse(first.confirmed)
+        self.assertFalse(second.confirmed)
+        self.assertTrue(third.confirmed)
+
+    def test_duplicate_result_cannot_increment_confirmation(self):
+        gate = FreshDetectionGate(required_hits=3)
+        first = gate.accept(self.detection(8))
+        duplicate = gate.accept(self.detection(8))
+        next_result = gate.accept(self.detection(9))
+
+        self.assertEqual(first.hits, 1)
+        self.assertEqual(duplicate.hits, 1)
+        self.assertEqual(next_result.hits, 2)
+        self.assertFalse(next_result.confirmed)
+
+    def test_missing_detection_resets_gate(self):
+        gate = FreshDetectionGate(required_hits=3)
+        gate.accept(self.detection(1, confirmed=False))
+        gate.accept(self.detection(2, confirmed=False))
+        self.assertIsNone(gate.accept(None))
+        reacquired = gate.accept(self.detection(1, confirmed=False))
+        self.assertEqual(reacquired.hits, 1)
 
 
 class LatestFrameDetectorTests(unittest.TestCase):
@@ -77,7 +131,65 @@ class LatestFrameDetectorTests(unittest.TestCase):
             self.assertEqual(result.frame_shape, (720, 960, 3))
             self.assertEqual(result.detection.center_x, 480)
             self.assertEqual(result.detection.center_y, 360)
+            self.assertFalse(result.hough_used)
+            self.assertEqual(result.candidate_count, 0)
             self.assertIsNone(worker.poll(after_sequence=result.sequence))
+        finally:
+            worker.close()
+
+    def test_runtime_worker_uses_small_detector_without_cropping_preview(self):
+        worker = LatestFrameBallDetector(
+            ImmediateDetector(),
+            max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
+            max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
+        )
+        try:
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            worker.submit(frame, captured_at=10.0)
+            result = wait_result(worker)
+            self.assertEqual(result.detector_shape, (240, 320, 3))
+            self.assertEqual(result.frame_shape, (480, 640, 3))
+            self.assertEqual(result.detection.center_x, 320)
+            self.assertEqual(result.detection.center_y, 240)
+        finally:
+            worker.close()
+
+    def test_real_runtime_pipeline_confirms_and_maps_silver_ball(self):
+        frame = np.full((480, 640, 3), 145, dtype=np.uint8)
+        center = (320, 300)
+        for radius, value in (
+            (44, 70), (40, 95), (34, 125), (27, 160), (19, 195)
+        ):
+            cv2.circle(
+                frame, center, radius, (value, value, value),
+                -1, cv2.LINE_AA)
+        cv2.circle(
+            frame, (307, 286), 8, (245, 245, 245),
+            -1, cv2.LINE_AA)
+        cv2.circle(
+            frame, center, 44, (65, 65, 65), 2, cv2.LINE_AA)
+
+        worker = LatestFrameBallDetector(
+            BallDetector("silver"),
+            max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
+            max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
+        )
+        last_sequence = 0
+        try:
+            result = None
+            for index in range(cfg.BALL_ACQUIRE_HITS):
+                worker.submit(frame, captured_at=index * 0.03)
+                result = wait_result(
+                    worker, after_sequence=last_sequence)
+                last_sequence = result.sequence
+
+            self.assertEqual(result.detector_shape, (240, 320, 3))
+            self.assertTrue(result.detection.confirmed)
+            self.assertEqual(result.detection.kind, "silver")
+            self.assertAlmostEqual(result.detection.center_x, 320, delta=12)
+            self.assertAlmostEqual(result.detection.center_y, 300, delta=12)
+            self.assertFalse(result.hough_used)
+            self.assertGreaterEqual(result.candidate_count, 1)
         finally:
             worker.close()
 

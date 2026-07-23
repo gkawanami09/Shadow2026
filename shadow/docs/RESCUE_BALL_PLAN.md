@@ -50,8 +50,11 @@ O sensor continua usando o campo de visão completo, mas a saída de trabalho é
 `640x480`. A resolução de saída menor não recorta a imagem; ela reduz somente
 o número de pixels processados. Captura, controle/preview e detecção agora são
 independentes: tanto a captura quanto o detector publicam apenas o frame mais
-recente, portanto uma etapa lenta nunca forma uma fila atrasada. A janela
-mostra FPS da câmera, FPS da visão, tempo de processamento e frames descartados.
+recente, portanto uma etapa lenta nunca forma uma fila atrasada. A visão roda
+em `320x240` e suas coordenadas são remapeadas para o preview `640x480`. A
+janela mostra FPS da câmera, FPS da visão, tempo de processamento, `C` para o
+caminho rápido de contornos ou `H` para fallback Hough, número de candidatos e
+frames descartados.
 
 Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 `640x480`. O detector aplica:
@@ -95,7 +98,9 @@ Outras travas:
 - frame antigo = `PARAR`;
 - o detector descarta backlog e nunca repete o mesmo resultado no controle;
 - captura travada não bloqueia o watchdog de imagem nem o envio de `PARAR`;
-- após imagem antiga, o rastreador exige três confirmações novas;
+- após imagem antiga, o controle exige três resultados distintos e frescos;
+- uma busca Hough antiga pode apenas semear a posição interna; nunca gera
+  movimento e ainda precisa das três verificações frescas;
 - após reconexão serial, `PARAR` substitui qualquer movimento antigo;
 - o timestamp é obtido depois da captura, evitando classificar como antigo um
   frame que apenas aguardou a câmera;
