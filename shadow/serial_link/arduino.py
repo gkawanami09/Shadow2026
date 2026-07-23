@@ -36,6 +36,7 @@ class Arduino:
         self._last_send_t = 0.0
         self._last_reconnect_t = 0.0
         self._connected = False
+        self._desired_led_mode = None
 
         if port is not None:
             if not self._try_port(port):
@@ -145,6 +146,9 @@ class Arduino:
         modo = str(modo).upper()
         if modo not in ("APAGADO", "ACESO"):
             raise ValueError(f"Modo de LED invalido: {modo}")
+        # O Uno reinicia com o LED aceso ao reabrir a USB. Guardar o modo
+        # desejado permite restaura-lo automaticamente numa reconexao.
+        self._desired_led_mode = modo
         self._send_aux_cmd(f"LED {modo}")
 
     def distancia_ultrassom(self, timeout=0.2):
@@ -290,4 +294,7 @@ class Arduino:
         for device in self._candidate_ports():
             if self._try_port(device):
                 print(f"[serial] reconectado em {device}")
+                if self._desired_led_mode is not None:
+                    self._send_aux_cmd(
+                        f"LED {self._desired_led_mode}")
                 return

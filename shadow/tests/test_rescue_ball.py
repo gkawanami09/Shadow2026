@@ -64,6 +64,26 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertEqual(result.kind, "silver")
         self.assertAlmostEqual(result.center_x, 320, delta=12)
 
+    def test_detector_thresholds_scale_at_960_pixels_wide(self):
+        frame = cv2.resize(
+            silver_ball_frame(), (960, 720), interpolation=cv2.INTER_LINEAR)
+        result = self._confirmed(BallDetector("silver"), frame)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertEqual(result.kind, "silver")
+        self.assertAlmostEqual(result.center_x, 480, delta=18)
+
+    def test_detector_scales_correctly_for_wide_full_fov(self):
+        resized = cv2.resize(
+            silver_ball_frame(), (720, 540), interpolation=cv2.INTER_LINEAR)
+        frame = np.full((540, 960, 3), 150, dtype=np.uint8)
+        frame[:, 120:840] = resized
+        result = self._confirmed(BallDetector("silver"), frame)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertEqual(result.kind, "silver")
+        self.assertAlmostEqual(result.center_x, 480, delta=18)
+
     def test_rejects_plain_rectangle(self):
         frame = base_frame()
         cv2.rectangle(frame, (250, 250), (390, 315), (20, 20, 20), -1)

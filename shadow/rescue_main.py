@@ -56,7 +56,9 @@ def parse_args():
         help="tipo de esfera aceito (padrao: any)")
     parser.add_argument(
         "--drive", action="store_true",
-        help="AUTORIZA movimento; sem esta opcao o Arduino nem e aberto")
+        help=(
+            "AUTORIZA movimento; sem esta opcao o Arduino permanece em PARAR "
+            "(o LED ainda e apagado no uso da camera real)"))
     parser.add_argument(
         "--debug", action="store_true",
         help="mostra a camera anotada; q ou Esc encerra")
@@ -93,16 +95,29 @@ def main():
     last_detail = None
     last_ultrasonic_poll = 0.0
     distance_mm = None
+    hardware_session = args.video is None
 
     try:
-        if args.drive:
+        if hardware_session:
             from control.motor_lock import MotorLockError, MotorOwnerLock
-            motor_lock = MotorOwnerLock("aproximacao-resgate")
+            motor_lock = MotorOwnerLock(
+                "aproximacao-resgate" if args.drive else "visao-resgate")
             try:
                 motor_lock.acquire()
             except MotorLockError as err:
                 raise RuntimeError(
                     f"modo de resgate recusado: {err}") from err
+
+            from serial_link.arduino import Arduino
+            from control.steer import init_steering, steer
+
+            arduino = Arduino()
+            init_steering(arduino)
+            steer()
+            arduino.led("APAGADO")
+            print(
+                "[resgate] LED APAGADO antes de abrir a camera frontal; "
+                "motores em PARAR")
 
         if args.video is not None:
             source = VideoSource(args.video)
@@ -112,12 +127,6 @@ def main():
             source = RescueCamera(args.camera_index)
 
         if args.drive:
-            from serial_link.arduino import Arduino
-            from control.steer import init_steering, steer
-
-            arduino = Arduino()
-            init_steering(arduino)
-            steer()
             print(
                 "[resgate] MOVIMENTO AUTORIZADO. Mantendo PARAR por 3 s; "
                 "afaste as maos e tenha acesso ao desligamento.")
@@ -128,31 +137,37 @@ def main():
         else:
             print(
                 "[resgate] modo de visao: motores desativados. "
-                "Use --drive somente depois de validar o --debug.")
+                "Use --drive somente depois de validar o --debug. "
+                "A faixa vermelha na tela confirma este modo.")
 
         while True:
-            loop_started = time.monotonic()
             frame = source.get_frame()
             if frame is None:
                 print("[resgate] fim da fonte de imagem")
                 break
 
-            detection = detector.detect(frame, timestamp=loop_started)
+            # O timestamp precisa representar o frame ja capturado. Antes ele
+            # era tirado antes da espera pela camera; Hough + captura faziam
+            # toda deteccao chegar ao controlador como "antiga".
+            frame_timestamp = time.monotonic()
+            detection = detector.detect(frame, timestamp=frame_timestamp)
+            decision_time = time.monotonic()
 
             distance_for_update = None
             ultrasonic_polled = False
             if (
-                arduino is not None
+                args.drive
+                and arduino is not None
                 and not args.no_ultrasonic
                 and detection is not None
                 and detection.confirmed
-                and loop_started - last_ultrasonic_poll
+                and decision_time - last_ultrasonic_poll
                 >= cfg.BALL_ULTRASONIC_POLL_S
             ):
                 distance_mm = arduino.distancia_ultrassom()
                 distance_for_update = distance_mm
                 ultrasonic_polled = True
-                last_ultrasonic_poll = loop_started
+                last_ultrasonic_poll = decision_time
 
             command = controller.update(
                 detection,
@@ -161,9 +176,13 @@ def main():
                 ultrasonic_polled=ultrasonic_polled,
                 now=time.monotonic())
 
-            if arduino is not None:
+            if args.drive and arduino is not None:
                 from control.steer import steer
                 steer(command.angle, command.speed)
+                arduino.refresh()
+            elif arduino is not None:
+                # Mantem o PARAR inicial vivo, mas nunca aplica o comando
+                # calculado pela visao sem autorizacao --drive.
                 arduino.refresh()
 
             if command.state != last_state or command.detail != last_detail:
@@ -173,19 +192,25 @@ def main():
 
             if args.debug:
                 annotated = annotate_rescue_frame(
-                    frame, detection, command.state, command.detail, distance_mm)
+                    frame,
+                    detection,
+                    command.state,
+                    command.detail,
+                    distance_mm,
+                    motors_enabled=args.drive,
+                )
                 cv2.imshow(WINDOW, annotated)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     break
 
             if command.terminal:
-                if arduino is not None:
+                if args.drive:
                     print(
                         f"[resgate] estado terminal {command.state}; "
                         "motores parados")
                     time.sleep(0.15)
-                if not args.debug or arduino is not None:
+                if not args.debug or args.drive:
                     break
 
     except RuntimeError as err:
@@ -204,7 +229,7 @@ def main():
         if motor_lock is not None:
             motor_lock.release()
         cv2.destroyAllWindows()
-        if arduino is not None:
+        if args.drive:
             print("[resgate] encerrado com PARAR")
         else:
             print("[resgate] encerrado; motores nunca foram habilitados")

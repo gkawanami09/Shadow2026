@@ -96,6 +96,7 @@ class BallDetector:
         self._tracked = None
         self._hits = 0
         self._misses = 0
+        self._pixel_scale = 1.0
         self.last_candidates = []
         self.last_enhanced = None
         self.last_edges = None
@@ -112,6 +113,7 @@ class BallDetector:
         timestamp = time.monotonic() if timestamp is None else float(timestamp)
 
         height, width = frame.shape[:2]
+        self._pixel_scale = cfg.ball_pixel_scale(width, height)
         enhanced = (
             self.enhancer.apply(frame) if self.enhancer is not None
             else frame.copy())
@@ -147,9 +149,12 @@ class BallDetector:
             dark_mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8), iterations=2)
 
         proposals = []
-        proposals.extend(self._hough_proposals(gray_blur, roi_top, roi_bottom))
-        proposals.extend(self._contour_proposals(closed_edges, "edge"))
-        proposals.extend(self._contour_proposals(dark_mask, "dark"))
+        proposals.extend(self._hough_proposals(
+            gray_blur, roi_top, roi_bottom, self._pixel_scale))
+        proposals.extend(self._contour_proposals(
+            closed_edges, "edge", self._pixel_scale))
+        proposals.extend(self._contour_proposals(
+            dark_mask, "dark", self._pixel_scale))
         proposals = self._deduplicate(proposals)
 
         edge_dilated = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
@@ -174,17 +179,20 @@ class BallDetector:
         selected = self._select_candidate(candidates)
         return self._update_track(selected, timestamp)
 
-    def _hough_proposals(self, gray, roi_top, roi_bottom):
+    def _hough_proposals(self, gray, roi_top, roi_bottom, pixel_scale):
         roi = gray[roi_top:roi_bottom, :]
         circles = cv2.HoughCircles(
             roi,
             cv2.HOUGH_GRADIENT,
             dp=cfg.BALL_HOUGH_DP,
-            minDist=cfg.BALL_HOUGH_MIN_DIST_PX,
+            minDist=max(
+                2, int(round(cfg.BALL_HOUGH_MIN_DIST_PX * pixel_scale))),
             param1=cfg.BALL_HOUGH_PARAM1,
             param2=cfg.BALL_HOUGH_PARAM2,
-            minRadius=cfg.BALL_MIN_RADIUS_PX,
-            maxRadius=cfg.BALL_MAX_RADIUS_PX,
+            minRadius=max(
+                2, int(round(cfg.BALL_MIN_RADIUS_PX * pixel_scale))),
+            maxRadius=max(
+                3, int(round(cfg.BALL_MAX_RADIUS_PX * pixel_scale))),
         )
         if circles is None:
             return []
@@ -199,7 +207,7 @@ class BallDetector:
             for circle in circles[0]
         ]
 
-    def _contour_proposals(self, mask, source):
+    def _contour_proposals(self, mask, source, pixel_scale):
         contours, _ = cv2.findContours(
             mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         proposals = []
@@ -210,7 +218,9 @@ class BallDetector:
                 continue
 
             (center_x, center_y), radius = cv2.minEnclosingCircle(contour)
-            if not cfg.BALL_MIN_RADIUS_PX <= radius <= cfg.BALL_MAX_RADIUS_PX:
+            min_radius = cfg.BALL_MIN_RADIUS_PX * pixel_scale
+            max_radius = cfg.BALL_MAX_RADIUS_PX * pixel_scale
+            if not min_radius <= radius <= max_radius:
                 continue
 
             _, _, box_width, box_height = cv2.boundingRect(contour)
@@ -376,7 +386,9 @@ class BallDetector:
         if self._tracked is None:
             return max(
                 candidates,
-                key=lambda item: item.confidence + min(item.radius / 160.0, 0.35))
+                key=lambda item: (
+                    item.confidence
+                    + min(item.radius / (160.0 * self._pixel_scale), 0.35)))
 
         matches = []
         for candidate in candidates:
@@ -386,7 +398,7 @@ class BallDetector:
                 candidate.center_x - self._tracked.center_x,
                 candidate.center_y - self._tracked.center_y)
             gate = max(
-                cfg.BALL_ASSOCIATION_MIN_PX,
+                cfg.BALL_ASSOCIATION_MIN_PX * self._pixel_scale,
                 cfg.BALL_ASSOCIATION_RADIUS_FACTOR
                 * max(candidate.radius, self._tracked.radius))
             radius_ratio = candidate.radius / max(self._tracked.radius, 1.0)
@@ -402,7 +414,9 @@ class BallDetector:
                 key=lambda item: item[0].confidence - 0.25 * item[1])[0]
         return max(
             candidates,
-            key=lambda item: item.confidence + min(item.radius / 160.0, 0.35))
+            key=lambda item: (
+                item.confidence
+                + min(item.radius / (160.0 * self._pixel_scale), 0.35)))
 
     def _update_track(self, selected, timestamp):
         if selected is None:
@@ -420,7 +434,7 @@ class BallDetector:
                 selected.center_x - self._tracked.center_x,
                 selected.center_y - self._tracked.center_y)
             gate = max(
-                cfg.BALL_ASSOCIATION_MIN_PX,
+                cfg.BALL_ASSOCIATION_MIN_PX * self._pixel_scale,
                 cfg.BALL_ASSOCIATION_RADIUS_FACTOR
                 * max(selected.radius, self._tracked.radius))
             radius_ratio = selected.radius / max(self._tracked.radius, 1.0)
@@ -460,7 +474,14 @@ class BallDetector:
         )
 
 
-def annotate_rescue_frame(frame, detection, state, detail="", distance_mm=None):
+def annotate_rescue_frame(
+    frame,
+    detection,
+    state,
+    detail="",
+    distance_mm=None,
+    motors_enabled=False,
+):
     """Retorna uma copia anotada para debug; nao participa da decisao."""
     annotated = frame.copy()
     height, width = annotated.shape[:2]
@@ -500,4 +521,12 @@ def annotate_rescue_frame(frame, detection, state, detail="", distance_mm=None):
         cv2.putText(
             annotated, f"ultrassom: {distance_mm} mm", (8, 63),
             cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+    motor_label = (
+        "MOTORES: ATIVOS (--drive)"
+        if motors_enabled else
+        "MOTORES: DESATIVADOS (adicione --drive)")
+    motor_color = (0, 210, 0) if motors_enabled else (0, 0, 255)
+    cv2.putText(
+        annotated, motor_label, (8, height - 12),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.50, motor_color, 2, cv2.LINE_AA)
     return annotated

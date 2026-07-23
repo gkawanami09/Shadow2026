@@ -8,11 +8,14 @@ comportamento de ``shadow/main.py``.
 # "resgate". O indice continua exposto na CLI porque o pipeline de linha antigo
 # ainda abre a camera padrao sem registrar seu indice explicitamente.
 RESCUE_CAMERA_INDEX = 0
-RESCUE_CAMERA_WIDTH = 640
-RESCUE_CAMERA_HEIGHT = 480
+# A saida preserva a proporcao do modo de sensor com maior campo de visao.
+# Estes limites produzem 960x540 em sensores 16:9 e 960x720 em sensores 4:3.
+RESCUE_CAMERA_MAX_WIDTH = 960
+RESCUE_CAMERA_MAX_HEIGHT = 720
 RESCUE_CAMERA_FPS = 30
 RESCUE_LENS_POSITION = None
 RESCUE_REQUIRE_TWO_CAMERAS = True
+RESCUE_ROTATE_180 = True
 
 # Melhoria de iluminacao ja experimentada no dual_camera_viewer.
 RESCUE_CLAHE_CLIP = 2.0
@@ -20,6 +23,20 @@ RESCUE_CLAHE_GRID = (8, 8)
 RESCUE_GAMMA = 1.5
 
 # Regiao e propostas geometricas.
+# Limiares em pixels abaixo foram calibrados em 640x480 e sao escalados
+# automaticamente sem confundir uma imagem mais larga com uma esfera maior.
+BALL_BASE_WIDTH = 640
+BALL_BASE_HEIGHT = 480
+
+
+def ball_pixel_scale(frame_width, frame_height):
+    """Escala isotropica dos limiares da calibracao 640x480."""
+    return max(min(
+        float(frame_width) / BALL_BASE_WIDTH,
+        float(frame_height) / BALL_BASE_HEIGHT,
+    ), 0.25)
+
+
 BALL_ROI_TOP = 0.12
 BALL_ROI_BOTTOM = 0.98
 BALL_MIN_RADIUS_PX = 9
@@ -64,10 +81,14 @@ BALL_TRACK_EMA_ALPHA = 0.40
 BALL_CENTER_DEADBAND = 0.085
 BALL_ALIGN_THRESHOLD = 0.19
 BALL_ALIGN_ANGLE = 180
-BALL_ALIGN_SPEED = 0.22
+# Os valores anteriores (0.20..0.38) geravam apenas pulsos de PWM 24..46,
+# intercalados por PARAR, e nao venceram a inercia no teste fisico. Estes
+# valores continuam abaixo dos 60 PWM usados pelo segue-linha, mas deixam uma
+# margem real para os quatro motores com a LiPo 2S.
+BALL_ALIGN_SPEED = 0.35
 BALL_STEER_MAX_ANGLE = 82
-BALL_APPROACH_SPEED_FAR = 0.38
-BALL_APPROACH_SPEED_NEAR = 0.20
+BALL_APPROACH_SPEED_FAR = 0.45
+BALL_APPROACH_SPEED_NEAR = 0.35
 BALL_SLOW_RADIUS_PX = 48
 
 # Parada perto da esfera. Estes dois valores sao deliberadamente conservadores
@@ -85,9 +106,12 @@ BALL_ULTRASONIC_STOP_MM = 145
 BALL_ULTRASONIC_CONFIRM_READS = 2
 BALL_ULTRASONIC_HOLD_TIMEOUT_S = 1.0
 
-BALL_FRAME_STALE_S = 0.20
+# Hough + filtros medidos no Pi podem ultrapassar 0.20 s. O timestamp agora e
+# tirado depois da captura; 0.75 s ainda impede movimento com imagem congelada,
+# mas nao rejeita todo frame valido como ocorreu no primeiro teste fisico.
+BALL_FRAME_STALE_S = 0.75
 BALL_REACQUIRE_TIMEOUT_S = 1.0
 BALL_MAX_WAIT_S = 30.0
-BALL_MAX_ACTIVE_S = 30.0
+BALL_MAX_ACTIVE_S = 45.0
 BALL_PROGRESS_WINDOW_S = 3.0
 BALL_PROGRESS_MIN_RADIUS_PX = 3.0

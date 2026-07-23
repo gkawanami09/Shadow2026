@@ -39,6 +39,7 @@ class BallApproachController:
         self.ultrasonic_near_count = 0
         self.ultrasonic_hold_started = None
         self.progress = deque()
+        self._pixel_scale = 1.0
         self._terminal_detail = ""
 
     def update(
@@ -51,6 +52,7 @@ class BallApproachController:
     ):
         now = time.monotonic() if now is None else float(now)
         height, width = frame_shape[:2]
+        self._pixel_scale = cfg.ball_pixel_scale(width, height)
 
         if self.state in (self.NEAR, self.FAULT):
             return MotionCommand(
@@ -96,7 +98,8 @@ class BallApproachController:
         error = detection.horizontal_error(width)
 
         visual_near = (
-            detection.radius >= cfg.BALL_STOP_RADIUS_PX
+            detection.radius
+            >= cfg.BALL_STOP_RADIUS_PX * self._pixel_scale
             and detection.bottom_y >= height * cfg.BALL_STOP_BOTTOM_Y_RATIO
             and abs(error) <= cfg.BALL_STOP_CENTER_ERROR)
         self.visual_near_count = (
@@ -171,10 +174,11 @@ class BallApproachController:
                 -cfg.BALL_STEER_MAX_ANGLE,
                 cfg.BALL_STEER_MAX_ANGLE)))
 
-        slow_span = max(
-            cfg.BALL_STOP_RADIUS_PX - cfg.BALL_SLOW_RADIUS_PX, 1)
+        slow_radius = cfg.BALL_SLOW_RADIUS_PX * self._pixel_scale
+        stop_radius = cfg.BALL_STOP_RADIUS_PX * self._pixel_scale
+        slow_span = max(stop_radius - slow_radius, 1)
         near_fraction = float(np.clip(
-            (detection.radius - cfg.BALL_SLOW_RADIUS_PX) / slow_span,
+            (detection.radius - slow_radius) / slow_span,
             0.0, 1.0))
         speed = (
             cfg.BALL_APPROACH_SPEED_FAR * (1.0 - near_fraction)
@@ -204,7 +208,7 @@ class BallApproachController:
         return (
             max(radius for _, radius in self.progress)
             - self.progress[0][1]
-            < cfg.BALL_PROGRESS_MIN_RADIUS_PX)
+            < cfg.BALL_PROGRESS_MIN_RADIUS_PX * self._pixel_scale)
 
     def _fault(self, detail):
         self.state = self.FAULT

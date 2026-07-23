@@ -66,6 +66,44 @@ class BallApproachControllerTests(unittest.TestCase):
         self.assertEqual(latched.state, controller.NEAR)
         self.assertEqual(latched.angle, 190)
 
+    def test_visual_radius_threshold_scales_with_camera_resolution(self):
+        controller = BallApproachController(start_time=0.0)
+        shape = (720, 960, 3)
+        scale = cfg.ball_pixel_scale(shape[1], shape[0])
+        command = None
+        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES):
+            now = 0.1 + index * 0.05
+            command = controller.update(
+                detection(
+                    x=shape[1] / 2,
+                    y=585,
+                    radius=(cfg.BALL_STOP_RADIUS_PX + 2) * scale,
+                    timestamp=now),
+                shape,
+                now=now)
+        self.assertEqual(command.state, controller.NEAR)
+        self.assertTrue(command.terminal)
+
+    def test_wide_fov_uses_isotropic_not_horizontal_scale(self):
+        shape = (540, 960, 3)
+        scale = cfg.ball_pixel_scale(shape[1], shape[0])
+        self.assertAlmostEqual(scale, 1.125)
+
+        controller = BallApproachController(start_time=0.0)
+        command = None
+        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES):
+            now = 0.1 + index * 0.05
+            command = controller.update(
+                detection(
+                    x=shape[1] / 2,
+                    y=440,
+                    radius=(cfg.BALL_STOP_RADIUS_PX + 2) * scale,
+                    timestamp=now),
+                shape,
+                now=now)
+        self.assertEqual(command.state, controller.NEAR)
+        self.assertTrue(command.terminal)
+
     def test_target_loss_stops_immediately(self):
         controller = BallApproachController(start_time=0.0)
         controller.update(

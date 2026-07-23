@@ -1,8 +1,8 @@
 # Plano de resgate — etapa 1: detectar e aproximar da bolinha
 
-Esta etapa é deliberadamente independente do segue-linha. Nenhum arquivo do
-pipeline atual de linha, da máquina de estados existente ou do firmware foi
-alterado.
+Esta etapa é deliberadamente independente do segue-linha. A lógica de linha,
+a máquina de estados existente e o firmware não foram alterados; a única
+integração no controle de linha é enviar `LED ACESO` ao iniciar esse modo.
 
 ## Escopo
 
@@ -29,7 +29,10 @@ tempo, o segue-linha antigo abre `Picamera2()` sem índice. Por isso:
 2. o padrão é `0`, seguindo o viewer já existente;
 3. `--camera-index` permite corrigir o mapeamento sem tocar no segue-linha;
 4. o programa imprime `Picamera2.global_camera_info()` no início;
-5. `shadow/main.py` e `shadow/rescue_main.py` nunca devem rodar juntos.
+5. o modo de sensor que usa a maior área física é escolhido automaticamente;
+6. a saída preserva a proporção desse modo, até `960x720`, sem esticar círculos;
+7. a câmera frontal é rotacionada em 180° por estar montada de ponta-cabeça;
+8. `shadow/main.py` e `shadow/rescue_main.py` nunca devem rodar juntos.
 
 Antes de liberar motores, execute:
 
@@ -41,8 +44,10 @@ Se a janela não mostrar a câmera frontal de resgate, encerre e teste índice `
 
 ## Visão
 
-O detector conserva `640x480` (4:3), evitando transformar círculos em elipses.
-Ele aplica:
+O detector recebe a maior imagem que cabe em `960x720`, preservando a proporção
+do sensor. Todos os limites medidos em pixels usam uma escala isotrópica
+derivada de `640x480`; assim uma imagem 16:9 mais larga não faz a esfera
+parecer artificialmente maior nem altera a distância de parada. Ele aplica:
 
 1. CLAHE e gamma no canal de luminosidade LAB;
 2. filtro mediano;
@@ -65,7 +70,12 @@ auxiliar e só pode parar quando a esfera ainda está confirmada e centralizada.
 
 Outras travas:
 
-- `--drive` é obrigatório para abrir a serial;
+- ao usar a câmera real, a serial é aberta, os motores recebem `PARAR` e o
+  comando `LED APAGADO` é enviado antes da abertura da câmera;
+- se a USB reconectar e reiniciar o Uno, o modo do LED é reaplicado
+  automaticamente;
+- `--drive` continua obrigatório para permitir qualquer movimento; sem ele, a
+  serial fica aberta apenas para manter `PARAR` e o LED apagado;
 - um lock de sistema impede segue-linha e resgate de comandarem os motores ao
   mesmo tempo;
 - contagem regressiva de 3 segundos;
@@ -73,6 +83,8 @@ Outras travas:
 - o primeiro eco ultrassônico próximo já produz uma parada provisória; o
   segundo confirma a chegada ou acusa obstáculo fora do eixo;
 - frame antigo = `PARAR`;
+- o timestamp é obtido depois da captura, evitando classificar como antigo um
+  frame que apenas aguardou a câmera;
 - aproximação sem aumento do raio = `FAULT`;
 - timeout = `FAULT`;
 - `finally` sempre envia `PARAR` e fecha a serial;

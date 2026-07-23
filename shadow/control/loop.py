@@ -59,6 +59,8 @@ def control_loop():
     arduino = Arduino()
     init_steering(arduino)
     steer()  # motores parados desde o inicio
+    arduino.led("ACESO")
+    print("[controle] LED ACESO: modo segue-linha")
 
     last_turn_dir = "l"
 
