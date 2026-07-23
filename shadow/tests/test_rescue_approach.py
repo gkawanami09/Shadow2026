@@ -166,6 +166,38 @@ class BallApproachControllerTests(unittest.TestCase):
         self.assertEqual(command.state, controller.LOST)
         self.assertEqual(command.angle, 190)
 
+    def test_stale_frame_resets_visual_near_confirmation(self):
+        controller = BallApproachController(start_time=0.0)
+        near_radius = cfg.BALL_STOP_RADIUS_PX + 2
+        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES - 1):
+            now = 0.1 + index * 0.05
+            command = controller.update(
+                detection(y=390, radius=near_radius, timestamp=now),
+                self.shape,
+                now=now)
+            self.assertFalse(command.terminal)
+
+        stale_now = cfg.BALL_FRAME_STALE_S + 1.0
+        stale = controller.update(
+            detection(y=390, radius=near_radius, timestamp=0.0),
+            self.shape,
+            now=stale_now)
+        self.assertEqual(stale.state, controller.LOST)
+
+        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES - 1):
+            now = stale_now + 0.1 + index * 0.05
+            command = controller.update(
+                detection(y=390, radius=near_radius, timestamp=now),
+                self.shape,
+                now=now)
+            self.assertFalse(command.terminal)
+        now += 0.05
+        command = controller.update(
+            detection(y=390, radius=near_radius, timestamp=now),
+            self.shape,
+            now=now)
+        self.assertEqual(command.state, controller.NEAR)
+
     def test_wait_timeout_is_a_latched_fault(self):
         controller = BallApproachController(start_time=0.0)
         command = controller.update(

@@ -67,7 +67,9 @@ def _select_widest_sensor_mode(
     largest_crop = max(crop_area(mode) for mode in modes)
     widest = [
         mode for mode in modes
-        if crop_area(mode) >= largest_crop * 0.98
+        # Tolerar somente arredondamento/alinhamento de poucos pixels. O modo
+        # OV5647 640x480 usa 98,77% da area e nao e full-FoV.
+        if crop_area(mode) >= largest_crop * 0.999
     ]
     fast_enough = [
         mode for mode in widest
@@ -96,6 +98,15 @@ def _select_widest_sensor_mode(
         key=lambda mode: (
             _mode_size(mode)[0] * _mode_size(mode)[1],
             float(mode.get("fps", 0.0))))
+
+
+def _known_sensor_mode(camera_info):
+    model = str(
+        camera_info.get("Model", camera_info.get("model", ""))).lower()
+    for model_name, mode in rescue_config.RESCUE_KNOWN_SENSOR_MODES.items():
+        if model_name.lower() in model:
+            return dict(mode)
+    return None
 
 
 class RescueCamera:
@@ -128,17 +139,61 @@ class RescueCamera:
             "Confirme no --debug que esta e a camera frontal de resgate.")
 
         self.picam2 = Picamera2(camera_num=self.camera_index)
-        sensor_mode = _select_widest_sensor_mode(
+        sensor_mode = _known_sensor_mode(camera_info[self.camera_index])
+        used_known_mode = sensor_mode is not None
+        if used_known_mode:
+            print(
+                "[resgate] partida rapida: modo full-FoV conhecido para "
+                f"{camera_info[self.camera_index].get('Model', 'camera')}")
+        else:
+            print(
+                "[resgate] sensor desconhecido; consultando modos uma vez")
+            sensor_mode = self._discover_sensor_mode()
+
+        if sensor_mode is None:
+            raise RuntimeError(
+                "a camera de resgate nao publicou modos de sensor validos")
+
+        camera_config = self._prepare_configuration(sensor_mode)
+        try:
+            self.picam2.configure(camera_config)
+        except (TypeError, ValueError, RuntimeError) as err:
+            if not used_known_mode:
+                raise
+            print(
+                "[resgate] modo rapido recusado; descobrindo modos como "
+                f"fallback: {err}")
+            self._software_rotate = False
+            sensor_mode = self._discover_sensor_mode()
+            if sensor_mode is None:
+                raise RuntimeError(
+                    "fallback nao encontrou modo de sensor valido") from err
+            camera_config = self._prepare_configuration(sensor_mode)
+            self.picam2.configure(camera_config)
+
+        self.picam2.start()
+
+        if rescue_config.RESCUE_LENS_POSITION is not None:
+            try:
+                from libcamera import controls
+                self.picam2.set_controls({
+                    "AfMode": controls.AfModeEnum.Manual,
+                    "LensPosition": rescue_config.RESCUE_LENS_POSITION,
+                })
+            except Exception as err:
+                print(f"[resgate] foco manual ignorado: {err}")
+
+        time.sleep(0.15)
+
+    def _discover_sensor_mode(self):
+        return _select_widest_sensor_mode(
             self.picam2.sensor_modes,
             rescue_config.RESCUE_CAMERA_FPS,
             rescue_config.RESCUE_CAMERA_MAX_WIDTH,
             rescue_config.RESCUE_CAMERA_MAX_HEIGHT,
         )
 
-        if sensor_mode is None:
-            raise RuntimeError(
-                "a camera de resgate nao publicou modos de sensor validos")
-
+    def _prepare_configuration(self, sensor_mode):
         sensor_width, sensor_height = _mode_size(sensor_mode)
         crop = _mode_crop(sensor_mode)
         crop_aspect = crop[2] / max(crop[3], 1)
@@ -163,22 +218,7 @@ class RescueCamera:
             f"{output_width}x{output_height} a {requested_fps:.1f} fps; "
             f"rotacao 180 graus={'sim' if rescue_config.RESCUE_ROTATE_180 else 'nao'}")
 
-        camera_config = self._create_configuration(
-            sensor_mode, frame_us)
-        self.picam2.configure(camera_config)
-        self.picam2.start()
-
-        if rescue_config.RESCUE_LENS_POSITION is not None:
-            try:
-                from libcamera import controls
-                self.picam2.set_controls({
-                    "AfMode": controls.AfModeEnum.Manual,
-                    "LensPosition": rescue_config.RESCUE_LENS_POSITION,
-                })
-            except Exception as err:
-                print(f"[resgate] foco manual ignorado: {err}")
-
-        time.sleep(0.15)
+        return self._create_configuration(sensor_mode, frame_us)
 
     def _create_configuration(self, sensor_mode, frame_us):
         main = {"size": self.output_size, "format": "RGB888"}
@@ -186,6 +226,9 @@ class RescueCamera:
             "main": main,
             "controls": {"FrameDurationLimits": (frame_us, frame_us)},
             "buffer_count": 4,
+            # Cada iteracao deve receber um frame novo. O worker ja descarta
+            # backlog; repetir o ultimo buffer confirmaria a mesma imagem.
+            "queue": False,
         }
 
         transform = None

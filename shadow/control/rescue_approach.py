@@ -85,6 +85,10 @@ class BallApproachController:
                 detail=f"alvo ausente ha {lost_for:.2f}s; robo parado")
 
         if now - detection.timestamp > cfg.BALL_FRAME_STALE_S:
+            self.visual_near_count = 0
+            self.ultrasonic_near_count = 0
+            self.ultrasonic_hold_started = None
+            self.progress.clear()
             self.state = self.LOST
             return MotionCommand(
                 self.state, detail="deteccao antiga; robo parado")

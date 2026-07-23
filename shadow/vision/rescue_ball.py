@@ -100,12 +100,14 @@ class BallDetector:
         self.last_candidates = []
         self.last_enhanced = None
         self.last_edges = None
+        self.last_hough_used = False
 
     def reset(self):
         self._tracked = None
         self._hits = 0
         self._misses = 0
         self.last_candidates = []
+        self.last_hough_used = False
 
     def detect(self, frame, timestamp=None):
         if frame is None or frame.ndim != 3 or frame.shape[2] != 3:
@@ -148,16 +150,71 @@ class BallDetector:
         dark_mask = cv2.morphologyEx(
             dark_mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8), iterations=2)
 
-        proposals = []
-        proposals.extend(self._hough_proposals(
-            gray_blur, roi_top, roi_bottom, self._pixel_scale))
-        proposals.extend(self._contour_proposals(
+        contour_proposals = []
+        contour_proposals.extend(self._contour_proposals(
             closed_edges, "edge", self._pixel_scale))
-        proposals.extend(self._contour_proposals(
+        contour_proposals.extend(self._contour_proposals(
             dark_mask, "dark", self._pixel_scale))
-        proposals = self._deduplicate(proposals)
+        contour_proposals = self._deduplicate(contour_proposals)
 
         edge_dilated = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
+        candidates = self._evaluate_proposals(
+            contour_proposals,
+            frame,
+            hsv,
+            edge_dilated,
+            width,
+            height,
+            roi_top,
+            roi_bottom,
+        )
+
+        # Hough e o trecho mais caro em fundos texturizados. Ele permanece nos
+        # frames de aquisicao e volta imediatamente se nenhum contorno for
+        # compativel com o alvo rastreado. Assim um artefato circular distante
+        # nao impede a recuperacao da esfera verdadeira.
+        contour_matches_track = any(
+            self._track_match(candidate)[0] for candidate in candidates)
+        self.last_hough_used = (
+            self._hits < cfg.BALL_ACQUIRE_HITS
+            or not candidates
+            or (
+                self._tracked is not None
+                and not contour_matches_track
+            )
+        )
+        if self.last_hough_used:
+            hough_proposals = self._hough_proposals(
+                gray_blur, roi_top, roi_bottom, self._pixel_scale)
+            hough_candidates = self._evaluate_proposals(
+                self._deduplicate(hough_proposals),
+                frame,
+                hsv,
+                edge_dilated,
+                width,
+                height,
+                roi_top,
+                roi_bottom,
+            )
+            candidates.extend(hough_candidates)
+
+        self.last_candidates = candidates
+        self.last_enhanced = enhanced
+        self.last_edges = edges
+        selected = self._select_candidate(candidates)
+        return self._update_track(selected, timestamp)
+
+    def _evaluate_proposals(
+        self,
+        proposals,
+        frame,
+        hsv,
+        edge_dilated,
+        width,
+        height,
+        roi_top,
+        roi_bottom,
+    ):
         candidates = []
         for proposal in proposals:
             if not self._inside_roi(proposal, width, height, roi_top, roi_bottom):
@@ -172,12 +229,7 @@ class BallDetector:
             if self.target_kind != "any" and candidate.kind != self.target_kind:
                 continue
             candidates.append(candidate)
-
-        self.last_candidates = candidates
-        self.last_enhanced = enhanced
-        self.last_edges = edges
-        selected = self._select_candidate(candidates)
-        return self._update_track(selected, timestamp)
+        return candidates
 
     def _hough_proposals(self, gray, roi_top, roi_bottom, pixel_scale):
         roi = gray[roi_top:roi_bottom, :]
@@ -392,21 +444,8 @@ class BallDetector:
 
         matches = []
         for candidate in candidates:
-            if candidate.kind != self._tracked.kind:
-                continue
-            distance = math.hypot(
-                candidate.center_x - self._tracked.center_x,
-                candidate.center_y - self._tracked.center_y)
-            gate = max(
-                cfg.BALL_ASSOCIATION_MIN_PX * self._pixel_scale,
-                cfg.BALL_ASSOCIATION_RADIUS_FACTOR
-                * max(candidate.radius, self._tracked.radius))
-            radius_ratio = candidate.radius / max(self._tracked.radius, 1.0)
-            if (
-                distance <= gate
-                and cfg.BALL_RADIUS_RATIO_MIN <= radius_ratio
-                <= cfg.BALL_RADIUS_RATIO_MAX
-            ):
+            compatible, distance, gate = self._track_match(candidate)
+            if compatible:
                 matches.append((candidate, distance / gate))
         if matches:
             return max(
@@ -417,6 +456,23 @@ class BallDetector:
             key=lambda item: (
                 item.confidence
                 + min(item.radius / (160.0 * self._pixel_scale), 0.35)))
+
+    def _track_match(self, candidate):
+        if self._tracked is None or candidate.kind != self._tracked.kind:
+            return False, float("inf"), 1.0
+        distance = math.hypot(
+            candidate.center_x - self._tracked.center_x,
+            candidate.center_y - self._tracked.center_y)
+        gate = max(
+            cfg.BALL_ASSOCIATION_MIN_PX * self._pixel_scale,
+            cfg.BALL_ASSOCIATION_RADIUS_FACTOR
+            * max(candidate.radius, self._tracked.radius))
+        radius_ratio = candidate.radius / max(self._tracked.radius, 1.0)
+        compatible = (
+            distance <= gate
+            and cfg.BALL_RADIUS_RATIO_MIN <= radius_ratio
+            <= cfg.BALL_RADIUS_RATIO_MAX)
+        return compatible, distance, gate
 
     def _update_track(self, selected, timestamp):
         if selected is None:
@@ -429,19 +485,8 @@ class BallDetector:
             return None
 
         compatible = False
-        if self._tracked is not None and selected.kind == self._tracked.kind:
-            distance = math.hypot(
-                selected.center_x - self._tracked.center_x,
-                selected.center_y - self._tracked.center_y)
-            gate = max(
-                cfg.BALL_ASSOCIATION_MIN_PX * self._pixel_scale,
-                cfg.BALL_ASSOCIATION_RADIUS_FACTOR
-                * max(selected.radius, self._tracked.radius))
-            radius_ratio = selected.radius / max(self._tracked.radius, 1.0)
-            compatible = (
-                distance <= gate
-                and cfg.BALL_RADIUS_RATIO_MIN <= radius_ratio
-                <= cfg.BALL_RADIUS_RATIO_MAX)
+        if self._tracked is not None:
+            compatible = self._track_match(selected)[0]
 
         if compatible:
             alpha = cfg.BALL_TRACK_EMA_ALPHA
@@ -481,6 +526,7 @@ def annotate_rescue_frame(
     detail="",
     distance_mm=None,
     motors_enabled=False,
+    performance_text="",
 ):
     """Retorna uma copia anotada para debug; nao participa da decisao."""
     annotated = frame.copy()
@@ -521,6 +567,12 @@ def annotate_rescue_frame(
         cv2.putText(
             annotated, f"ultrassom: {distance_mm} mm", (8, 63),
             cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+    if performance_text:
+        performance_y = 84 if distance_mm is not None else 63
+        cv2.putText(
+            annotated, performance_text, (8, performance_y),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 220, 80), 1,
+            cv2.LINE_AA)
     motor_label = (
         "MOTORES: ATIVOS (--drive)"
         if motors_enabled else

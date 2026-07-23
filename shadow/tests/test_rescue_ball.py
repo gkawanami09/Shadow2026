@@ -9,7 +9,7 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import rescue_config as cfg
-from vision.rescue_ball import BallDetector, RescueEnhancer
+from vision.rescue_ball import BallDetector, RescueEnhancer, _Candidate
 
 
 def base_frame():
@@ -58,11 +58,57 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertAlmostEqual(result.center_y, 300, delta=10)
 
     def test_detects_and_confirms_silver_ball(self):
-        result = self._confirmed(BallDetector("silver"), silver_ball_frame())
+        detector = BallDetector("silver")
+        result = self._confirmed(detector, silver_ball_frame())
         self.assertIsNotNone(result)
         self.assertTrue(result.confirmed)
         self.assertEqual(result.kind, "silver")
         self.assertAlmostEqual(result.center_x, 320, delta=12)
+        detector.detect(silver_ball_frame(), timestamp=0.2)
+        self.assertFalse(detector.last_hough_used)
+
+    def test_hough_remains_a_fallback_when_contours_do_not_propose(self):
+        detector = BallDetector("silver")
+        detector._contour_proposals = lambda *_args: []
+        result = self._confirmed(detector, silver_ball_frame())
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertTrue(detector.last_hough_used)
+
+    def test_incompatible_contour_cannot_block_hough_reacquisition(self):
+        detector = BallDetector("any")
+        detector._tracked = _Candidate("silver", 100, 300, 40, 0.9)
+        detector._hits = 5
+        detector._pixel_scale = 1.0
+        spurious = _Candidate("black", 500, 300, 40, 0.9)
+        reacquired = _Candidate("silver", 102, 300, 41, 0.92)
+        evaluations = iter(([spurious], [reacquired]))
+        detector._evaluate_proposals = lambda *_args: next(evaluations)
+        detector._hough_proposals = lambda *_args: [object()]
+        detector._deduplicate = lambda proposals: proposals
+
+        result = detector.detect(base_frame(), timestamp=0.1)
+
+        self.assertTrue(detector.last_hough_used)
+        self.assertEqual(result.kind, "silver")
+        self.assertTrue(result.confirmed)
+        self.assertEqual(result.hits, 6)
+        self.assertAlmostEqual(result.center_x, 100.8)
+
+    def test_compatible_confirmed_contour_skips_hough(self):
+        detector = BallDetector("silver")
+        detector._tracked = _Candidate("silver", 320, 300, 40, 0.9)
+        detector._hits = cfg.BALL_ACQUIRE_HITS
+        compatible = _Candidate("silver", 321, 300, 41, 0.92)
+        detector._evaluate_proposals = lambda *_args: [compatible]
+
+        def unexpected_hough(*_args):
+            raise AssertionError("Hough nao deveria rodar com track compativel")
+
+        detector._hough_proposals = unexpected_hough
+        result = detector.detect(base_frame(), timestamp=0.1)
+        self.assertFalse(detector.last_hough_used)
+        self.assertTrue(result.confirmed)
 
     def test_detector_thresholds_scale_at_960_pixels_wide(self):
         frame = cv2.resize(

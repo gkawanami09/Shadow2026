@@ -9,13 +9,33 @@ comportamento de ``shadow/main.py``.
 # ainda abre a camera padrao sem registrar seu indice explicitamente.
 RESCUE_CAMERA_INDEX = 0
 # A saida preserva a proporcao do modo de sensor com maior campo de visao.
-# Estes limites produzem 960x540 em sensores 16:9 e 960x720 em sensores 4:3.
-RESCUE_CAMERA_MAX_WIDTH = 960
-RESCUE_CAMERA_MAX_HEIGHT = 720
+# 640x480 reduz em 56% os pixels do antigo 960x720 sem reduzir o campo de
+# visao: quem define o FoV e o modo/crop do sensor, nao a escala da saida.
+RESCUE_CAMERA_MAX_WIDTH = 640
+RESCUE_CAMERA_MAX_HEIGHT = 480
 RESCUE_CAMERA_FPS = 30
 RESCUE_LENS_POSITION = None
 RESCUE_REQUIRE_TWO_CAMERAS = True
 RESCUE_ROTATE_180 = True
+
+# Modo full-FoV ja identificado no hardware frontal OV5647 do Shadow. Usar o
+# modo conhecido evita consultar ``sensor_modes`` a cada partida (essa consulta
+# para e reconfigura a camera varias vezes). Outros sensores usam descoberta.
+RESCUE_KNOWN_SENSOR_MODES = {
+    "ov5647": {
+        "size": (1296, 972),
+        "bit_depth": 10,
+        "fps": 43.25,
+        "crop_limits": (0, 0, 2592, 1944),
+    },
+}
+
+# O detector roda em uma thread com caixa de um unico frame. Estes limites
+# tambem cobrem videos de teste que tenham resolucao maior que a camera real.
+RESCUE_DETECTOR_MAX_WIDTH = 640
+RESCUE_DETECTOR_MAX_HEIGHT = 480
+RESCUE_ARM_DELAY_S = 3.0
+RESCUE_WORKER_JOIN_TIMEOUT_S = 2.0
 
 # Melhoria de iluminacao ja experimentada no dual_camera_viewer.
 RESCUE_CLAHE_CLIP = 2.0
@@ -48,7 +68,7 @@ BALL_MIN_EDGE_SUPPORT = 0.22
 
 # Hough + bordas. Os contornos de mascara cobrem a esfera preta; Hough e
 # contraste local cobrem a esfera prateada/reflexiva.
-BALL_MEDIAN_BLUR = 7
+BALL_MEDIAN_BLUR = 5
 BALL_CANNY_SIGMA = 0.33
 BALL_HOUGH_DP = 1.2
 BALL_HOUGH_MIN_DIST_PX = 28
@@ -101,6 +121,7 @@ BALL_STOP_CONFIRM_FRAMES = 3
 # Ultrassom e travas de seguranca. O HC-SR04 e somente uma barreira auxiliar:
 # esfera pequena pode nao devolver eco e parede pode devolver.
 BALL_ULTRASONIC_POLL_S = 0.20
+BALL_ULTRASONIC_TIMEOUT_S = 0.05
 BALL_ULTRASONIC_MIN_VALID_MM = 35
 BALL_ULTRASONIC_STOP_MM = 145
 BALL_ULTRASONIC_CONFIRM_READS = 2

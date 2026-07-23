@@ -37,6 +37,13 @@ class Arduino:
         self._last_reconnect_t = 0.0
         self._connected = False
         self._desired_led_mode = None
+        self._rx_buffer = bytearray()
+        self._ultra_pending = False
+        self._ultra_deadline = 0.0
+        self._ultra_ready = False
+        self._ultra_value = None
+        self._manual_pending = False
+        self._manual_response = None
 
         if port is not None:
             if not self._try_port(port):
@@ -94,6 +101,10 @@ class Arduino:
         ser.timeout = 0  # nunca mais bloquear em leitura
         self._ser = ser
         self._connected = True
+        self._rx_buffer.clear()
+        self.cancelar_ultrassom()
+        self._manual_pending = False
+        self._manual_response = None
 
     def _autodetect(self):
         deadline = time.monotonic() + config.SERIAL_HANDSHAKE_TIMEOUT
@@ -153,14 +164,60 @@ class Arduino:
 
     def distancia_ultrassom(self, timeout=0.2):
         """Solicita uma leitura e retorna a distancia em mm, ou None sem eco."""
-        resposta = self._query("ULTRASSOM", "OK ULTRASSOM ", timeout)
-        if resposta is None:
+        if not self.iniciar_ultrassom(timeout=timeout):
             return None
-        try:
-            distancia_mm = int(resposta.split()[-1])
-        except (ValueError, IndexError):
-            return None
-        return None if distancia_mm < 0 else distancia_mm
+        while True:
+            concluido, distancia_mm = self.poll_ultrassom()
+            if concluido:
+                return distancia_mm
+            time.sleep(0.002)
+
+    def iniciar_ultrassom(self, timeout=0.2):
+        """Inicia uma leitura sem esperar a resposta do firmware."""
+        timeout = float(timeout)
+        if timeout <= 0:
+            raise ValueError("timeout do ultrassom deve ser positivo")
+        self._drain()
+        if (
+            not self._connected
+            or self._ultra_pending
+            or self._ultra_ready
+        ):
+            return False
+
+        self._ultra_pending = True
+        self._ultra_deadline = time.monotonic() + timeout
+        self._ultra_value = None
+        self._write_line("ULTRASSOM")
+        if not self._connected:
+            self._ultra_pending = False
+            return False
+        return True
+
+    def poll_ultrassom(self):
+        """Retorna (concluido, distancia_mm) sem bloquear."""
+        self._drain()
+        now = time.monotonic()
+        if self._ultra_pending and (
+            not self._connected or now >= self._ultra_deadline
+        ):
+            self._ultra_pending = False
+            self._ultra_ready = True
+            self._ultra_value = None
+
+        if not self._ultra_ready:
+            return False, None
+        value = self._ultra_value
+        self._ultra_ready = False
+        self._ultra_value = None
+        return True, value
+
+    def cancelar_ultrassom(self):
+        """Descarta pedido/resposta; uma resposta tardia nao sera reutilizada."""
+        self._ultra_pending = False
+        self._ultra_ready = False
+        self._ultra_value = None
+        self._ultra_deadline = 0.0
 
     def futaba(self, potencia, tempo_ms):
         """Aciona o servo continuo com potencia -100..100 por ate 3000 ms."""
@@ -186,25 +243,46 @@ class Arduino:
         if not comando:
             raise ValueError("O comando serial nao pode estar vazio")
 
+        if not self._connected:
+            self._try_reconnect()
+        if not self._connected:
+            return None
+
         self._drain()
+        self._manual_pending = True
+        self._manual_response = None
         self._write_line(comando)
         deadline = time.monotonic() + timeout
-        while self._connected and time.monotonic() < deadline:
-            try:
-                if self._ser.in_waiting:
-                    line = self._ser.readline().decode(errors="replace").strip()
-                    if line:
-                        return line
-                else:
-                    time.sleep(0.002)
-            except (serial.SerialException, OSError):
-                self._connected = False
-                break
-        return None
+        try:
+            while self._connected and time.monotonic() < deadline:
+                self._drain()
+                if self._manual_response is not None:
+                    return self._manual_response
+                time.sleep(0.002)
+            return None
+        finally:
+            self._manual_pending = False
+            self._manual_response = None
 
-    def refresh(self):
+    def refresh(self, fail_closed=False):
         """Re-send the last command if the keepalive interval elapsed
-        (call inside any sleep while motors are running)."""
+        (call inside any sleep while motors are running).
+
+        ``fail_closed`` e usado pelo resgate: depois de reconectar, substitui
+        um movimento baseado numa imagem antiga por PARAR. O padrao preserva
+        o comportamento dos outros modos existentes.
+        """
+        if fail_closed and not self._connected:
+            self._try_reconnect()
+            if not self._connected:
+                return
+            # Uma reconexao pode acontecer muito depois do frame que gerou o
+            # ultimo movimento. Nunca ressuscitar esse comando antigo.
+            self._write_line("PARAR")
+            self._last_cmd = "PARAR"
+            self._last_send_t = time.monotonic()
+            self._drain()
+            return
         if self._last_cmd is not None and \
                 time.monotonic() - self._last_send_t > config.SERIAL_KEEPALIVE_S:
             self._write_line(self._last_cmd)
@@ -241,23 +319,8 @@ class Arduino:
 
     def _query(self, cmd, prefix, timeout):
         """Envia uma consulta e aguarda somente a resposta correspondente."""
-        self._drain()
-        self._write_line(cmd)
-        deadline = time.monotonic() + timeout
-        while self._connected and time.monotonic() < deadline:
-            try:
-                if self._ser.in_waiting:
-                    line = self._ser.readline().decode(errors="replace").strip()
-                    if line.startswith(prefix):
-                        return line
-                    if line.startswith("ERRO"):
-                        print(f"[serial] firmware respondeu: {line}")
-                else:
-                    time.sleep(0.002)
-            except (serial.SerialException, OSError):
-                self._connected = False
-                break
-        return None
+        line = self.comando_serial(cmd, timeout=timeout)
+        return line if line is not None and line.startswith(prefix) else None
 
     def _write_line(self, cmd):
         if not self._connected:
@@ -279,12 +342,47 @@ class Arduino:
         if not self._connected:
             return
         try:
-            while self._ser.in_waiting:
-                line = self._ser.readline().decode(errors="replace").strip()
-                if line.startswith("ERRO"):
-                    print(f"[serial] firmware respondeu: {line}")
+            available = int(self._ser.in_waiting)
+            if available <= 0:
+                return
+            chunk = self._ser.read(available)
+            if isinstance(chunk, str):
+                chunk = chunk.encode()
+            self._rx_buffer.extend(chunk)
+
+            while b"\n" in self._rx_buffer:
+                raw_line, _, remainder = self._rx_buffer.partition(b"\n")
+                self._rx_buffer = bytearray(remainder)
+                line = raw_line.decode(errors="replace").strip()
+                if line:
+                    self._route_line(line)
+
+            # Firmware correto sempre termina linhas com LF. Limitar lixo de
+            # uma porta incorreta sem perder fragmentos normais.
+            if len(self._rx_buffer) > 4096:
+                self._rx_buffer.clear()
         except (serial.SerialException, OSError):
             self._connected = False
+
+    def _route_line(self, line):
+        if line.startswith("OK ULTRASSOM "):
+            if self._ultra_pending:
+                try:
+                    value = int(line.split()[-1])
+                except (ValueError, IndexError):
+                    value = -1
+                self._ultra_value = None if value < 0 else value
+                self._ultra_pending = False
+                self._ultra_ready = True
+                return
+            # A ferramenta manual tambem pode enviar ULTRASSOM.
+            if self._manual_pending and self._manual_response is None:
+                self._manual_response = line
+            return
+        if self._manual_pending and self._manual_response is None:
+            self._manual_response = line
+        if line.startswith("ERRO"):
+            print(f"[serial] firmware respondeu: {line}")
 
     def _try_reconnect(self):
         now = time.monotonic()
