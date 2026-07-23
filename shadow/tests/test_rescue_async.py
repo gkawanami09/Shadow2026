@@ -142,6 +142,7 @@ class LatestFrameDetectorTests(unittest.TestCase):
             self.assertEqual(result.candidate_count, 0)
             self.assertEqual(result.candidate_radii, ())
             self.assertEqual(result.candidate_circles, ())
+            self.assertIsNone(result.crescent_evidence)
             self.assertEqual(result.diagnostic, "")
             self.assertIsNone(worker.poll(after_sequence=result.sequence))
         finally:
@@ -202,6 +203,48 @@ class LatestFrameDetectorTests(unittest.TestCase):
             self.assertGreaterEqual(result.candidate_count, 1)
             self.assertTrue(result.candidate_radii)
             self.assertTrue(result.candidate_circles)
+            self.assertIsNotNone(result.crescent_evidence)
+            self.assertFalse(result.crescent_evidence.accepted)
+        finally:
+            worker.close()
+
+    def test_worker_publishes_close_crescent_without_full_circle(self):
+        height, width = 480, 640
+        frame = np.full((height, width, 3), 165, dtype=np.uint8)
+        normalized_x = np.linspace(-1.0, 1.0, 301)
+        xs = (
+            width / 2
+            + normalized_x
+            * cfg.BALL_CRESCENT_DEFAULT_HALFSPAN_RATIO
+            * width
+        )
+        ys = (
+            cfg.BALL_CRESCENT_DEFAULT_TOP_RATIO
+            + (
+                cfg.BALL_CRESCENT_BOTTOM_RATIO
+                - cfg.BALL_CRESCENT_DEFAULT_TOP_RATIO
+            )
+            * np.square(normalized_x)
+        ) * height
+        curve = np.column_stack((xs, ys)).astype(np.int32)
+        polygon = np.vstack((
+            curve,
+            (curve[-1, 0], height - 1),
+            (curve[0, 0], height - 1),
+        )).astype(np.int32)
+        cv2.fillPoly(frame, [polygon], (35, 35, 35))
+
+        worker = LatestFrameBallDetector(
+            BallDetector("any", enhance=False),
+            max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
+            max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
+        )
+        try:
+            worker.submit(frame, captured_at=10.0)
+            result = wait_result(worker)
+            self.assertIsNotNone(result.crescent_evidence)
+            self.assertTrue(result.crescent_evidence.accepted)
+            self.assertEqual(result.crescent_evidence.timestamp, 10.0)
         finally:
             worker.close()
 

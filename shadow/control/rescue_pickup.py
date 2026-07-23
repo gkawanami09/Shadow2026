@@ -32,7 +32,7 @@ class PickupStep:
 
 
 class BallPickupSequencer:
-    """Re -> Futaba -> avanco com garras, sempre com deadlines monotonic."""
+    """Re -> Futaba -> avanco -> garras, com deadlines monotonic."""
 
     IDLE = "PICKUP_IDLE"
     BACKUP_START = "PICKUP_BACKUP_START"
@@ -40,6 +40,8 @@ class BallPickupSequencer:
     BACKUP = "PICKUP_BACKUP"
     FUTABA_START = "PICKUP_FUTABA_START"
     FUTABA_WAIT = "PICKUP_FUTABA"
+    FORWARD_START = "PICKUP_FORWARD_START"
+    FORWARD_LEAD = "PICKUP_FORWARD_LEAD"
     GRIPPERS_START = "PICKUP_GRIPPERS_START"
     GRIPPERS_WAIT = "PICKUP_GRIPPERS"
     COMPLETE = "PICKUP_COMPLETE"
@@ -48,6 +50,7 @@ class BallPickupSequencer:
     def __init__(self):
         self.state = self.IDLE
         self._deadline = None
+        self._forward_deadline = None
         self._terminal_detail = ""
 
     @property
@@ -126,15 +129,41 @@ class BallPickupSequencer:
                     "aguardando o Futaba terminar a descida",
                 )
 
-            self.state = self.GRIPPERS_START
+            self.state = self.FORWARD_START
             self._deadline = None
             return PickupStep(
-                self.GRIPPERS_START,
-                "Futaba embaixo; avancando e fechando as duas garras",
+                self.FORWARD_START,
+                "Futaba embaixo; iniciando avanco antes das garras",
                 angle=0,
                 speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 motor_action="forward",
                 stop_futaba=True,
+            )
+
+        if self.state == self.FORWARD_START:
+            return PickupStep(
+                self.FORWARD_START,
+                "aguardando confirmacao do comando de avanco",
+                angle=0,
+                speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+            )
+
+        if self.state == self.FORWARD_LEAD:
+            if now < self._deadline:
+                return PickupStep(
+                    self.FORWARD_LEAD,
+                    "avancando antes de fechar as garras",
+                    angle=0,
+                    speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+                )
+
+            self.state = self.GRIPPERS_START
+            self._deadline = None
+            return PickupStep(
+                self.GRIPPERS_START,
+                "avanco iniciado; fechando as duas garras",
+                angle=0,
+                speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 gripper_action=(
                     cfg.BALL_PICKUP_LEFT_DELTA,
                     cfg.BALL_PICKUP_RIGHT_DELTA,
@@ -194,14 +223,25 @@ class BallPickupSequencer:
         self.state = self.BACKUP
         self._deadline = now + cfg.BALL_PICKUP_REVERSE_S
 
+    def mark_forward_started(self, now=None):
+        """Inicia os 1,5 s totais e a vantagem antes das garras."""
+        if self.state != self.FORWARD_START:
+            raise RuntimeError(
+                "confirmacao do avanco fora do estado de partida")
+        now = time.monotonic() if now is None else float(now)
+        self.state = self.FORWARD_LEAD
+        self._deadline = now + cfg.BALL_PICKUP_FORWARD_LEAD_S
+        self._forward_deadline = now + cfg.BALL_PICKUP_FORWARD_S
+
     def mark_grippers_started(self, now=None):
-        """Inicia o avanco depois que motor e garras foram escritos."""
+        """Mantem o prazo total contado desde o inicio do avanco."""
         if self.state != self.GRIPPERS_START:
             raise RuntimeError(
                 "confirmacao das garras fora do estado de partida")
-        now = time.monotonic() if now is None else float(now)
+        if self._forward_deadline is None:
+            raise RuntimeError("prazo do avanco ainda nao foi iniciado")
         self.state = self.GRIPPERS_WAIT
-        self._deadline = now + cfg.BALL_PICKUP_FORWARD_S
+        self._deadline = self._forward_deadline
 
     def fail(self, detail):
         self.state = self.FAULT

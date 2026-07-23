@@ -102,6 +102,8 @@ def _apply_pickup_actions(
     expected_connection_epoch=None,
 ):
     """Aplica somente os eventos one-shot emitidos pelo sequenciador."""
+    forward_started = False
+
     def link_changed():
         return (
             expected_connection_epoch is not None
@@ -114,9 +116,20 @@ def _apply_pickup_actions(
     def link_error():
         return "serial mudou durante a coleta; sequencia cancelada"
 
+    def abort(detail):
+        # No passo das garras o avanco ja foi iniciado no estado anterior.
+        # Qualquer falha precisa cortar as rodas aqui, sem esperar o proximo
+        # tick; o caller ainda repete PARAR ao entrar em PICKUP_FAULT.
+        if forward_started or step.gripper_action is not None:
+            try:
+                steer_action()
+            except Exception:
+                pass
+        return detail
+
     try:
         if link_changed():
-            return link_error()
+            return abort(link_error())
         if step.motor_action == "reverse":
             if steer_action(step.angle, step.speed) is False:
                 return "comando de re nao foi enviado pela serial"
@@ -131,40 +144,40 @@ def _apply_pickup_actions(
         elif step.motor_action not in ("", "forward"):
             return f"acao de motor desconhecida: {step.motor_action}"
         if link_changed():
-            return link_error()
+            return abort(link_error())
 
         if step.futaba_action is not None:
             potencia, tempo_ms = step.futaba_action
             if arduino.futaba(potencia, tempo_ms) is False:
                 return "FUTABA nao foi enviado pela serial"
             if link_changed():
-                return link_error()
+                return abort(link_error())
 
         if step.stop_futaba:
             if arduino.parar_futaba() is False:
                 return "FUTABA PARAR nao foi enviado pela serial"
             if link_changed():
-                return link_error()
+                return abort(link_error())
+
+        # A ordem fisica pedida e FUTABA PARAR -> avanco -> garras. O avanco
+        # possui um estado proprio e uma curta vantagem monotonic antes de o
+        # lote simultaneo das duas garras ser emitido.
+        if step.motor_action == "forward":
+            if steer_action(step.angle, step.speed) is False:
+                return "comando de avanco nao foi enviado pela serial"
+            forward_started = True
+            if link_changed():
+                return abort(link_error())
 
         if step.gripper_action is not None:
             esquerda, direita = step.gripper_action
             if arduino.garras(esquerda, direita) is False:
-                return "comando simultaneo das garras nao foi enviado"
+                return abort(
+                    "comando simultaneo das garras nao foi enviado")
             if link_changed():
-                return link_error()
-
-        # O avanco da coleta e aplicado por ultimo: primeiro confirmamos que o
-        # Futaba parou e que as garras receberam o lote. Os poucos
-        # milissegundos entre as escritas ainda deixam os servos fechando
-        # durante todo o deslocamento, mas uma falha nas garras nunca produz
-        # nem um pulso de avanco.
-        if step.motor_action == "forward":
-            if steer_action(step.angle, step.speed) is False:
-                return "comando de avanco nao foi enviado pela serial"
-            if link_changed():
-                return link_error()
+                return abort(link_error())
     except Exception as err:
-        return f"falha ao comandar coleta: {err}"
+        return abort(f"falha ao comandar coleta: {err}")
     return None
 
 
@@ -195,6 +208,29 @@ def _dataset_metadata(
 
     detector_data = None
     if result is not None:
+        crescent = result.crescent_evidence
+        crescent_data = None
+        if crescent is not None:
+            crescent_data = {
+                "accepted": bool(crescent.accepted),
+                "confidence": float(crescent.confidence),
+                "support": float(crescent.support),
+                "left_support": float(crescent.left_support),
+                "center_support": float(crescent.center_support),
+                "right_support": float(crescent.right_support),
+                "contrast": float(crescent.contrast),
+                "center_x_ratio": float(crescent.center_x_ratio),
+                "top_y_ratio": float(crescent.top_y_ratio),
+                "halfspan_ratio": float(crescent.halfspan_ratio),
+                "gradient_polarity": float(
+                    crescent.gradient_polarity),
+                "profile_support": float(crescent.profile_support),
+                "profile_polarity": float(crescent.profile_polarity),
+                "coherent_run": float(crescent.coherent_run),
+                "circle_rmse_ratio": float(
+                    crescent.circle_rmse_ratio),
+                "curvature_score": float(crescent.curvature_score),
+            }
         detector_data = {
             # Candidatos/deteccao so descrevem este PNG quando esta flag e
             # true. Caso contrario servem apenas como contexto do loop.
@@ -211,6 +247,7 @@ def _dataset_metadata(
             "candidate_circles": [
                 list(circle) for circle in result.candidate_circles
             ],
+            "crescent_evidence": crescent_data,
             "diagnostic": result.diagnostic,
             "detection": detection_data,
         }
@@ -451,6 +488,7 @@ def main():
                     command = controller.update(
                         result.detection,
                         result.frame_shape,
+                        crescent_evidence=result.crescent_evidence,
                         now=now,
                     )
                     command_updated = True
@@ -466,8 +504,7 @@ def main():
                     command = controller.update(
                         control_detection,
                         result.frame_shape,
-                        candidate_count=result.candidate_count,
-                        candidate_circles=result.candidate_circles,
+                        crescent_evidence=result.crescent_evidence,
                         now=now,
                     )
                     command_updated = True
@@ -479,6 +516,7 @@ def main():
                 command = controller.update(
                     latest_result.detection,
                     latest_result.frame_shape,
+                    crescent_evidence=latest_result.crescent_evidence,
                     now=now,
                 )
                 command_updated = True
@@ -525,6 +563,8 @@ def main():
                             pickup.mark_reverse_started(action_completed_at)
                         if pickup_step.futaba_action is not None:
                             pickup.mark_futaba_started(action_completed_at)
+                        if pickup_step.motor_action == "forward":
+                            pickup.mark_forward_started(action_completed_at)
                         if pickup_step.gripper_action is not None:
                             pickup.mark_grippers_started(action_completed_at)
                     if pickup_error is not None:
@@ -553,7 +593,7 @@ def main():
                 )
                 print(
                     "[coleta] bolinha proxima: iniciando re, Futaba, "
-                    "garras e avanco final")
+                    "avanco final e depois garras")
 
             log_now = time.monotonic()
             should_log = (
@@ -605,6 +645,19 @@ def main():
             diagnostic = (
                 last_metrics_result.diagnostic
                 if last_metrics_result is not None else "inicio")
+            crescent_metrics = (
+                last_metrics_result.crescent_evidence
+                if last_metrics_result is not None else None)
+            crescent_text = (
+                (
+                    " lua"
+                    f"{crescent_metrics.support * 100:.0f}%"
+                    f"/{crescent_metrics.contrast:.0f}"
+                    f"{'*' if crescent_metrics.accepted else ''}"
+                )
+                if crescent_metrics is not None
+                else ""
+            )
             radii_text = (
                 " r" + "/".join(
                     f"{radius:.0f}" for radius in candidate_radii)
@@ -614,7 +667,7 @@ def main():
                 f"vis {detector_fps:.1f} | "
                 f"{processing_ms:.0f}ms | "
                 f"{vision_mode}{candidate_count}/{hough_proposals}:"
-                f"{diagnostic}{radii_text} | "
+                f"{diagnostic}{radii_text}{crescent_text} | "
                 f"d{dropped}")
 
             if (
@@ -632,6 +685,10 @@ def main():
                     performance_text=performance_text,
                     pickup_in_range=command.pickup_in_range,
                     pickup_confirmations=command.pickup_confirmations,
+                    crescent_evidence=(
+                        latest_result.crescent_evidence
+                        if latest_result is not None else None
+                    ),
                 )
                 cv2.imshow(WINDOW, annotated)
 

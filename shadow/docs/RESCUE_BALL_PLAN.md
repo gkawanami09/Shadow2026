@@ -9,22 +9,25 @@ integração no controle de linha é enviar `LED ACESO` ao iniciar esse modo.
 ```text
 WAIT_TARGET -> ALIGN -> APPROACH -> NEAR_CONFIRM -> NEAR
                     \-> LOST/FAULT (PARAR)
-NEAR -> PICKUP_BACKUP -> PICKUP_FUTABA -> PICKUP_GRIPPERS -> PICKUP_COMPLETE
+NEAR -> PICKUP_BACKUP -> PICKUP_FUTABA -> PICKUP_FORWARD
+     -> PICKUP_GRIPPERS -> PICKUP_COMPLETE
 ```
 
 - `WAIT_TARGET`: motores parados até uma esfera aparecer de forma consistente.
 - `ALIGN`: pivô lento, sem avanço, para centralizar a esfera.
 - `APPROACH`: avanço em arco; a velocidade diminui à medida que a esfera cresce.
 - `NEAR_CONFIRM`: para imediatamente e confirma por três frames que a esfera
-  entrou na faixa visual da garra.
+  formou a meia-lua larga na frente da garra.
 - `NEAR`: parada confirmada e transferência única para a coleta.
 - `LOST`: qualquer perda ou imagem antiga produz `PARAR` imediatamente.
 - `FAULT`: timeout ou falta de progresso produz `PARAR` travado.
 - `PICKUP_BACKUP`: ré reta por 1,50 s a velocidade 0,35.
 - `PICKUP_FUTABA`: rodas zeradas e `FUTABA -20 1500`; aguarda 1,50 s
   mais 0,10 s de margem.
-- `PICKUP_GRIPPERS`: envia esquerda `-50` e direita `+50` no mesmo pacote
-  USB e avança reto por 1,50 s a velocidade 0,35 enquanto elas fecham.
+- `PICKUP_FORWARD`: envia primeiro o avanço reto e espera 0,12 s para as rodas
+  vencerem a inércia.
+- `PICKUP_GRIPPERS`: já em avanço, envia esquerda `-50` e direita `+50` no
+  mesmo pacote USB; o avanço continua até completar 1,50 s no total.
 - `PICKUP_COMPLETE`: envia `PARAR` e encerra.
 
 Ainda não há busca cega por rotação, transporte, depósito ou navegação completa
@@ -70,15 +73,31 @@ aceitos/propostas Hough brutas, motivo principal de rejeição, até quatro raio
 aceitos e frames descartados. Por exemplo, `H1/5:ok r42` significa que cinco
 círculos foram propostos, um passou pelos filtros e seu raio no preview é 42 px.
 
-O preview também desenha a `FAIXA GARRA`: o corredor inferior fica amarelo
-enquanto a esfera está fora, laranja em `1/3` e `2/3`, e verde em `3/3`.
-Quando a esfera prateada está tão perto que sai parcialmente do quadro, o
-tracker pode escolher um reflexo interno pequeno. Nesse caso, a faixa exige
-também confiança, histórico e pelo menos dois círculos externos grandes entre
-os candidatos do mesmo frame. Os dois círculos precisam envolver espacialmente
-o reflexo rastreado, ser classificados como prateados e manter o centro do
-envelope dentro do corredor da garra; círculos grandes de outro objeto ou uma
-esfera deslocada para o lado não podem armar a coleta.
+O preview desenha a `MEIA-LUA GARRA`: duas curvas delimitam a faixa onde deve
+aparecer a borda superior da esfera enorme. Ela fica amarela fora do gate,
+laranja em `1/3` e `2/3`, e verde em `3/3`. O detector mede uma curva com pelo
+menos 68% da largura da imagem e exige borda distribuída no ombro esquerdo,
+centro e ombro direito. Os pontos precisam pertencer à mesma componente de
+borda, acompanhar a orientação da parábola, manter poucos trechos coerentes de
+polaridade (permitindo o reflexo central do alumínio) e formar um trecho
+contínuo. A inclinação precisa variar por toda a largura, inclusive nos
+ombros, para que uma bolinha pequena encostada numa sombra em V não forme uma
+meia-lua composta falsa. A borda
+também precisa ajustar um círculo; por isso um `V` ou trapézio preenchido não
+substitui a curvatura da esfera. O contraste também precisa continuar dentro
+da região profunda da esfera; uma linha curva desenhada, grade, mosaico ou
+vários pedaços soltos não bastam. O marcador usa a geometria realmente
+avaliada naquele frame: `p=` mostra a coerência de polaridade e `q=` a
+curvatura distribuída.
+
+Assim, uma esfera pequena distante pode até estar centralizada, mas não
+consegue preencher a meia-lua e não arma a coleta. Essa etapa independe do
+Hough no frame final, pois o círculo real já está cortado pelo quadro e seria
+corretamente rejeitado pelo ROI normal. Porém, por segurança, a meia-lua só é
+autorizada por um token curto criado durante uma aproximação anterior: exige
+vários círculos centralizados, já baixos no quadro e crescendo enquanto o robô
+avança. Uma meia-lua presente desde a partida mantém o robô parado; ela nunca
+inicia a coleta a frio.
 O watchdog também considera a descida da esfera na imagem, além do aumento do
 raio, para não declarar falta de progresso durante essa aproximação final.
 
@@ -101,7 +120,10 @@ Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 12. preferência pelo envelope externo somente quando um círculo menor está
     realmente contido nele e as duas confianças são compatíveis;
 13. associação espacial mais rígida durante os três hits de aquisição,
-    suavização e confirmação em vários frames.
+    suavização e confirmação em vários frames;
+14. gate final independente por arco parabólico largo em `320x240`, com três
+    resultados frescos, histórico de aproximação obrigatório e parada já no
+    primeiro.
 
 Uma detecção incerta não movimenta o robô.
 
@@ -115,10 +137,11 @@ deslocamentos relativos e não podem ser repetidos.
 `PARAR` também corta o Futaba no firmware. Por isso, ao terminar a ré, o
 programa usa `LADO 0 0` para zerar as quatro rodas. O keepalive repete esse
 comando enquanto CH3 desce, sem interromper os 1500 ms. Depois do prazo, o
-programa envia `FUTABA PARAR` por segurança e as duas linhas das garras em uma
-única escrita serial. Confirmado o lote das garras, inicia o avanço reto; o
-cronômetro de 1,50 s começa somente depois que todas essas escritas retornam.
-Se as garras não receberem o comando, o avanço não começa.
+programa envia `FUTABA PARAR` por segurança e inicia o avanço reto. Após 0,12 s,
+envia as duas linhas das garras em uma única escrita serial. O cronômetro de
+1,50 s começa quando o avanço é entregue, portanto restam aproximadamente
+1,38 s de movimento enquanto elas fecham. Se o lote das garras falhar, o
+programa envia `PARAR` imediatamente e entra em `PICKUP_FAULT`.
 
 O PCA9685 precisa de alimentação externa regulada adequada para os servos, com
 GND comum ao Arduino. Não alimente Futaba e garras pelo pino 5 V do Uno.
@@ -151,8 +174,8 @@ neural sendo treinada nesta etapa.
 ## Parada e segurança
 
 A chegada perto da bolinha é decidida exclusivamente pela câmera frontal:
-posição inferior, centralização e evidências do envelope externo precisam ser
-confirmadas em três frames. O primeiro indício já produz `PARAR`, antes de
+a meia-lua larga, centralizada, contrastada e apoiada nos três setores precisa
+ser confirmada em três frames. O primeiro indício já produz `PARAR`, antes de
 confirmar e armar a coleta. O resgate não consulta o HC-SR04, porque uma vítima
 esférica pode desviar o eco e uma parede pode gerar uma falsa proximidade.
 
@@ -180,8 +203,8 @@ Outras travas:
   frame que apenas aguardou a câmera;
 - aproximação sem aumento do raio = `FAULT`;
 - timeout = `FAULT`;
-- falha de escrita de ré, Futaba ou garras = `PICKUP_FAULT`, sem avançar para
-  a próxima ação;
+- falha de escrita de ré, Futaba, avanço ou garras = `PICKUP_FAULT`; se o
+  avanço já começou, `PARAR` é enviado imediatamente;
 - reconexão serial durante a coleta cancela a sequência, pois o Uno pode ter
   reiniciado a posição relativa das garras;
 - `finally` sempre envia `PARAR`, `FUTABA PARAR` e fecha a serial;
@@ -204,8 +227,8 @@ Outras travas:
 3. Pressionar `s` e testar cenas reais: piso vazio, sombra, parede, reflexo,
    esfera preta e prateada em 15, 20, 30, 50 e 80 cm.
 
-4. Ajustar somente `shadow/rescue_config.py`, principalmente ROI, raios,
-   confiança e parada.
+4. Ajustar somente `shadow/rescue_config.py`, principalmente os ratios,
+   suportes e contraste `BALL_CRESCENT_*`.
 
 5. Primeiro movimento com rodas suspensas:
 
@@ -217,9 +240,10 @@ Outras travas:
    assumir silenciosamente qual câmera física deve comandar o robô.
 
 6. Ainda com as rodas suspensas e sem bolinha presa, confirme no log a ordem:
-   `PICKUP_BACKUP`, `PICKUP_FUTABA`, `PICKUP_GRIPPERS`,
-   `PICKUP_COMPLETE`. Em `PICKUP_GRIPPERS`, as rodas devem avançar por 1,50 s
-   enquanto os servos fecham. Mantenha acesso imediato à alimentação.
+   `PICKUP_BACKUP`, `PICKUP_FUTABA`, `PICKUP_FORWARD`,
+   `PICKUP_GRIPPERS`, `PICKUP_COMPLETE`. O avanço precisa aparecer antes das
+   garras; após 0,12 s elas fecham e o avanço termina ao completar 1,50 s no
+   total. Mantenha acesso imediato à alimentação.
 
 7. Teste no chão em velocidade baixa.
 

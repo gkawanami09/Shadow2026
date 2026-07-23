@@ -148,34 +148,66 @@ BALL_APPROACH_SPEED_FAR = 0.45
 BALL_APPROACH_SPEED_NEAR = 0.35
 BALL_SLOW_RADIUS_PX = 48
 
-# Parada perto da esfera, exclusivamente pela camera. O resgate nao consulta o
-# HC-SR04 porque a superficie esferica pode desviar o eco. O gate normal usa o
-# circulo externo e tambem espera a linha inferior 0.84, inclusive para a esfera
-# preta, evitando a parada antecipada observada a cerca de 20 cm. A faixa
-# especial abaixo cobre a esfera prateada muito perto: nessa pose o circulo
-# externo fica cortado e o tracker pode escolher um reflexo interno pequeno,
-# como no frame medido x=424, y=379, r=37 em 640x480.
+# O raio ainda controla apenas a desaceleracao. A coleta nao e mais disparada
+# por "circulo dentro de um retangulo": perto da garra a esfera fica maior que
+# o quadro e o Hough rejeita o contorno cortado. O gate definitivo usa a
+# meia-lua larga descrita abaixo.
 BALL_STOP_RADIUS_PX = 76
-BALL_STOP_BOTTOM_Y_RATIO = 0.84
-BALL_STOP_CENTER_ERROR = 0.12
 BALL_STOP_CONFIRM_FRAMES = 3
 
-# Gate da esfera prateada cortada na parte inferior da imagem. Alem da
-# deteccao selecionada, exige varios candidatos e dois circulos externos
-# grandes que envolvam o reflexo rastreado no mesmo frame; assim um brilho
-# pequeno no piso nao pode se combinar com circulos de outro objeto.
-BALL_CLOSE_MIN_CONFIDENCE = 0.80
-BALL_CLOSE_MIN_HITS = 6
-BALL_CLOSE_MIN_RADIUS_PX = 28
-BALL_CLOSE_CENTER_Y_RATIO = 0.74
-BALL_CLOSE_BOTTOM_Y_RATIO = 0.84
-BALL_CLOSE_CENTER_ERROR = 0.42
-BALL_CLOSE_MIN_CANDIDATES = 6
-BALL_CLOSE_LARGEST_RADIUS_PX = 105
-BALL_CLOSE_SECOND_RADIUS_PX = 85
-BALL_CLOSE_ASSOCIATION_RADIUS_RATIO = 1.15
-BALL_CLOSE_OUTER_MIN_CONFIDENCE = 0.66
-BALL_CLOSE_OUTER_CENTER_ERROR = 0.24
+# Gate de proximidade pela borda superior da esfera enorme/cortada. Cada
+# template e uma parabola y=top+(bottom-top)*x^2, normalizada pelo frame. A
+# largura minima e 68% da imagem; uma esfera pequena distante nao consegue
+# fornecer borda simultaneamente nos dois ombros e no centro.
+BALL_CRESCENT_TOP_RATIOS = (0.70, 0.74, 0.78)
+BALL_CRESCENT_HALFSPAN_RATIOS = (0.34, 0.40, 0.46)
+BALL_CRESCENT_CENTER_RATIOS = (0.44, 0.48, 0.50, 0.52, 0.56)
+BALL_CRESCENT_BOTTOM_RATIO = 0.98
+BALL_CRESCENT_DEFAULT_TOP_RATIO = 0.74
+BALL_CRESCENT_DEFAULT_HALFSPAN_RATIO = 0.46
+BALL_CRESCENT_BAND_RATIO = 0.018
+BALL_CRESCENT_CONTRAST_OFFSET_RATIO = 0.025
+BALL_CRESCENT_OUTSIDE_CONTRAST_OFFSET_RATIO = 0.050
+BALL_CRESCENT_DEEP_CONTRAST_OFFSET_RATIO = 0.075
+BALL_CRESCENT_DEEP_INNER_X_RATIO = 0.70
+BALL_CRESCENT_SAMPLES = 73
+BALL_CRESCENT_MIN_SUPPORT = 0.55
+BALL_CRESCENT_MIN_SHOULDER_SUPPORT = 0.40
+BALL_CRESCENT_MIN_CENTER_SUPPORT = 0.55
+BALL_CRESCENT_MIN_CONTRAST = 10.0
+BALL_CRESCENT_MIN_GRADIENT = 12.0
+BALL_CRESCENT_MIN_GRADIENT_ALIGNMENT = 0.82
+BALL_CRESCENT_MIN_GRADIENT_POLARITY = 0.62
+BALL_CRESCENT_MIN_PROFILE_SUPPORT = 0.55
+BALL_CRESCENT_MIN_PROFILE_POLARITY = 0.62
+BALL_CRESCENT_MIN_COHERENT_RUN = 0.18
+BALL_CRESCENT_MAX_CIRCLE_RMSE_RATIO = 0.008
+BALL_CRESCENT_CURVATURE_BINS = 7
+BALL_CRESCENT_MIN_CURVATURE_SCORE = 0.95
+# Exige curvatura também nos ombros. Um V ligado a uma bolinha ainda pequena
+# pode parecer circular no miolo, mas seus incrementos externos ficam < 0.08.
+BALL_CRESCENT_MIN_SLOPE_STEP = 0.08
+BALL_CRESCENT_MIN_SLOPE_SPAN = 0.45
+BALL_CRESCENT_MAX_CENTER_ERROR = 0.12
+
+# A meia-lua so pode concluir uma aproximacao visual real. O token e armado
+# por uma serie temporal de circulos centralizados, crescentes e ja baixos no
+# quadro; ele sobrevive por pouco tempo quando o perimetro sai do ROI.
+BALL_CRESCENT_HISTORY_S = 1.80
+BALL_CRESCENT_HISTORY_MIN_SAMPLES = 4
+BALL_CRESCENT_HISTORY_MIN_SPAN_S = 0.20
+BALL_CRESCENT_HISTORY_MIN_FORWARD_S = 0.12
+BALL_CRESCENT_ARM_RADIUS_RATIO = 0.07
+BALL_CRESCENT_ARM_BOTTOM_RATIO = 0.76
+BALL_CRESCENT_ARM_RADIUS_GROWTH_RATIO = 0.012
+BALL_CRESCENT_ARM_BOTTOM_GROWTH_RATIO = 0.025
+BALL_CRESCENT_ARM_MAX_CENTER_ERROR = 0.24
+BALL_CRESCENT_ASSOCIATION_X_RATIO = 0.10
+# Perto demais, o Hough pode escolher um reflexo interno deslocado (no frame
+# medido, x=424 enquanto a esfera externa estava centrada em 640 px).
+BALL_CRESCENT_INNER_ASSOCIATION_X_RATIO = 0.22
+BALL_CRESCENT_INNER_BOTTOM_RATIO = 0.82
+BALL_CRESCENT_TOKEN_TTL_S = 0.80
 
 # Coleta depois que a aproximacao visual termina. Re e avanco usam a mesma
 # velocidade conservadora ja validada perto da esfera. O Futaba e continuo:
@@ -188,6 +220,10 @@ BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
 BALL_PICKUP_LEFT_DELTA = -50
 BALL_PICKUP_RIGHT_DELTA = 50
+# O motor recebe o avanco antes das garras. Esta curta vantagem deixa as rodas
+# vencerem a inercia; depois ambas as garras fecham no mesmo lote USB. Os
+# 1,50 s sao contados desde o comando das rodas, incluindo essa vantagem.
+BALL_PICKUP_FORWARD_LEAD_S = 0.12
 BALL_PICKUP_FORWARD_S = 1.50
 BALL_PICKUP_FORWARD_SPEED = BALL_APPROACH_SPEED_NEAR
 

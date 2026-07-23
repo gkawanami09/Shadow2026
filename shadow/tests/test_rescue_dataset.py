@@ -21,7 +21,10 @@ from vision.rescue_dataset import (  # noqa: E402
 from control.rescue_approach import MotionCommand  # noqa: E402
 from rescue_main import _dataset_metadata  # noqa: E402
 from vision.rescue_async import AsyncDetectionResult  # noqa: E402
-from vision.rescue_ball import BallDetection  # noqa: E402
+from vision.rescue_ball import (  # noqa: E402
+    BallDetection,
+    CloseCrescentEvidence,
+)
 
 
 class RescueDatasetWriterTests(unittest.TestCase):
@@ -234,6 +237,10 @@ class RescueDatasetWriterTests(unittest.TestCase):
                 (315.0, 298.0, 31.0, "silver", 0.82),
                 (330.0, 302.0, 24.0, "silver", 0.76),
             ),
+            crescent_evidence=CloseCrescentEvidence(
+                True, 0.90, 0.80, 0.75, 0.90, 0.76,
+                42.0, 0.50, 0.74, 0.46, 0.98, 10.0,
+            ),
         )
         command = MotionCommand("ALIGN", angle=180, speed=0.35)
 
@@ -254,6 +261,12 @@ class RescueDatasetWriterTests(unittest.TestCase):
         self.assertEqual(
             exact["latest_detector_result"]["candidate_circles"][0],
             [320.0, 300.0, 42.0, "silver", 0.90],
+        )
+        self.assertTrue(
+            exact["latest_detector_result"]["crescent_evidence"]["accepted"])
+        self.assertEqual(
+            exact["latest_detector_result"]["crescent_evidence"]["support"],
+            0.80,
         )
 
 

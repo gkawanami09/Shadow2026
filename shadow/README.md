@@ -10,10 +10,11 @@ RoboCup Junior Rescue Line, Eindhoven 2024) para o hardware do **Shadow2026**:
 - LiPo 7.4 V 2200 mAh
 
 O executável de segue-linha continua **sem** IMU, TPU e sensores IR. O resgate
-fica isolado em `rescue_main.py`, usa somente a câmera frontal e uma faixa
-visual inferior para decidir a proximidade, e então aciona o Futaba e as
-garras, sem alterar `main.py`. A câmera de linha e o HC-SR04 não participam de
-nenhuma decisão do resgate.
+fica isolado em `rescue_main.py`, usa somente a câmera frontal e confirma a
+proximidade pela borda larga em meia-lua da esfera já cortada pelo quadro. A
+meia-lua só vale depois de um histórico real de aproximação crescente. Depois
+aciona o Futaba, inicia o avanço e fecha as garras, sem alterar `main.py`. A
+câmera de linha e o HC-SR04 não participam de nenhuma decisão do resgate.
 
 ## O que ele faz
 
@@ -21,8 +22,8 @@ nenhuma decisão do resgate.
 2. **Cruza gaps** — valida, alinha em até 7 ciclos e cruza às cegas
 3. **Marcadores verdes** — 90° esquerda/direita e 180° no verde duplo
 4. **Linha vermelha** — para 9 s
-5. **Resgate separado** — encontra a esfera, aproxima, recua 1,5 s, baixa o
-   Futaba e avança 1,5 s enquanto fecha as duas garras
+5. **Resgate separado** — encontra a esfera, aproxima até a meia-lua, recua
+   1,5 s, baixa o Futaba, inicia o avanço e então fecha as duas garras
 
 ## Comece por aqui
 

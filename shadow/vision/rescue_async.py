@@ -62,6 +62,7 @@ class AsyncDetectionResult:
     candidate_radii: tuple
     diagnostic: str
     candidate_circles: tuple = ()
+    crescent_evidence: object = None
 
 
 @dataclass(frozen=True)
@@ -360,6 +361,11 @@ class LatestFrameBallDetector:
                     ))
                 diagnostic = str(
                     getattr(self.detector, "last_diagnostic", ""))
+                crescent_evidence = getattr(
+                    self.detector,
+                    "last_crescent_evidence",
+                    None,
+                )
                 detection = _scale_detection(
                     detection, detector_frame.shape, frame.shape)
                 detector_height, detector_width = detector_frame.shape[:2]
@@ -405,6 +411,7 @@ class LatestFrameBallDetector:
                     candidate_radii=candidate_radii,
                     diagnostic=diagnostic,
                     candidate_circles=candidate_circles,
+                    crescent_evidence=crescent_evidence,
                 )
             except Exception as err:
                 with self._condition:

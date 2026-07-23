@@ -39,6 +39,11 @@ class BallApproachController:
         self.last_seen = None
         self.visual_near_count = 0
         self.progress = deque()
+        self.approach_history = deque()
+        self._crescent_token_until = None
+        self._crescent_token_center = None
+        self._last_history_timestamp = None
+        self._last_crescent_timestamp = None
         self._pixel_scale = 1.0
         self._terminal_detail = ""
 
@@ -46,8 +51,7 @@ class BallApproachController:
         self,
         detection,
         frame_shape,
-        candidate_count=0,
-        candidate_circles=(),
+        crescent_evidence=None,
         now=None,
     ):
         now = time.monotonic() if now is None else float(now)
@@ -66,10 +70,89 @@ class BallApproachController:
             return MotionCommand(
                 self.state, detail=self._terminal_detail, terminal=True)
 
-        if detection is None or not detection.confirmed:
+        detection_confirmed = bool(
+            detection is not None and detection.confirmed)
+        if (
+            detection_confirmed
+            and now - detection.timestamp > cfg.BALL_FRAME_STALE_S
+        ):
             self.visual_near_count = 0
             self.progress.clear()
+            self.state = self.LOST
+            return MotionCommand(
+                self.state, detail="deteccao antiga; robo parado")
 
+        if (
+            self.active_started is not None
+            and now - self.active_started >= cfg.BALL_MAX_ACTIVE_S
+        ):
+            return self._fault("timeout da aproximacao")
+
+        if detection_confirmed:
+            if self.active_started is None:
+                self.active_started = now
+            self.last_seen = now
+            # O estado anterior descreve o comando que estava nas rodas entre
+            # este frame e o anterior. So esse trecho de avanco pode autorizar
+            # a transicao do circulo inteiro para a meia-lua cortada.
+            if self.state == self.APPROACH:
+                self._record_approach_history(
+                    detection,
+                    height,
+                    width,
+                    now,
+                )
+
+        self._refresh_crescent_token(now)
+
+        crescent_near = self._close_crescent_near(
+            crescent_evidence,
+            detection if detection_confirmed else None,
+            height,
+            width,
+            now,
+        )
+        if crescent_near:
+            if self.active_started is None:
+                self.active_started = now
+            self.last_seen = now
+            crescent_timestamp = float(crescent_evidence.timestamp)
+            if (
+                self._last_crescent_timestamp is None
+                or crescent_timestamp
+                > self._last_crescent_timestamp + 1e-9
+            ):
+                self.visual_near_count += 1
+                self._last_crescent_timestamp = crescent_timestamp
+            if self.visual_near_count >= cfg.BALL_STOP_CONFIRM_FRAMES:
+                reason = (
+                    "meia-lua da esfera confirmada; "
+                    "esfera na posicao de coleta")
+                self.state = self.NEAR
+                self._terminal_detail = reason
+                return MotionCommand(
+                    self.state,
+                    detail=reason,
+                    terminal=True,
+                    pickup_in_range=True,
+                    pickup_confirmations=self.visual_near_count,
+                )
+
+            self.state = self.NEAR_CONFIRM
+            self.progress.clear()
+            return MotionCommand(
+                self.state,
+                detail=(
+                    "meia-lua proxima; confirmando "
+                    f"{self.visual_near_count}/"
+                    f"{cfg.BALL_STOP_CONFIRM_FRAMES}"),
+                pickup_in_range=True,
+                pickup_confirmations=self.visual_near_count,
+            )
+
+        self.visual_near_count = 0
+        if not detection_confirmed:
+            self.progress.clear()
             if self.active_started is None:
                 if now - self.wait_started >= cfg.BALL_MAX_WAIT_S:
                     return self._fault("tempo maximo esperando uma bolinha")
@@ -82,6 +165,9 @@ class BallApproachController:
             if lost_for >= cfg.BALL_REACQUIRE_TIMEOUT_S:
                 self.active_started = None
                 self.wait_started = now
+                self.approach_history.clear()
+                self._crescent_token_until = None
+                self._crescent_token_center = None
                 self.state = self.WAIT_TARGET
                 return MotionCommand(
                     self.state,
@@ -90,68 +176,7 @@ class BallApproachController:
                 self.state,
                 detail=f"alvo ausente ha {lost_for:.2f}s; robo parado")
 
-        if now - detection.timestamp > cfg.BALL_FRAME_STALE_S:
-            self.visual_near_count = 0
-            self.progress.clear()
-            self.state = self.LOST
-            return MotionCommand(
-                self.state, detail="deteccao antiga; robo parado")
-
-        if self.active_started is None:
-            self.active_started = now
-        elif now - self.active_started >= cfg.BALL_MAX_ACTIVE_S:
-            return self._fault("timeout da aproximacao")
-
-        self.last_seen = now
         error = detection.horizontal_error(width)
-
-        normal_near = (
-            detection.radius
-            >= cfg.BALL_STOP_RADIUS_PX * self._pixel_scale
-            and detection.bottom_y >= height * cfg.BALL_STOP_BOTTOM_Y_RATIO
-            and abs(error) <= cfg.BALL_STOP_CENTER_ERROR)
-        clipped_silver_near = self._clipped_silver_near(
-            detection,
-            height,
-            width,
-            error,
-            candidate_count,
-            candidate_circles,
-        )
-        visual_near = normal_near or clipped_silver_near
-        self.visual_near_count = (
-            self.visual_near_count + 1 if visual_near else 0)
-
-        if self.visual_near_count >= cfg.BALL_STOP_CONFIRM_FRAMES:
-            reason = (
-                "faixa de coleta confirmada; esfera muito proxima"
-                if clipped_silver_near
-                else "proximidade visual confirmada")
-            self.state = self.NEAR
-            self._terminal_detail = reason
-            return MotionCommand(
-                self.state,
-                detail=reason,
-                terminal=True,
-                pickup_in_range=True,
-                pickup_confirmations=self.visual_near_count,
-            )
-
-        if visual_near:
-            # O reflexo interno pode ficar fora do centro mesmo com a esfera
-            # externa alinhada. Parar durante a confirmacao evita um pivo curto
-            # em cima da bolinha e suspende o watchdog de progresso.
-            self.state = self.NEAR_CONFIRM
-            self.progress.clear()
-            return MotionCommand(
-                self.state,
-                detail=(
-                    "esfera na faixa de coleta; confirmando "
-                    f"{self.visual_near_count}/"
-                    f"{cfg.BALL_STOP_CONFIRM_FRAMES}"),
-                pickup_in_range=True,
-                pickup_confirmations=self.visual_near_count,
-            )
 
         if abs(error) > cfg.BALL_ALIGN_THRESHOLD:
             self.state = self.ALIGN
@@ -193,73 +218,143 @@ class BallApproachController:
                 f"aproximando; erro={error:+.3f}, "
                 f"raio={detection.radius:.1f}px"))
 
-    def _clipped_silver_near(
+    def _record_approach_history(
         self,
         detection,
         frame_height,
         frame_width,
-        horizontal_error,
-        candidate_count,
-        candidate_circles,
+        now,
     ):
-        """Reconhece a esfera prateada proxima mesmo seguindo reflexo interno."""
-        associated_candidates = []
-        for circle in candidate_circles or ():
-            if len(circle) < 5:
-                continue
-            center_x, center_y, radius = map(float, circle[:3])
-            kind = str(circle[3])
-            confidence = float(circle[4])
-            if (
-                radius <= 0
-                or kind != "silver"
-                or confidence < cfg.BALL_CLOSE_OUTER_MIN_CONFIDENCE
-            ):
-                continue
-            center_distance = float(np.hypot(
-                detection.center_x - center_x,
-                detection.center_y - center_y,
-            ))
-            if (
-                center_distance
-                <= radius * cfg.BALL_CLOSE_ASSOCIATION_RADIUS_RATIO
-            ):
-                associated_candidates.append(
-                    (radius, center_x, center_y))
-        associated_candidates.sort(reverse=True)
-        if len(associated_candidates) < 2:
-            return False
-        large_candidates = [
-            candidate for candidate in associated_candidates
-            if candidate[0]
-            >= cfg.BALL_CLOSE_SECOND_RADIUS_PX * self._pixel_scale
-        ]
-        if len(large_candidates) < 2:
-            return False
-        outer_center_x = float(np.median(
-            [candidate[1] for candidate in large_candidates]))
-        outer_half_width = max(float(frame_width) / 2.0, 1.0)
-        outer_center_error = (
-            outer_center_x - outer_half_width) / outer_half_width
-        return (
-            detection.kind == "silver"
-            and detection.confidence >= cfg.BALL_CLOSE_MIN_CONFIDENCE
-            and detection.hits >= cfg.BALL_CLOSE_MIN_HITS
-            and detection.radius
-            >= cfg.BALL_CLOSE_MIN_RADIUS_PX * self._pixel_scale
-            and detection.center_y
-            >= frame_height * cfg.BALL_CLOSE_CENTER_Y_RATIO
-            and detection.bottom_y
-            >= frame_height * cfg.BALL_CLOSE_BOTTOM_Y_RATIO
-            and abs(horizontal_error) <= cfg.BALL_CLOSE_CENTER_ERROR
-            and int(candidate_count) >= cfg.BALL_CLOSE_MIN_CANDIDATES
-            and abs(outer_center_error)
-            <= cfg.BALL_CLOSE_OUTER_CENTER_ERROR
-            and associated_candidates[0][0]
-            >= cfg.BALL_CLOSE_LARGEST_RADIUS_PX * self._pixel_scale
-            and associated_candidates[1][0]
-            >= cfg.BALL_CLOSE_SECOND_RADIUS_PX * self._pixel_scale
+        timestamp = float(detection.timestamp)
+        if (
+            self._last_history_timestamp is not None
+            and timestamp <= self._last_history_timestamp + 1e-9
+        ):
+            return
+        center_error = detection.horizontal_error(frame_width)
+        if abs(center_error) > cfg.BALL_CRESCENT_ARM_MAX_CENTER_ERROR:
+            return
+        self._last_history_timestamp = timestamp
+        self.approach_history.append((
+            timestamp,
+            float(detection.center_x) / max(frame_width, 1),
+            float(detection.radius) / max(frame_height, 1),
+            float(detection.bottom_y) / max(frame_height, 1),
+        ))
+        self._prune_approach_history(now)
+
+    def _prune_approach_history(self, now):
+        while (
+            self.approach_history
+            and now - self.approach_history[0][0]
+            > cfg.BALL_CRESCENT_HISTORY_S
+        ):
+            self.approach_history.popleft()
+
+    def _refresh_crescent_token(self, now):
+        self._prune_approach_history(now)
+        samples = list(self.approach_history)
+        if len(samples) < cfg.BALL_CRESCENT_HISTORY_MIN_SAMPLES:
+            return
+        span = samples[-1][0] - samples[0][0]
+        if span < max(
+            cfg.BALL_CRESCENT_HISTORY_MIN_SPAN_S,
+            cfg.BALL_CRESCENT_HISTORY_MIN_FORWARD_S,
+        ):
+            return
+
+        third = max(len(samples) // 3, 1)
+        first = samples[:third]
+        last = samples[-third:]
+
+        first_radius = float(np.median(
+            [sample[2] for sample in first]))
+        last_radius = float(np.median(
+            [sample[2] for sample in last]))
+        first_bottom = float(np.median(
+            [sample[3] for sample in first]))
+        last_bottom = float(np.median(
+            [sample[3] for sample in last]))
+        close_endpoint = (
+            last_radius >= cfg.BALL_CRESCENT_ARM_RADIUS_RATIO
+            and last_bottom >= cfg.BALL_CRESCENT_ARM_BOTTOM_RATIO
         )
+        grew = (
+            last_radius - first_radius
+            >= cfg.BALL_CRESCENT_ARM_RADIUS_GROWTH_RATIO
+            or last_bottom - first_bottom
+            >= cfg.BALL_CRESCENT_ARM_BOTTOM_GROWTH_RATIO
+        )
+        if not (close_endpoint and grew):
+            return
+
+        recent_centers = [sample[1] for sample in last]
+        center = float(np.median(recent_centers))
+        if max(
+            abs(sample_center - center)
+            for sample_center in recent_centers
+        ) > cfg.BALL_CRESCENT_ASSOCIATION_X_RATIO:
+            return
+        self._crescent_token_center = center
+        self._crescent_token_until = (
+            samples[-1][0] + cfg.BALL_CRESCENT_TOKEN_TTL_S)
+
+    def _close_crescent_near(
+        self,
+        evidence,
+        detection,
+        frame_height,
+        frame_width,
+        now,
+    ):
+        if evidence is None or not bool(
+            getattr(evidence, "accepted", False)
+        ):
+            return False
+        evidence_age = now - float(evidence.timestamp)
+        if not (-0.05 <= evidence_age <= cfg.BALL_FRAME_STALE_S):
+            return False
+        if (
+            self._crescent_token_until is None
+            or now > self._crescent_token_until
+            or self._crescent_token_center is None
+        ):
+            return False
+        if (
+            abs(
+                float(evidence.center_x_ratio)
+                - self._crescent_token_center
+            )
+            > cfg.BALL_CRESCENT_ASSOCIATION_X_RATIO
+        ):
+            return False
+
+        # Se o Hough ainda existe, ele deve confirmar que o mesmo alvo ja esta
+        # baixo e grande. Uma bolinha distante jamais pode "emprestar" o token
+        # para um arco de parede/piso.
+        if detection is not None:
+            center_ratio = (
+                float(detection.center_x) / max(frame_width, 1))
+            radius_ratio = (
+                float(detection.radius) / max(frame_height, 1))
+            bottom_ratio = (
+                float(detection.bottom_y) / max(frame_height, 1))
+            close_inner_reflection = (
+                bottom_ratio >= cfg.BALL_CRESCENT_INNER_BOTTOM_RATIO
+                or (
+                    radius_ratio >= cfg.BALL_CRESCENT_ARM_RADIUS_RATIO
+                    and bottom_ratio
+                    >= cfg.BALL_CRESCENT_ARM_BOTTOM_RATIO
+                )
+            )
+            if (
+                not close_inner_reflection
+                or abs(
+                    center_ratio - float(evidence.center_x_ratio)
+                ) > cfg.BALL_CRESCENT_INNER_ASSOCIATION_X_RATIO
+            ):
+                return False
+        return True
 
     def _record_progress(self, now, radius, bottom_y):
         self.progress.append((
