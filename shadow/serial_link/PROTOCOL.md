@@ -31,7 +31,7 @@ O `shadow/` **não** substitui esse firmware — apenas fala com ele
 | `FRENTE <v>` / `TRAS <v>` | as 4 rodas para frente / trás (v = módulo) | `OK FRENTE <v>` … |
 | `GIRAR_ESQ <v>` / `GIRAR_DIR <v>` | pivot no lugar | `OK GIRAR_… <v>` |
 
-| `SERVO <nome> <angulo>` | move um canal do PCA9685; `GARRA_ESQ`, `GARRA_DIR`, `CACAMBA` ou `FUTABA`; angulo 0..180 | `OK SERVO <nome> <angulo>` |
+| `SERVO <nome> <delta>` | move relativamente a ultima posicao; nomes `GARRA_ESQ`, `GARRA_DIR`, `CACAMBA` ou `FUTABA`; delta -180..180 | `OK SERVO <nome> DELTA <d> POS <alvo>` |
 | `LED APAGADO\|ACESO` | controla o LED indicador em D12; inicia aceso no boot | `OK LED <modo>` |
 | `ULTRASSOM` | mede o sensor com TRIG D8 e ECHO D11 | `OK ULTRASSOM <mm>`; `-1` = sem eco |
 
@@ -40,8 +40,8 @@ Erros: `ERRO PARAMETROS_INVALIDOS`, `ERRO MOTOR_INVALIDO`, `ERRO SERVO_INVALIDO`
 Os comandos antigos e o banner `SPEC_01` continuam iguais. Os comandos de
 perifericos sao adicionais e nao modificam as velocidades dos motores. O PCA9685
 usa o endereco I2C `0x40`, 50 Hz, com CH0=garra esquerda, CH1=garra direita,
-CH2=cacamba e CH3=Futaba. No boot, os canais ficam desligados ate receberem o
-primeiro comando `SERVO`.
+CH2=cacamba e CH3=Futaba. No boot, os quatro canais recebem a posicao central
+de 90 graus, que serve como referencia para os deslocamentos relativos.
 
 ## Como o Python usa o protocolo
 

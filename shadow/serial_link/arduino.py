@@ -128,15 +128,15 @@ class Arduino:
     def ping(self):
         self._send_cmd("PING", force=True)
 
-    def servo(self, nome, angulo):
-        """Move um servo do PCA9685 sem alterar o keepalive dos motores."""
+    def servo(self, nome, deslocamento):
+        """Move o servo relativamente a ultima posicao comandada, em graus."""
         nome = str(nome).upper()
         if nome not in ("GARRA_ESQ", "GARRA_DIR", "CACAMBA", "FUTABA"):
             raise ValueError(f"Servo invalido: {nome}")
-        angulo = int(round(angulo))
-        if not 0 <= angulo <= 180:
-            raise ValueError(f"Angulo fora de 0..180: {angulo}")
-        self._send_aux_cmd(f"SERVO {nome} {angulo}")
+        deslocamento = int(round(deslocamento))
+        if not -180 <= deslocamento <= 180:
+            raise ValueError(f"Deslocamento fora de -180..180: {deslocamento}")
+        self._send_aux_cmd(f"SERVO {nome} {deslocamento}")
 
     def led(self, modo):
         """Define o LED como APAGADO ou ACESO."""
@@ -155,6 +155,32 @@ class Arduino:
         except (ValueError, IndexError):
             return None
         return None if distancia_mm < 0 else distancia_mm
+
+    def comando_serial(self, comando, timeout=0.5):
+        """Envia uma linha livre e retorna a primeira resposta do firmware.
+
+        Destinado a ferramentas manuais de teste. Nao substitui o ultimo
+        comando de movimento usado pelo keepalive da aplicacao principal.
+        """
+        comando = str(comando).strip()
+        if not comando:
+            raise ValueError("O comando serial nao pode estar vazio")
+
+        self._drain()
+        self._write_line(comando)
+        deadline = time.monotonic() + timeout
+        while self._connected and time.monotonic() < deadline:
+            try:
+                if self._ser.in_waiting:
+                    line = self._ser.readline().decode(errors="replace").strip()
+                    if line:
+                        return line
+                else:
+                    time.sleep(0.002)
+            except (serial.SerialException, OSError):
+                self._connected = False
+                break
+        return None
 
     def refresh(self):
         """Re-send the last command if the keepalive interval elapsed

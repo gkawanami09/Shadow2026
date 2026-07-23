@@ -16,6 +16,14 @@ enum ModoLed {
 };
 
 ModoLed modo_led = LED_ACESO;
+int posicao_servo_atual[4] = {
+  SERVO_POSICAO_INICIAL,
+  SERVO_POSICAO_INICIAL,
+  SERVO_POSICAO_INICIAL,
+  SERVO_POSICAO_INICIAL
+};
+
+void definir_servo(byte canal, int angulo);
 
 void configurar_pinos() {
   pinMode(FE_IN1, OUTPUT);
@@ -57,14 +65,10 @@ void configurar_pca9685() {
   delay(1);
   escrever_pca9685(0x00, 0xA0);
 
-  // Nao movimenta os servos durante o boot. Cada canal e ativado somente
-  // quando a Raspberry enviar o primeiro comando SERVO correspondente.
+  // Estabelece uma referencia conhecida para os comandos relativos. Como o
+  // PCA9685 nao le a posicao fisica do eixo, todos partem do centro (90 graus).
   for (byte canal = 0; canal < 4; canal++) {
-    byte base = 0x06 + 4 * canal;
-    escrever_pca9685(base, 0);
-    escrever_pca9685(base + 1, 0);
-    escrever_pca9685(base + 2, 0);
-    escrever_pca9685(base + 3, 0x10);
+    definir_servo(canal, SERVO_POSICAO_INICIAL);
   }
 }
 
@@ -77,6 +81,14 @@ void definir_servo(byte canal, int angulo) {
   escrever_pca9685(base + 1, 0);
   escrever_pca9685(base + 2, contador & 0xFF);
   escrever_pca9685(base + 3, (contador >> 8) & 0x0F);
+}
+
+int mover_servo_relativo(byte canal, int deslocamento) {
+  int destino = posicao_servo_atual[canal] + deslocamento;
+  destino = constrain(destino, SERVO_ANGULO_MIN, SERVO_ANGULO_MAX);
+  definir_servo(canal, destino);
+  posicao_servo_atual[canal] = destino;
+  return destino;
 }
 
 bool canal_servo_por_nome(const char* nome, byte* canal) {
@@ -224,13 +236,18 @@ void processar_comando(char* comando) {
   if (strcmp(tipo, "SERVO") == 0) {
     byte canal;
     if (primeiro == NULL || segundo == NULL || terceiro != NULL ||
-        !ler_inteiro(segundo, &valor1) || valor1 < 0 || valor1 > 180) {
+        !ler_inteiro(segundo, &valor1) || valor1 < -180 || valor1 > 180) {
       Serial.println("ERRO PARAMETROS_INVALIDOS");
     } else if (!canal_servo_por_nome(primeiro, &canal)) {
       Serial.println("ERRO SERVO_INVALIDO");
     } else {
-      definir_servo(canal, valor1);
-      Serial.print("OK SERVO "); Serial.print(primeiro); Serial.print(" "); Serial.println(valor1);
+      int destino = mover_servo_relativo(canal, valor1);
+      Serial.print("OK SERVO ");
+      Serial.print(primeiro);
+      Serial.print(" DELTA ");
+      Serial.print(valor1);
+      Serial.print(" POS ");
+      Serial.println(destino);
     }
     return;
   }
