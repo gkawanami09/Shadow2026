@@ -101,6 +101,10 @@ class BallDetector:
         self.last_enhanced = None
         self.last_edges = None
         self.last_hough_used = False
+        self.last_contour_proposals = 0
+        self.last_hough_proposals = 0
+        self.last_diagnostic = "inicio"
+        self._frame_rejections = {}
 
     def reset(self):
         self._tracked = None
@@ -108,11 +112,18 @@ class BallDetector:
         self._misses = 0
         self.last_candidates = []
         self.last_hough_used = False
+        self.last_contour_proposals = 0
+        self.last_hough_proposals = 0
+        self.last_diagnostic = "reset"
+        self._frame_rejections = {}
 
     def detect(self, frame, timestamp=None):
         if frame is None or frame.ndim != 3 or frame.shape[2] != 3:
             raise ValueError("frame BGR invalido")
         timestamp = time.monotonic() if timestamp is None else float(timestamp)
+        self._frame_rejections = {}
+        self.last_contour_proposals = 0
+        self.last_hough_proposals = 0
 
         height, width = frame.shape[:2]
         self._pixel_scale = cfg.ball_pixel_scale(width, height)
@@ -156,6 +167,7 @@ class BallDetector:
         contour_proposals.extend(self._contour_proposals(
             dark_mask, "dark", self._pixel_scale))
         contour_proposals = self._deduplicate(contour_proposals)
+        self.last_contour_proposals = len(contour_proposals)
 
         edge_dilated = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
         candidates = self._evaluate_proposals(
@@ -189,6 +201,7 @@ class BallDetector:
         if self.last_hough_used:
             hough_proposals = self._hough_proposals(
                 gray_blur, roi_top, roi_bottom, self._pixel_scale)
+            self.last_hough_proposals = len(hough_proposals)
             hough_candidates = self._evaluate_proposals(
                 self._deduplicate(hough_proposals),
                 frame,
@@ -205,7 +218,9 @@ class BallDetector:
         self.last_enhanced = enhanced
         self.last_edges = edges
         selected = self._select_candidate(candidates)
-        return self._update_track(selected, timestamp)
+        detection = self._update_track(selected, timestamp)
+        self.last_diagnostic = self._diagnostic(selected)
+        return detection
 
     def _evaluate_proposals(
         self,
@@ -221,15 +236,18 @@ class BallDetector:
         candidates = []
         for proposal in proposals:
             if not self._inside_roi(proposal, width, height, roi_top, roi_bottom):
+                self._reject("roi")
                 continue
             proposal.edge_support = self._radial_edge_support(
                 edge_dilated, proposal)
             if proposal.edge_support < cfg.BALL_MIN_EDGE_SUPPORT:
+                self._reject("borda")
                 continue
             candidate = self._classify(frame, hsv, proposal)
             if candidate is None:
                 continue
             if self.target_kind != "any" and candidate.kind != self.target_kind:
+                self._reject("tipo")
                 continue
             candidates.append(candidate)
         return candidates
@@ -348,6 +366,7 @@ class BallDetector:
         del frame  # reservado para futuros descritores sem alterar a API
         inner_s, inner_v, annulus_v = self._circle_samples(hsv, proposal)
         if inner_v.size < 20 or annulus_v.size < 20:
+            self._reject("amostra")
             return None
 
         inner_mean = float(np.mean(inner_v))
@@ -359,6 +378,10 @@ class BallDetector:
             np.percentile(inner_v, 90) - np.percentile(inner_v, 10))
         highlight_fraction = float(
             np.mean(inner_v >= cfg.BALL_SILVER_HIGHLIGHT_V))
+        neutral_highlight_fraction = float(np.mean(
+            (inner_v >= cfg.BALL_SILVER_HIGHLIGHT_V)
+            & (inner_s <= cfg.BALL_SILVER_TINTED_NEUTRAL_S_MAX)
+        ))
 
         geometry = float(np.clip(
             0.35 * proposal.circularity
@@ -377,16 +400,33 @@ class BallDetector:
             + 0.33 * geometry,
             0.0, 1.0))
 
+        neutral_silver_valid = (
+            low_sat_fraction >= cfg.BALL_SILVER_LOW_SAT_FRACTION_MIN)
+        tinted_reflective_valid = (
+            inner_mean >= cfg.BALL_SILVER_TINTED_INNER_V_MIN
+            and dynamic_range >= cfg.BALL_SILVER_TINTED_DYNAMIC_RANGE_MIN
+            and highlight_fraction
+            >= cfg.BALL_SILVER_TINTED_HIGHLIGHT_FRACTION_MIN
+            and neutral_highlight_fraction
+            >= cfg.BALL_SILVER_TINTED_NEUTRAL_HIGHLIGHT_MIN
+            and proposal.edge_support
+            >= cfg.BALL_SILVER_TINTED_EDGE_SUPPORT_MIN)
         silver_valid = (
             inner_mean > cfg.BALL_BLACK_V_MAX * 0.62
-            and low_sat_fraction >= cfg.BALL_SILVER_LOW_SAT_FRACTION_MIN
             and dynamic_range >= cfg.BALL_SILVER_DYNAMIC_RANGE_MIN
+            and (neutral_silver_valid or tinted_reflective_valid)
             and (
                 highlight_fraction >= cfg.BALL_SILVER_HIGHLIGHT_FRACTION_MIN
                 or abs(annulus_mean - inner_mean)
                 >= cfg.BALL_BLACK_LOCAL_CONTRAST_MIN))
+        neutrality_score = float(np.clip(
+            low_sat_fraction
+            / max(cfg.BALL_SILVER_LOW_SAT_FRACTION_MIN, 0.01),
+            0.0,
+            1.0,
+        ))
         silver_score = float(np.clip(
-            0.25 * low_sat_fraction
+            0.25 * neutrality_score
             + 0.25 * np.clip(dynamic_range / 100.0, 0.0, 1.0)
             + 0.15 * np.clip(highlight_fraction / 0.20, 0.0, 1.0)
             + 0.35 * geometry,
@@ -397,6 +437,18 @@ class BallDetector:
         elif silver_valid:
             kind, confidence = "silver", silver_score
         else:
+            if inner_mean <= cfg.BALL_BLACK_V_MAX * 0.62:
+                self._reject("escura")
+            if not neutral_silver_valid and not tinted_reflective_valid:
+                self._reject("saturacao")
+            if dynamic_range < cfg.BALL_SILVER_DYNAMIC_RANGE_MIN:
+                self._reject("textura")
+            if (
+                highlight_fraction < cfg.BALL_SILVER_HIGHLIGHT_FRACTION_MIN
+                and abs(annulus_mean - inner_mean)
+                < cfg.BALL_BLACK_LOCAL_CONTRAST_MIN
+            ):
+                self._reject("reflexo")
             return None
 
         required_confidence = (
@@ -404,6 +456,7 @@ class BallDetector:
             if proposal.source == "hough"
             else cfg.BALL_MIN_CONFIDENCE)
         if confidence < required_confidence:
+            self._reject("confianca")
             return None
         return _Candidate(
             kind,
@@ -411,6 +464,49 @@ class BallDetector:
             proposal.center_y,
             proposal.radius,
             confidence)
+
+    def _reject(self, reason):
+        self._frame_rejections[reason] = (
+            self._frame_rejections.get(reason, 0) + 1)
+
+    def _diagnostic(self, selected):
+        if selected is not None:
+            return "ok"
+        if self.last_hough_used and self.last_hough_proposals == 0:
+            return "sem_circulo"
+        if self._frame_rejections:
+            # Aparencia e mais util para calibrar a esfera real do que dezenas
+            # de contornos do fundo rejeitados por borda/ROI.
+            priority = {
+                "saturacao": 8,
+                "textura": 7,
+                "reflexo": 6,
+                "confianca": 5,
+                "borda": 4,
+                "tipo": 3,
+                "roi": 2,
+                "amostra": 1,
+                "escura": 0,
+            }
+            appearance_reasons = {
+                reason: count
+                for reason, count in self._frame_rejections.items()
+                if reason in {
+                    "saturacao", "textura", "reflexo",
+                    "confianca", "tipo", "escura",
+                }
+            }
+            reasons = appearance_reasons or self._frame_rejections
+            return max(
+                reasons,
+                key=lambda reason: (
+                    reasons[reason],
+                    priority.get(reason, -1),
+                ),
+            )
+        if self.last_contour_proposals == 0:
+            return "sem_contorno"
+        return "sem_candidato"
 
     @staticmethod
     def _deduplicate(proposals):
@@ -484,11 +580,21 @@ class BallDetector:
             # mover, a esfera precisa cumprir novamente todos os hits.
             self._hits = 0
             if self._misses > cfg.BALL_MAX_TRACK_MISSES:
-                used_hough = self.last_hough_used
+                frame_metrics = (
+                    self.last_hough_used,
+                    self.last_contour_proposals,
+                    self.last_hough_proposals,
+                    dict(self._frame_rejections),
+                )
                 self.reset()
                 # reset() externo limpa telemetria; aqui o frame atual acabou
-                # de usar Hough e o overlay deve continuar mostrando H0.
-                self.last_hough_used = used_hough
+                # de usar Hough e o overlay deve preservar o motivo da rejeicao.
+                (
+                    self.last_hough_used,
+                    self.last_contour_proposals,
+                    self.last_hough_proposals,
+                    self._frame_rejections,
+                ) = frame_metrics
             return None
 
         compatible = False

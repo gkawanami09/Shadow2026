@@ -133,6 +133,7 @@ class LatestFrameDetectorTests(unittest.TestCase):
             self.assertEqual(result.detection.center_y, 360)
             self.assertFalse(result.hough_used)
             self.assertEqual(result.candidate_count, 0)
+            self.assertEqual(result.diagnostic, "")
             self.assertIsNone(worker.poll(after_sequence=result.sequence))
         finally:
             worker.close()

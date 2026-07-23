@@ -85,10 +85,21 @@ BALL_BLACK_V_MAX = 105
 BALL_BLACK_DARK_FRACTION_MIN = 0.52
 BALL_BLACK_LOCAL_CONTRAST_MIN = 8.0
 BALL_SILVER_S_MAX = 88
+# Referencia de bonus, nao gate: aluminio reflete a cor do iluminante e pode
+# ficar ciano/verde com saturacao alta mesmo continuando metalico.
 BALL_SILVER_LOW_SAT_FRACTION_MIN = 0.62
 BALL_SILVER_DYNAMIC_RANGE_MIN = 20.0
 BALL_SILVER_HIGHLIGHT_V = 195
 BALL_SILVER_HIGHLIGHT_FRACTION_MIN = 0.015
+# Rota conservadora para aluminio refletindo luz ciano/verde. Ela dispensa a
+# neutralidade global somente quando textura, brilho quase neutro e borda sao
+# simultaneamente muito fortes.
+BALL_SILVER_TINTED_INNER_V_MIN = 110
+BALL_SILVER_TINTED_DYNAMIC_RANGE_MIN = 40.0
+BALL_SILVER_TINTED_HIGHLIGHT_FRACTION_MIN = 0.05
+BALL_SILVER_TINTED_NEUTRAL_S_MAX = 120
+BALL_SILVER_TINTED_NEUTRAL_HIGHLIGHT_MIN = 0.015
+BALL_SILVER_TINTED_EDGE_SUPPORT_MIN = 0.35
 BALL_MIN_CONFIDENCE = 0.56
 
 # Rastreamento e confirmacao temporal.

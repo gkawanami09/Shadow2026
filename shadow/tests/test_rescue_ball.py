@@ -36,6 +36,15 @@ def silver_ball_frame():
     return frame
 
 
+def with_color_cast(frame, bgr_gains):
+    gains = np.asarray(bgr_gains, dtype=np.float32).reshape(1, 1, 3)
+    return np.clip(
+        frame.astype(np.float32) * gains,
+        0,
+        255,
+    ).astype(np.uint8)
+
+
 class RescueBallDetectorTests(unittest.TestCase):
     def _confirmed(self, detector, frame):
         result = None
@@ -171,6 +180,41 @@ class RescueBallDetectorTests(unittest.TestCase):
         )
         self.assertFalse(detector.last_hough_used)
 
+    def test_detects_silver_under_cyan_and_green_color_cast(self):
+        for gains in ((1.45, 1.35, 0.65), (1.05, 1.50, 0.65)):
+            cast = with_color_cast(silver_ball_frame(), gains)
+            frame = cv2.resize(
+                cast,
+                (cfg.RESCUE_DETECTOR_MAX_WIDTH,
+                 cfg.RESCUE_DETECTOR_MAX_HEIGHT),
+                interpolation=cv2.INTER_AREA,
+            )
+            detector = BallDetector("silver")
+            result = self._confirmed(detector, frame)
+            self.assertIsNotNone(result)
+            self.assertTrue(result.confirmed)
+            self.assertEqual(result.kind, "silver")
+            self.assertEqual(detector.last_diagnostic, "ok")
+
+    def test_rejects_solid_cyan_circle_without_metallic_texture(self):
+        frame = base_frame()
+        cv2.circle(
+            frame, (320, 300), 44, (230, 190, 70),
+            -1, cv2.LINE_AA)
+        frame = cv2.resize(
+            frame,
+            (cfg.RESCUE_DETECTOR_MAX_WIDTH,
+             cfg.RESCUE_DETECTOR_MAX_HEIGHT),
+            interpolation=cv2.INTER_AREA,
+        )
+        detector = BallDetector("silver")
+        results = [
+            detector.detect(frame, timestamp=index * 0.03)
+            for index in range(cfg.BALL_ACQUIRE_HITS + 1)
+        ]
+        self.assertFalse(any(
+            result is not None and result.confirmed for result in results))
+
     def test_hough_fallback_still_detects_at_runtime_resolution(self):
         frame = cv2.resize(
             silver_ball_frame(),
@@ -215,6 +259,7 @@ class RescueBallDetectorTests(unittest.TestCase):
             self.assertIsNone(
                 detector.detect(base_frame(), timestamp=index * 0.03))
         self.assertTrue(detector.last_hough_used)
+        self.assertEqual(detector.last_diagnostic, "sem_circulo")
 
     def test_detector_scales_correctly_for_wide_full_fov(self):
         resized = cv2.resize(

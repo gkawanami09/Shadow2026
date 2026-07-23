@@ -53,8 +53,8 @@ independentes: tanto a captura quanto o detector publicam apenas o frame mais
 recente, portanto uma etapa lenta nunca forma uma fila atrasada. A visão roda
 em `320x240` e suas coordenadas são remapeadas para o preview `640x480`. A
 janela mostra FPS da câmera, FPS da visão, tempo de processamento, `C` para o
-caminho rápido de contornos ou `H` para fallback Hough, número de candidatos e
-frames descartados.
+caminho rápido de contornos ou `H` para fallback Hough, número de candidatos,
+motivo principal de rejeição e frames descartados.
 
 Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 `640x480`. O detector aplica:
@@ -68,7 +68,8 @@ Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 7. suporte de borda ao redor da circunferência;
 8. contraste entre interior e anel de piso próximo;
 9. aparência escura para esfera preta;
-10. baixa saturação, faixa dinâmica e reflexo para esfera prateada;
+10. faixa dinâmica e reflexo para esfera prateada; baixa saturação aumenta a
+    confiança, mas iluminação ciano/verde possui uma rota metálica mais estrita;
 11. associação espacial, suavização e confirmação em vários frames.
 
 Uma detecção incerta não movimenta o robô.

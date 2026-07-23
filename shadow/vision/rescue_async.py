@@ -56,6 +56,7 @@ class AsyncDetectionResult:
     generation: int
     hough_used: bool
     candidate_count: int
+    diagnostic: str
 
 
 @dataclass(frozen=True)
@@ -328,6 +329,8 @@ class LatestFrameBallDetector:
                     getattr(self.detector, "last_hough_used", False))
                 candidate_count = len(
                     getattr(self.detector, "last_candidates", ()))
+                diagnostic = str(
+                    getattr(self.detector, "last_diagnostic", ""))
                 detection = _scale_detection(
                     detection, detector_frame.shape, frame.shape)
                 completed_at = self._clock()
@@ -343,6 +346,7 @@ class LatestFrameBallDetector:
                     generation=generation,
                     hough_used=hough_used,
                     candidate_count=candidate_count,
+                    diagnostic=diagnostic,
                 )
             except Exception as err:
                 with self._condition:

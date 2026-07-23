@@ -425,11 +425,15 @@ def main():
             candidate_count = (
                 last_metrics_result.candidate_count
                 if last_metrics_result is not None else 0)
+            diagnostic = (
+                last_metrics_result.diagnostic
+                if last_metrics_result is not None else "inicio")
             performance_text = (
-                f"cam {_sequence_rate(capture_samples):.1f} fps | "
-                f"visao {detector_fps:.1f} fps | "
-                f"{processing_ms:.0f} ms | {vision_mode}{candidate_count} | "
-                f"drop {dropped}")
+                f"cam {_sequence_rate(capture_samples):.1f} | "
+                f"vis {detector_fps:.1f} | "
+                f"{processing_ms:.0f}ms | "
+                f"{vision_mode}{candidate_count}:{diagnostic} | "
+                f"d{dropped}")
 
             if (
                 args.debug
