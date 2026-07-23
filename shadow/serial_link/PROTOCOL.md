@@ -80,5 +80,10 @@ positivos comandam subida e negativos comandam descida.
 - **Reconexão**: erro de escrita fecha a porta e tenta reabrir com backoff de
   0.5 s; enquanto desconectado os comandos são descartados (o watchdog do Uno
   mantém os motores parados).
+- **Garras juntas**: `Arduino.garras(esq, dir)` envia as duas linhas `SERVO`
+  no mesmo pacote USB. O Uno ainda atualiza CH0 e CH1 sequencialmente, mas sem
+  permitir outro comando intercalado.
+- **Futaba com rodas paradas**: durante `FUTABA -20 1500`, use `LADO 0 0`
+  como keepalive. Repetir `PARAR` cortaria CH3 antes dos 1500 ms.
 - **Aviso**: não usar `dsrdtr`/`rtscts` (eram do Nano do OE²; no Uno podem
   travar a escrita).

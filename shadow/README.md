@@ -9,7 +9,9 @@ RoboCup Junior Rescue Line, Eindhoven 2024) para o hardware do **Shadow2026**:
 - Câmera CSI (Picamera2), fish-eye 160°, 8 cm do chão, 35° de inclinação
 - LiPo 7.4 V 2200 mAh
 
-**Sem** IMU, TPU, sensores IR, segunda câmera, garra ou GUI.
+O executável de segue-linha continua **sem** IMU, TPU e sensores IR. O resgate
+fica isolado em `rescue_main.py` e usa a câmera frontal, o Futaba e as garras
+sem alterar `main.py`.
 
 ## O que ele faz
 
@@ -17,6 +19,8 @@ RoboCup Junior Rescue Line, Eindhoven 2024) para o hardware do **Shadow2026**:
 2. **Cruza gaps** — valida, alinha em até 7 ciclos e cruza às cegas
 3. **Marcadores verdes** — 90° esquerda/direita e 180° no verde duplo
 4. **Linha vermelha** — para 9 s
+5. **Resgate separado** — encontra a esfera, aproxima, recua 0,5 s, baixa o
+   Futaba e aciona as duas garras
 
 ## Comece por aqui
 
@@ -29,6 +33,7 @@ seguindo linha (instalação, firmware, polaridade, calibração, testes).
 cd ~/Overengineering-squared-RoboCup
 python3 shadow/main.py            # operação normal (headless)
 python3 shadow/main.py --debug    # com janela da câmera anotada
+python3 shadow/rescue_main.py --camera-index 0 --drive --debug
 ```
 
 ## Documentação

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Primeira etapa autonoma do resgate: detectar, alinhar e chegar perto.
+"""Resgate: detectar, aproximar e executar a sequencia inicial de coleta.
 
 Este executavel e independente do segue-linha. Nunca rode ``shadow/main.py`` e
 ``shadow/rescue_main.py`` ao mesmo tempo: cada um precisa ser o unico dono de
@@ -29,6 +29,7 @@ from control.rescue_approach import (  # noqa: E402
     BallApproachController,
     MotionCommand,
 )
+from control.rescue_pickup import BallPickupSequencer  # noqa: E402
 from vision.rescue_async import (  # noqa: E402
     FreshDetectionGate,
     LatestFrameBallDetector,
@@ -92,6 +93,66 @@ def _best_effort(label, action):
     except Exception as err:
         print(f"[resgate] falha ao {label}: {err}")
         return None
+
+
+def _apply_pickup_actions(
+    step,
+    arduino,
+    steer_action,
+    expected_connection_epoch=None,
+):
+    """Aplica somente os eventos one-shot emitidos pelo sequenciador."""
+    def link_changed():
+        return (
+            expected_connection_epoch is not None
+            and (
+                not arduino.connected
+                or arduino.connection_epoch != expected_connection_epoch
+            )
+        )
+
+    def link_error():
+        return "serial mudou durante a coleta; sequencia cancelada"
+
+    try:
+        if link_changed():
+            return link_error()
+        if step.motor_action == "reverse":
+            if steer_action(step.angle, step.speed) is False:
+                return "comando de re nao foi enviado pela serial"
+        elif step.motor_action == "hold":
+            # PARAR tambem cortaria o Futaba no firmware. LADO 0 0 zera as
+            # quatro rodas e vira um keepalive que nao toca no canal CH3.
+            if arduino.lado(0, 0) is False:
+                return "LADO 0 0 nao foi enviado pela serial"
+        elif step.motor_action == "stop":
+            if steer_action() is False:
+                return "PARAR nao foi enviado pela serial"
+        if link_changed():
+            return link_error()
+
+        if step.futaba_action is not None:
+            potencia, tempo_ms = step.futaba_action
+            if arduino.futaba(potencia, tempo_ms) is False:
+                return "FUTABA nao foi enviado pela serial"
+            if link_changed():
+                return link_error()
+
+        if step.stop_futaba:
+            if arduino.parar_futaba() is False:
+                return "FUTABA PARAR nao foi enviado pela serial"
+            if link_changed():
+                return link_error()
+
+        if step.gripper_action is not None:
+            esquerda, direita = step.gripper_action
+            if arduino.garras(esquerda, direita) is False:
+                return "comando simultaneo das garras nao foi enviado"
+            if link_changed():
+                return link_error()
+    except Exception as err:
+        return f"falha ao comandar coleta: {err}"
+    return None
 
 
 def _dataset_metadata(
@@ -167,7 +228,7 @@ def _dataset_metadata(
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "detecta uma esfera de resgate e, com --drive, aproxima o robo"))
+            "detecta uma esfera e, com --drive, aproxima e aciona a coleta"))
     parser.add_argument(
         "--camera-index", type=int,
         help=(
@@ -216,6 +277,7 @@ def main():
     detector_worker = None
     dataset_worker = None
     controller = None
+    pickup = None
     hardware_session = args.video is None
 
     last_state = None
@@ -226,6 +288,7 @@ def main():
     distance_mm = None
     ultrasonic_sample_ready = False
     ultrasonic_sample_at = 0.0
+    pickup_connection_epoch = None
     capture_samples = deque(maxlen=60)
     detection_times = deque(maxlen=30)
 
@@ -274,6 +337,7 @@ def main():
             loop_started + cfg.RESCUE_ARM_DELAY_S
             if args.drive else loop_started)
         controller = BallApproachController(start_time=armed_at)
+        pickup = BallPickupSequencer()
         command = MotionCommand(
             "ARMING" if args.drive else controller.WAIT_TARGET,
             detail=(
@@ -316,7 +380,7 @@ def main():
 
             now = time.monotonic()
             armed = now >= armed_at
-            if new_frame and armed:
+            if new_frame and armed and not pickup.started:
                 detector_worker.submit(
                     latest_frame,
                     captured_at=frame_packet.captured_at,
@@ -327,6 +391,7 @@ def main():
                 args.drive
                 and arduino is not None
                 and not args.no_ultrasonic
+                and not pickup.started
             ):
                 sample_done, sample_value = arduino.poll_ultrassom()
                 if sample_done:
@@ -344,7 +409,31 @@ def main():
             # controlador; assim nao existe divergencia perto do limite stale.
             now = time.monotonic()
             command_updated = False
-            if not armed:
+            pickup_step = None
+            if pickup.started:
+                # Consumir um eventual resultado que ja estava em voo somente
+                # para telemetria. A visao nunca volta a comandar os motores
+                # depois que a coleta foi armada.
+                if result is not None:
+                    last_result_sequence = result.sequence
+                    last_metrics_result = result
+                    detection_times.append(result.completed_at)
+                if (
+                    arduino is not None
+                    and pickup_connection_epoch is not None
+                    and arduino.connection_epoch
+                    != pickup_connection_epoch
+                ):
+                    pickup_step = pickup.fail(
+                        "serial reconectou durante a coleta; "
+                        "sequencia cancelada")
+                else:
+                    pickup_step = pickup.update(now)
+                command = pickup_step.motion_command()
+                command_updated = True
+                distance_mm = None
+                ultrasonic_sample_ready = False
+            elif not armed:
                 remaining = max(armed_at - now, 0.0)
                 command = MotionCommand(
                     "ARMING",
@@ -456,11 +545,63 @@ def main():
                 command_updated = True
                 last_idle_control = now
 
-            if args.drive and arduino is not None and command_updated:
+            if args.drive and arduino is not None:
                 from control.steer import steer
-                steer(command.angle, command.speed)
+                if pickup_step is not None:
+                    pickup_error = _apply_pickup_actions(
+                        pickup_step,
+                        arduino,
+                        steer,
+                        expected_connection_epoch=pickup_connection_epoch,
+                    )
+                    if (
+                        pickup_error is None
+                        and not pickup_step.terminal
+                        and pickup_connection_epoch is not None
+                        and arduino.connection_epoch
+                        != pickup_connection_epoch
+                    ):
+                        pickup_error = (
+                            "serial reconectou durante a coleta; "
+                            "sequencia cancelada")
+                    if pickup_error is None:
+                        action_completed_at = time.monotonic()
+                        if pickup_step.motor_action == "reverse":
+                            pickup.mark_reverse_started(action_completed_at)
+                        if pickup_step.futaba_action is not None:
+                            pickup.mark_futaba_started(action_completed_at)
+                        if pickup_step.gripper_action is not None:
+                            pickup.mark_grippers_started(action_completed_at)
+                    if pickup_error is not None:
+                        pickup_step = pickup.fail(pickup_error)
+                        command = pickup_step.motion_command()
+                        _apply_pickup_actions(
+                            pickup_step,
+                            arduino,
+                            steer,
+                        )
+                        command_updated = True
+                elif command_updated:
+                    steer(command.angle, command.speed)
             if arduino is not None:
                 arduino.refresh(fail_closed=True)
+
+            if (
+                args.drive
+                and command.state == controller.NEAR
+                and not pickup.started
+            ):
+                if arduino is not None:
+                    arduino.cancelar_ultrassom()
+                ultrasonic_sample_ready = False
+                distance_mm = None
+                pickup.start()
+                pickup_connection_epoch = (
+                    arduino.connection_epoch
+                    if arduino is not None else None
+                )
+                print(
+                    "[coleta] bolinha proxima: iniciando re, Futaba e garras")
 
             log_now = time.monotonic()
             should_log = (
@@ -586,11 +727,19 @@ def main():
                                 f"{submitted.status}")
 
             if command.terminal:
-                if args.drive:
+                approach_handoff = (
+                    args.drive
+                    and command.state == controller.NEAR
+                    and pickup.started
+                )
+                if args.drive and not approach_handoff:
                     print(
                         f"[resgate] estado terminal {command.state}; "
                         "motores parados")
-                if not args.debug or args.drive:
+                if (
+                    not approach_handoff
+                    and (not args.debug or args.drive)
+                ):
                     break
 
             time.sleep(MAIN_TICK_S)
@@ -604,6 +753,7 @@ def main():
         if arduino is not None:
             from control.steer import steer
             _best_effort("parar os motores", steer)
+            _best_effort("cortar o Futaba", arduino.parar_futaba)
         if dataset_worker is not None:
             dataset_closed = _best_effort(
                 "encerrar a gravacao do dataset",

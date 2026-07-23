@@ -55,6 +55,7 @@ class RescueSerialLedTests(unittest.TestCase):
     def _bare_arduino():
         arduino = Arduino.__new__(Arduino)
         arduino._connected = False
+        arduino._connection_epoch = 0
         arduino._last_reconnect_t = -1e9
         arduino._desired_led_mode = None
         arduino._ser = None
@@ -101,6 +102,16 @@ class RescueSerialLedTests(unittest.TestCase):
 
         self.assertTrue(arduino._connected)
         self.assertEqual(sent, ["LED APAGADO"])
+
+    def test_connection_epoch_changes_when_new_serial_is_adopted(self):
+        arduino = self._bare_arduino()
+
+        arduino._adopt(FakeSerial())
+        first_epoch = arduino.connection_epoch
+        arduino._adopt(FakeSerial())
+
+        self.assertEqual(first_epoch, 1)
+        self.assertEqual(arduino.connection_epoch, 2)
 
     def test_refresh_after_reconnect_discards_old_motion(self):
         arduino = self._bare_arduino()
@@ -186,6 +197,56 @@ class RescueSerialLedTests(unittest.TestCase):
             arduino.comando_serial("PING", timeout=0.05),
             "PONG",
         )
+
+    def test_grippers_are_sent_in_one_usb_write(self):
+        arduino = self._connected_arduino()
+
+        self.assertTrue(arduino.garras(-50, 50))
+
+        self.assertEqual(
+            arduino._ser.writes,
+            [b"SERVO GARRA_ESQ -50\nSERVO GARRA_DIR 50\n"],
+        )
+        self.assertIsNone(arduino._last_cmd)
+
+    def test_gripper_batch_validates_both_deltas_before_writing(self):
+        arduino = self._connected_arduino()
+
+        with self.assertRaisesRegex(ValueError, "fora"):
+            arduino.garras(-50, 181)
+
+        self.assertEqual(arduino._ser.writes, [])
+
+    def test_futaba_write_reports_serial_delivery(self):
+        arduino = self._connected_arduino()
+
+        self.assertTrue(arduino.futaba(-20, 1500))
+
+        self.assertEqual(
+            arduino._ser.writes,
+            [b"FUTABA -20 1500\n"],
+        )
+
+    def test_futaba_wait_refreshes_lado_zero_not_parar(self):
+        arduino = self._connected_arduino()
+        arduino.lado(0, 0)
+        arduino.futaba(-20, 1500)
+
+        with patch(
+            "serial_link.arduino.time.monotonic",
+            return_value=arduino._last_send_t + 0.30,
+        ):
+            arduino.refresh(fail_closed=True)
+
+        self.assertEqual(
+            arduino._ser.writes,
+            [
+                b"LADO 0 0\n",
+                b"FUTABA -20 1500\n",
+                b"LADO 0 0\n",
+            ],
+        )
+        self.assertNotIn(b"PARAR\n", arduino._ser.writes)
 
 
 if __name__ == "__main__":

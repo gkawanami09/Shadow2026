@@ -45,8 +45,7 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
 
     # stop
     if angle == 190:
-        arduino.parar()
-        return
+        return arduino.parar()
 
     # backward
     elif angle == 200:
@@ -78,8 +77,7 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
 
     else:
         # angulo fora do vocabulario: para por seguranca
-        arduino.parar()
-        return
+        return arduino.parar()
 
     # Para erros grandes, desloca progressivamente o centro de giro para a
     # frente do chassi. No limite, as rodas dianteiras ficam quase paradas e
@@ -115,12 +113,17 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
             front_left = ((1 - assist) * front_left
                           - assist * front_reverse)
 
-        arduino.rodas(round(front_left * MAX_PWM),
-                      round(rear_left * MAX_PWM),
-                      round(front_right * MAX_PWM),
-                      round(rear_right * MAX_PWM))
+        return arduino.rodas(
+            round(front_left * MAX_PWM),
+            round(rear_left * MAX_PWM),
+            round(front_right * MAX_PWM),
+            round(rear_right * MAX_PWM),
+        )
     else:
-        arduino.lado(round(speed_left * MAX_PWM), round(speed_right * MAX_PWM))
+        return arduino.lado(
+            round(speed_left * MAX_PWM),
+            round(speed_right * MAX_PWM),
+        )
 
 
 def sleep_steering(duration):

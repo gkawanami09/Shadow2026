@@ -36,6 +36,7 @@ class Arduino:
         self._last_send_t = 0.0
         self._last_reconnect_t = 0.0
         self._connected = False
+        self._connection_epoch = 0
         self._desired_led_mode = None
         self._rx_buffer = bytearray()
         self._ultra_pending = False
@@ -101,6 +102,7 @@ class Arduino:
         ser.timeout = 0  # nunca mais bloquear em leitura
         self._ser = ser
         self._connected = True
+        self._connection_epoch += 1
         self._rx_buffer.clear()
         self.cancelar_ultrassom()
         self._manual_pending = False
@@ -120,25 +122,35 @@ class Arduino:
 
     # ------------------------------------------------------------- public API
 
+    @property
+    def connection_epoch(self):
+        """Muda sempre que uma nova conexao serial e adotada."""
+        return self._connection_epoch
+
+    @property
+    def connected(self):
+        return self._connected
+
     def lado(self, esq, dir_):
         """LADO <esq> <dir> — signed wheel speeds, left pair / right pair."""
         esq, dir_ = int(round(esq)), int(round(dir_))
         assert abs(esq) <= config.MAX_PWM and abs(dir_) <= config.MAX_PWM, \
             f"PWM acima do teto de seguranca ({esq}, {dir_}) > {config.MAX_PWM}"
-        self._send_cmd(f"LADO {esq} {dir_}")
+        return self._send_cmd(f"LADO {esq} {dir_}")
 
     def rodas(self, fe, te, fd, td):
         """RODAS <FE> <TE> <FD> <TD> — PWM assinado por motor."""
         velocidades = tuple(int(round(v)) for v in (fe, te, fd, td))
         assert all(abs(v) <= config.MAX_PWM for v in velocidades), \
             f"PWM acima do teto de seguranca {velocidades} > {config.MAX_PWM}"
-        self._send_cmd("RODAS " + " ".join(map(str, velocidades)))
+        return self._send_cmd(
+            "RODAS " + " ".join(map(str, velocidades)))
 
     def parar(self):
-        self._send_cmd("PARAR")
+        return self._send_cmd("PARAR")
 
     def ping(self):
-        self._send_cmd("PING", force=True)
+        return self._send_cmd("PING", force=True)
 
     def servo(self, nome, deslocamento):
         """Move o servo relativamente a ultima posicao comandada, em graus."""
@@ -150,7 +162,24 @@ class Arduino:
         deslocamento = int(round(deslocamento))
         if not -180 <= deslocamento <= 180:
             raise ValueError(f"Deslocamento fora de -180..180: {deslocamento}")
-        self._send_aux_cmd(f"SERVO {nome} {deslocamento}")
+        return self._send_aux_cmd(f"SERVO {nome} {deslocamento}")
+
+    def garras(self, deslocamento_esq, deslocamento_dir):
+        """Envia os dois deltas no mesmo pacote USB.
+
+        O Uno aplica CH0 e CH1 sequencialmente, mas uma unica escrita impede
+        que outro comando seja intercalado e reduz a diferenca a poucos ms.
+        """
+        deslocamento_esq = int(round(deslocamento_esq))
+        deslocamento_dir = int(round(deslocamento_dir))
+        for deslocamento in (deslocamento_esq, deslocamento_dir):
+            if not -180 <= deslocamento <= 180:
+                raise ValueError(
+                    f"Deslocamento fora de -180..180: {deslocamento}")
+        return self._send_aux_batch((
+            f"SERVO GARRA_ESQ {deslocamento_esq}",
+            f"SERVO GARRA_DIR {deslocamento_dir}",
+        ))
 
     def led(self, modo):
         """Define o LED como APAGADO ou ACESO."""
@@ -227,11 +256,11 @@ class Arduino:
             raise ValueError("Potencia do Futaba deve estar em -100..-1 ou 1..100")
         if not 1 <= tempo_ms <= 3000:
             raise ValueError("Tempo do Futaba deve estar em 1..3000 ms")
-        self._send_aux_cmd(f"FUTABA {potencia} {tempo_ms}")
+        return self._send_aux_cmd(f"FUTABA {potencia} {tempo_ms}")
 
     def parar_futaba(self):
         """Corta imediatamente o sinal do canal continuo CH3."""
-        self._send_aux_cmd("FUTABA PARAR")
+        return self._send_aux_cmd("FUTABA PARAR")
 
     def comando_serial(self, comando, timeout=0.5):
         """Envia uma linha livre e retorna a primeira resposta do firmware.
@@ -306,16 +335,35 @@ class Arduino:
         now = time.monotonic()
         if not force and cmd == self._last_cmd and \
                 now - self._last_send_t < config.SERIAL_MIN_RESEND_S:
-            return
-        self._write_line(cmd)
+            return True
+        sent = self._write_line(cmd)
         self._last_cmd = cmd
         self._last_send_t = now
         self._drain()
+        return sent
 
     def _send_aux_cmd(self, cmd):
         """Envia periferico sem substituir o ultimo comando dos motores."""
-        self._write_line(cmd)
+        sent = self._write_line(cmd)
         self._drain()
+        return sent
+
+    def _send_aux_batch(self, commands):
+        """Envia varias linhas validadas em uma unica escrita serial."""
+        commands = tuple(str(command).strip() for command in commands)
+        if (
+            not commands
+            or any(
+                not command
+                or "\n" in command
+                or "\r" in command
+                for command in commands
+            )
+        ):
+            raise ValueError("Lote serial auxiliar invalido")
+        sent = self._write_line("\n".join(commands))
+        self._drain()
+        return sent
 
     def _query(self, cmd, prefix, timeout):
         """Envia uma consulta e aguarda somente a resposta correspondente."""
@@ -326,9 +374,10 @@ class Arduino:
         if not self._connected:
             self._try_reconnect()
             if not self._connected:
-                return
+                return False
         try:
             self._ser.write((cmd + "\n").encode())
+            return True
         except (serial.SerialException, OSError) as err:
             print(f"[serial] erro de escrita ({err}); reconectando…")
             self._connected = False
@@ -336,6 +385,7 @@ class Arduino:
                 self._ser.close()
             except (serial.SerialException, OSError):
                 pass
+            return False
 
     def _drain(self):
         """Non-blocking read of pending replies; surfaces ERRO lines."""

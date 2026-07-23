@@ -1,4 +1,4 @@
-# Plano de resgate — etapa 1: detectar e aproximar da bolinha
+# Plano de resgate — detectar, aproximar e iniciar a coleta
 
 Esta etapa é deliberadamente independente do segue-linha. A lógica de linha,
 a máquina de estados existente e o firmware não foram alterados; a única
@@ -9,16 +9,24 @@ integração no controle de linha é enviar `LED ACESO` ao iniciar esse modo.
 ```text
 WAIT_TARGET -> ALIGN -> APPROACH -> NEAR
                     \-> LOST/FAULT (PARAR)
+NEAR -> PICKUP_BACKUP -> PICKUP_FUTABA -> PICKUP_GRIPPERS -> PICKUP_COMPLETE
 ```
 
 - `WAIT_TARGET`: motores parados até uma esfera aparecer de forma consistente.
 - `ALIGN`: pivô lento, sem avanço, para centralizar a esfera.
 - `APPROACH`: avanço em arco; a velocidade diminui à medida que a esfera cresce.
-- `NEAR`: parada travada, encerrando esta primeira etapa.
+- `NEAR`: parada confirmada e transferência única para a coleta.
 - `LOST`: qualquer perda ou imagem antiga produz `PARAR` imediatamente.
 - `FAULT`: timeout ou falta de progresso produz `PARAR` travado.
+- `PICKUP_BACKUP`: ré reta por 0,50 s a velocidade 0,35.
+- `PICKUP_FUTABA`: rodas zeradas e `FUTABA -20 1500`; aguarda 1,50 s
+  mais 0,10 s de margem.
+- `PICKUP_GRIPPERS`: envia esquerda `-50` e direita `+50` no mesmo pacote
+  USB e aguarda 0,50 s para acomodação.
+- `PICKUP_COMPLETE`: envia `PARAR` e encerra.
 
-Ainda não há busca cega, coleta, transporte, depósito ou navegação pela zona.
+Ainda não há busca cega por rotação, transporte, depósito ou navegação completa
+pela zona.
 
 ## Câmera
 
@@ -81,6 +89,22 @@ Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 
 Uma detecção incerta não movimenta o robô.
 
+## Sequência dos atuadores
+
+O controlador de aproximação permanece independente. Somente depois da
+proximidade confirmada ele arma um sequenciador monotônico separado. Cada ação
+do Futaba e das garras possui latch one-shot, pois os comandos das garras são
+deslocamentos relativos e não podem ser repetidos.
+
+`PARAR` também corta o Futaba no firmware. Por isso, ao terminar a ré, o
+programa usa `LADO 0 0` para zerar as quatro rodas. O keepalive repete esse
+comando enquanto CH3 desce, sem interromper os 1500 ms. Depois do prazo, o
+programa envia `FUTABA PARAR` por segurança e as duas linhas das garras em uma
+única escrita serial.
+
+O PCA9685 precisa de alimentação externa regulada adequada para os servos, com
+GND comum ao Arduino. Não alimente Futaba e garras pelo pino 5 V do Uno.
+
 ### Dataset da câmera montada
 
 No modo `--debug` sem `--drive`, pressione `s` para salvar o frame bruto atual.
@@ -139,7 +163,11 @@ Outras travas:
   frame que apenas aguardou a câmera;
 - aproximação sem aumento do raio = `FAULT`;
 - timeout = `FAULT`;
-- `finally` sempre envia `PARAR` e fecha a serial;
+- falha de escrita de ré, Futaba ou garras = `PICKUP_FAULT`, sem avançar para
+  a próxima ação;
+- reconexão serial durante a coleta cancela a sequência, pois o Uno pode ter
+  reiniciado a posição relativa das garras;
+- `finally` sempre envia `PARAR`, `FUTABA PARAR` e fecha a serial;
 - PWM continua limitado pelo código existente e pelo firmware.
 
 ## Ordem de validação
@@ -171,7 +199,11 @@ Outras travas:
    No modo com motores, `--camera-index` é obrigatório: o programa não aceita
    assumir silenciosamente qual câmera física deve comandar o robô.
 
-6. Teste no chão em velocidade baixa, com acesso imediato à alimentação.
+6. Ainda com as rodas suspensas e sem bolinha presa, confirme no log a ordem:
+   `PICKUP_BACKUP`, `PICKUP_FUTABA`, `PICKUP_GRIPPERS`,
+   `PICKUP_COMPLETE`. Mantenha acesso imediato à alimentação.
+
+7. Teste no chão em velocidade baixa.
 
 ## Limite desta implementação
 
