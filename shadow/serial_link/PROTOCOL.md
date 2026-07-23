@@ -31,17 +31,29 @@ O `shadow/` **não** substitui esse firmware — apenas fala com ele
 | `FRENTE <v>` / `TRAS <v>` | as 4 rodas para frente / trás (v = módulo) | `OK FRENTE <v>` … |
 | `GIRAR_ESQ <v>` / `GIRAR_DIR <v>` | pivot no lugar | `OK GIRAR_… <v>` |
 
-| `SERVO <nome> <delta>` | move relativamente a ultima posicao; nomes `GARRA_ESQ`, `GARRA_DIR`, `CACAMBA` ou `FUTABA`; delta -180..180 | `OK SERVO <nome> DELTA <d> POS <alvo>` |
+| `SERVO <nome> <delta>` | move relativamente a ultima posicao; nomes ativos `GARRA_ESQ`, `GARRA_DIR` ou `CACAMBA`; delta -180..180 | `OK SERVO <nome> DELTA <d> POS <alvo>` |
 | `LED APAGADO\|ACESO` | controla o LED indicador em D12; inicia aceso no boot | `OK LED <modo>` |
 | `ULTRASSOM` | mede o sensor com TRIG D8 e ECHO D11 | `OK ULTRASSOM <mm>`; `-1` = sem eco |
+| `FUTABA ATIVAR` | ativa CH3 no pulso central seguro de 1500 us | `OK FUTABA ATIVO PULSO 1500` |
+| `FUTABA PULSO <500..2500>` | move suavemente para um pulso de calibracao | `OK FUTABA PULSO <us>` |
+| `FUTABA MAIS\|MENOS <passo>` | ajusta o pulso atual em microssegundos | `OK FUTABA PULSO <us>` |
+| `FUTABA MARCAR_ALTO\|MARCAR_BAIXO` | guarda temporariamente a posicao atual | `OK FUTABA ALTO\|BAIXO <us>` |
+| `FUTABA ALTO\|BAIXO` | vai suavemente para a posicao marcada | `OK FUTABA ALTO\|BAIXO <us>` |
+| `FUTABA STATUS` | informa ativacao, pulso e marcacoes | `OK FUTABA ...` |
+| `FUTABA DESATIVAR` | desliga completamente a saida CH3 | `OK FUTABA DESATIVADO` |
 
-Erros: `ERRO PARAMETROS_INVALIDOS`, `ERRO MOTOR_INVALIDO`, `ERRO SERVO_INVALIDO`, `ERRO COMANDO_INVALIDO`.
+Erros: `ERRO PARAMETROS_INVALIDOS`, `ERRO MOTOR_INVALIDO`, `ERRO SERVO_INVALIDO`, `ERRO SERVO_DESATIVADO`, `ERRO COMANDO_INVALIDO`.
 
 Os comandos antigos e o banner `SPEC_01` continuam iguais. Os comandos de
 perifericos sao adicionais e nao modificam as velocidades dos motores. O PCA9685
 usa o endereco I2C `0x40`, 50 Hz, com CH0=garra esquerda, CH1=garra direita,
-CH2=cacamba e CH3=Futaba. No boot, os quatro canais recebem a posicao central
-de 90 graus, que serve como referencia para os deslocamentos relativos.
+CH2=cacamba e CH3=Futaba. No boot, a garra esquerda vai para 180 graus e a
+direita para 0 graus (extremos abertos); a cacamba vai para 90 graus e o canal
+do Futaba permanece totalmente desligado.
+
+As marcacoes `ALTO` e `BAIXO` ficam somente na RAM e sao apagadas quando o Uno
+reinicia. Depois da calibracao, os pulsos confirmados devem ser fixados no
+`config.h` para uso autonomo.
 
 ## Como o Python usa o protocolo
 

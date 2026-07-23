@@ -4,7 +4,7 @@
 Uso:
     python3 -m shadow.tools.controle_serial
     python3 -m shadow.tools.controle_serial --port /dev/ttyACM0
-    python3 -m shadow.tools.controle_serial --comando "SERVO FUTABA 20"
+    python3 -m shadow.tools.controle_serial --comando "SERVO GARRA_ESQ 20"
 """
 
 import argparse
@@ -21,7 +21,16 @@ Digite exatamente o comando que deseja enviar, por exemplo:
   SERVO GARRA_ESQ 20     move 20 graus no sentido positivo
   SERVO GARRA_DIR -20    move 20 graus no sentido contrario
   SERVO CACAMBA 10
-  SERVO FUTABA -5
+  FUTABA ATIVAR
+  FUTABA PULSO 1500
+  FUTABA MAIS 25
+  FUTABA MENOS 25
+  FUTABA MARCAR_ALTO
+  FUTABA MARCAR_BAIXO
+  FUTABA ALTO
+  FUTABA BAIXO
+  FUTABA STATUS
+  FUTABA DESATIVAR
   LED ACESO
   LED APAGADO
   ULTRASSOM

@@ -17,13 +17,26 @@ enum ModoLed {
 
 ModoLed modo_led = LED_ACESO;
 int posicao_servo_atual[4] = {
-  SERVO_POSICAO_INICIAL,
-  SERVO_POSICAO_INICIAL,
-  SERVO_POSICAO_INICIAL,
-  SERVO_POSICAO_INICIAL
+  SERVO_POSICAO_INICIAL_GARRA_ESQ,
+  SERVO_POSICAO_INICIAL_GARRA_DIR,
+  SERVO_POSICAO_INICIAL_CACAMBA,
+  0
 };
+bool futaba_ativo = false;
+int futaba_pulso_atual_us = FUTABA_PULSO_CENTRO_US;
+int futaba_pulso_alto_us = -1;
+int futaba_pulso_baixo_us = -1;
 
+void escrever_pca9685(byte registrador, byte valor);
 void definir_servo(byte canal, int angulo);
+
+void desligar_canal_pca9685(byte canal) {
+  byte base = 0x06 + 4 * canal;
+  escrever_pca9685(base, 0);
+  escrever_pca9685(base + 1, 0);
+  escrever_pca9685(base + 2, 0);
+  escrever_pca9685(base + 3, 0x10);
+}
 
 void configurar_pinos() {
   pinMode(FE_IN1, OUTPUT);
@@ -65,11 +78,15 @@ void configurar_pca9685() {
   delay(1);
   escrever_pca9685(0x00, 0xA0);
 
-  // Estabelece uma referencia conhecida para os comandos relativos. Como o
-  // PCA9685 nao le a posicao fisica do eixo, todos partem do centro (90 graus).
+  // Primeiro desliga os quatro canais. O Futaba (CH3) permanece desligado.
   for (byte canal = 0; canal < 4; canal++) {
-    definir_servo(canal, SERVO_POSICAO_INICIAL);
+    desligar_canal_pca9685(canal);
   }
+
+  // As garras sao espelhadas: esquerda abre em 180 e direita abre em 0.
+  definir_servo(SERVO_GARRA_ESQUERDA, SERVO_POSICAO_INICIAL_GARRA_ESQ);
+  definir_servo(SERVO_GARRA_DIREITA, SERVO_POSICAO_INICIAL_GARRA_DIR);
+  definir_servo(SERVO_CACAMBA, SERVO_POSICAO_INICIAL_CACAMBA);
 }
 
 void definir_servo(byte canal, int angulo) {
@@ -81,6 +98,41 @@ void definir_servo(byte canal, int angulo) {
   escrever_pca9685(base + 1, 0);
   escrever_pca9685(base + 2, contador & 0xFF);
   escrever_pca9685(base + 3, (contador >> 8) & 0x0F);
+}
+
+void definir_servo_pulso(byte canal, int pulso_us) {
+  unsigned int contador = (unsigned int)((long)pulso_us * 4096L / 20000L);
+  byte base = 0x06 + 4 * canal;
+  escrever_pca9685(base, 0);
+  escrever_pca9685(base + 1, 0);
+  escrever_pca9685(base + 2, contador & 0xFF);
+  escrever_pca9685(base + 3, (contador >> 8) & 0x0F);
+}
+
+void mover_futaba_suave(int destino_us) {
+  destino_us = constrain(
+    destino_us,
+    FUTABA_PULSO_MIN_TESTE_US,
+    FUTABA_PULSO_MAX_TESTE_US
+  );
+
+  if (!futaba_ativo) {
+    futaba_pulso_atual_us = FUTABA_PULSO_CENTRO_US;
+    definir_servo_pulso(SERVO_FUTABA, futaba_pulso_atual_us);
+    futaba_ativo = true;
+  }
+
+  while (futaba_pulso_atual_us != destino_us) {
+    int diferenca = destino_us - futaba_pulso_atual_us;
+    int passo = constrain(
+      diferenca,
+      -FUTABA_PASSO_RAMPA_US,
+      FUTABA_PASSO_RAMPA_US
+    );
+    futaba_pulso_atual_us += passo;
+    definir_servo_pulso(SERVO_FUTABA, futaba_pulso_atual_us);
+    delay(FUTABA_ATRASO_RAMPA_MS);
+  }
 }
 
 int mover_servo_relativo(byte canal, int deslocamento) {
@@ -201,6 +253,18 @@ bool ler_inteiro(const char* texto, int* valor) {
   return true;
 }
 
+bool ler_pulso_futaba(const char* texto, int* valor) {
+  char* fim;
+  long numero = strtol(texto, &fim, 10);
+  if (*texto == '\0' || *fim != '\0' ||
+      numero < FUTABA_PULSO_MIN_TESTE_US ||
+      numero > FUTABA_PULSO_MAX_TESTE_US) {
+    return false;
+  }
+  *valor = (int)numero;
+  return true;
+}
+
 void responder_ok_motor(const char* nome_motor, int velocidade) {
   Serial.print("OK MOTOR ");
   Serial.print(nome_motor);
@@ -233,6 +297,53 @@ void processar_comando(char* comando) {
   char* extra = strtok(NULL, " \t");
   int valor1, valor2, valor3, valor4;
 
+  if (strcmp(tipo, "FUTABA") == 0) {
+    if (primeiro == NULL || terceiro != NULL) {
+      Serial.println("ERRO PARAMETROS_INVALIDOS");
+      return;
+    }
+
+    if (strcmp(primeiro, "ATIVAR") == 0 && segundo == NULL) {
+      mover_futaba_suave(FUTABA_PULSO_CENTRO_US);
+      Serial.print("OK FUTABA ATIVO PULSO "); Serial.println(futaba_pulso_atual_us);
+    } else if (strcmp(primeiro, "DESATIVAR") == 0 && segundo == NULL) {
+      desligar_canal_pca9685(SERVO_FUTABA);
+      futaba_ativo = false;
+      Serial.println("OK FUTABA DESATIVADO");
+    } else if (strcmp(primeiro, "STATUS") == 0 && segundo == NULL) {
+      Serial.print("OK FUTABA ");
+      Serial.print(futaba_ativo ? "ATIVO" : "DESATIVADO");
+      Serial.print(" PULSO "); Serial.print(futaba_pulso_atual_us);
+      Serial.print(" ALTO "); Serial.print(futaba_pulso_alto_us);
+      Serial.print(" BAIXO "); Serial.println(futaba_pulso_baixo_us);
+    } else if (strcmp(primeiro, "PULSO") == 0 && segundo != NULL &&
+               ler_pulso_futaba(segundo, &valor1)) {
+      mover_futaba_suave(valor1);
+      Serial.print("OK FUTABA PULSO "); Serial.println(futaba_pulso_atual_us);
+    } else if ((strcmp(primeiro, "MAIS") == 0 || strcmp(primeiro, "MENOS") == 0) &&
+               segundo != NULL && ler_inteiro(segundo, &valor1) &&
+               valor1 > 0) {
+      if (strcmp(primeiro, "MENOS") == 0) valor1 = -valor1;
+      mover_futaba_suave(futaba_pulso_atual_us + valor1);
+      Serial.print("OK FUTABA PULSO "); Serial.println(futaba_pulso_atual_us);
+    } else if (strcmp(primeiro, "MARCAR_ALTO") == 0 && segundo == NULL && futaba_ativo) {
+      futaba_pulso_alto_us = futaba_pulso_atual_us;
+      Serial.print("OK FUTABA ALTO "); Serial.println(futaba_pulso_alto_us);
+    } else if (strcmp(primeiro, "MARCAR_BAIXO") == 0 && segundo == NULL && futaba_ativo) {
+      futaba_pulso_baixo_us = futaba_pulso_atual_us;
+      Serial.print("OK FUTABA BAIXO "); Serial.println(futaba_pulso_baixo_us);
+    } else if (strcmp(primeiro, "ALTO") == 0 && segundo == NULL && futaba_pulso_alto_us >= 0) {
+      mover_futaba_suave(futaba_pulso_alto_us);
+      Serial.print("OK FUTABA ALTO "); Serial.println(futaba_pulso_atual_us);
+    } else if (strcmp(primeiro, "BAIXO") == 0 && segundo == NULL && futaba_pulso_baixo_us >= 0) {
+      mover_futaba_suave(futaba_pulso_baixo_us);
+      Serial.print("OK FUTABA BAIXO "); Serial.println(futaba_pulso_atual_us);
+    } else {
+      Serial.println("ERRO PARAMETROS_INVALIDOS");
+    }
+    return;
+  }
+
   if (strcmp(tipo, "SERVO") == 0) {
     byte canal;
     if (primeiro == NULL || segundo == NULL || terceiro != NULL ||
@@ -240,6 +351,8 @@ void processar_comando(char* comando) {
       Serial.println("ERRO PARAMETROS_INVALIDOS");
     } else if (!canal_servo_por_nome(primeiro, &canal)) {
       Serial.println("ERRO SERVO_INVALIDO");
+    } else if (canal == SERVO_FUTABA) {
+      Serial.println("ERRO SERVO_DESATIVADO");
     } else {
       int destino = mover_servo_relativo(canal, valor1);
       Serial.print("OK SERVO ");

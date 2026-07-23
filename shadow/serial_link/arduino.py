@@ -131,7 +131,9 @@ class Arduino:
     def servo(self, nome, deslocamento):
         """Move o servo relativamente a ultima posicao comandada, em graus."""
         nome = str(nome).upper()
-        if nome not in ("GARRA_ESQ", "GARRA_DIR", "CACAMBA", "FUTABA"):
+        if nome == "FUTABA":
+            raise ValueError("Servo FUTABA esta desativado no firmware")
+        if nome not in ("GARRA_ESQ", "GARRA_DIR", "CACAMBA"):
             raise ValueError(f"Servo invalido: {nome}")
         deslocamento = int(round(deslocamento))
         if not -180 <= deslocamento <= 180:
