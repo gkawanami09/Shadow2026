@@ -9,7 +9,12 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import rescue_config as cfg
-from vision.rescue_ball import BallDetector, RescueEnhancer, _Candidate
+from vision.rescue_ball import (
+    BallDetector,
+    RescueEnhancer,
+    _Candidate,
+    _Proposal,
+)
 
 
 def base_frame():
@@ -151,6 +156,113 @@ class RescueBallDetectorTests(unittest.TestCase):
         result = detector.detect(base_frame(), timestamp=0.1)
         self.assertFalse(detector.last_hough_used)
         self.assertTrue(result.confirmed)
+
+    def test_deduplicate_keeps_nested_radii_but_merges_near_duplicates(self):
+        detector = BallDetector("silver")
+        proposals = [
+            _Proposal(100, 100, 20, 0.56, 0.50, "hough"),
+            _Proposal(100.8, 100.5, 19.5, 0.56, 0.50, "hough"),
+            _Proposal(102, 101, 13, 0.56, 0.50, "hough"),
+        ]
+
+        unique = detector._deduplicate(proposals)
+
+        self.assertEqual(len(unique), 2)
+        self.assertEqual(
+            sorted(round(item.radius, 1) for item in unique),
+            [13.0, 20.0],
+        )
+
+    def test_all_hough_radii_are_evaluated_before_selection(self):
+        detector = BallDetector("silver")
+        detector._contour_proposals = lambda *_args: []
+        proposals = [
+            _Proposal(320, 300, 40, 0.56, 0.50, "hough"),
+            _Proposal(322, 299, 28, 0.56, 0.50, "hough"),
+        ]
+        detector._hough_proposals = lambda *_args: proposals
+        evaluated_radii = []
+
+        def evaluate(items, *_args):
+            evaluated_radii.append([item.radius for item in items])
+            if not items:
+                return []
+            # Simula halo externo invalido e perimetro menor valido.
+            return [_Candidate("silver", 322, 299, 28, 0.82)]
+
+        detector._evaluate_proposals = evaluate
+
+        result = detector.detect(base_frame(), timestamp=0.1)
+
+        self.assertEqual(evaluated_radii[-1], [40, 28])
+        self.assertIsNotNone(result)
+        self.assertEqual(result.radius, 28)
+
+    def test_nested_reflections_do_not_beat_credible_outer_circle(self):
+        detector = BallDetector("silver")
+        detector._pixel_scale = 0.5
+        outer = _Candidate("silver", 178, 163, 18.5, 0.70)
+        reflection = _Candidate("silver", 181, 159, 14.5, 0.86)
+        inner = _Candidate("silver", 180, 158, 12.0, 0.87)
+
+        selected = detector._select_candidate(
+            [outer, reflection, inner])
+
+        self.assertIs(selected, outer)
+
+    def test_weak_outer_halo_does_not_hide_strong_inner_candidate(self):
+        detector = BallDetector("silver")
+        detector._pixel_scale = 0.5
+        halo = _Candidate("silver", 178, 163, 18.5, 0.60)
+        inner = _Candidate("silver", 181, 159, 14.5, 0.90)
+
+        selected = detector._select_candidate([halo, inner])
+
+        self.assertIs(selected, inner)
+
+    def test_outer_preference_does_not_bias_spatially_separate_candidates(self):
+        detector = BallDetector("silver")
+        detector._pixel_scale = 0.5
+        large = _Candidate("silver", 100, 100, 20, 0.70)
+        separate = _Candidate("silver", 130, 100, 14, 0.90)
+
+        selected = detector._select_candidate([large, separate])
+
+        self.assertIs(selected, separate)
+
+    def test_stable_outer_circle_confirms_despite_changing_reflections(self):
+        detector = BallDetector("silver")
+        detector._pixel_scale = 0.5
+        result = None
+        for index in range(cfg.BALL_ACQUIRE_HITS):
+            outer = _Candidate(
+                "silver", 178 + index * 0.5, 163, 18.5, 0.70)
+            reflection = _Candidate(
+                "silver", 181 - index, 159 + index, 14.5, 0.86)
+            selected = detector._select_candidate([outer, reflection])
+            self.assertIs(selected, outer)
+            result = detector._update_track(
+                selected, timestamp=0.1 + index * 0.03)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertEqual(result.hits, cfg.BALL_ACQUIRE_HITS)
+        self.assertAlmostEqual(result.radius, 18.5)
+
+    def test_acquisition_association_is_stricter_than_confirmed_tracking(self):
+        detector = BallDetector("silver")
+        detector._pixel_scale = 0.5
+        detector._tracked = _Candidate("silver", 100, 100, 20, 0.9)
+        moved = _Candidate("silver", 120, 100, 20, 0.9)
+        grown = _Candidate("silver", 100, 100, 31, 0.9)
+
+        detector._hits = 1
+        self.assertFalse(detector._track_match(moved)[0])
+        self.assertFalse(detector._track_match(grown)[0])
+
+        detector._hits = cfg.BALL_ACQUIRE_HITS
+        self.assertTrue(detector._track_match(moved)[0])
+        self.assertTrue(detector._track_match(grown)[0])
 
     def test_detector_thresholds_scale_at_960_pixels_wide(self):
         frame = cv2.resize(

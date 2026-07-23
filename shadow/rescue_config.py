@@ -109,7 +109,29 @@ BALL_ASSOCIATION_MIN_PX = 34
 BALL_ASSOCIATION_RADIUS_FACTOR = 1.7
 BALL_RADIUS_RATIO_MIN = 0.55
 BALL_RADIUS_RATIO_MAX = 1.80
+# Antes dos 3 hits, reflexos internos nao podem ser associados como se fossem
+# o mesmo perimetro externo. Depois da confirmacao, os limites amplos acima
+# continuam cobrindo o movimento real do robo e pequenas perdas de quadro.
+BALL_ACQUIRE_ASSOCIATION_MIN_PX = 16
+BALL_ACQUIRE_ASSOCIATION_RADIUS_FACTOR = 0.80
+BALL_ACQUIRE_RADIUS_RATIO_MIN = 0.72
+BALL_ACQUIRE_RADIUS_RATIO_MAX = 1.40
 BALL_TRACK_EMA_ALPHA = 0.40
+
+# Propostas quase identicas sao redundantes; circulos concentricos com raios
+# diferentes precisam chegar a classificacao para um halo invalido nao apagar
+# o perimetro verdadeiro.
+BALL_DUPLICATE_CENTER_FACTOR = 0.25
+BALL_DUPLICATE_RADIUS_RATIO_MIN = 0.82
+
+# Entre candidatos ja validados, um circulo menor pode ser apenas um reflexo
+# dentro da esfera. A preferencia pelo envelope externo so vale quando existe
+# contencao geometrica e a confianca externa permanece proxima da interna.
+BALL_OUTER_MIN_RADIUS_RATIO = 1.15
+BALL_OUTER_MAX_RADIUS_RATIO = 1.80
+BALL_OUTER_CENTER_FACTOR = 0.45
+BALL_OUTER_CONTAINMENT_SLACK = 1.15
+BALL_OUTER_CONFIDENCE_TOLERANCE = 0.18
 
 # Controle de aproximacao. O comando usa a lei steer() ja existente:
 # positivo=direita, negativo=esquerda, |angulo|>110=pivo, 190=PARAR.

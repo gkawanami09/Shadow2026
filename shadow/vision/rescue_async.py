@@ -46,6 +46,7 @@ def _scale_detection(detection, from_shape, to_shape):
 @dataclass(frozen=True)
 class AsyncDetectionResult:
     sequence: int
+    source_sequence: object
     detection: object
     frame_shape: tuple
     detector_shape: tuple
@@ -55,7 +56,10 @@ class AsyncDetectionResult:
     dropped_frames: int
     generation: int
     hough_used: bool
+    contour_proposals: int
+    hough_proposals: int
     candidate_count: int
+    candidate_radii: tuple
     diagnostic: str
 
 
@@ -241,7 +245,7 @@ class LatestFrameBallDetector:
         )
         self._thread.start()
 
-    def submit(self, frame, captured_at=None):
+    def submit(self, frame, captured_at=None, source_sequence=None):
         if frame is None:
             raise ValueError("frame ausente")
         captured_at = (
@@ -256,7 +260,12 @@ class LatestFrameBallDetector:
             # capture_array/read entregam uma matriz propria. O worker mantem
             # esta referencia ate terminar; nao existe fila crescente.
             self._pending = (
-                sequence, frame, captured_at, self._generation)
+                sequence,
+                frame,
+                captured_at,
+                self._generation,
+                source_sequence,
+            )
             self._condition.notify()
             return sequence
 
@@ -302,7 +311,13 @@ class LatestFrameBallDetector:
                     self._condition.wait()
                 if self._stopping:
                     return
-                sequence, frame, captured_at, generation = self._pending
+                (
+                    sequence,
+                    frame,
+                    captured_at,
+                    generation,
+                    source_sequence,
+                ) = self._pending
                 self._pending = None
                 dropped_frames = self._dropped_frames
                 should_reset = (
@@ -327,15 +342,42 @@ class LatestFrameBallDetector:
                     detector_frame, timestamp=captured_at)
                 hough_used = bool(
                     getattr(self.detector, "last_hough_used", False))
-                candidate_count = len(
+                candidates = tuple(
                     getattr(self.detector, "last_candidates", ()))
+                candidate_count = len(candidates)
+                contour_proposals = int(
+                    getattr(
+                        self.detector,
+                        "last_contour_proposals",
+                        0,
+                    ))
+                hough_proposals = int(
+                    getattr(
+                        self.detector,
+                        "last_hough_proposals",
+                        0,
+                    ))
                 diagnostic = str(
                     getattr(self.detector, "last_diagnostic", ""))
                 detection = _scale_detection(
                     detection, detector_frame.shape, frame.shape)
+                detector_height, detector_width = detector_frame.shape[:2]
+                frame_height, frame_width = frame.shape[:2]
+                radius_scale = min(
+                    float(frame_width) / max(detector_width, 1),
+                    float(frame_height) / max(detector_height, 1),
+                )
+                candidate_radii = tuple(sorted(
+                    (
+                        round(float(candidate.radius) * radius_scale, 1)
+                        for candidate in candidates
+                    ),
+                    reverse=True,
+                )[:4])
                 completed_at = self._clock()
                 result = AsyncDetectionResult(
                     sequence=sequence,
+                    source_sequence=source_sequence,
                     detection=detection,
                     frame_shape=tuple(frame.shape),
                     detector_shape=tuple(detector_frame.shape),
@@ -345,7 +387,10 @@ class LatestFrameBallDetector:
                     dropped_frames=dropped_frames,
                     generation=generation,
                     hough_used=hough_used,
+                    contour_proposals=contour_proposals,
+                    hough_proposals=hough_proposals,
                     candidate_count=candidate_count,
+                    candidate_radii=candidate_radii,
                     diagnostic=diagnostic,
                 )
             except Exception as err:

@@ -53,8 +53,10 @@ independentes: tanto a captura quanto o detector publicam apenas o frame mais
 recente, portanto uma etapa lenta nunca forma uma fila atrasada. A visão roda
 em `320x240` e suas coordenadas são remapeadas para o preview `640x480`. A
 janela mostra FPS da câmera, FPS da visão, tempo de processamento, `C` para o
-caminho rápido de contornos ou `H` para fallback Hough, número de candidatos,
-motivo principal de rejeição e frames descartados.
+caminho rápido de contornos ou `H` para fallback Hough, número de candidatos
+aceitos/propostas Hough brutas, motivo principal de rejeição, até quatro raios
+aceitos e frames descartados. Por exemplo, `H1/5:ok r42` significa que cinco
+círculos foram propostos, um passou pelos filtros e seu raio no preview é 42 px.
 
 Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 `640x480`. O detector aplica:
@@ -70,9 +72,39 @@ Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 9. aparência escura para esfera preta;
 10. faixa dinâmica e reflexo para esfera prateada; baixa saturação aumenta a
     confiança, mas iluminação ciano/verde possui uma rota metálica mais estrita;
-11. associação espacial, suavização e confirmação em vários frames.
+11. classificação de todas as propostas Hough antes da deduplicação, para um
+    halo inválido não apagar o perímetro verdadeiro;
+12. preferência pelo envelope externo somente quando um círculo menor está
+    realmente contido nele e as duas confianças são compatíveis;
+13. associação espacial mais rígida durante os três hits de aquisição,
+    suavização e confirmação em vários frames.
 
 Uma detecção incerta não movimenta o robô.
+
+### Dataset da câmera montada
+
+No modo `--debug` sem `--drive`, pressione `s` para salvar o frame bruto atual.
+O programa não salva o texto, as linhas ou os círculos do preview. A codificação
+PNG e a escrita acontecem em um worker com uma única posição pendente, portanto
+não formam uma fila capaz de atrasar o controle. Os pares ficam em:
+
+```text
+shadow/captures/rescue_dataset/session_.../
+├── frame_....png
+└── frame_....json
+```
+
+O JSON registra estado, diagnóstico, propostas, raios e a sequência temporal.
+Como o detector e a câmera são assíncronos, `same_frame` informa explicitamente
+se esses dados pertencem exatamente ao PNG ou se são apenas contexto do frame
+anterior. A tecla é recusada com `--drive`; faça a calibração com os motores
+desativados e o LED frontal apagado.
+
+Para calibrar a variação espacial da iluminação, colete a esfera prateada em
+esquerda/centro/direita, três distâncias e mais de uma iluminação. Inclua também
+piso/parede sem esfera e reflexos que não podem ser confundidos com ela. Estes
+arquivos formam um dataset de calibração do detector OpenCV; não há uma rede
+neural sendo treinada nesta etapa.
 
 ## Parada e segurança
 
@@ -124,8 +156,8 @@ Outras travas:
    python3 shadow/rescue_main.py --camera-index 0 --debug
    ```
 
-3. Gravar e testar cenas reais: piso vazio, sombra, parede, reflexo, esfera
-   preta e prateada em 15, 20, 30, 50 e 80 cm.
+3. Pressionar `s` e testar cenas reais: piso vazio, sombra, parede, reflexo,
+   esfera preta e prateada em 15, 20, 30, 50 e 80 cm.
 
 4. Ajustar somente `shadow/rescue_config.py`, principalmente ROI, raios,
    confiança e parada.
@@ -143,7 +175,8 @@ Outras travas:
 
 ## Limite desta implementação
 
-Sem imagens reais da câmera montada, os limiares são valores iniciais seguros,
-não calibração de competição. O objetivo desta versão é oferecer a arquitetura,
-os filtros, as travas e um caminho reproduzível para calibrar. Precisão real,
-especialmente na esfera prateada, deve ser medida com capturas do próprio robô.
+As capturas de tela já permitiram corrigir a dominante ciano e a competição
+entre o perímetro da esfera, seus reflexos internos e halos. Elas, porém,
+contêm a anotação do programa e não permitem reproduzir todos os estágios do
+detector. A calibração de competição deve usar os PNGs brutos salvos com `s`,
+especialmente para a esfera prateada no centro e nos cantos da imagem.

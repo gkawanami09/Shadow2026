@@ -124,15 +124,23 @@ class LatestFrameDetectorTests(unittest.TestCase):
             ImmediateDetector(), max_width=640, max_height=480)
         try:
             frame = np.zeros((720, 960, 3), dtype=np.uint8)
-            sequence = worker.submit(frame, captured_at=10.0)
+            sequence = worker.submit(
+                frame,
+                captured_at=10.0,
+                source_sequence=77,
+            )
             result = wait_result(worker)
             self.assertEqual(result.sequence, sequence)
+            self.assertEqual(result.source_sequence, 77)
             self.assertEqual(result.detector_shape, (480, 640, 3))
             self.assertEqual(result.frame_shape, (720, 960, 3))
             self.assertEqual(result.detection.center_x, 480)
             self.assertEqual(result.detection.center_y, 360)
             self.assertFalse(result.hough_used)
+            self.assertEqual(result.contour_proposals, 0)
+            self.assertEqual(result.hough_proposals, 0)
             self.assertEqual(result.candidate_count, 0)
+            self.assertEqual(result.candidate_radii, ())
             self.assertEqual(result.diagnostic, "")
             self.assertIsNone(worker.poll(after_sequence=result.sequence))
         finally:
@@ -191,6 +199,7 @@ class LatestFrameDetectorTests(unittest.TestCase):
             self.assertAlmostEqual(result.detection.center_y, 300, delta=12)
             self.assertFalse(result.hough_used)
             self.assertGreaterEqual(result.candidate_count, 1)
+            self.assertTrue(result.candidate_radii)
         finally:
             worker.close()
 

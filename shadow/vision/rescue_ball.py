@@ -202,8 +202,13 @@ class BallDetector:
             hough_proposals = self._hough_proposals(
                 gray_blur, roi_top, roi_bottom, self._pixel_scale)
             self.last_hough_proposals = len(hough_proposals)
+            # Nao colapsar circulos Hough antes da aparencia. Um halo grande
+            # invalido poderia apagar o perimetro verdadeiro (ou vice-versa)
+            # sem que ambos tivessem a chance de ser classificados. Em
+            # 320x240 o Hough produz poucas propostas e todas podem ser
+            # avaliadas dentro do orcamento.
             hough_candidates = self._evaluate_proposals(
-                self._deduplicate(hough_proposals),
+                hough_proposals,
                 frame,
                 hsv,
                 edge_dilated,
@@ -524,17 +529,71 @@ class BallDetector:
                 distance = math.hypot(
                     proposal.center_x - kept.center_x,
                     proposal.center_y - kept.center_y)
-                if distance <= 0.55 * max(proposal.radius, kept.radius):
+                max_radius = max(proposal.radius, kept.radius)
+                radius_ratio = (
+                    min(proposal.radius, kept.radius)
+                    / max(max_radius, 1.0)
+                )
+                if (
+                    distance
+                    <= cfg.BALL_DUPLICATE_CENTER_FACTOR * max_radius
+                    and radius_ratio
+                    >= cfg.BALL_DUPLICATE_RADIUS_RATIO_MIN
+                ):
                     duplicate = True
                     break
             if not duplicate:
                 unique.append(proposal)
         return unique
 
+    @staticmethod
+    def _prefer_outer_candidates(candidates):
+        """Remove reflexos contidos quando ha envelope externo confiavel.
+
+        A regra e local: candidatos separados continuam competindo pelo score
+        normal, e um halo externo de confianca muito inferior nunca elimina um
+        circulo interno forte.
+        """
+        preferred = []
+        for inner in candidates:
+            internal_reflection = False
+            for outer in candidates:
+                if outer is inner or outer.kind != inner.kind:
+                    continue
+                radius_ratio = outer.radius / max(inner.radius, 1.0)
+                if not (
+                    cfg.BALL_OUTER_MIN_RADIUS_RATIO
+                    <= radius_ratio
+                    <= cfg.BALL_OUTER_MAX_RADIUS_RATIO
+                ):
+                    continue
+                distance = math.hypot(
+                    outer.center_x - inner.center_x,
+                    outer.center_y - inner.center_y)
+                if (
+                    distance
+                    > cfg.BALL_OUTER_CENTER_FACTOR * outer.radius
+                    or distance + inner.radius
+                    > cfg.BALL_OUTER_CONTAINMENT_SLACK * outer.radius
+                ):
+                    continue
+                if (
+                    outer.confidence
+                    < inner.confidence
+                    - cfg.BALL_OUTER_CONFIDENCE_TOLERANCE
+                ):
+                    continue
+                internal_reflection = True
+                break
+            if not internal_reflection:
+                preferred.append(inner)
+        return preferred or list(candidates)
+
     def _select_candidate(self, candidates):
         if not candidates:
             return None
         if self._tracked is None:
+            candidates = self._prefer_outer_candidates(candidates)
             return max(
                 candidates,
                 key=lambda item: (
@@ -547,9 +606,19 @@ class BallDetector:
             if compatible:
                 matches.append((candidate, distance / gate))
         if matches:
+            preferred_ids = {
+                id(candidate)
+                for candidate in self._prefer_outer_candidates(
+                    [item[0] for item in matches])
+            }
+            matches = [
+                item for item in matches
+                if id(item[0]) in preferred_ids
+            ]
             return max(
                 matches,
                 key=lambda item: item[0].confidence - 0.25 * item[1])[0]
+        candidates = self._prefer_outer_candidates(candidates)
         return max(
             candidates,
             key=lambda item: (
@@ -562,15 +631,24 @@ class BallDetector:
         distance = math.hypot(
             candidate.center_x - self._tracked.center_x,
             candidate.center_y - self._tracked.center_y)
+        acquiring = self._hits < cfg.BALL_ACQUIRE_HITS
+        if acquiring:
+            association_min = cfg.BALL_ACQUIRE_ASSOCIATION_MIN_PX
+            radius_factor = cfg.BALL_ACQUIRE_ASSOCIATION_RADIUS_FACTOR
+            radius_ratio_min = cfg.BALL_ACQUIRE_RADIUS_RATIO_MIN
+            radius_ratio_max = cfg.BALL_ACQUIRE_RADIUS_RATIO_MAX
+        else:
+            association_min = cfg.BALL_ASSOCIATION_MIN_PX
+            radius_factor = cfg.BALL_ASSOCIATION_RADIUS_FACTOR
+            radius_ratio_min = cfg.BALL_RADIUS_RATIO_MIN
+            radius_ratio_max = cfg.BALL_RADIUS_RATIO_MAX
         gate = max(
-            cfg.BALL_ASSOCIATION_MIN_PX * self._pixel_scale,
-            cfg.BALL_ASSOCIATION_RADIUS_FACTOR
-            * max(candidate.radius, self._tracked.radius))
+            association_min * self._pixel_scale,
+            radius_factor * max(candidate.radius, self._tracked.radius))
         radius_ratio = candidate.radius / max(self._tracked.radius, 1.0)
         compatible = (
             distance <= gate
-            and cfg.BALL_RADIUS_RATIO_MIN <= radius_ratio
-            <= cfg.BALL_RADIUS_RATIO_MAX)
+            and radius_ratio_min <= radius_ratio <= radius_ratio_max)
         return compatible, distance, gate
 
     def _update_track(self, selected, timestamp):

@@ -35,6 +35,7 @@ from vision.rescue_async import (  # noqa: E402
     LatestFrameSource,
 )
 from vision.rescue_ball import (BallDetector, annotate_rescue_frame)  # noqa: E402
+from vision.rescue_dataset import RescueDatasetWriter  # noqa: E402
 
 
 WINDOW = "Shadow2026 - aproximacao da bolinha"
@@ -93,6 +94,76 @@ def _best_effort(label, action):
         return None
 
 
+def _dataset_metadata(
+    args,
+    command,
+    frame_sequence,
+    frame_captured_at,
+    result,
+    distance_mm,
+    now,
+):
+    same_frame = bool(
+        result is not None
+        and result.source_sequence == frame_sequence
+    )
+    detection = result.detection if result is not None else None
+    detection_data = None
+    if detection is not None:
+        detection_data = {
+            "kind": detection.kind,
+            "center_x": float(detection.center_x),
+            "center_y": float(detection.center_y),
+            "radius": float(detection.radius),
+            "confidence": float(detection.confidence),
+            "confirmed": bool(detection.confirmed),
+            "hits": int(detection.hits),
+        }
+
+    detector_data = None
+    if result is not None:
+        detector_data = {
+            # Candidatos/deteccao so descrevem este PNG quando esta flag e
+            # true. Caso contrario servem apenas como contexto do loop.
+            "same_frame": same_frame,
+            "source_capture_sequence": result.source_sequence,
+            "result_sequence": int(result.sequence),
+            "age_s": float(max(now - result.captured_at, 0.0)),
+            "processing_ms": float(result.processing_s * 1000.0),
+            "hough_used": bool(result.hough_used),
+            "contour_proposals": int(result.contour_proposals),
+            "hough_proposals": int(result.hough_proposals),
+            "candidate_count": int(result.candidate_count),
+            "candidate_radii": list(result.candidate_radii),
+            "diagnostic": result.diagnostic,
+            "detection": detection_data,
+        }
+
+    return {
+        "purpose": "rescue_ball_calibration",
+        "raw_unannotated": True,
+        "frame": {
+            "capture_sequence": int(frame_sequence),
+            "captured_monotonic_s": float(frame_captured_at),
+        },
+        "run": {
+            "camera_index": int(args.camera_index),
+            "target": args.target,
+            "enhance": not args.no_enhance,
+            "motors_enabled": bool(args.drive),
+        },
+        "control": {
+            "state": command.state,
+            "detail": command.detail,
+            "angle": int(command.angle),
+            "speed": float(command.speed),
+            "terminal": bool(command.terminal),
+            "ultrasonic_distance_mm": distance_mm,
+        },
+        "latest_detector_result": detector_data,
+    }
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
@@ -112,7 +183,9 @@ def parse_args():
             "(o LED ainda e apagado no uso da camera real)"))
     parser.add_argument(
         "--debug", action="store_true",
-        help="mostra a camera anotada; q ou Esc encerra")
+        help=(
+            "mostra a camera anotada; s salva PNG bruto para calibracao; "
+            "q ou Esc encerra"))
     parser.add_argument(
         "--video", type=Path,
         help="processa um video gravado em vez da camera; sempre sem motores")
@@ -141,6 +214,7 @@ def main():
     motor_lock = None
     capture_worker = None
     detector_worker = None
+    dataset_worker = None
     controller = None
     hardware_session = args.video is None
 
@@ -210,6 +284,7 @@ def main():
         last_frame_sequence = 0
         last_result_sequence = 0
         latest_frame = None
+        latest_frame_captured_at = None
         latest_result = None
         latest_detection = None
         last_metrics_result = None
@@ -221,7 +296,8 @@ def main():
         else:
             print(
                 "[resgate] modo de visao: motores desativados. "
-                "Use --drive somente depois de validar o --debug.")
+                "No --debug, pressione s para salvar um PNG bruto; "
+                "use --drive somente depois de validar a visao.")
 
         while True:
             frame_packet = capture_worker.poll(last_frame_sequence)
@@ -229,6 +305,7 @@ def main():
             if new_frame:
                 last_frame_sequence = frame_packet.sequence
                 latest_frame = frame_packet.frame
+                latest_frame_captured_at = frame_packet.captured_at
                 capture_samples.append((
                     frame_packet.sequence,
                     frame_packet.captured_at,
@@ -243,6 +320,7 @@ def main():
                 detector_worker.submit(
                     latest_frame,
                     captured_at=frame_packet.captured_at,
+                    source_sequence=frame_packet.sequence,
                 )
 
             if (
@@ -425,14 +503,25 @@ def main():
             candidate_count = (
                 last_metrics_result.candidate_count
                 if last_metrics_result is not None else 0)
+            hough_proposals = (
+                last_metrics_result.hough_proposals
+                if last_metrics_result is not None else 0)
+            candidate_radii = (
+                last_metrics_result.candidate_radii
+                if last_metrics_result is not None else ())
             diagnostic = (
                 last_metrics_result.diagnostic
                 if last_metrics_result is not None else "inicio")
+            radii_text = (
+                " r" + "/".join(
+                    f"{radius:.0f}" for radius in candidate_radii)
+                if candidate_radii else "")
             performance_text = (
                 f"cam {_sequence_rate(capture_samples):.1f} | "
                 f"vis {detector_fps:.1f} | "
                 f"{processing_ms:.0f}ms | "
-                f"{vision_mode}{candidate_count}:{diagnostic} | "
+                f"{vision_mode}{candidate_count}/{hough_proposals}:"
+                f"{diagnostic}{radii_text} | "
                 f"d{dropped}")
 
             if (
@@ -455,6 +544,46 @@ def main():
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     break
+                if key == ord("s"):
+                    if args.drive:
+                        print(
+                            "[dataset] captura recusada com --drive; "
+                            "colecione imagens com os motores desativados")
+                    elif (
+                        latest_frame is None
+                        or latest_frame_captured_at is None
+                    ):
+                        print("[dataset] nenhum frame disponivel para salvar")
+                    else:
+                        if dataset_worker is None:
+                            dataset_worker = RescueDatasetWriter()
+                            print(
+                                "[dataset] sessao criada em "
+                                f"{dataset_worker.session_dir}")
+                        submitted = dataset_worker.submit(
+                            latest_frame,
+                            _dataset_metadata(
+                                args,
+                                command,
+                                last_frame_sequence,
+                                latest_frame_captured_at,
+                                last_metrics_result,
+                                distance_mm,
+                                time.monotonic(),
+                            ),
+                        )
+                        if submitted.accepted:
+                            print(
+                                "[dataset] frame bruto aceito: "
+                                f"{submitted.capture_id}")
+                        elif submitted.status == "mailbox_full":
+                            print(
+                                "[dataset] gravacao ocupada; aguarde antes "
+                                "de pressionar s novamente")
+                        else:
+                            print(
+                                "[dataset] captura recusada: "
+                                f"{submitted.status}")
 
             if command.terminal:
                 if args.drive:
@@ -475,6 +604,21 @@ def main():
         if arduino is not None:
             from control.steer import steer
             _best_effort("parar os motores", steer)
+        if dataset_worker is not None:
+            dataset_closed = _best_effort(
+                "encerrar a gravacao do dataset",
+                lambda: dataset_worker.close(
+                    timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S),
+            )
+            if dataset_closed is False:
+                print(
+                    "[dataset] AVISO: gravacao nao encerrou no prazo; "
+                    "motores ja estao em PARAR")
+            if dataset_worker.failed_count:
+                print(
+                    "[dataset] AVISO: "
+                    f"{dataset_worker.failed_count} captura(s) falharam; "
+                    f"ultimo erro: {dataset_worker.last_error}")
         if detector_worker is not None:
             detector_closed = _best_effort(
                 "encerrar o detector",
