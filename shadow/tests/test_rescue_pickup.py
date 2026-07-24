@@ -13,9 +13,9 @@ from rescue_main import _apply_pickup_actions  # noqa: E402
 
 class BallPickupSequencerTests(unittest.TestCase):
     def test_collection_motion_durations_match_requested_sequence(self):
-        self.assertEqual(cfg.BALL_PICKUP_REVERSE_S, 1.5)
+        self.assertFalse(hasattr(cfg, "BALL_PICKUP_REVERSE_S"))
         self.assertEqual(cfg.BALL_PICKUP_FORWARD_LEAD_S, 0.12)
-        self.assertEqual(cfg.BALL_PICKUP_FORWARD_S, 1.5)
+        self.assertEqual(cfg.BALL_PICKUP_FORWARD_S, 2.0)
         self.assertEqual(
             cfg.BALL_PICKUP_FORWARD_SPEED,
             cfg.BALL_APPROACH_SPEED_NEAR,
@@ -26,21 +26,10 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertTrue(pickup.start())
         self.assertFalse(pickup.start())
 
-        reverse = pickup.update(now=10.0)
-        self.assertEqual(reverse.motor_action, "reverse")
-        self.assertEqual(reverse.angle, 200)
-        self.assertEqual(reverse.speed, cfg.BALL_PICKUP_REVERSE_SPEED)
-        self.assertIsNone(reverse.futaba_action)
-        pickup.mark_reverse_started(now=10.0)
-
-        still_reversing = pickup.update(
-            now=10.0 + cfg.BALL_PICKUP_REVERSE_S - 0.001)
-        self.assertEqual(still_reversing.state, pickup.BACKUP)
-        self.assertEqual(still_reversing.motor_action, "")
-
-        futaba_started_at = 10.0 + cfg.BALL_PICKUP_REVERSE_S
+        futaba_started_at = 10.0
         futaba = pickup.update(now=futaba_started_at)
         self.assertEqual(futaba.motor_action, "hold")
+        self.assertNotEqual(futaba.angle, 200)
         self.assertEqual(
             futaba.futaba_action,
             (cfg.BALL_PICKUP_FUTABA_POWER, cfg.BALL_PICKUP_FUTABA_MS),
@@ -119,21 +108,19 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertIsNone(latched.futaba_action)
         self.assertIsNone(latched.gripper_action)
 
-    def test_delayed_first_tick_cannot_skip_reverse(self):
+    def test_delayed_first_tick_starts_futaba_once_without_reverse(self):
         pickup = BallPickupSequencer()
         pickup.start()
 
         first = pickup.update(now=1000.0)
-        self.assertEqual(first.motor_action, "reverse")
-        self.assertEqual(pickup.state, pickup.BACKUP_PENDING)
+        self.assertEqual(first.motor_action, "hold")
+        self.assertNotEqual(first.angle, 200)
+        self.assertIsNotNone(first.futaba_action)
+        self.assertEqual(pickup.state, pickup.FUTABA_PENDING)
 
-        delivered_at = 1005.0
-        pickup.mark_reverse_started(now=delivered_at)
-
-        before_deadline = pickup.update(
-            now=delivered_at + cfg.BALL_PICKUP_REVERSE_S - 0.001)
-        self.assertEqual(before_deadline.state, pickup.BACKUP)
-        self.assertIsNone(before_deadline.futaba_action)
+        pending = pickup.update(now=1005.0)
+        self.assertIsNone(pending.futaba_action)
+        self.assertEqual(pending.state, pickup.FUTABA_PENDING)
 
     def test_failure_is_terminal_and_never_opens_grippers(self):
         pickup = BallPickupSequencer()
@@ -179,12 +166,9 @@ class PickupActionApplicationTests(unittest.TestCase):
     def advance_to_forward_step(pickup):
         pickup.start()
         pickup.update(now=0.0)
-        pickup.mark_reverse_started(now=0.0)
-        pickup.update(now=cfg.BALL_PICKUP_REVERSE_S)
-        pickup.mark_futaba_started(now=cfg.BALL_PICKUP_REVERSE_S)
+        pickup.mark_futaba_started(now=0.0)
         forward_time = (
-            cfg.BALL_PICKUP_REVERSE_S
-            + cfg.BALL_PICKUP_FUTABA_MS / 1000.0
+            cfg.BALL_PICKUP_FUTABA_MS / 1000.0
             + cfg.BALL_PICKUP_FUTABA_GUARD_S
         )
         return pickup.update(now=forward_time), forward_time
@@ -200,9 +184,7 @@ class PickupActionApplicationTests(unittest.TestCase):
     def test_hold_is_sent_before_futaba_without_parar(self):
         pickup = BallPickupSequencer()
         pickup.start()
-        pickup.update(now=0.0)
-        pickup.mark_reverse_started(now=0.0)
-        step = pickup.update(now=cfg.BALL_PICKUP_REVERSE_S)
+        step = pickup.update(now=0.0)
         arduino = self.FakeArduino()
 
         error = _apply_pickup_actions(
@@ -261,9 +243,7 @@ class PickupActionApplicationTests(unittest.TestCase):
     def test_failed_futaba_write_is_reported(self):
         pickup = BallPickupSequencer()
         pickup.start()
-        pickup.update(now=0.0)
-        pickup.mark_reverse_started(now=0.0)
-        step = pickup.update(now=cfg.BALL_PICKUP_REVERSE_S)
+        step = pickup.update(now=0.0)
         arduino = self.FakeArduino()
         arduino.futaba = lambda *_args: False
 
@@ -279,8 +259,6 @@ class PickupActionApplicationTests(unittest.TestCase):
         pickup = BallPickupSequencer()
         pickup.start()
         pickup.update(now=0.0)
-        pickup.mark_reverse_started(now=0.0)
-        pickup.update(now=cfg.BALL_PICKUP_REVERSE_S)
 
         # Simula uma reconexao lenta: o comando so retornou varios segundos
         # depois de o estado ter produzido a acao.
@@ -317,7 +295,7 @@ class PickupActionApplicationTests(unittest.TestCase):
         self.assertEqual(grippers.motor_action, "")
         self.assertIsNotNone(grippers.gripper_action)
 
-        # Mesmo se o lote das garras levar algum tempo, os 1,5 s totais
+        # Mesmo se o lote das garras levar algum tempo, os 2 s totais
         # continuam ancorados na entrega anterior do comando de avanco.
         delivered_at = gripper_time + 0.20
         pickup.mark_grippers_started(now=delivered_at)
@@ -389,19 +367,13 @@ class PickupActionApplicationTests(unittest.TestCase):
         # NEAR para primeiro; a coleta comeca somente no tick seguinte.
         steer()
         pickup.start()
-        reverse = pickup.update(now=0.0)
-        self.assertIsNone(
-            _apply_pickup_actions(reverse, arduino, steer))
-        pickup.mark_reverse_started(now=0.0)
-
-        futaba = pickup.update(now=cfg.BALL_PICKUP_REVERSE_S)
+        futaba = pickup.update(now=0.0)
         self.assertIsNone(
             _apply_pickup_actions(futaba, arduino, steer))
-        pickup.mark_futaba_started(now=cfg.BALL_PICKUP_REVERSE_S)
+        pickup.mark_futaba_started(now=0.0)
 
         forward_time = (
-            cfg.BALL_PICKUP_REVERSE_S
-            + cfg.BALL_PICKUP_FUTABA_MS / 1000.0
+            cfg.BALL_PICKUP_FUTABA_MS / 1000.0
             + cfg.BALL_PICKUP_FUTABA_GUARD_S
         )
         forward = pickup.update(now=forward_time)
@@ -424,11 +396,6 @@ class PickupActionApplicationTests(unittest.TestCase):
             arduino.calls,
             [
                 ("steer", 190, 0.8),
-                (
-                    "steer",
-                    200,
-                    cfg.BALL_PICKUP_REVERSE_SPEED,
-                ),
                 ("lado", 0, 0),
                 (
                     "futaba",
@@ -454,12 +421,9 @@ class PickupActionApplicationTests(unittest.TestCase):
         pickup = BallPickupSequencer()
         pickup.start()
         pickup.update(now=0.0)
-        pickup.mark_reverse_started(now=0.0)
-        pickup.update(now=cfg.BALL_PICKUP_REVERSE_S)
-        pickup.mark_futaba_started(now=cfg.BALL_PICKUP_REVERSE_S)
+        pickup.mark_futaba_started(now=0.0)
         gripper_time = (
-            cfg.BALL_PICKUP_REVERSE_S
-            + cfg.BALL_PICKUP_FUTABA_MS / 1000.0
+            cfg.BALL_PICKUP_FUTABA_MS / 1000.0
             + cfg.BALL_PICKUP_FUTABA_GUARD_S
         )
         step = pickup.update(now=gripper_time)

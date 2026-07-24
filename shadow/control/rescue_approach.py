@@ -123,15 +123,30 @@ class BallApproachController:
             now,
         )
         near_source = None
+        near_label = None
         near_timestamp = None
         near_required = cfg.BALL_STOP_CONFIRM_FRAMES
         if locked_circle_near:
-            near_source = "circulo travado"
+            near_source = "contato inferior"
+            near_label = "circulo no ponto inferior"
             near_timestamp = float(detection.timestamp)
             near_required = cfg.BALL_LOCKED_CIRCLE_CONFIRM_FRAMES
-        elif crescent_near:
-            near_source = "meia-lua"
+        elif (
+            crescent_near
+            and self._near_source == "contato inferior"
+            and self.visual_near_count > 0
+            and self._near_hold_until is not None
+            and now <= self._near_hold_until
+            and self._near_misses
+            <= cfg.BALL_NEAR_CONFIRM_MAX_MISSES
+        ):
+            # A meia-lua nao inicia coleta sozinha. Ela apenas confirma o
+            # contato que o circulo travado acabou de fazer com a borda
+            # inferior, caso o perimetro seja cortado no frame seguinte.
+            near_source = "contato inferior"
+            near_label = "meia-lua apos contato"
             near_timestamp = float(crescent_evidence.timestamp)
+            near_required = cfg.BALL_LOCKED_CIRCLE_CONFIRM_FRAMES
 
         # A janela curta existe para uma unica falha visual, nao para unir
         # confirmacoes de tracks diferentes depois de uma reacquisicao.
@@ -172,7 +187,7 @@ class BallApproachController:
                     now + cfg.BALL_NEAR_CONFIRM_GRACE_S)
             if self.visual_near_count >= near_required:
                 reason = (
-                    f"{near_source} confirmado; "
+                    "contato inferior confirmado; "
                     "esfera na posicao de coleta")
                 self.state = self.NEAR
                 self._terminal_detail = reason
@@ -189,7 +204,7 @@ class BallApproachController:
             return MotionCommand(
                 self.state,
                 detail=(
-                    f"{near_source} proximo; confirmando "
+                    f"{near_label} proximo; confirmando "
                     f"{self.visual_near_count}/"
                     f"{near_required}"),
                 pickup_in_range=True,
@@ -211,7 +226,7 @@ class BallApproachController:
             self.progress.clear()
             required = (
                 cfg.BALL_LOCKED_CIRCLE_CONFIRM_FRAMES
-                if self._near_source == "circulo travado"
+                if self._near_source == "contato inferior"
                 else cfg.BALL_STOP_CONFIRM_FRAMES
             )
             return MotionCommand(

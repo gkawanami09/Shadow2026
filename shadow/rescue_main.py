@@ -130,10 +130,7 @@ def _apply_pickup_actions(
     try:
         if link_changed():
             return abort(link_error())
-        if step.motor_action == "reverse":
-            if steer_action(step.angle, step.speed) is False:
-                return "comando de re nao foi enviado pela serial"
-        elif step.motor_action == "hold":
+        if step.motor_action == "hold":
             # PARAR tambem cortaria o Futaba no firmware. LADO 0 0 zera as
             # quatro rodas e vira um keepalive que nao toca no canal CH3.
             if arduino.lado(0, 0) is False:
@@ -587,8 +584,6 @@ def main():
                             "sequencia cancelada")
                     if pickup_error is None:
                         action_completed_at = time.monotonic()
-                        if pickup_step.motor_action == "reverse":
-                            pickup.mark_reverse_started(action_completed_at)
                         if pickup_step.futaba_action is not None:
                             pickup.mark_futaba_started(action_completed_at)
                         if pickup_step.motor_action == "forward":
@@ -620,8 +615,8 @@ def main():
                     if arduino is not None else None
                 )
                 print(
-                    "[coleta] bolinha proxima: iniciando re, Futaba, "
-                    "avanco final e depois garras")
+                    "[coleta] bolinha no ponto inferior: baixando Futaba, "
+                    "avancando por 2 s e fechando as garras")
 
             log_now = time.monotonic()
             should_log = (

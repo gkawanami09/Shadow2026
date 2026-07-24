@@ -1198,11 +1198,14 @@ class BallDetector:
     @staticmethod
     def _inside_roi(proposal, width, height, roi_top, roi_bottom):
         margin = 2
+        bottom_overflow = (
+            height * cfg.BALL_ROI_BOTTOM_OVERFLOW_RATIO)
         return (
             proposal.center_x - proposal.radius >= margin
             and proposal.center_x + proposal.radius < width - margin
             and proposal.center_y - proposal.radius >= roi_top
-            and proposal.center_y + proposal.radius < min(roi_bottom, height) - margin
+            and proposal.center_y + proposal.radius
+            < min(roi_bottom, height) - margin + bottom_overflow
         )
 
     @staticmethod

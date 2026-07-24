@@ -59,7 +59,11 @@ def ball_pixel_scale(frame_width, frame_height):
 
 
 BALL_ROI_TOP = 0.12
-BALL_ROI_BOTTOM = 0.98
+# O circulo pode continuar valido ate a ultima linha. Uma tolerancia pequena
+# deixa o lock sobreviver quando a base acabou de ser cortada, sem mover para
+# cima o ponto fisico que dispara a coleta.
+BALL_ROI_BOTTOM = 1.00
+BALL_ROI_BOTTOM_OVERFLOW_RATIO = 0.03
 BALL_MIN_RADIUS_PX = 9
 BALL_MAX_RADIUS_PX = 135
 BALL_MIN_CIRCULARITY = 0.56
@@ -167,8 +171,8 @@ BALL_STOP_CONFIRM_FRAMES = 3
 # vitima cobre um ponto perto da base. Tamanho, centro, crescimento anterior
 # e dois timestamps frescos impedem um reflexo pequeno de acionar a coleta.
 BALL_LOCKED_CIRCLE_POINT_X_RATIO = 0.50
-BALL_LOCKED_CIRCLE_POINT_Y_RATIO = 0.90
-BALL_LOCKED_CIRCLE_POINT_SLACK_RATIO = 0.02
+BALL_LOCKED_CIRCLE_POINT_Y_RATIO = 0.98
+BALL_LOCKED_CIRCLE_POINT_SLACK_RATIO = 0.00
 BALL_LOCKED_CIRCLE_MIN_RADIUS_RATIO = 0.085
 BALL_LOCKED_CIRCLE_MAX_CENTER_ERROR = 0.16
 BALL_LOCKED_CIRCLE_CONFIRM_FRAMES = 2
@@ -259,12 +263,11 @@ BALL_CRESCENT_INNER_ASSOCIATION_X_RATIO = 0.22
 BALL_CRESCENT_INNER_BOTTOM_RATIO = 0.82
 BALL_CRESCENT_TOKEN_TTL_S = 0.80
 
-# Coleta depois que a aproximacao visual termina. Re e avanco usam a mesma
-# velocidade conservadora ja validada perto da esfera. O Futaba e continuo:
+# Coleta depois que a aproximacao visual termina. Nao existe etapa de re.
+# O avanco usa a velocidade conservadora ja validada perto da esfera. O Futaba
+# e continuo:
 # -20 e potencia de descida por 1500 ms, nao um angulo. A margem garante que
 # CH3 ja foi desligado pelo firmware antes do avanco com as duas garras.
-BALL_PICKUP_REVERSE_S = 1.50
-BALL_PICKUP_REVERSE_SPEED = BALL_APPROACH_SPEED_NEAR
 BALL_PICKUP_FUTABA_POWER = -20
 BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
@@ -272,9 +275,9 @@ BALL_PICKUP_LEFT_DELTA = -50
 BALL_PICKUP_RIGHT_DELTA = 50
 # O motor recebe o avanco antes das garras. Esta curta vantagem deixa as rodas
 # vencerem a inercia; depois ambas as garras fecham no mesmo lote USB. Os
-# 1,50 s sao contados desde o comando das rodas, incluindo essa vantagem.
+# 2,00 s sao contados desde o comando das rodas, incluindo essa vantagem.
 BALL_PICKUP_FORWARD_LEAD_S = 0.12
-BALL_PICKUP_FORWARD_S = 1.50
+BALL_PICKUP_FORWARD_S = 2.00
 BALL_PICKUP_FORWARD_SPEED = BALL_APPROACH_SPEED_NEAR
 
 # Hough + filtros medidos no Pi podem ultrapassar 0.20 s. O timestamp agora e

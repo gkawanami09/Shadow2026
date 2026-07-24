@@ -767,6 +767,30 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertFalse(detector.last_hough_used)
         self.assertTrue(result.confirmed)
 
+    def test_roi_allows_only_small_clip_after_bottom_contact(self):
+        width, height = 320, 240
+        roi_top = int(height * cfg.BALL_ROI_TOP)
+        roi_bottom = int(height * cfg.BALL_ROI_BOTTOM)
+        just_clipped = _Proposal(
+            160, 219, 25, 0.80, 0.80, "hough")
+        too_far_out = _Proposal(
+            160, 221, 25, 0.80, 0.80, "hough")
+
+        self.assertTrue(BallDetector._inside_roi(
+            just_clipped,
+            width,
+            height,
+            roi_top,
+            roi_bottom,
+        ))
+        self.assertFalse(BallDetector._inside_roi(
+            too_far_out,
+            width,
+            height,
+            roi_top,
+            roi_bottom,
+        ))
+
     def test_deduplicate_keeps_nested_radii_but_merges_near_duplicates(self):
         detector = BallDetector("silver")
         proposals = [

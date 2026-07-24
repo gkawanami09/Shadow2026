@@ -94,6 +94,29 @@ def arm_crescent_history(
     return last_time
 
 
+def pickup_touch_center_y(shape, radius):
+    """Centro cujo circulo acabou de alcancar o ponto inferior."""
+    point_y = cfg.BALL_LOCKED_CIRCLE_POINT_Y_RATIO * shape[0]
+    return point_y - radius + 1.0
+
+
+def arm_bottom_contact(controller, shape, timestamp, kind="silver"):
+    """Produz a primeira confirmacao obrigatoria no ponto inferior."""
+    radius = 52.0 * cfg.ball_pixel_scale(shape[1], shape[0])
+    return controller.update(
+        detection(
+            x=shape[1] / 2.0,
+            y=pickup_touch_center_y(shape, radius),
+            radius=radius,
+            timestamp=timestamp,
+            kind=kind,
+            track_locked=True,
+        ),
+        shape,
+        now=timestamp,
+    )
+
+
 class BallApproachControllerTests(unittest.TestCase):
     shape = (480, 640, 3)
 
@@ -182,28 +205,38 @@ class BallApproachControllerTests(unittest.TestCase):
         self.assertEqual(far.angle, 0)
         self.assertLess(near.speed, far.speed)
 
-    def test_close_crescent_requires_multiple_frames_and_latches(self):
+    def test_circle_contact_then_crescent_confirms_and_latches(self):
         controller = BallApproachController(start_time=0.0)
         history_end = arm_crescent_history(controller, self.shape)
 
-        commands = []
-        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES):
-            now = history_end + 0.05 + index * 0.05
-            commands.append(controller.update(
-                None,
-                self.shape,
-                crescent_evidence=crescent_evidence(timestamp=now),
-                now=now,
-            ))
+        contact_time = history_end + 0.05
+        contact = controller.update(
+            detection(
+                x=self.shape[1] / 2,
+                y=pickup_touch_center_y(self.shape, 52),
+                radius=52,
+                timestamp=contact_time,
+                track_locked=True,
+            ),
+            self.shape,
+            now=contact_time,
+        )
+        confirmed_at = contact_time + 0.05
+        confirmed = controller.update(
+            None,
+            self.shape,
+            crescent_evidence=crescent_evidence(
+                timestamp=confirmed_at),
+            now=confirmed_at,
+        )
 
-        self.assertEqual(commands[0].state, controller.NEAR_CONFIRM)
-        self.assertEqual(commands[0].angle, 190)
-        self.assertEqual(commands[0].speed, 0.0)
-        self.assertEqual(commands[0].pickup_confirmations, 1)
-        self.assertEqual(commands[1].pickup_confirmations, 2)
-        self.assertEqual(commands[2].state, controller.NEAR)
-        self.assertTrue(commands[2].terminal)
-        self.assertIn("meia-lua", commands[2].detail)
+        self.assertEqual(contact.state, controller.NEAR_CONFIRM)
+        self.assertEqual(contact.angle, 190)
+        self.assertEqual(contact.speed, 0.0)
+        self.assertEqual(contact.pickup_confirmations, 1)
+        self.assertEqual(confirmed.state, controller.NEAR)
+        self.assertTrue(confirmed.terminal)
+        self.assertIn("contato inferior", confirmed.detail)
 
         latched = controller.update(None, self.shape, now=1.0)
         self.assertEqual(latched.state, controller.NEAR)
@@ -219,7 +252,7 @@ class BallApproachControllerTests(unittest.TestCase):
             commands.append(controller.update(
                 detection(
                     x=320,
-                    y=390,
+                    y=pickup_touch_center_y(self.shape, 52),
                     radius=52,
                     timestamp=now,
                     track_locked=True,
@@ -229,9 +262,34 @@ class BallApproachControllerTests(unittest.TestCase):
             ))
 
         self.assertEqual(commands[0].state, controller.NEAR_CONFIRM)
-        self.assertIn("circulo travado", commands[0].detail)
+        self.assertIn("ponto inferior", commands[0].detail)
         self.assertEqual(commands[-1].state, controller.NEAR)
         self.assertTrue(commands[-1].terminal)
+
+    def test_locked_circle_one_pixel_before_bottom_point_does_not_trigger(self):
+        controller = BallApproachController(start_time=0.0)
+        history_end = arm_crescent_history(controller, self.shape)
+        radius = 52.0
+        point_y = (
+            cfg.BALL_LOCKED_CIRCLE_POINT_Y_RATIO * self.shape[0])
+        command = None
+        for index in range(cfg.BALL_LOCKED_CIRCLE_CONFIRM_FRAMES):
+            now = history_end + 0.05 + index * 0.05
+            command = controller.update(
+                detection(
+                    x=self.shape[1] / 2,
+                    y=point_y - radius - 1.0,
+                    radius=radius,
+                    timestamp=now,
+                    track_locked=True,
+                ),
+                self.shape,
+                now=now,
+            )
+
+        self.assertNotEqual(command.state, controller.NEAR)
+        self.assertEqual(command.pickup_confirmations, 0)
+        self.assertFalse(command.terminal)
 
     def test_locked_circle_cannot_cold_start_pickup(self):
         controller = BallApproachController(start_time=0.0)
@@ -241,7 +299,7 @@ class BallApproachControllerTests(unittest.TestCase):
             command = controller.update(
                 detection(
                     x=320,
-                    y=390,
+                    y=pickup_touch_center_y(self.shape, 52),
                     radius=52,
                     timestamp=now,
                     track_locked=True,
@@ -289,7 +347,7 @@ class BallApproachControllerTests(unittest.TestCase):
         first = controller.update(
             detection(
                 x=320,
-                y=390,
+                y=pickup_touch_center_y(self.shape, 52),
                 radius=52,
                 timestamp=first_time,
                 track_locked=True,
@@ -306,7 +364,7 @@ class BallApproachControllerTests(unittest.TestCase):
         second = controller.update(
             detection(
                 x=320,
-                y=390,
+                y=pickup_touch_center_y(self.shape, 52),
                 radius=52,
                 timestamp=second_time,
                 track_locked=True,
@@ -327,7 +385,7 @@ class BallApproachControllerTests(unittest.TestCase):
         first = controller.update(
             detection(
                 x=320,
-                y=390,
+                y=pickup_touch_center_y(self.shape, 52),
                 radius=52,
                 timestamp=first_time,
                 track_locked=True,
@@ -349,7 +407,7 @@ class BallApproachControllerTests(unittest.TestCase):
         reacquired = controller.update(
             detection(
                 x=320,
-                y=390,
+                y=pickup_touch_center_y(self.shape, 52),
                 radius=52,
                 timestamp=reacquired_time,
                 track_locked=True,
@@ -372,7 +430,7 @@ class BallApproachControllerTests(unittest.TestCase):
         first = controller.update(
             detection(
                 x=320,
-                y=390,
+                y=pickup_touch_center_y(self.shape, 52),
                 radius=52,
                 timestamp=first_time,
                 track_locked=True,
@@ -385,7 +443,7 @@ class BallApproachControllerTests(unittest.TestCase):
         late = controller.update(
             detection(
                 x=320,
-                y=390,
+                y=pickup_touch_center_y(self.shape, 52),
                 radius=52,
                 timestamp=late_time,
                 track_locked=True,
@@ -405,7 +463,7 @@ class BallApproachControllerTests(unittest.TestCase):
         timestamp = history_end + 0.05
         circle = detection(
             x=320,
-            y=390,
+            y=pickup_touch_center_y(self.shape, 52),
             radius=52,
             timestamp=timestamp,
             track_locked=True,
@@ -420,7 +478,7 @@ class BallApproachControllerTests(unittest.TestCase):
         late = controller.update(
             detection(
                 x=320,
-                y=390,
+                y=pickup_touch_center_y(self.shape, 52),
                 radius=52,
                 timestamp=late_time,
                 track_locked=True,
@@ -470,6 +528,23 @@ class BallApproachControllerTests(unittest.TestCase):
         self.assertFalse(command.terminal)
         self.assertFalse(command.pickup_in_range)
 
+    def test_crescent_cannot_bypass_bottom_circle_contact(self):
+        controller = BallApproachController(start_time=0.0)
+        history_end = arm_crescent_history(controller, self.shape)
+        command = None
+        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES):
+            now = history_end + 0.05 + index * 0.05
+            command = controller.update(
+                None,
+                self.shape,
+                crescent_evidence=crescent_evidence(timestamp=now),
+                now=now,
+            )
+
+        self.assertNotEqual(command.state, controller.NEAR)
+        self.assertEqual(command.pickup_confirmations, 0)
+        self.assertFalse(command.terminal)
+
     def test_distant_target_plus_strong_crescent_is_rejected(self):
         controller = BallApproachController(start_time=0.0)
         controller.update(
@@ -511,50 +586,40 @@ class BallApproachControllerTests(unittest.TestCase):
     def test_brief_crescent_interruption_keeps_confirmation_stopped(self):
         controller = BallApproachController(start_time=0.0)
         history_end = arm_crescent_history(controller, self.shape)
-        first = controller.update(
-            None,
-            self.shape,
-            crescent_evidence=crescent_evidence(
-                timestamp=history_end + 0.05),
-            now=history_end + 0.05,
-        )
+        contact_time = history_end + 0.05
+        first = arm_bottom_contact(
+            controller, self.shape, contact_time)
         self.assertEqual(first.pickup_confirmations, 1)
 
         interrupted = controller.update(
             None,
             self.shape,
             crescent_evidence=crescent_evidence(
-                timestamp=history_end + 0.10,
+                timestamp=contact_time + 0.05,
                 accepted=False,
             ),
-            now=history_end + 0.10,
+            now=contact_time + 0.05,
         )
         self.assertEqual(interrupted.state, controller.NEAR_CONFIRM)
         self.assertEqual(interrupted.pickup_confirmations, 1)
 
-        commands = []
-        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES - 1):
-            now = history_end + 0.15 + index * 0.05
-            commands.append(controller.update(
-                None,
-                self.shape,
-                crescent_evidence=crescent_evidence(timestamp=now),
-                now=now,
-            ))
-        self.assertEqual(commands[0].pickup_confirmations, 2)
-        self.assertEqual(commands[-1].state, controller.NEAR)
+        confirmed_at = contact_time + 0.10
+        confirmed = controller.update(
+            None,
+            self.shape,
+            crescent_evidence=crescent_evidence(
+                timestamp=confirmed_at),
+            now=confirmed_at,
+        )
+        self.assertEqual(confirmed.pickup_confirmations, 3)
+        self.assertEqual(confirmed.state, controller.NEAR)
 
     def test_long_crescent_interruption_restarts_confirmation(self):
         controller = BallApproachController(start_time=0.0)
         history_end = arm_crescent_history(controller, self.shape)
         first_time = history_end + 0.05
-        first = controller.update(
-            None,
-            self.shape,
-            crescent_evidence=crescent_evidence(
-                timestamp=first_time),
-            now=first_time,
-        )
+        first = arm_bottom_contact(
+            controller, self.shape, first_time)
         self.assertEqual(first.pickup_confirmations, 1)
 
         interrupted_at = (
@@ -577,7 +642,8 @@ class BallApproachControllerTests(unittest.TestCase):
                 timestamp=interrupted_at + 0.05),
             now=interrupted_at + 0.05,
         )
-        self.assertEqual(restarted.pickup_confirmations, 1)
+        self.assertEqual(restarted.pickup_confirmations, 0)
+        self.assertFalse(restarted.terminal)
 
     def test_rescue_runtime_never_calls_ultrasonic_sensor(self):
         source = (SHADOW_ROOT / "rescue_main.py").read_text(encoding="utf-8")
@@ -601,15 +667,17 @@ class BallApproachControllerTests(unittest.TestCase):
         controller = BallApproachController(start_time=0.0)
         shape = (720, 960, 3)
         history_end = arm_crescent_history(controller, shape)
-        command = None
-        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES):
-            now = history_end + 0.05 + index * 0.05
-            command = controller.update(
-                None,
-                shape,
-                crescent_evidence=crescent_evidence(timestamp=now),
-                now=now,
-            )
+        contact_time = history_end + 0.05
+        contact = arm_bottom_contact(
+            controller, shape, contact_time)
+        now = contact_time + 0.05
+        command = controller.update(
+            None,
+            shape,
+            crescent_evidence=crescent_evidence(timestamp=now),
+            now=now,
+        )
+        self.assertEqual(contact.state, controller.NEAR_CONFIRM)
         self.assertEqual(command.state, controller.NEAR)
         self.assertTrue(command.terminal)
 
@@ -618,14 +686,20 @@ class BallApproachControllerTests(unittest.TestCase):
         history_end = arm_crescent_history(
             controller, self.shape, kind="black")
 
-        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES):
-            now = history_end + 0.05 + index * 0.05
-            command = controller.update(
-                None,
-                self.shape,
-                crescent_evidence=crescent_evidence(timestamp=now),
-                now=now,
-            )
+        contact_time = history_end + 0.05
+        arm_bottom_contact(
+            controller,
+            self.shape,
+            contact_time,
+            kind="black",
+        )
+        now = contact_time + 0.05
+        command = controller.update(
+            None,
+            self.shape,
+            crescent_evidence=crescent_evidence(timestamp=now),
+            now=now,
+        )
         self.assertEqual(command.state, controller.NEAR)
         self.assertTrue(command.terminal)
 
@@ -667,15 +741,11 @@ class BallApproachControllerTests(unittest.TestCase):
     def test_stale_frame_resets_visual_near_confirmation(self):
         controller = BallApproachController(start_time=0.0)
         history_end = arm_crescent_history(controller, self.shape)
-        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES - 1):
-            now = history_end + 0.05 + index * 0.05
-            command = controller.update(
-                None,
-                self.shape,
-                crescent_evidence=crescent_evidence(timestamp=now),
-                now=now,
-            )
-            self.assertFalse(command.terminal)
+        contact_time = history_end + 0.05
+        contact = arm_bottom_contact(
+            controller, self.shape, contact_time)
+        self.assertEqual(contact.pickup_confirmations, 1)
+        self.assertFalse(contact.terminal)
 
         stale_now = history_end + cfg.BALL_FRAME_STALE_S + 1.0
         stale = controller.update(
@@ -689,16 +759,12 @@ class BallApproachControllerTests(unittest.TestCase):
             self.shape,
             start_time=stale_now + 0.05,
         )
-        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES - 1):
-            now = history_end + 0.05 + index * 0.05
-            command = controller.update(
-                None,
-                self.shape,
-                crescent_evidence=crescent_evidence(timestamp=now),
-                now=now,
-            )
-            self.assertFalse(command.terminal)
-        now += 0.05
+        contact_time = history_end + 0.05
+        contact = arm_bottom_contact(
+            controller, self.shape, contact_time)
+        self.assertEqual(contact.pickup_confirmations, 1)
+        self.assertFalse(contact.terminal)
+        now = contact_time + 0.05
         command = controller.update(
             None,
             self.shape,
@@ -760,23 +826,27 @@ class BallApproachControllerTests(unittest.TestCase):
             (history_end, 50.0, 380.0),
         ))
 
-        commands = []
-        for index in range(cfg.BALL_STOP_CONFIRM_FRAMES):
-            now = history_end + 0.04 + index * 0.04
-            commands.append(controller.update(
-                None,
-                self.shape,
-                crescent_evidence=crescent_evidence(timestamp=now),
-                now=now,
-            ))
+        contact_time = history_end + 0.04
+        contact = arm_bottom_contact(
+            controller, self.shape, contact_time)
+        confirmed_at = contact_time + 0.04
+        confirmed = controller.update(
+            None,
+            self.shape,
+            crescent_evidence=crescent_evidence(
+                timestamp=confirmed_at),
+            now=confirmed_at,
+        )
 
-        self.assertEqual(commands[0].state, controller.NEAR_CONFIRM)
-        self.assertEqual(commands[-1].state, controller.NEAR)
+        self.assertEqual(contact.state, controller.NEAR_CONFIRM)
+        self.assertEqual(confirmed.state, controller.NEAR)
 
     def test_duplicate_crescent_timestamp_does_not_add_confirmation(self):
         controller = BallApproachController(start_time=0.0)
         history_end = arm_crescent_history(controller, self.shape)
         timestamp = history_end + 0.05
+        contact = arm_bottom_contact(
+            controller, self.shape, timestamp)
         first = controller.update(
             None,
             self.shape,
@@ -790,6 +860,7 @@ class BallApproachControllerTests(unittest.TestCase):
             now=timestamp + 0.01,
         )
 
+        self.assertEqual(contact.pickup_confirmations, 1)
         self.assertEqual(first.pickup_confirmations, 1)
         self.assertEqual(repeated.pickup_confirmations, 1)
         self.assertFalse(repeated.terminal)
@@ -830,7 +901,10 @@ class BallApproachControllerTests(unittest.TestCase):
     def test_close_offcenter_inner_reflection_does_not_veto_dome(self):
         controller = BallApproachController(start_time=0.0)
         history_end = arm_crescent_history(controller, self.shape)
-        now = history_end + 0.05
+        contact_time = history_end + 0.05
+        arm_bottom_contact(
+            controller, self.shape, contact_time)
+        now = contact_time + 0.05
         command = controller.update(
             detection(
                 x=424,
@@ -843,13 +917,16 @@ class BallApproachControllerTests(unittest.TestCase):
             now=now,
         )
 
-        self.assertEqual(command.state, controller.NEAR_CONFIRM)
-        self.assertEqual(command.pickup_confirmations, 1)
+        self.assertEqual(command.state, controller.NEAR)
+        self.assertTrue(command.terminal)
 
     def test_small_but_deep_inner_reflection_does_not_veto_dome(self):
         controller = BallApproachController(start_time=0.0)
         history_end = arm_crescent_history(controller, self.shape)
-        now = history_end + 0.05
+        contact_time = history_end + 0.05
+        arm_bottom_contact(
+            controller, self.shape, contact_time)
+        now = contact_time + 0.05
         command = controller.update(
             detection(
                 x=390,
@@ -862,8 +939,8 @@ class BallApproachControllerTests(unittest.TestCase):
             now=now,
         )
 
-        self.assertEqual(command.state, controller.NEAR_CONFIRM)
-        self.assertEqual(command.pickup_confirmations, 1)
+        self.assertEqual(command.state, controller.NEAR)
+        self.assertTrue(command.terminal)
 
     def test_commands_integrate_with_existing_steer_without_hardware(self):
         class FakeArduino:

@@ -32,13 +32,11 @@ class PickupStep:
 
 
 class BallPickupSequencer:
-    """Re -> Futaba -> avanco -> garras, com deadlines monotonic."""
+    """Futaba -> avanco -> garras, com deadlines monotonic."""
 
     IDLE = "PICKUP_IDLE"
-    BACKUP_START = "PICKUP_BACKUP_START"
-    BACKUP_PENDING = "PICKUP_BACKUP_PENDING"
-    BACKUP = "PICKUP_BACKUP"
     FUTABA_START = "PICKUP_FUTABA_START"
+    FUTABA_PENDING = "PICKUP_FUTABA_PENDING"
     FUTABA_WAIT = "PICKUP_FUTABA"
     FORWARD_START = "PICKUP_FORWARD_START"
     FORWARD_LEAD = "PICKUP_FORWARD_LEAD"
@@ -62,10 +60,10 @@ class BallPickupSequencer:
         return self.state in (self.COMPLETE, self.FAULT)
 
     def start(self):
-        """Arma a sequencia uma unica vez; a re comeca no proximo update."""
+        """Arma a sequencia; a descida do Futaba comeca no proximo update."""
         if self.state != self.IDLE:
             return False
-        self.state = self.BACKUP_START
+        self.state = self.FUTABA_START
         return True
 
     def update(self, now=None):
@@ -77,37 +75,10 @@ class BallPickupSequencer:
                 "coleta ainda nao iniciada",
             )
 
-        if self.state == self.BACKUP_START:
-            self.state = self.BACKUP_PENDING
+        if self.state == self.FUTABA_START:
+            self.state = self.FUTABA_PENDING
             return PickupStep(
-                self.BACKUP_PENDING,
-                "enviando comando de re",
-                angle=200,
-                speed=cfg.BALL_PICKUP_REVERSE_SPEED,
-                motor_action="reverse",
-            )
-
-        if self.state == self.BACKUP_PENDING:
-            return PickupStep(
-                self.BACKUP_PENDING,
-                "aguardando confirmacao do envio da re",
-                angle=200,
-                speed=cfg.BALL_PICKUP_REVERSE_SPEED,
-            )
-
-        if self.state == self.BACKUP:
-            if now < self._deadline:
-                return PickupStep(
-                    self.BACKUP,
-                    "afastando da bolinha",
-                    angle=200,
-                    speed=cfg.BALL_PICKUP_REVERSE_SPEED,
-                )
-
-            self.state = self.FUTABA_START
-            self._deadline = None
-            return PickupStep(
-                self.FUTABA_START,
+                self.FUTABA_PENDING,
                 "rodas zeradas; baixando o Futaba",
                 motor_action="hold",
                 futaba_action=(
@@ -116,9 +87,9 @@ class BallPickupSequencer:
                 ),
             )
 
-        if self.state == self.FUTABA_START:
+        if self.state == self.FUTABA_PENDING:
             return PickupStep(
-                self.FUTABA_START,
+                self.FUTABA_PENDING,
                 "aguardando confirmacao do envio ao Futaba",
             )
 
@@ -203,7 +174,7 @@ class BallPickupSequencer:
 
     def mark_futaba_started(self, now=None):
         """Inicia o prazo somente depois que a escrita serial retornou."""
-        if self.state != self.FUTABA_START:
+        if self.state != self.FUTABA_PENDING:
             raise RuntimeError(
                 "confirmacao do Futaba fora do estado de partida")
         now = time.monotonic() if now is None else float(now)
@@ -214,17 +185,8 @@ class BallPickupSequencer:
             + cfg.BALL_PICKUP_FUTABA_GUARD_S
         )
 
-    def mark_reverse_started(self, now=None):
-        """Conta a re depois que a escrita serial correspondente retornou."""
-        if self.state != self.BACKUP_PENDING:
-            raise RuntimeError(
-                "confirmacao da re fora do estado de partida")
-        now = time.monotonic() if now is None else float(now)
-        self.state = self.BACKUP
-        self._deadline = now + cfg.BALL_PICKUP_REVERSE_S
-
     def mark_forward_started(self, now=None):
-        """Inicia os 1,5 s totais e a vantagem antes das garras."""
+        """Inicia os 2 s totais e a vantagem antes das garras."""
         if self.state != self.FORWARD_START:
             raise RuntimeError(
                 "confirmacao do avanco fora do estado de partida")
