@@ -19,15 +19,26 @@ import time
 
 import cv2
 
-from config import (CAPTURE_FPS, CAPTURE_HEIGHT, CAPTURE_WIDTH, LENS_POSITION,
-                    camera_x, camera_y)
+from config import (CAPTURE_FPS, CAPTURE_HEIGHT, CAPTURE_WIDTH,
+                    LENS_POSITION, LINE_CAMERA_INDEX, camera_x, camera_y)
 
 
 class LineCamera:
     def __init__(self):
         from picamera2 import Picamera2  # import local: so existe no Pi
 
-        self.picam2 = Picamera2()
+        camera_info = Picamera2.global_camera_info()
+        if not 0 <= LINE_CAMERA_INDEX < len(camera_info):
+            raise RuntimeError(
+                "camera de segue-linha no indice "
+                f"{LINE_CAMERA_INDEX} indisponivel; detectadas: "
+                f"{camera_info}"
+            )
+        print(
+            "[camera] abrindo camera de segue-linha explicita "
+            f"{LINE_CAMERA_INDEX} (flat 2)"
+        )
+        self.picam2 = Picamera2(camera_num=LINE_CAMERA_INDEX)
 
         frame_us = int(1_000_000 / CAPTURE_FPS)
         try:

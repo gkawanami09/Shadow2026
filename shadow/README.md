@@ -6,8 +6,12 @@ RoboCup Junior Rescue Line, Eindhoven 2024) para o hardware do **Shadow2026**:
 - Raspberry Pi 5 (8 GB), Raspberry Pi OS Bookworm, Python 3.11
 - 1× Arduino Uno via USB serial (115200) com firmware **SPEC 01** já existente
 - 4× motores DC 12 V via 2× TB6612FNG (2 motores por lado)
-- Câmera CSI (Picamera2), fish-eye 160°, 8 cm do chão, 35° de inclinação
+- Câmera CSI de segue-linha, fish-eye 160°, 8 cm do chão, 35° de inclinação
+- Câmera CSI frontal exclusiva do resgate
 - LiPo 7.4 V 2200 mAh
+
+Mapeamento das câmeras no Pi 5: resgate no índice `0`; segue-linha no flat 2,
+índice `1`. Os dois programas abrem seus índices explicitamente.
 
 O executável de segue-linha continua **sem** IMU, TPU e sensores IR. O resgate
 fica isolado em `rescue_main.py`, usa somente a câmera frontal e confirma a

@@ -40,6 +40,9 @@ MAX_PWM = 120                             # [SHADOW §2.7] teto absoluto; firmwa
 # ----------------------------------------------------------------------------
 # Camera  [SHADOW §2.4] — captura 640×480 RGB, algoritmo em 448×252 BGR
 # ----------------------------------------------------------------------------
+# Mapeamento físico atual do Pi 5: índice 0 = resgate; índice 1 = segue-linha
+# no flat 2. Nunca deixar Picamera2 escolher a câmera padrão neste processo.
+LINE_CAMERA_INDEX = 1
 CAPTURE_WIDTH = 640
 CAPTURE_HEIGHT = 480
 CAPTURE_FPS = 40                          # FrameDurationLimits = 1e6/40 = 25000 µs

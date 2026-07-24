@@ -35,12 +35,13 @@ pela zona.
 
 ## Câmera
 
-O `dual_camera_viewer.py` chama por convenção a câmera `0` de resgate. Ao mesmo
-tempo, o segue-linha antigo abre `Picamera2()` sem índice. Por isso:
+O mapeamento físico atual possui duas câmeras e nenhum processo pode depender
+da câmera padrão do Picamera2:
 
-1. o resgate abre uma câmera por índice explícito;
-2. o padrão é `0`, seguindo o viewer já existente;
-3. `--camera-index` permite corrigir o mapeamento sem tocar no segue-linha;
+1. resgate = índice `0`, aberto explicitamente por `rescue_main.py`;
+2. segue-linha no flat 2 = índice `1`, fixado por `LINE_CAMERA_INDEX`;
+3. se a câmera `1` estiver ausente, o segue-linha falha com mensagem clara em
+   vez de abrir silenciosamente a câmera de resgate;
 4. o programa imprime `Picamera2.global_camera_info()` no início;
 5. no OV5647 frontal, o modo full-FoV já medido (`1296x972`, 10-bit) é pedido
    diretamente, evitando a consulta lenta de todos os modos na partida;
@@ -57,7 +58,9 @@ Antes de liberar motores, execute:
 python3 shadow/rescue_main.py --camera-index 0 --debug
 ```
 
-Se a janela não mostrar a câmera frontal de resgate, encerre e teste índice `1`.
+Se a janela não mostrar a câmera frontal de resgate, encerre e confira os
+flats com `dual_camera_viewer.py`; não use o índice `1` no resgate, pois ele
+está reservado ao segue-linha.
 
 ## Visão
 
