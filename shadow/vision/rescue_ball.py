@@ -6,7 +6,7 @@ valida geometria, borda radial e contraste local. A classificacao de aparencia
 sempre usa o frame original, sem gamma.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import time
 
@@ -63,6 +63,11 @@ class CloseCrescentEvidence:
     coherent_run: float = 0.0
     circle_rmse_ratio: float = 1.0
     curvature_score: float = 0.0
+    foil_fallback: bool = False
+    foil_texture_bins: int = 0
+    foil_valid_bins: int = 0
+    interior_edge_density: float = 0.0
+    background_edge_density: float = 1.0
 
 
 def _polarity_floor(values, valid, sector_masks):
@@ -152,6 +157,36 @@ def _circle_fit_rmse_ratio(xs, ys, frame_height):
     return rmse / max(float(frame_height), 1.0)
 
 
+def _smooth_curve_samples(values, hits):
+    """Suaviza somente a forma larga, preservando V e quinas extensas."""
+    values = np.asarray(values, dtype=np.float64)
+    hits = np.asarray(hits, dtype=bool)
+    indices = np.arange(values.size, dtype=np.float64)
+    valid_indices = indices[hits]
+    if valid_indices.size < 6:
+        return values
+
+    filled = np.interp(
+        indices,
+        valid_indices,
+        values[hits],
+    )
+    window = max(int(cfg.BALL_CRESCENT_SMOOTH_SAMPLES), 1)
+    if window % 2 == 0:
+        window += 1
+    window = min(window, values.size if values.size % 2 else values.size - 1)
+    if window < 3:
+        return filled
+
+    radius = window // 2
+    positions = np.arange(-radius, radius + 1, dtype=np.float64)
+    sigma = max(window / 4.0, 1.0)
+    kernel = np.exp(-0.5 * np.square(positions / sigma))
+    kernel /= np.sum(kernel)
+    padded = np.pad(filled, radius, mode="edge")
+    return np.convolve(padded, kernel, mode="valid")
+
+
 def _distributed_curvature_score(
     normalized_x,
     xs,
@@ -215,8 +250,247 @@ def _distributed_curvature_score(
     return min(distributed, span_score)
 
 
+def _circular_crescent_geometry(
+    width,
+    height,
+    center_x_ratio,
+    top_y_ratio,
+    halfspan_ratio,
+    bottom_y_ratio,
+    normalized_x,
+):
+    """Arco circular definido pelo ápice e pelos dois ombros inferiores."""
+    center_x = float(center_x_ratio) * width
+    top_y = float(top_y_ratio) * height
+    bottom_y = float(bottom_y_ratio) * height
+    halfspan = float(halfspan_ratio) * width
+    vertical_delta = max(bottom_y - top_y, 1.0)
+    radius = (
+        halfspan * halfspan + vertical_delta * vertical_delta
+    ) / (2.0 * vertical_delta)
+    circle_center_y = top_y + radius
+    offset_x = np.asarray(normalized_x, dtype=np.float64) * halfspan
+    root = np.sqrt(np.maximum(
+        radius * radius - np.square(offset_x),
+        1e-6,
+    ))
+    xs = center_x + offset_x
+    ys = circle_center_y - root
+    slope = offset_x / root
+    return xs, ys, slope
+
+
+def _crescent_fill_metrics(
+    profile_gray,
+    x_indices,
+    actual_y,
+    template_valid,
+    hits,
+    normalized_x,
+    sector_masks,
+    height,
+    contrast_offset,
+    outside_contrast_offset,
+    deep_contrast_offset,
+):
+    """Contraste da borda e preenchimento real abaixo do caminho encontrado."""
+    samples = len(x_indices)
+    above_y = actual_y - outside_contrast_offset
+    below_y = actual_y + contrast_offset
+    deep_y = actual_y + deep_contrast_offset
+    contrast_valid = (
+        template_valid
+        & hits
+        & (above_y >= 0)
+        & (below_y < height)
+    )
+    if not np.any(contrast_valid):
+        return 0.0, 0.0, 0.0
+
+    profile_delta = np.zeros(samples, dtype=np.float32)
+    profile_delta[contrast_valid] = (
+        profile_gray[
+            below_y[contrast_valid],
+            x_indices[contrast_valid],
+        ].astype(np.float32)
+        - profile_gray[
+            above_y[contrast_valid],
+            x_indices[contrast_valid],
+        ].astype(np.float32)
+    )
+    strong_profile = (
+        contrast_valid
+        & (
+            np.abs(profile_delta)
+            >= cfg.BALL_CRESCENT_MIN_CONTRAST
+        )
+    )
+    contrast = float(np.median(np.abs(
+        profile_delta[contrast_valid])))
+    profile_support = _support_floor(
+        strong_profile,
+        contrast_valid,
+        sector_masks,
+    )
+    profile_polarity = _polarity_floor(
+        profile_delta,
+        strong_profile,
+        sector_masks,
+    )
+
+    # Uma linha curva fina volta ao fundo poucos pixels abaixo. A esfera
+    # continua ocupando a faixa interna profunda.
+    deep_valid = (
+        template_valid
+        & hits
+        & (above_y >= 0)
+        & (deep_y < height)
+        & (
+            np.abs(normalized_x)
+            <= cfg.BALL_CRESCENT_DEEP_INNER_X_RATIO
+        )
+    )
+    deep_delta = np.zeros(samples, dtype=np.float32)
+    if np.any(deep_valid):
+        deep_delta[deep_valid] = (
+            profile_gray[
+                deep_y[deep_valid],
+                x_indices[deep_valid],
+            ].astype(np.float32)
+            - profile_gray[
+                above_y[deep_valid],
+                x_indices[deep_valid],
+            ].astype(np.float32)
+        )
+    strong_deep = (
+        deep_valid
+        & (
+            np.abs(deep_delta)
+            >= cfg.BALL_CRESCENT_MIN_CONTRAST
+        )
+    )
+    deep_support = _support_floor(
+        strong_deep,
+        deep_valid,
+        sector_masks,
+    )
+    deep_polarity = _polarity_floor(
+        deep_delta,
+        strong_deep,
+        sector_masks,
+    )
+    deep_contrast = (
+        float(np.median(np.abs(deep_delta[deep_valid])))
+        if np.any(deep_valid)
+        else 0.0
+    )
+    return (
+        min(contrast, deep_contrast),
+        min(profile_support, deep_support),
+        min(profile_polarity, deep_polarity),
+    )
+
+
+def _crescent_texture_metrics(
+    gray,
+    edge_binary,
+    x_indices,
+    path_y,
+    template_valid,
+    normalized_x,
+    height,
+):
+    """Reflexos distribuídos no domo e fundo mais limpo que o interior."""
+    bin_count = max(int(cfg.BALL_CRESCENT_FOIL_TEXTURE_BINS), 3)
+    limit = float(cfg.BALL_CRESCENT_FOIL_INNER_X_RATIO)
+    bin_edges = np.linspace(-limit, limit, bin_count + 1)
+    textured_bins = 0
+    valid_bins = 0
+    interior_edge_densities = []
+    background_edge_densities = []
+
+    for index in range(bin_count):
+        if index == bin_count - 1:
+            in_bin = (
+                template_valid
+                & (normalized_x >= bin_edges[index])
+                & (normalized_x <= bin_edges[index + 1])
+            )
+        else:
+            in_bin = (
+                template_valid
+                & (normalized_x >= bin_edges[index])
+                & (normalized_x < bin_edges[index + 1])
+            )
+        if np.count_nonzero(in_bin) < 3:
+            continue
+
+        inside_values = []
+        inside_edges = []
+        for offset_ratio in cfg.BALL_CRESCENT_FOIL_INSIDE_OFFSETS:
+            sample_y = (
+                path_y
+                + int(round(float(offset_ratio) * height))
+            )
+            valid = in_bin & (sample_y >= 0) & (sample_y < height)
+            if np.any(valid):
+                inside_values.append(gray[
+                    sample_y[valid],
+                    x_indices[valid],
+                ])
+                inside_edges.append(edge_binary[
+                    sample_y[valid],
+                    x_indices[valid],
+                ])
+
+        outside_edges = []
+        for offset_ratio in cfg.BALL_CRESCENT_FOIL_OUTSIDE_OFFSETS:
+            sample_y = (
+                path_y
+                - int(round(float(offset_ratio) * height))
+            )
+            valid = in_bin & (sample_y >= 0) & (sample_y < height)
+            if np.any(valid):
+                outside_edges.append(edge_binary[
+                    sample_y[valid],
+                    x_indices[valid],
+                ])
+
+        if not inside_values or not inside_edges or not outside_edges:
+            continue
+        interior = np.concatenate(inside_values).astype(np.float32)
+        if interior.size < 8:
+            continue
+        valid_bins += 1
+        dynamic_range = float(
+            np.percentile(interior, 90)
+            - np.percentile(interior, 10)
+        )
+        highlight_range = float(
+            np.percentile(interior, 99)
+            - np.median(interior)
+        )
+        if max(dynamic_range, highlight_range) >= (
+            cfg.BALL_CRESCENT_FOIL_MIN_DYNAMIC_RANGE
+        ):
+            textured_bins += 1
+        interior_edge_densities.append(float(np.mean(
+            np.concatenate(inside_edges))))
+        background_edge_densities.append(float(np.mean(
+            np.concatenate(outside_edges))))
+
+    if valid_bins == 0:
+        return 0, 0, 0.0, 1.0
+    return (
+        textured_bins,
+        valid_bins,
+        float(np.median(interior_edge_densities)),
+        float(np.median(background_edge_densities)),
+    )
+
+
 def _detect_close_crescent(gray, edges, timestamp):
-    """Procura uma borda parabolica larga no terco inferior da imagem."""
+    """Procura o arco circular largo da esfera cortada pelo quadro."""
     if (
         gray is None
         or edges is None
@@ -272,21 +546,20 @@ def _detect_close_crescent(gray, edges, timestamp):
 
     best = None
     best_key = None
+    foil_candidates_by_shape = {}
     for center_ratio in cfg.BALL_CRESCENT_CENTER_RATIOS:
-        center_x = float(center_ratio) * width
         center_error = (float(center_ratio) - 0.5) / 0.5
         for top_ratio in cfg.BALL_CRESCENT_TOP_RATIOS:
             for halfspan_ratio in cfg.BALL_CRESCENT_HALFSPAN_RATIOS:
-                halfspan = float(halfspan_ratio) * width
-                xs = center_x + normalized_x * halfspan
-                ys = (
-                    float(top_ratio)
-                    + (
-                        cfg.BALL_CRESCENT_BOTTOM_RATIO
-                        - float(top_ratio)
-                    )
-                    * np.square(normalized_x)
-                ) * height
+                xs, ys, slope = _circular_crescent_geometry(
+                    width,
+                    height,
+                    center_ratio,
+                    top_ratio,
+                    halfspan_ratio,
+                    cfg.BALL_CRESCENT_BOTTOM_RATIO,
+                    normalized_x,
+                )
                 x_indices = np.clip(
                     np.rint(xs).astype(np.int32), 0, width - 1)
                 y_indices = np.clip(
@@ -298,21 +571,11 @@ def _detect_close_crescent(gray, edges, timestamp):
                     & (ys < height)
                 )
 
-                # A derivada da parabola fornece a normal esperada da borda.
+                # A derivada do arco fornece a normal esperada da borda.
                 # Um mosaico/grade pode ter muitos Canny pixels por perto, mas
                 # nao mantem essa orientacao mudando suavemente de um ombro ao
                 # outro nem poucos trechos coerentes de fundo->esfera. A troca
                 # de sinal no miolo e permitida por causa dos reflexos do foil.
-                slope = (
-                    2.0
-                    * (
-                        cfg.BALL_CRESCENT_BOTTOM_RATIO
-                        - float(top_ratio)
-                    )
-                    * height
-                    * normalized_x
-                    / max(halfspan, 1.0)
-                )
                 normal_scale = np.sqrt(1.0 + np.square(slope))
                 normal_x = -slope / normal_scale
                 normal_y = 1.0 / normal_scale
@@ -376,6 +639,7 @@ def _detect_close_crescent(gray, edges, timestamp):
                 selected_gradient = normal_gradient[
                     np.arange(samples), best_offsets]
                 selected_residual = offsets[best_offsets]
+                actual_y = y_indices + selected_residual
                 circle_rmse_ratio = 1.0
                 curvature_score = 0.0
 
@@ -395,106 +659,25 @@ def _detect_close_crescent(gray, edges, timestamp):
                     max_residual_jump=max(band_px * 0.60, 2.0),
                 )
 
-                above_y = y_indices - outside_contrast_offset
-                below_y = y_indices + contrast_offset
-                deep_y = y_indices + deep_contrast_offset
-                contrast_valid = (
-                    template_valid
-                    & (above_y >= 0)
-                    & (below_y < height)
+                # As amostras de preenchimento partem da borda realmente
+                # encontrada, não do centro teórico da faixa. Isso permite
+                # tolerar o contorno amassado sem transformar uma linha curva
+                # fina, deslocada dentro da faixa, em uma esfera preenchida.
+                contrast, profile_support, profile_polarity = (
+                    _crescent_fill_metrics(
+                        profile_gray,
+                        x_indices,
+                        actual_y,
+                        template_valid,
+                        hits,
+                        normalized_x,
+                        sector_masks,
+                        height,
+                        contrast_offset,
+                        outside_contrast_offset,
+                        deep_contrast_offset,
+                    )
                 )
-                if np.any(contrast_valid):
-                    above_values = profile_gray[
-                        above_y[contrast_valid],
-                        x_indices[contrast_valid],
-                    ].astype(np.float32)
-                    below_values = profile_gray[
-                        below_y[contrast_valid],
-                        x_indices[contrast_valid],
-                    ].astype(np.float32)
-                    profile_delta = np.zeros(
-                        samples, dtype=np.float32)
-                    profile_delta[contrast_valid] = (
-                        below_values - above_values)
-                    strong_profile = (
-                        contrast_valid
-                        & (
-                            np.abs(profile_delta)
-                            >= cfg.BALL_CRESCENT_MIN_CONTRAST
-                        )
-                    )
-                    contrast = float(np.median(np.abs(
-                        profile_delta[contrast_valid])))
-                    profile_support = _support_floor(
-                        strong_profile,
-                        contrast_valid,
-                        sector_masks,
-                    )
-                    profile_polarity = _polarity_floor(
-                        profile_delta,
-                        strong_profile,
-                        sector_masks,
-                    )
-
-                    # Uma linha curva desenhada tem contraste perto da tinta,
-                    # mas volta ao fundo poucos pixels abaixo. A esfera ocupa
-                    # tambem a faixa interna profunda. O miolo evita os pontos
-                    # onde a parabola ja encosta na borda inferior do frame.
-                    deep_valid = (
-                        template_valid
-                        & (above_y >= 0)
-                        & (deep_y < height)
-                        & (
-                            np.abs(normalized_x)
-                            <= cfg.BALL_CRESCENT_DEEP_INNER_X_RATIO
-                        )
-                    )
-                    deep_delta = np.zeros(
-                        samples, dtype=np.float32)
-                    if np.any(deep_valid):
-                        deep_delta[deep_valid] = (
-                            profile_gray[
-                                deep_y[deep_valid],
-                                x_indices[deep_valid],
-                            ].astype(np.float32)
-                            - profile_gray[
-                                above_y[deep_valid],
-                                x_indices[deep_valid],
-                            ].astype(np.float32)
-                        )
-                    strong_deep = (
-                        deep_valid
-                        & (
-                            np.abs(deep_delta)
-                            >= cfg.BALL_CRESCENT_MIN_CONTRAST
-                        )
-                    )
-                    deep_support = _support_floor(
-                        strong_deep,
-                        deep_valid,
-                        sector_masks,
-                    )
-                    deep_polarity = _polarity_floor(
-                        deep_delta,
-                        strong_deep,
-                        sector_masks,
-                    )
-                    deep_contrast = (
-                        float(np.median(np.abs(
-                            deep_delta[deep_valid])))
-                        if np.any(deep_valid)
-                        else 0.0
-                    )
-                    contrast = min(contrast, deep_contrast)
-                    profile_support = min(
-                        profile_support, deep_support)
-                    profile_polarity = min(
-                        profile_polarity, deep_polarity)
-                else:
-                    contrast = 0.0
-                    profile_support = 0.0
-                    profile_polarity = 0.0
-
                 sector_floor = min(
                     left_support,
                     center_support,
@@ -526,6 +709,21 @@ def _detect_close_crescent(gray, edges, timestamp):
                     0.0,
                     1.0,
                 ))
+                foil_rank = (
+                    0.35 * support
+                    + 0.20 * sector_floor
+                    + 0.15 * profile_support
+                    + 0.15 * profile_polarity
+                    + 0.10 * min(
+                        coherent_run
+                        / max(
+                            cfg.BALL_CRESCENT_FOIL_MIN_COHERENT_RUN,
+                            1e-6,
+                        ),
+                        1.0,
+                    )
+                    + 0.05 * contrast_score
+                )
                 base_geometry_accepted = bool(
                     support >= cfg.BALL_CRESCENT_MIN_SUPPORT
                     and left_support
@@ -546,28 +744,51 @@ def _detect_close_crescent(gray, edges, timestamp):
                     and abs(center_error)
                     <= cfg.BALL_CRESCENT_MAX_CENTER_ERROR + 1e-9
                 )
-                if base_geometry_accepted:
-                    actual_y = y_indices + selected_residual
+                foil_shape_accepted = bool(
+                    support >= cfg.BALL_CRESCENT_FOIL_MIN_SUPPORT
+                    and left_support
+                    >= cfg.BALL_CRESCENT_FOIL_MIN_SHOULDER_SUPPORT
+                    and center_support
+                    >= cfg.BALL_CRESCENT_FOIL_MIN_CENTER_SUPPORT
+                    and right_support
+                    >= cfg.BALL_CRESCENT_FOIL_MIN_SHOULDER_SUPPORT
+                    and contrast >= cfg.BALL_CRESCENT_MIN_CONTRAST
+                    and profile_support
+                    >= cfg.BALL_CRESCENT_MIN_PROFILE_SUPPORT
+                    and profile_polarity
+                    >= cfg.BALL_CRESCENT_MIN_PROFILE_POLARITY
+                    and coherent_run
+                    >= cfg.BALL_CRESCENT_FOIL_MIN_COHERENT_RUN
+                    and abs(center_error)
+                    <= cfg.BALL_CRESCENT_MAX_CENTER_ERROR + 1e-9
+                )
+                if base_geometry_accepted or foil_shape_accepted:
+                    smooth_y = _smooth_curve_samples(actual_y, hits)
                     circle_rmse_ratio = _circle_fit_rmse_ratio(
                         x_indices[hits],
-                        actual_y[hits],
+                        smooth_y[hits],
                         height,
                     )
                     curvature_score = _distributed_curvature_score(
                         normalized_x,
                         x_indices,
-                        actual_y,
+                        smooth_y,
                         hits,
                     )
-                accepted = bool(
+                strict_accepted = bool(
                     base_geometry_accepted
                     and circle_rmse_ratio
                     <= cfg.BALL_CRESCENT_MAX_CIRCLE_RMSE_RATIO
                     and curvature_score
                     >= cfg.BALL_CRESCENT_MIN_CURVATURE_SCORE
                 )
+                foil_geometry_accepted = bool(
+                    foil_shape_accepted
+                    and circle_rmse_ratio
+                    <= cfg.BALL_CRESCENT_FOIL_MAX_CIRCLE_RMSE_RATIO
+                )
                 evidence = CloseCrescentEvidence(
-                    accepted=accepted,
+                    accepted=strict_accepted,
                     confidence=confidence,
                     support=support,
                     left_support=left_support,
@@ -586,10 +807,95 @@ def _detect_close_crescent(gray, edges, timestamp):
                     circle_rmse_ratio=circle_rmse_ratio,
                     curvature_score=curvature_score,
                 )
-                key = (int(accepted), confidence)
+                key = (int(strict_accepted), confidence)
                 if best is None or key > best_key:
                     best = evidence
                     best_key = key
+                if foil_geometry_accepted:
+                    foil_key = (foil_rank, support, sector_floor)
+                    # A textura e relativamente cara. Guardamos somente as
+                    # melhores formas plausiveis e as medimos depois das 40
+                    # hipoteses. Variacoes apenas de centro disputam a mesma
+                    # vaga, evitando um top-3 de templates quase duplicados.
+                    shape_key = (
+                        float(top_ratio),
+                        float(halfspan_ratio),
+                    )
+                    candidate = (
+                        foil_key,
+                        evidence,
+                        x_indices.copy(),
+                        np.where(hits, actual_y, y_indices).copy(),
+                        template_valid.copy(),
+                    )
+                    previous = foil_candidates_by_shape.get(shape_key)
+                    if previous is None or foil_key > previous[0]:
+                        foil_candidates_by_shape[shape_key] = candidate
+
+    foil_candidates = sorted(
+        foil_candidates_by_shape.values(),
+        key=lambda item: item[0],
+        reverse=True,
+    )[:cfg.BALL_CRESCENT_FOIL_MAX_CANDIDATES]
+
+    if (
+        foil_candidates
+        and (best is None or not best.accepted)
+    ):
+        for (
+            _foil_geometry_key,
+            foil_evidence,
+            foil_x_indices,
+            foil_path_y,
+            foil_template_valid,
+        ) in foil_candidates:
+            (
+                foil_texture_bins,
+                foil_valid_bins,
+                interior_edge_density,
+                background_edge_density,
+            ) = _crescent_texture_metrics(
+                gray,
+                edge_binary,
+                foil_x_indices,
+                foil_path_y,
+                foil_template_valid,
+                normalized_x,
+                height,
+            )
+            foil_texture_accepted = bool(
+                foil_valid_bins
+                >= cfg.BALL_CRESCENT_FOIL_MIN_TEXTURE_BINS
+                and foil_texture_bins
+                >= cfg.BALL_CRESCENT_FOIL_MIN_TEXTURE_BINS
+                and interior_edge_density
+                >= cfg.BALL_CRESCENT_FOIL_MIN_INTERIOR_EDGE_DENSITY
+                and background_edge_density
+                <= cfg.BALL_CRESCENT_FOIL_MAX_BACKGROUND_EDGE_DENSITY
+                and background_edge_density
+                <= (
+                    cfg.BALL_CRESCENT_FOIL_BACKGROUND_EDGE_RATIO
+                    * interior_edge_density
+                )
+            )
+            foil_evidence = replace(
+                foil_evidence,
+                accepted=foil_texture_accepted,
+                foil_fallback=foil_texture_accepted,
+                foil_texture_bins=foil_texture_bins,
+                foil_valid_bins=foil_valid_bins,
+                interior_edge_density=interior_edge_density,
+                background_edge_density=background_edge_density,
+            )
+            foil_key = (
+                int(foil_texture_accepted),
+                foil_evidence.confidence,
+            )
+            if best is None or foil_key >= best_key:
+                best = foil_evidence
+                best_key = foil_key
+            if foil_texture_accepted:
+                break
 
     return best
 
@@ -1287,15 +1593,15 @@ def _crescent_band_points(
         max(int(cfg.BALL_CRESCENT_SAMPLES), 9),
         dtype=np.float32,
     )
-    xs = (
-        float(center_x_ratio) * width
-        + normalized_x * float(halfspan_ratio) * width
+    xs, ys, _ = _circular_crescent_geometry(
+        width,
+        height,
+        center_x_ratio,
+        top_y_ratio,
+        halfspan_ratio,
+        bottom_y_ratio,
+        normalized_x,
     )
-    ys = (
-        float(top_y_ratio)
-        + (float(bottom_y_ratio) - float(top_y_ratio))
-        * np.square(normalized_x)
-    ) * height
     band = max(height * cfg.BALL_CRESCENT_BAND_RATIO, 1.0)
 
     def points(y_values):
@@ -1395,6 +1701,16 @@ def annotate_rescue_frame(
     )
     crescent_metrics = ""
     if crescent_evidence is not None:
+        shape_metrics = (
+            " f="
+            f"{crescent_evidence.foil_texture_bins}/"
+            f"{crescent_evidence.foil_valid_bins}"
+            if crescent_evidence.foil_valid_bins > 0
+            else (
+                " q="
+                f"{crescent_evidence.curvature_score * 100:.0f}%"
+            )
+        )
         crescent_metrics = (
             f" s={crescent_evidence.support * 100:.0f}%"
             f" c={crescent_evidence.contrast:.0f}"
@@ -1403,7 +1719,7 @@ def annotate_rescue_frame(
                 crescent_evidence.gradient_polarity,
                 crescent_evidence.profile_polarity,
             ) * 100:.0f}%"
-            f" q={crescent_evidence.curvature_score * 100:.0f}%"
+            f"{shape_metrics}"
         )
     label_x = max(int(round(
         width * (

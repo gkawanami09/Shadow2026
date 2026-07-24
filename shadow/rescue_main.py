@@ -230,6 +230,14 @@ def _dataset_metadata(
                 "circle_rmse_ratio": float(
                     crescent.circle_rmse_ratio),
                 "curvature_score": float(crescent.curvature_score),
+                "foil_fallback": bool(crescent.foil_fallback),
+                "foil_texture_bins": int(
+                    crescent.foil_texture_bins),
+                "foil_valid_bins": int(crescent.foil_valid_bins),
+                "interior_edge_density": float(
+                    crescent.interior_edge_density),
+                "background_edge_density": float(
+                    crescent.background_edge_density),
             }
         detector_data = {
             # Candidatos/deteccao so descrevem este PNG quando esta flag e
@@ -648,12 +656,23 @@ def main():
             crescent_metrics = (
                 last_metrics_result.crescent_evidence
                 if last_metrics_result is not None else None)
+            crescent_marker = (
+                "F" if (
+                    crescent_metrics is not None
+                    and crescent_metrics.foil_fallback
+                ) else (
+                    "*" if (
+                        crescent_metrics is not None
+                        and crescent_metrics.accepted
+                    ) else ""
+                )
+            )
             crescent_text = (
                 (
                     " lua"
                     f"{crescent_metrics.support * 100:.0f}%"
                     f"/{crescent_metrics.contrast:.0f}"
-                    f"{'*' if crescent_metrics.accepted else ''}"
+                    f"{crescent_marker}"
                 )
                 if crescent_metrics is not None
                 else ""

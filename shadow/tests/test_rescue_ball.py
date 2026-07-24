@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 import unittest
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -9,6 +10,7 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import rescue_config as cfg
+import vision.rescue_ball as rescue_ball
 from vision.rescue_ball import (
     BallDetection,
     BallDetector,
@@ -69,11 +71,20 @@ def close_crescent_frame(
         center_x_ratio * width
         + normalized_x * halfspan_ratio * width
     )
-    ys = (
-        top_y_ratio
-        + (cfg.BALL_CRESCENT_BOTTOM_RATIO - top_y_ratio)
-        * np.square(normalized_x)
-    ) * height
+    top_y = top_y_ratio * height
+    bottom_y = cfg.BALL_CRESCENT_BOTTOM_RATIO * height
+    halfspan = halfspan_ratio * width
+    vertical_delta = bottom_y - top_y
+    radius = (
+        halfspan * halfspan
+        + vertical_delta * vertical_delta
+    ) / max(2.0 * vertical_delta, 1.0)
+    center_y = top_y + radius
+    offset_x = normalized_x * halfspan
+    ys = center_y - np.sqrt(np.maximum(
+        radius * radius - np.square(offset_x),
+        0.0,
+    ))
     curve = np.column_stack((xs, ys)).astype(np.int32)
     polygon = np.vstack((
         curve,
@@ -157,11 +168,18 @@ def disconnected_crescent_islands(connect_at_floor=False):
         end_x = min(start_x + 20, right)
         xs = np.arange(start_x, end_x + 1)
         normalized = (xs - center) / halfspan
-        ys = (
-            0.74
-            + (cfg.BALL_CRESCENT_BOTTOM_RATIO - 0.74)
-            * np.square(normalized)
-        ) * height
+        top_y = 0.70 * height
+        bottom_y = cfg.BALL_CRESCENT_BOTTOM_RATIO * height
+        vertical_delta = bottom_y - top_y
+        radius = (
+            halfspan * halfspan
+            + vertical_delta * vertical_delta
+        ) / max(2.0 * vertical_delta, 1.0)
+        circle_center_y = top_y + radius
+        ys = circle_center_y - np.sqrt(np.maximum(
+            radius * radius - np.square(xs - center),
+            0.0,
+        ))
         curve = np.column_stack((xs, ys)).astype(np.int32)
         polygon = np.vstack((
             curve,
@@ -177,6 +195,54 @@ def disconnected_crescent_islands(connect_at_floor=False):
             (35, 35, 35),
             -1,
         )
+    return frame
+
+
+def irregular_foil_dome_frame():
+    """Domo largo e amassado, semelhante aos brutos enviados pelo robo."""
+    height, width = 240, 320
+    boundary = np.asarray(
+        (
+            (30, 239),
+            (38, 226),
+            (52, 209),
+            (70, 196),
+            (95, 180),
+            (125, 165),
+            (160, 153),
+            (186, 162),
+            (210, 176),
+            (240, 199),
+            (270, 224),
+            (292, 239),
+        ),
+        dtype=np.int32,
+    )
+    mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillPoly(mask, [boundary], 255)
+
+    rng = np.random.default_rng(20260723)
+    gray = np.full((height, width), 165, dtype=np.int16)
+    gray[mask > 0] = np.clip(
+        65 + rng.normal(0, 35, np.count_nonzero(mask)),
+        0,
+        255,
+    )
+    frame = cv2.cvtColor(
+        gray.astype(np.uint8),
+        cv2.COLOR_GRAY2BGR,
+    )
+    for _ in range(80):
+        x = int(rng.integers(25, 295))
+        y = int(rng.integers(150, 239))
+        if mask[y, x]:
+            cv2.circle(
+                frame,
+                (x, y),
+                int(rng.integers(1, 4)),
+                (240, 240, 240),
+                -1,
+            )
     return frame
 
 
@@ -293,11 +359,12 @@ class RescueBallDetectorTests(unittest.TestCase):
 
     def test_close_crescent_accepts_true_circle_arcs(self):
         for top_y_ratio, halfspan_ratio in (
-            (0.70, 0.34),
+            (0.62, 0.40),
+            (0.66, 0.46),
+            (0.70, 0.40),
             (0.70, 0.46),
             (0.74, 0.40),
-            (0.78, 0.34),
-            (0.78, 0.46),
+            (0.74, 0.46),
         ):
             with self.subTest(
                 top_y_ratio=top_y_ratio,
@@ -354,6 +421,40 @@ class RescueBallDetectorTests(unittest.TestCase):
         detector = BallDetector("any", enhance=False)
         detector.detect(frame, timestamp=0.1)
         self.assertTrue(detector.last_crescent_evidence.accepted)
+
+    def test_close_crescent_accepts_irregular_realistic_foil_dome(self):
+        detector = BallDetector("any", enhance=False)
+        detector.detect(
+            irregular_foil_dome_frame(),
+            timestamp=0.1,
+        )
+
+        evidence = detector.last_crescent_evidence
+        self.assertTrue(evidence.accepted, evidence)
+        self.assertTrue(evidence.foil_fallback, evidence)
+        self.assertGreaterEqual(
+            evidence.foil_texture_bins,
+            cfg.BALL_CRESCENT_FOIL_MIN_TEXTURE_BINS,
+        )
+
+    def test_foil_texture_is_only_measured_on_shortlist(self):
+        original = rescue_ball._crescent_texture_metrics
+        with mock.patch.object(
+            rescue_ball,
+            "_crescent_texture_metrics",
+            wraps=original,
+        ) as texture_metrics:
+            detector = BallDetector("any", enhance=False)
+            detector.detect(
+                irregular_foil_dome_frame(),
+                timestamp=0.1,
+            )
+
+        self.assertGreaterEqual(texture_metrics.call_count, 1)
+        self.assertLessEqual(
+            texture_metrics.call_count,
+            cfg.BALL_CRESCENT_FOIL_MAX_CANDIDATES,
+        )
 
     def test_close_crescent_accepts_center_hotspot_with_opposite_polarity(self):
         for sides, center in ((35, 215), (215, 35)):
@@ -567,6 +668,20 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result.confirmed)
         self.assertTrue(detector.last_hough_used)
+
+    def test_close_dome_keeps_hough_distance_veto_available(self):
+        detector = BallDetector("any", enhance=False)
+        detector._contour_proposals = lambda *_args: []
+        detector._hough_proposals = mock.Mock(return_value=[])
+
+        detector.detect(
+            irregular_foil_dome_frame(),
+            timestamp=0.1,
+        )
+
+        self.assertTrue(detector.last_crescent_evidence.accepted)
+        self.assertTrue(detector.last_hough_used)
+        detector._hough_proposals.assert_called_once()
 
     def test_strong_contour_skips_hough_during_acquisition(self):
         detector = BallDetector("silver")

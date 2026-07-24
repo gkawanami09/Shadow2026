@@ -240,6 +240,11 @@ class RescueDatasetWriterTests(unittest.TestCase):
             crescent_evidence=CloseCrescentEvidence(
                 True, 0.90, 0.80, 0.75, 0.90, 0.76,
                 42.0, 0.50, 0.74, 0.46, 0.98, 10.0,
+                foil_fallback=True,
+                foil_texture_bins=4,
+                foil_valid_bins=5,
+                interior_edge_density=0.08,
+                background_edge_density=0.01,
             ),
         )
         command = MotionCommand("ALIGN", angle=180, speed=0.35)
@@ -267,6 +272,17 @@ class RescueDatasetWriterTests(unittest.TestCase):
         self.assertEqual(
             exact["latest_detector_result"]["crescent_evidence"]["support"],
             0.80,
+        )
+        self.assertTrue(
+            exact["latest_detector_result"]["crescent_evidence"][
+                "foil_fallback"
+            ]
+        )
+        self.assertEqual(
+            exact["latest_detector_result"]["crescent_evidence"][
+                "foil_texture_bins"
+            ],
+            4,
         )
 
 

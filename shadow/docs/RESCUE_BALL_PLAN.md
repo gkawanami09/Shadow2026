@@ -75,20 +75,19 @@ círculos foram propostos, um passou pelos filtros e seu raio no preview é 42 p
 
 O preview desenha a `MEIA-LUA GARRA`: duas curvas delimitam a faixa onde deve
 aparecer a borda superior da esfera enorme. Ela fica amarela fora do gate,
-laranja em `1/3` e `2/3`, e verde em `3/3`. O detector mede uma curva com pelo
-menos 68% da largura da imagem e exige borda distribuída no ombro esquerdo,
-centro e ombro direito. Os pontos precisam pertencer à mesma componente de
-borda, acompanhar a orientação da parábola, manter poucos trechos coerentes de
-polaridade (permitindo o reflexo central do alumínio) e formar um trecho
-contínuo. A inclinação precisa variar por toda a largura, inclusive nos
-ombros, para que uma bolinha pequena encostada numa sombra em V não forme uma
-meia-lua composta falsa. A borda
-também precisa ajustar um círculo; por isso um `V` ou trapézio preenchido não
-substitui a curvatura da esfera. O contraste também precisa continuar dentro
-da região profunda da esfera; uma linha curva desenhada, grade, mosaico ou
-vários pedaços soltos não bastam. O marcador usa a geometria realmente
-avaliada naquele frame: `p=` mostra a coerência de polaridade e `q=` a
-curvatura distribuída.
+laranja em `1/3` e `2/3`, e verde em `3/3`. Os brutos de calibração mostraram
+que essa borda é um arco circular entre `0,62H` e `0,74H`, ocupando de 80% a
+92% da largura. O detector exige apoio no ombro esquerdo, centro e ombro
+direito, além de continuidade, contraste e preenchimento abaixo da borda.
+
+A rota estrita exige a mesma componente de Canny, coerência de polaridade,
+ajuste circular e curvatura distribuída. Uma segunda rota é exclusiva para o
+papel-alumínio amassado: ela tolera pequenas interrupções unidas pelo
+fechamento morfológico apenas quando há reflexos distribuídos em pelo menos
+quatro de cinco setores internos e o fundo acima da esfera permanece muito
+menos texturizado. O histórico de aproximação continua obrigatório nas duas
+rotas. No marcador, `p=` mostra a coerência de polaridade, `q=` a curvatura
+estrita e `f=4/5` ou `f=5/5` os setores metálicos da rota de foil.
 
 Assim, uma esfera pequena distante pode até estar centralizada, mas não
 consegue preencher a meia-lua e não arma a coleta. Essa etapa independe do
@@ -108,7 +107,8 @@ Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 2. filtro mediano;
 3. Canny automático e fechamento morfológico;
 4. propostas por contornos de borda e máscara escura;
-5. Hough somente como fallback no mesmo frame quando os contornos falham;
+5. Hough somente como fallback quando os contornos falham; ele continua
+   disponível no frame da meia-lua para vetar um círculo ainda distante;
 6. raio, proporção, circularidade e preenchimento;
 7. suporte de borda ao redor da circunferência;
 8. contraste entre interior e anel de piso próximo;
@@ -121,9 +121,9 @@ Todos os limites medidos em pixels usam uma escala isotrópica derivada de
     realmente contido nele e as duas confianças são compatíveis;
 13. associação espacial mais rígida durante os três hits de aquisição,
     suavização e confirmação em vários frames;
-14. gate final independente por arco parabólico largo em `320x240`, com três
-    resultados frescos, histórico de aproximação obrigatório e parada já no
-    primeiro.
+14. gate final independente por arco circular largo em `320x240`, com rota
+    estrita e fallback metálico, três resultados frescos, histórico de
+    aproximação obrigatório e parada já no primeiro.
 
 Uma detecção incerta não movimenta o robô.
 
@@ -249,8 +249,10 @@ Outras travas:
 
 ## Limite desta implementação
 
-As capturas de tela já permitiram corrigir a dominante ciano e a competição
-entre o perímetro da esfera, seus reflexos internos e halos. Elas, porém,
-contêm a anotação do programa e não permitem reproduzir todos os estágios do
-detector. A calibração de competição deve usar os PNGs brutos salvos com `s`,
-especialmente para a esfera prateada no centro e nos cantos da imagem.
+Os PNGs brutos de 23/07/2026 permitiram corrigir a forma circular do domo e a
+fragmentação causada pelos reflexos do papel-alumínio. Quando o JSON salvo
+indicar `"same_frame": false`, os números do detector descrevem um frame
+anterior e servem apenas como contexto; a decisão visual sobre aquele PNG deve
+usar a própria imagem. A calibração de competição deve continuar coletando
+PNGs brutos com `s`, especialmente no instante exato em que o domo entra na
+faixa da garra.

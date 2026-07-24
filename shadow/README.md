@@ -12,9 +12,11 @@ RoboCup Junior Rescue Line, Eindhoven 2024) para o hardware do **Shadow2026**:
 O executável de segue-linha continua **sem** IMU, TPU e sensores IR. O resgate
 fica isolado em `rescue_main.py`, usa somente a câmera frontal e confirma a
 proximidade pela borda larga em meia-lua da esfera já cortada pelo quadro. A
-meia-lua só vale depois de um histórico real de aproximação crescente. Depois
-aciona o Futaba, inicia o avanço e fecha as garras, sem alterar `main.py`. A
-câmera de linha e o HC-SR04 não participam de nenhuma decisão do resgate.
+meia-lua usa um arco circular e uma rota específica para a textura irregular
+do papel-alumínio, mas só vale depois de um histórico real de aproximação
+crescente. Depois aciona o Futaba, inicia o avanço e fecha as garras, sem
+alterar `main.py`. A câmera de linha e o HC-SR04 não participam de nenhuma
+decisão do resgate.
 
 ## O que ele faz
 

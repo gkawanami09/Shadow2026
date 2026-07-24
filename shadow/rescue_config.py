@@ -156,16 +156,18 @@ BALL_STOP_RADIUS_PX = 76
 BALL_STOP_CONFIRM_FRAMES = 3
 
 # Gate de proximidade pela borda superior da esfera enorme/cortada. Cada
-# template e uma parabola y=top+(bottom-top)*x^2, normalizada pelo frame. A
-# largura minima e 68% da imagem; uma esfera pequena distante nao consegue
-# fornecer borda simultaneamente nos dois ombros e no centro.
-BALL_CRESCENT_TOP_RATIOS = (0.70, 0.74, 0.78)
-BALL_CRESCENT_HALFSPAN_RATIOS = (0.34, 0.40, 0.46)
+# template é o arco circular que passa pelo ápice e pelos dois ombros.
+# Os frames reais colocaram o ápice entre 0,62H e 0,74H. Uma esfera distante
+# não cobre simultaneamente os dois ombros e o centro.
+BALL_CRESCENT_TOP_RATIOS = (0.62, 0.66, 0.70, 0.74)
+# Os brutos reais ocupam aproximadamente 80–92% da largura. Exigir essa meia
+# lua larga impede que a perspectiva de uma bolinha distante arme a coleta.
+BALL_CRESCENT_HALFSPAN_RATIOS = (0.40, 0.46)
 BALL_CRESCENT_CENTER_RATIOS = (0.44, 0.48, 0.50, 0.52, 0.56)
 BALL_CRESCENT_BOTTOM_RATIO = 0.98
-BALL_CRESCENT_DEFAULT_TOP_RATIO = 0.74
+BALL_CRESCENT_DEFAULT_TOP_RATIO = 0.70
 BALL_CRESCENT_DEFAULT_HALFSPAN_RATIO = 0.46
-BALL_CRESCENT_BAND_RATIO = 0.018
+BALL_CRESCENT_BAND_RATIO = 0.035
 BALL_CRESCENT_CONTRAST_OFFSET_RATIO = 0.025
 BALL_CRESCENT_OUTSIDE_CONTRAST_OFFSET_RATIO = 0.050
 BALL_CRESCENT_DEEP_CONTRAST_OFFSET_RATIO = 0.075
@@ -181,6 +183,9 @@ BALL_CRESCENT_MIN_GRADIENT_POLARITY = 0.62
 BALL_CRESCENT_MIN_PROFILE_SUPPORT = 0.55
 BALL_CRESCENT_MIN_PROFILE_POLARITY = 0.62
 BALL_CRESCENT_MIN_COHERENT_RUN = 0.18
+# A silhueta da esfera de foil tem pequenos dentes. A suavização é aplicada
+# apenas aos pontos já validados da borda, antes dos testes de forma global.
+BALL_CRESCENT_SMOOTH_SAMPLES = 9
 BALL_CRESCENT_MAX_CIRCLE_RMSE_RATIO = 0.008
 BALL_CRESCENT_CURVATURE_BINS = 7
 BALL_CRESCENT_MIN_CURVATURE_SCORE = 0.95
@@ -189,6 +194,27 @@ BALL_CRESCENT_MIN_CURVATURE_SCORE = 0.95
 BALL_CRESCENT_MIN_SLOPE_STEP = 0.08
 BALL_CRESCENT_MIN_SLOPE_SPAN = 0.45
 BALL_CRESCENT_MAX_CENTER_ERROR = 0.12
+
+# Segunda rota exclusiva para o papel-alumínio amassado/desfocado. A forma
+# pode perder Canny e circularidade local, mas precisa ter reflexos distribuídos
+# dentro do domo e fundo muito mais limpo; sombras e rampas sólidas não passam.
+BALL_CRESCENT_FOIL_MIN_SUPPORT = 0.45
+BALL_CRESCENT_FOIL_MIN_SHOULDER_SUPPORT = 0.35
+BALL_CRESCENT_FOIL_MIN_CENTER_SUPPORT = 0.45
+BALL_CRESCENT_FOIL_MIN_COHERENT_RUN = 0.16
+BALL_CRESCENT_FOIL_MAX_CIRCLE_RMSE_RATIO = 0.025
+# Um candidato por par (altura, largura); evita gastar as tres vagas apenas
+# com pequenos deslocamentos horizontais da mesma forma.
+BALL_CRESCENT_FOIL_MAX_CANDIDATES = 3
+BALL_CRESCENT_FOIL_TEXTURE_BINS = 5
+BALL_CRESCENT_FOIL_MIN_TEXTURE_BINS = 4
+BALL_CRESCENT_FOIL_MIN_DYNAMIC_RANGE = 35.0
+BALL_CRESCENT_FOIL_INNER_X_RATIO = 0.75
+BALL_CRESCENT_FOIL_INSIDE_OFFSETS = (0.035, 0.070, 0.105, 0.140)
+BALL_CRESCENT_FOIL_OUTSIDE_OFFSETS = (0.060, 0.100, 0.140)
+BALL_CRESCENT_FOIL_MIN_INTERIOR_EDGE_DENSITY = 0.02
+BALL_CRESCENT_FOIL_MAX_BACKGROUND_EDGE_DENSITY = 0.04
+BALL_CRESCENT_FOIL_BACKGROUND_EDGE_RATIO = 0.60
 
 # A meia-lua so pode concluir uma aproximacao visual real. O token e armado
 # por uma serie temporal de circulos centralizados, crescentes e ja baixos no
