@@ -971,7 +971,10 @@ class BallDetector:
             arena_guardian
             if arena_guardian is not None
             else (
-                MonocularArenaGuardian()
+                MonocularArenaGuardian(
+                    max_work_width=cfg.ARENA_GUARD_WORK_WIDTH,
+                    max_work_height=cfg.ARENA_GUARD_WORK_HEIGHT,
+                )
                 if self.enforce_arena else None
             )
         )
@@ -984,10 +987,15 @@ class BallDetector:
         self._misses = 0
         self._track_locked = False
         self._pixel_scale = 1.0
+        self._arena_frame_index = 0
+        self._arena_cached_model = None
+        self._marker_guard_frame_index = 0
+        self._hough_idle_frame_index = 0
         self.last_candidates = []
         self.last_enhanced = None
         self.last_edges = None
         self.last_hough_used = False
+        self.last_hough_deferred = False
         self.last_contour_proposals = 0
         self.last_hough_proposals = 0
         self.last_diagnostic = "inicio"
@@ -995,6 +1003,7 @@ class BallDetector:
         self.last_locked_detection = None
         self.last_arena_model = None
         self.last_arena_evidence = None
+        self.last_arena_vetoed = False
         self.last_marker_exclusions = ()
         self._frame_rejections = {}
 
@@ -1003,8 +1012,13 @@ class BallDetector:
         self._hits = 0
         self._misses = 0
         self._track_locked = False
+        self._arena_frame_index = 0
+        self._arena_cached_model = None
+        self._marker_guard_frame_index = 0
+        self._hough_idle_frame_index = 0
         self.last_candidates = []
         self.last_hough_used = False
+        self.last_hough_deferred = False
         self.last_contour_proposals = 0
         self.last_hough_proposals = 0
         self.last_diagnostic = "reset"
@@ -1012,6 +1026,7 @@ class BallDetector:
         self.last_locked_detection = None
         self.last_arena_model = None
         self.last_arena_evidence = None
+        self.last_arena_vetoed = False
         self.last_marker_exclusions = ()
         for marker_guard in self.marker_guards:
             marker_guard.reset()
@@ -1024,6 +1039,7 @@ class BallDetector:
         self._frame_rejections = {}
         self.last_contour_proposals = 0
         self.last_hough_proposals = 0
+        self.last_hough_deferred = False
 
         height, width = frame.shape[:2]
         self._pixel_scale = cfg.ball_pixel_scale(width, height)
@@ -1033,15 +1049,38 @@ class BallDetector:
         )
         self.last_arena_model = None
         self.last_arena_evidence = None
+        self.last_arena_vetoed = False
         if (
             acquiring
             and self.enforce_arena
             and self.arena_guardian is not None
         ):
-            self.last_arena_model = self.arena_guardian.build_model(frame)
+            interval = max(
+                int(cfg.ARENA_GUARD_INTERVAL_FRAMES), 1)
+            cached = self._arena_cached_model
+            refresh_arena = (
+                cached is None
+                or getattr(cached, "frame_width", width) != width
+                or getattr(cached, "frame_height", height) != height
+                or self._arena_frame_index % interval == 0
+            )
+            if refresh_arena:
+                cached = self.arena_guardian.build_model(frame)
+                self._arena_cached_model = cached
+            self.last_arena_model = cached
+            self._arena_frame_index += 1
 
         marker_exclusions = []
+        marker_interval = max(
+            int(cfg.MARKER_GUARD_INTERVAL_FRAMES), 1)
+        run_marker_guards = (
+            acquiring
+            and self.marker_guards
+            and self._marker_guard_frame_index % marker_interval == 0
+        )
         if acquiring and self.marker_guards:
+            self._marker_guard_frame_index += 1
+        if run_marker_guards:
             precomputed_masks = color_masks(frame)
             minimum_marker_pixels = max(
                 8,
@@ -1155,7 +1194,19 @@ class BallDetector:
                 self._track_match(candidate)[0]
                 for candidate in strong_contours
             )
-        self.last_hough_used = not strong_track_match
+        run_hough = not strong_track_match
+        if (
+            run_hough
+            and self._tracked is None
+            and not candidates
+        ):
+            idle_interval = max(
+                int(cfg.BALL_HOUGH_IDLE_INTERVAL_FRAMES), 1)
+            run_hough = (
+                self._hough_idle_frame_index % idle_interval == 0)
+            self._hough_idle_frame_index += 1
+            self.last_hough_deferred = not run_hough
+        self.last_hough_used = run_hough
         if self.last_hough_used:
             hough_proposals = self._hough_proposals(
                 gray_blur, roi_top, roi_bottom, self._pixel_scale)
@@ -1193,6 +1244,8 @@ class BallDetector:
             # A telemetria deve descrever exatamente a proposta escolhida,
             # nao outra circunferencia avaliada antes/depois no mesmo frame.
             self.last_arena_evidence = selected.arena_evidence
+            self.last_arena_vetoed = self._arena_evidence_vetoes(
+                selected.arena_evidence)
         detection = self._update_track(selected, timestamp)
         self.last_crescent_evidence = crescent_evidence
         self.last_diagnostic = self._diagnostic(selected)
@@ -1234,12 +1287,32 @@ class BallDetector:
             ):
                 arena_evidence = self.arena_guardian.evaluate(
                     arena_model, proposal)
+                arena_vetoed = self._arena_evidence_vetoes(
+                    arena_evidence)
+                current_evidence = self.last_arena_evidence
+                current_priority = (
+                    2
+                    if self._arena_evidence_vetoes(current_evidence)
+                    else (
+                        1
+                        if (
+                            current_evidence is not None
+                            and current_evidence.accepted
+                        )
+                        else 0
+                    )
+                )
+                arena_priority = (
+                    2 if arena_vetoed
+                    else (1 if arena_evidence.accepted else 0)
+                )
                 if (
-                    self.last_arena_evidence is None
-                    or arena_evidence.accepted
+                    current_evidence is None
+                    or arena_priority > current_priority
                 ):
                     self.last_arena_evidence = arena_evidence
-                if not arena_evidence.accepted:
+                if arena_vetoed:
+                    self.last_arena_vetoed = True
                     self._reject(arena_evidence.reason)
                     continue
             (
@@ -1272,6 +1345,34 @@ class BallDetector:
             candidate.arena_evidence = arena_evidence
             candidates.append(candidate)
         return candidates
+
+    @staticmethod
+    def _arena_evidence_vetoes(evidence):
+        """Usa a arena como veto forte, nunca como requisito de aquisicao.
+
+        A lente larga curva a junção parede-piso e a porta interrompe essa
+        linha. Sem um modelo confiavel, os filtros independentes de metade
+        inferior, perimetro, aparencia e confirmacao temporal continuam
+        decidindo. Quando a soleira e forte, objetos acima dela ainda sao
+        descartados; falta de apoio no piso so veta quando o suporte e quase
+        zero.
+        """
+        if evidence is None or evidence.accepted:
+            return False
+        confidence = float(
+            getattr(evidence, "boundary_confidence", 0.0))
+        reason = str(getattr(evidence, "reason", ""))
+        if (
+            reason == "fora_arena"
+            and confidence >= cfg.ARENA_VETO_MIN_CONFIDENCE
+        ):
+            return True
+        return (
+            reason == "sem_apoio_piso"
+            and confidence >= cfg.ARENA_VETO_MIN_CONFIDENCE
+            and float(getattr(evidence, "floor_support", 1.0))
+            <= cfg.ARENA_VETO_MAX_FLOOR_SUPPORT
+        )
 
     @staticmethod
     def _overlaps_marker(proposal, marker_exclusions):
@@ -1540,6 +1641,67 @@ class BallDetector:
         return crop[:, :, 1][inner], crop[:, :, 2][inner], crop[:, :, 2][annulus]
 
     @staticmethod
+    def _smooth_sphere_radial_metrics(hsv, proposal):
+        """Contraste radial de uma esfera prata lisa.
+
+        A esfera perolada das fotos quase nao possui a textura distribuida do
+        papel-aluminio amassado. Mesmo assim, sua iluminacao e esferica: a
+        regiao central tende a ser mais clara que um anel interno proximo da
+        borda. Medianas tornam a medida resistente ao reflexo especular.
+        """
+        height, width = hsv.shape[:2]
+        outer = int(math.ceil(proposal.radius * 0.82))
+        x0 = max(int(proposal.center_x) - outer, 0)
+        x1 = min(int(proposal.center_x) + outer + 1, width)
+        y0 = max(int(proposal.center_y) - outer, 0)
+        y1 = min(int(proposal.center_y) + outer + 1, height)
+        crop = hsv[y0:y1, x0:x1]
+        if crop.size == 0:
+            return 0.0, 0
+
+        yy, xx = np.ogrid[y0:y1, x0:x1]
+        dx = xx - proposal.center_x
+        dy = yy - proposal.center_y
+        distance = np.hypot(dx, dy)
+        center = distance <= proposal.radius * 0.42
+        rim = (
+            (distance >= proposal.radius * 0.58)
+            & (distance <= proposal.radius * 0.80)
+        )
+        center_values = crop[:, :, 2][center]
+        rim_values = crop[:, :, 2][rim]
+        if center_values.size < 12 or rim_values.size < 12:
+            return 0.0, 0
+
+        center_rim = float(
+            np.median(center_values) - np.median(rim_values))
+        value = crop[:, :, 2]
+        quadrants = (
+            (dx < 0) & (dy < 0),
+            (dx >= 0) & (dy < 0),
+            (dx < 0) & (dy >= 0),
+            (dx >= 0) & (dy >= 0),
+        )
+        radial_quadrants = 0
+        for quadrant in quadrants:
+            quadrant_center = value[center & quadrant]
+            quadrant_rim = value[rim & quadrant]
+            if (
+                quadrant_center.size < 3
+                or quadrant_rim.size < 3
+            ):
+                continue
+            contrast = float(
+                np.median(quadrant_center)
+                - np.median(quadrant_rim)
+            )
+            if contrast >= (
+                cfg.BALL_SILVER_SMOOTH_QUADRANT_CONTRAST_MIN
+            ):
+                radial_quadrants += 1
+        return center_rim, radial_quadrants
+
+    @staticmethod
     def _distributed_appearance_metrics(hsv, proposal):
         """Mede textura interna e contraste de borda por setores."""
         height, width = hsv.shape[:2]
@@ -1674,6 +1836,10 @@ class BallDetector:
             & (inner_s <= cfg.BALL_SILVER_TINTED_NEUTRAL_S_MAX)
         ))
         (
+            center_rim_contrast,
+            radial_quadrants,
+        ) = self._smooth_sphere_radial_metrics(hsv, proposal)
+        (
             texture_sectors,
             reflective_sectors,
             black_contrast_sectors,
@@ -1740,17 +1906,67 @@ class BallDetector:
             >= cfg.BALL_SILVER_TINTED_NEUTRAL_HIGHLIGHT_MIN
             and proposal.edge_support
             >= cfg.BALL_SILVER_TINTED_EDGE_SUPPORT_MIN)
-        silver_valid = (
+        textured_silver_valid = (
             inner_mean > cfg.BALL_BLACK_V_MAX * 0.62
             and dynamic_range >= cfg.BALL_SILVER_DYNAMIC_RANGE_MIN
             and texture_sectors >= cfg.BALL_SILVER_MIN_TEXTURE_SECTORS
-            and reflective_sectors
-            >= cfg.BALL_SILVER_MIN_REFLECTIVE_SECTORS
+            and (
+                reflective_sectors
+                >= cfg.BALL_SILVER_MIN_REFLECTIVE_SECTORS
+                or (
+                    tinted_reflective_valid
+                    and reflective_sectors >= 2
+                )
+            )
             and (neutral_silver_valid or tinted_reflective_valid)
             and (
                 highlight_fraction >= cfg.BALL_SILVER_HIGHLIGHT_FRACTION_MIN
                 or abs(annulus_mean - inner_mean)
                 >= cfg.BALL_BLACK_LOCAL_CONTRAST_MIN))
+        smooth_silver_valid = (
+            inner_mean >= cfg.BALL_SILVER_SMOOTH_INNER_V_MIN
+            and low_sat_fraction
+            >= cfg.BALL_SILVER_SMOOTH_LOW_SAT_FRACTION_MIN
+            and dynamic_range
+            >= cfg.BALL_SILVER_SMOOTH_DYNAMIC_RANGE_MIN
+            and dynamic_range
+            <= cfg.BALL_SILVER_SMOOTH_DYNAMIC_RANGE_MAX
+            and cfg.BALL_SILVER_SMOOTH_HIGHLIGHT_MIN
+            <= highlight_fraction
+            <= cfg.BALL_SILVER_SMOOTH_HIGHLIGHT_MAX
+            and center_rim_contrast
+            >= cfg.BALL_SILVER_SMOOTH_CENTER_RIM_MIN
+            and reflective_sectors
+            >= cfg.BALL_SILVER_SMOOTH_MIN_REFLECTIVE_SECTORS
+            and radial_quadrants
+            >= cfg.BALL_SILVER_SMOOTH_MIN_RADIAL_QUADRANTS
+            and geometry >= cfg.BALL_SILVER_SMOOTH_GEOMETRY_MIN
+        )
+        bright_silver_valid = (
+            inner_mean >= cfg.BALL_SILVER_BRIGHT_INNER_V_MIN
+            and low_sat_fraction
+            >= cfg.BALL_SILVER_SMOOTH_LOW_SAT_FRACTION_MIN
+            and highlight_fraction
+            >= cfg.BALL_SILVER_BRIGHT_HIGHLIGHT_MIN
+            and highlight_fraction
+            <= cfg.BALL_SILVER_BRIGHT_HIGHLIGHT_MAX
+            and dynamic_range
+            >= cfg.BALL_SILVER_BRIGHT_DYNAMIC_RANGE_MIN
+            and center_rim_contrast
+            >= cfg.BALL_SILVER_BRIGHT_CENTER_RIM_MIN
+            and radial_quadrants
+            >= cfg.BALL_SILVER_SMOOTH_MIN_RADIAL_QUADRANTS
+            and reflective_sectors
+            >= cfg.BALL_SILVER_BRIGHT_MIN_REFLECTIVE_SECTORS
+            and geometry >= cfg.BALL_SILVER_BRIGHT_GEOMETRY_MIN
+            and abs(annulus_mean - inner_mean)
+            >= cfg.BALL_BLACK_LOCAL_CONTRAST_MIN
+        )
+        silver_valid = (
+            textured_silver_valid
+            or smooth_silver_valid
+            or bright_silver_valid
+        )
         neutrality_score = float(np.clip(
             low_sat_fraction
             / max(cfg.BALL_SILVER_LOW_SAT_FRACTION_MIN, 0.01),
@@ -1763,6 +1979,35 @@ class BallDetector:
             + 0.15 * np.clip(highlight_fraction / 0.20, 0.0, 1.0)
             + 0.35 * geometry,
             0.0, 1.0))
+        smooth_silver_score = float(np.clip(
+            0.50 * geometry
+            + 0.18 * neutrality_score
+            + 0.12 * np.clip(
+                inner_mean / 180.0, 0.0, 1.0)
+            + 0.10 * np.clip(
+                highlight_fraction / 0.05, 0.0, 1.0)
+            + 0.10 * np.clip(
+                center_rim_contrast / 20.0, 0.0, 1.0),
+            0.0,
+            1.0,
+        ))
+        bright_silver_score = float(np.clip(
+            0.40 * geometry
+            + 0.20 * neutrality_score
+            + 0.20 * np.clip(
+                highlight_fraction
+                / max(cfg.BALL_SILVER_BRIGHT_HIGHLIGHT_MIN, 0.01),
+                0.0,
+                1.0,
+            )
+            + 0.20 * np.clip(inner_mean / 220.0, 0.0, 1.0),
+            0.0,
+            1.0,
+        ))
+        if smooth_silver_valid:
+            silver_score = max(silver_score, smooth_silver_score)
+        if bright_silver_valid:
+            silver_score = max(silver_score, bright_silver_score)
 
         if black_valid and black_score >= silver_score:
             kind, confidence = "black", black_score
@@ -1771,20 +2016,37 @@ class BallDetector:
         else:
             if inner_mean <= cfg.BALL_BLACK_V_MAX * 0.62:
                 self._reject("escura")
-            if not neutral_silver_valid and not tinted_reflective_valid:
+            if (
+                not neutral_silver_valid
+                and not tinted_reflective_valid
+                and low_sat_fraction
+                < cfg.BALL_SILVER_SMOOTH_LOW_SAT_FRACTION_MIN
+            ):
                 self._reject("saturacao")
-            if dynamic_range < cfg.BALL_SILVER_DYNAMIC_RANGE_MIN:
-                self._reject("textura")
-            if texture_sectors < cfg.BALL_SILVER_MIN_TEXTURE_SECTORS:
+            if (
+                not textured_silver_valid
+                and not smooth_silver_valid
+                and not bright_silver_valid
+                and (
+                    dynamic_range < cfg.BALL_SILVER_DYNAMIC_RANGE_MIN
+                    or texture_sectors
+                    < cfg.BALL_SILVER_MIN_TEXTURE_SECTORS
+                )
+            ):
                 self._reject("textura")
             if (
-                reflective_sectors
-                < cfg.BALL_SILVER_MIN_REFLECTIVE_SECTORS
-                or (
-                    highlight_fraction
-                    < cfg.BALL_SILVER_HIGHLIGHT_FRACTION_MIN
-                    and abs(annulus_mean - inner_mean)
-                    < cfg.BALL_BLACK_LOCAL_CONTRAST_MIN
+                not textured_silver_valid
+                and not smooth_silver_valid
+                and not bright_silver_valid
+                and (
+                    reflective_sectors
+                    < cfg.BALL_SILVER_SMOOTH_MIN_REFLECTIVE_SECTORS
+                    or (
+                        highlight_fraction
+                        < cfg.BALL_SILVER_SMOOTH_HIGHLIGHT_MIN
+                        and abs(annulus_mean - inner_mean)
+                        < cfg.BALL_BLACK_LOCAL_CONTRAST_MIN
+                    )
                 )
             ):
                 self._reject("reflexo")
@@ -1811,11 +2073,8 @@ class BallDetector:
     def _diagnostic(self, selected):
         if selected is not None:
             return "ok"
-        if (
-            self.last_arena_model is not None
-            and not self.last_arena_model.valid
-        ):
-            return f"arena_{self.last_arena_model.reason}"
+        if self.last_hough_deferred:
+            return "hough_intercalado"
         if self.last_hough_used and self.last_hough_proposals == 0:
             return "sem_circulo"
         if self._frame_rejections:
@@ -1855,6 +2114,11 @@ class BallDetector:
                     priority.get(reason, -1),
                 ),
             )
+        if (
+            self.last_arena_model is not None
+            and not self.last_arena_model.valid
+        ):
+            return f"arena_incerta_{self.last_arena_model.reason}"
         if self.last_contour_proposals == 0:
             return "sem_contorno"
         return "sem_candidato"
@@ -2035,24 +2299,36 @@ class BallDetector:
             if self._misses > cfg.BALL_MAX_TRACK_MISSES:
                 frame_metrics = (
                     self.last_hough_used,
+                    self.last_hough_deferred,
                     self.last_contour_proposals,
                     self.last_hough_proposals,
                     dict(self._frame_rejections),
                     self.last_arena_model,
                     self.last_arena_evidence,
+                    self.last_arena_vetoed,
                     self.last_marker_exclusions,
+                    self._arena_frame_index,
+                    self._arena_cached_model,
+                    self._marker_guard_frame_index,
+                    self._hough_idle_frame_index,
                 )
                 self.reset()
                 # reset() externo limpa telemetria; aqui o frame atual acabou
                 # de usar Hough e o overlay deve preservar o motivo da rejeicao.
                 (
                     self.last_hough_used,
+                    self.last_hough_deferred,
                     self.last_contour_proposals,
                     self.last_hough_proposals,
                     self._frame_rejections,
                     self.last_arena_model,
                     self.last_arena_evidence,
+                    self.last_arena_vetoed,
                     self.last_marker_exclusions,
+                    self._arena_frame_index,
+                    self._arena_cached_model,
+                    self._marker_guard_frame_index,
+                    self._hough_idle_frame_index,
                 ) = frame_metrics
             return None
 

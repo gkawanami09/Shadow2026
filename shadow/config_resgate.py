@@ -38,6 +38,21 @@ RESCUE_DETECTOR_MAX_HEIGHT = 240
 RESCUE_ARM_DELAY_S = 3.0
 RESCUE_WORKER_JOIN_TIMEOUT_S = 2.0
 
+# A soleira da arena e apenas um veto quando existe evidencia forte. Nas fotos
+# reais a lente larga curva a parede/piso e portas interrompem a linha; exigir
+# um modelo valido em todo frame deixava o detector completamente cego.
+# A analise roda reduzida e em frames alternados para nao derrubar o FPS.
+ARENA_GUARD_WORK_WIDTH = 160
+ARENA_GUARD_WORK_HEIGHT = 120
+ARENA_GUARD_INTERVAL_FRAMES = 2
+ARENA_VETO_MIN_CONFIDENCE = 0.64
+ARENA_VETO_MAX_FLOOR_SUPPORT = 0.12
+
+# Durante a busca de bolinhas, os dois filtros cromaticos de triangulo tambem
+# rodam em frames alternados. Como adquirir uma esfera exige tres resultados,
+# um triangulo ainda e interceptado antes de poder obter LOCK.
+MARKER_GUARD_INTERVAL_FRAMES = 2
+
 # Melhoria de iluminação já experimentada no visualizador de câmeras.
 RESCUE_CLAHE_CLIP = 2.0
 RESCUE_CLAHE_GRID = (8, 8)
@@ -67,7 +82,7 @@ BALL_TARGET_MIN_CENTER_Y_RATIO = 0.50
 # deixa o lock sobreviver quando a base acabou de ser cortada, sem mover para
 # cima o ponto fisico que dispara a coleta.
 BALL_ROI_BOTTOM = 1.00
-BALL_ROI_BOTTOM_OVERFLOW_RATIO = 0.03
+BALL_ROI_BOTTOM_OVERFLOW_RATIO = 0.10
 BALL_MIN_RADIUS_PX = 9
 BALL_MAX_RADIUS_PX = 135
 BALL_MIN_CIRCULARITY = 0.56
@@ -101,9 +116,13 @@ BALL_HOUGH_MIN_DIST_PX = 28
 BALL_HOUGH_PARAM1 = 105
 BALL_HOUGH_PARAM2 = 18
 BALL_HOUGH_MIN_CONFIDENCE = 0.66
+# Sem candidato nem track, o Hough pesado roda em frames alternados. Assim o
+# fundo cheio de circulos falsos nao prende o Raspberry; ao primeiro candidato
+# Hough, o tracker existe e os frames seguintes voltam a ser consecutivos.
+BALL_HOUGH_IDLE_INTERVAL_FRAMES = 2
 # Um contorno forte ja passou por circularidade, borda e aparencia. Nessa
 # situacao, Hough redundante durante os 3 hits de aquisicao so adiciona atraso.
-BALL_CONTOUR_FAST_CONFIDENCE = 0.78
+BALL_CONTOUR_FAST_CONFIDENCE = 0.68
 
 # Aparencia no frame original (classificacao nunca usa o gamma).
 BALL_BLACK_V_MAX = 105
@@ -127,9 +146,30 @@ BALL_SILVER_HIGHLIGHT_FRACTION_MIN = 0.015
 # global. O aluminio precisa distribuir textura e reflexos por varios setores.
 BALL_SILVER_TEXTURE_SECTORS = 6
 BALL_SILVER_MIN_TEXTURE_SECTORS = 4
-BALL_SILVER_MIN_REFLECTIVE_SECTORS = 2
+BALL_SILVER_MIN_REFLECTIVE_SECTORS = 3
 BALL_SILVER_SECTOR_DYNAMIC_RANGE_MIN = 18.0
 BALL_SILVER_SECTOR_HIGHLIGHT_FRACTION_MIN = 0.01
+# Segunda assinatura para a esfera prata lisa vista nas novas fotos. Ela pode
+# ter pouco "amassado" por setor, mas conserva um contorno circular forte,
+# neutralidade, um reflexo compacto e escurecimento esferico ate a borda.
+BALL_SILVER_SMOOTH_LOW_SAT_FRACTION_MIN = 0.70
+BALL_SILVER_SMOOTH_INNER_V_MIN = 115
+BALL_SILVER_SMOOTH_DYNAMIC_RANGE_MIN = 7.0
+BALL_SILVER_SMOOTH_DYNAMIC_RANGE_MAX = 45.0
+BALL_SILVER_SMOOTH_HIGHLIGHT_MIN = 0.008
+BALL_SILVER_SMOOTH_HIGHLIGHT_MAX = 0.32
+BALL_SILVER_SMOOTH_CENTER_RIM_MIN = 5.0
+BALL_SILVER_SMOOTH_QUADRANT_CONTRAST_MIN = 4.0
+BALL_SILVER_SMOOTH_MIN_RADIAL_QUADRANTS = 3
+BALL_SILVER_SMOOTH_MIN_REFLECTIVE_SECTORS = 1
+BALL_SILVER_SMOOTH_GEOMETRY_MIN = 0.78
+BALL_SILVER_BRIGHT_INNER_V_MIN = 175
+BALL_SILVER_BRIGHT_DYNAMIC_RANGE_MIN = 4.0
+BALL_SILVER_BRIGHT_HIGHLIGHT_MIN = 0.25
+BALL_SILVER_BRIGHT_HIGHLIGHT_MAX = 0.92
+BALL_SILVER_BRIGHT_CENTER_RIM_MIN = 3.0
+BALL_SILVER_BRIGHT_MIN_REFLECTIVE_SECTORS = 4
+BALL_SILVER_BRIGHT_GEOMETRY_MIN = 0.80
 # Rota conservadora para aluminio refletindo luz ciano/verde. Ela dispensa a
 # neutralidade global somente quando textura, brilho quase neutro e borda sao
 # simultaneamente muito fortes.
@@ -334,11 +374,11 @@ BALL_PICKUP_WIGGLE_STEP_S = 0.20
 
 # Busca das proximas vitimas. O Shadow nao possui IMU: o 360 e temporizado a
 # partir da calibracao existente de 0,70 s ~= 90 graus em velocidade 0,70.
-# O giro tanque foi reduzido para 0,30 para preservar nitidez e tempo de campo
-# suficientes para frear assim que o detector produzir o primeiro candidato.
+# O giro tanque foi reduzido novamente para 0,22: nas imagens novas, a esfera
+# atravessava o campo de visao antes de obter os tres resultados distintos.
 BALL_SEARCH_TANK_ANGLE = 180
-BALL_SEARCH_TANK_SPEED = 0.30
-BALL_SEARCH_FULL_TURN_S = 6.55
+BALL_SEARCH_TANK_SPEED = 0.22
+BALL_SEARCH_FULL_TURN_S = 8.93
 BALL_SEARCH_BRAKE_MIN_CONFIDENCE = BALL_MIN_CONFIDENCE
 BALL_SEARCH_VERIFY_TIMEOUT_S = 1.00
 

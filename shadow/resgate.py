@@ -154,11 +154,13 @@ def _annotate_arena_guard(frame, result):
     points = tuple(getattr(result, "arena_boundary_points", ()))
     reason = str(getattr(result, "arena_reason", ""))
     accepted = getattr(result, "arena_accepted", None)
-    blocked = (
-        accepted is False
-        or (accepted is None and reason not in ("", "ok"))
+    blocked = accepted is False
+    uncertain = accepted is None and reason not in ("", "ok")
+    arena_color = (
+        (0, 80, 255)
+        if blocked
+        else ((0, 190, 255) if uncertain else (255, 210, 0))
     )
-    arena_color = (0, 80, 255) if blocked else (255, 210, 0)
     if points:
         cv2.polylines(
             frame,
@@ -169,7 +171,7 @@ def _annotate_arena_guard(frame, result):
             cv2.LINE_AA,
         )
         label_y = max(min(point[1] for point in points) - 8, 18)
-        if not blocked:
+        if not blocked and not uncertain:
             cv2.putText(
                 frame,
                 (
@@ -197,6 +199,24 @@ def _annotate_arena_guard(frame, result):
             ),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.52,
+            arena_color,
+            2,
+            cv2.LINE_AA,
+        )
+    elif uncertain:
+        cv2.putText(
+            frame,
+            f"ARENA INCERTA: {reason} (nao veta)",
+            (
+                8,
+                (
+                    max(min(point[1] for point in points) - 8, 18)
+                    if points
+                    else max(int(round(frame.shape[0] * 0.46)), 20)
+                ),
+            ),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
             arena_color,
             2,
             cv2.LINE_AA,

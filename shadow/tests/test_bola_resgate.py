@@ -56,6 +56,38 @@ def silver_ball_frame(center=(320, 300)):
     return frame
 
 
+def smooth_silver_ball_frame(center=(320, 330), radius=48):
+    """Esfera perolada lisa: degradê radial e um reflexo compacto."""
+    frame = base_frame()
+    yy, xx = np.indices(frame.shape[:2])
+    distance = np.hypot(xx - center[0], yy - center[1])
+    inside = distance <= radius
+    values = np.clip(
+        181.0 - 0.35 * distance,
+        0,
+        255,
+    ).astype(np.uint8)
+    for channel in range(3):
+        frame[:, :, channel][inside] = values[inside]
+    cv2.circle(
+        frame,
+        (center[0] - 12, center[1] - 14),
+        7,
+        (245, 245, 245),
+        -1,
+        cv2.LINE_AA,
+    )
+    cv2.circle(
+        frame,
+        center,
+        radius,
+        (80, 80, 80),
+        4,
+        cv2.LINE_AA,
+    )
+    return frame
+
+
 def wood_with_lines_frame():
     """Madeira texturizada com linhas e arco que nao formam uma esfera."""
     frame = base_frame()
@@ -849,9 +881,9 @@ class RescueBallDetectorTests(unittest.TestCase):
         roi_top = int(height * cfg.BALL_ROI_TOP)
         roi_bottom = int(height * cfg.BALL_ROI_BOTTOM)
         just_clipped = _Proposal(
-            160, 219, 25, 0.80, 0.80, "hough")
+            160, 236, 25, 0.80, 0.80, "hough")
         too_far_out = _Proposal(
-            160, 221, 25, 0.80, 0.80, "hough")
+            160, 237, 25, 0.80, 0.80, "hough")
 
         self.assertTrue(BallDetector._inside_roi(
             just_clipped,
@@ -1162,6 +1194,55 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertTrue(result.confirmed)
         self.assertTrue(detector.last_hough_used)
 
+    def test_idle_hough_is_interleaved_without_resetting_its_phase(self):
+        detector = BallDetector("silver", enhance=False)
+        calls = []
+
+        def empty_hough(*_args):
+            calls.append(1)
+            return []
+
+        detector._contour_proposals = lambda *_args: []
+        detector._hough_proposals = empty_hough
+        diagnostics = []
+        for index in range(6):
+            detector.detect(
+                base_frame(),
+                timestamp=index * 0.03,
+            )
+            diagnostics.append(detector.last_diagnostic)
+
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(
+            diagnostics.count("hough_intercalado"),
+            3,
+        )
+
+    def test_hough_runs_consecutively_after_first_candidate(self):
+        frame = cv2.resize(
+            smooth_silver_ball_frame(),
+            (
+                cfg.RESCUE_DETECTOR_MAX_WIDTH,
+                cfg.RESCUE_DETECTOR_MAX_HEIGHT,
+            ),
+            interpolation=cv2.INTER_AREA,
+        )
+        detector = BallDetector("silver", enhance=False)
+        detector._contour_proposals = lambda *_args: []
+        original_hough = detector._hough_proposals
+        calls = []
+
+        def counted_hough(*args):
+            calls.append(1)
+            return original_hough(*args)
+
+        detector._hough_proposals = counted_hough
+        result = self._confirmed(detector, frame)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertEqual(len(calls), cfg.BALL_ACQUIRE_HITS)
+
     def test_runtime_resolution_rejects_existing_negative_scenes(self):
         rectangle = base_frame()
         cv2.rectangle(
@@ -1203,6 +1284,69 @@ class RescueBallDetectorTests(unittest.TestCase):
                     self.assertIsNotNone(result)
                     self.assertTrue(result.confirmed)
                     self.assertEqual(result.kind, target)
+
+    def test_smooth_silver_ball_is_detected_at_320_and_640(self):
+        for size in ((320, 240), (640, 480)):
+            with self.subTest(size=size):
+                frame = cv2.resize(
+                    smooth_silver_ball_frame(),
+                    size,
+                    interpolation=cv2.INTER_AREA,
+                )
+                detector = BallDetector("silver", enhance=False)
+                result = self._confirmed(detector, frame)
+
+                self.assertIsNotNone(result)
+                self.assertTrue(result.confirmed)
+                self.assertEqual(result.kind, "silver")
+                self.assertEqual(detector.last_diagnostic, "ok")
+
+    def test_hough_only_preserves_smooth_silver_ball(self):
+        frame = cv2.resize(
+            smooth_silver_ball_frame(),
+            (
+                cfg.RESCUE_DETECTOR_MAX_WIDTH,
+                cfg.RESCUE_DETECTOR_MAX_HEIGHT,
+            ),
+            interpolation=cv2.INTER_AREA,
+        )
+        detector = BallDetector("silver", enhance=False)
+        detector._contour_proposals = lambda *_args: []
+
+        result = self._confirmed(detector, frame)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertTrue(detector.last_hough_used)
+
+    def test_uniform_white_disc_is_not_a_smooth_silver_ball(self):
+        frame = base_frame()
+        cv2.circle(
+            frame, (320, 330), 48, (225, 225, 225),
+            -1, cv2.LINE_AA)
+        cv2.circle(
+            frame, (320, 330), 48, (80, 80, 80),
+            4, cv2.LINE_AA)
+        detector = BallDetector("silver", enhance=False)
+        results = [
+            detector.detect(frame, timestamp=index * 0.03)
+            for index in range(cfg.BALL_ACQUIRE_HITS + 1)
+        ]
+
+        self.assertTrue(all(result is None for result in results))
+
+    def test_glossy_neutral_wood_knot_is_not_silver(self):
+        frame = neutral_wood_knot_frame()
+        cv2.circle(
+            frame, (300, 290), 11, (245, 245, 245),
+            -1, cv2.LINE_AA)
+        detector = BallDetector("silver", enhance=False)
+        results = [
+            detector.detect(frame, timestamp=index * 0.03)
+            for index in range(cfg.BALL_ACQUIRE_HITS + 1)
+        ]
+
+        self.assertTrue(all(result is None for result in results))
 
     def test_rejects_wood_shadow_and_triangle_at_320_and_640(self):
         scenes = (
@@ -1248,7 +1392,7 @@ class RescueBallDetectorTests(unittest.TestCase):
 
         self.assertIs(selected, real_ball)
 
-    def test_arena_guard_fails_closed_without_reliable_boundary(self):
+    def test_uncertain_arena_does_not_blind_a_valid_ball(self):
         detector = BallDetector(
             "silver",
             enforce_arena=True,
@@ -1263,23 +1407,94 @@ class RescueBallDetectorTests(unittest.TestCase):
             for index in range(cfg.BALL_ACQUIRE_HITS)
         ]
 
-        self.assertTrue(all(result is None for result in results))
-        self.assertTrue(
-            detector.last_diagnostic.startswith("arena_"),
-            detector.last_diagnostic,
+        self.assertIsNotNone(results[-1])
+        self.assertTrue(results[-1].confirmed)
+        self.assertFalse(detector.last_arena_vetoed)
+        self.assertEqual(detector.last_diagnostic, "ok")
+
+    def test_only_strong_arena_evidence_vetoes(self):
+        evidence = lambda reason, confidence, support=0.0: SimpleNamespace(
+            accepted=False,
+            reason=reason,
+            boundary_confidence=confidence,
+            floor_support=support,
         )
+        cases = (
+            (evidence("fora_arena", 0.64), True),
+            (evidence("fora_arena", 0.639), False),
+            (evidence("sem_apoio_piso", 0.64, 0.12), True),
+            (evidence("sem_apoio_piso", 0.64, 0.121), False),
+            (evidence("sem_limite_confiavel", 1.0), False),
+            (evidence("sem_piso_conectado", 1.0), False),
+            (evidence("sem_area_apoio", 1.0), False),
+        )
+        for arena_evidence, expected in cases:
+            with self.subTest(
+                reason=arena_evidence.reason,
+                confidence=arena_evidence.boundary_confidence,
+                support=arena_evidence.floor_support,
+            ):
+                self.assertIs(
+                    BallDetector._arena_evidence_vetoes(
+                        arena_evidence),
+                    expected,
+                )
+
+    def test_confident_outside_arena_prevents_acquisition(self):
+        class RejectingGuardian:
+            @staticmethod
+            def build_model(frame):
+                return SimpleNamespace(
+                    valid=True,
+                    reason="ok",
+                    confidence=0.92,
+                    frame_width=frame.shape[1],
+                    frame_height=frame.shape[0],
+                    boundary_points=lambda: (),
+                )
+
+            @staticmethod
+            def evaluate(_model, _proposal):
+                return SimpleNamespace(
+                    accepted=False,
+                    valid=False,
+                    reason="fora_arena",
+                    boundary_confidence=0.92,
+                    floor_support=0.0,
+                    support_box=None,
+                )
+
+        detector = BallDetector(
+            "silver",
+            enhance=False,
+            arena_guardian=RejectingGuardian(),
+        )
+        results = [
+            detector.detect(
+                silver_ball_frame(),
+                timestamp=index * 0.03,
+            )
+            for index in range(cfg.BALL_ACQUIRE_HITS)
+        ]
+
+        self.assertTrue(all(result is None for result in results))
+        self.assertTrue(detector.last_arena_vetoed)
+        self.assertEqual(detector.last_diagnostic, "fora_arena")
 
     def test_arena_guard_allows_supported_ball_before_lock(self):
         class AcceptingGuardian:
             def __init__(self):
                 self.evaluations = 0
+                self.builds = 0
 
-            @staticmethod
-            def build_model(_frame):
+            def build_model(self, frame):
+                self.builds += 1
                 return SimpleNamespace(
                     valid=True,
                     reason="ok",
                     confidence=0.95,
+                    frame_width=frame.shape[1],
+                    frame_height=frame.shape[0],
                     boundary_points=lambda: (),
                 )
 
@@ -1308,6 +1523,14 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result.confirmed)
         self.assertGreater(guardian.evaluations, 0)
+        self.assertEqual(guardian.builds, 2)
+
+        detector.detect(silver_ball_frame(), timestamp=1.0)
+        self.assertEqual(
+            guardian.builds,
+            2,
+            "guardiao nao deve reconstruir modelo depois do LOCK",
+        )
 
     def test_validated_marker_bbox_excludes_overlapping_circle(self):
         proposal = _Proposal(
@@ -1325,6 +1548,52 @@ class RescueBallDetectorTests(unittest.TestCase):
             BallDetector._overlaps_marker(proposal, (marker,)))
         self.assertFalse(
             BallDetector._overlaps_marker(proposal, (distant,)))
+
+    def test_interleaved_marker_guard_still_prevents_ball_lock(self):
+        class FakeMarkerGuard:
+            target_kind = "green"
+
+            def __init__(self):
+                self.calls = 0
+                self.last_candidates = []
+
+            def reset(self):
+                self.last_candidates = []
+
+            def detect(self, frame, timestamp, masks):
+                del frame, timestamp, masks
+                self.calls += 1
+                self.last_candidates = [
+                    SimpleNamespace(
+                        bbox=(270, 245, 100, 115),
+                        kind="green",
+                    )
+                ]
+
+        marker_guard = FakeMarkerGuard()
+        detector = BallDetector("silver", enhance=False)
+        detector.marker_guards = (marker_guard,)
+        full_mask = np.full((480, 640), 255, dtype=np.uint8)
+        results = []
+        with mock.patch.object(
+            rescue_ball,
+            "color_masks",
+            return_value={
+                "green": full_mask,
+                "red": np.zeros_like(full_mask),
+            },
+        ):
+            for index in range(6):
+                results.append(detector.detect(
+                    silver_ball_frame(),
+                    timestamp=index * 0.03,
+                ))
+
+        self.assertFalse(any(
+            result is not None and result.confirmed
+            for result in results
+        ))
+        self.assertEqual(marker_guard.calls, 3)
 
     def test_large_candidate_has_tight_gate_only_during_acquisition(self):
         detector = BallDetector("silver")

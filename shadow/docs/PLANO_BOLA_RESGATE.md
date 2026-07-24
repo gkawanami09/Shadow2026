@@ -62,7 +62,7 @@ NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
   `SEARCH`.
 
 O giro de 360° é temporizado porque o robô não possui IMU. Com o giro tanque
-reduzido para `0,30`, o valor inicial passou a `6,55 s`; ambos devem ser
+reduzido para `0,22`, o valor inicial passou a `8,93 s`; ambos devem ser
 conferidos no piso real com a bateria usada na competição. Durante o giro, o
 primeiro candidato visual válido já produz `PARAR`, mas a aproximação só começa
 depois das confirmações fortes feitas com o chassi parado.
@@ -93,11 +93,14 @@ fora da arena nessa região são rejeitados antes de entrar no tracker ou obter
 
 Na aquisição, uma segunda trava estima a junção parede-piso e o piso conectado
 à base da imagem. Lacunas entre segmentos coerentes viram uma soleira virtual:
-um círculo visto através da entrada/saída, acima dessa soleira ou sem apoio no
-piso interno, não entra no tracker. Se o limite não for confiável, a aquisição
-falha fechada e o robô continua parado. Depois do `LOCK`, essa trava é relaxada
-para a esfera próxima não desaparecer quando encobrir o próprio piso. A linha
-`SOLEIRA ARENA` no debug mostra o limite realmente usado.
+quando há uma soleira confiável, um círculo certamente acima dela ou com apoio
+quase nulo no piso interno não entra no tracker. Uma soleira ausente,
+interrompida ou curva é tratada como evidência incerta e não apaga uma esfera
+que passou pelos filtros independentes de metade inferior, perímetro,
+aparência e confirmação temporal. Depois do `LOCK`, essa análise deixa de
+rodar para a esfera próxima não desaparecer quando encobrir o próprio piso.
+O debug mostra `SOLEIRA ARENA`, `ARENA BLOQUEADA` ou `ARENA INCERTA (nao
+veta)`, conforme a força da evidência.
 
 Antes de liberar motores, execute:
 
@@ -122,6 +125,9 @@ caminho rápido de contornos ou `H` para fallback Hough, número de candidatos
 aceitos/propostas Hough brutas, motivo principal de rejeição, até quatro raios
 aceitos e frames descartados. Por exemplo, `H1/5:ok r42` significa que cinco
 círculos foram propostos, um passou pelos filtros e seu raio no preview é 42 px.
+Sem candidato nem track, o Hough pesado roda em frames alternados; ao encontrar
+o primeiro candidato, volta a rodar em resultados consecutivos até confirmar
+ou perder esse alvo.
 
 O preview desenha uma cruz `PONTO GARRA` em `(0,50W, 0,95H)`. O círculo
 suavizado da esfera recebe o rótulo `LOCK` depois de três associações
@@ -129,7 +135,7 @@ consistentes. Quando esse mesmo círculo cobre o ponto, está centralizado, tem
 raio de pelo menos `0,085H` e possui histórico real de avanço, o robô para no
 primeiro indício e exige uma segunda medição nova em até 0,35 s. Não existe
 folga acima do ponto: a borda calculada do círculo precisa realmente
-alcançá-lo. O ROI chega até a base da imagem e aceita até `0,03H` do perímetro
+alcançá-lo. O ROI chega até a base da imagem e aceita até `0,10H` do perímetro
 já cortado; isso preserva vários frames para confirmar em 240p sem subir o
 ponto físico. No máximo uma perda isolada pode preservar a confirmação por
 0,18 s com as rodas paradas; duas perdas liberam o lock e reiniciam a
@@ -181,9 +187,10 @@ Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 9. exclusão explícita de contornos triangulares verdes/vermelhos validados;
 10. contraste entre interior e exterior distribuído por setores para esfera
     preta, sem aceitar uma mancha apenas por ser muito escura;
-11. textura e reflexos neutros distribuídos por setores para a esfera
-    prateada; baixa saturação aumenta a
-    confiança, mas iluminação ciano/verde possui uma rota metálica mais estrita;
+11. textura e reflexos neutros distribuídos por setores para alumínio
+    amassado, ou brilho compacto com sombreamento radial em três de quatro
+    quadrantes para a esfera prata lisa; iluminação ciano/verde possui uma
+    rota metálica mais estrita;
 12. classificação de todas as propostas Hough antes da deduplicação, para um
     halo inválido não apagar o perímetro verdadeiro;
 13. preferência pelo envelope externo somente quando um círculo menor está
@@ -283,8 +290,8 @@ Outras travas:
 - um lock de sistema impede segue-linha e resgate de comandarem os motores ao
   mesmo tempo;
 - contagem regressiva de 3 segundos com preview já funcionando e `PARAR`;
-- limite da arena ausente ou piso sem apoio durante a aquisição = alvo
-  recusado, sem movimento;
+- soleira confiável indicando `fora_arena`, ou apoio praticamente nulo com
+  alta confiança = alvo recusado; limite incerto não veta sozinho;
 - abertura de entrada/saída = soleira virtual interpolada entre as paredes;
 - perda da esfera = `PARAR`;
 - nenhuma leitura ultrassônica pode alterar, pausar ou encerrar a aproximação;

@@ -316,6 +316,7 @@ class LatestFrameDetectorTests(unittest.TestCase):
     def test_arena_decision_and_geometry_are_published_at_preview_scale(self):
         class ArenaTelemetryDetector:
             def detect(self, frame, timestamp):
+                self.last_arena_vetoed = True
                 self.last_arena_model = SimpleNamespace(
                     reason="ok",
                     confidence=0.91,
@@ -355,6 +356,45 @@ class LatestFrameDetectorTests(unittest.TestCase):
         finally:
             worker.close()
 
+    def test_uncertain_arena_is_published_as_nullable_non_veto(self):
+        class UncertainArenaDetector:
+            def detect(self, frame, timestamp):
+                self.last_arena_vetoed = False
+                self.last_arena_model = SimpleNamespace(
+                    reason="sem_limite_confiavel",
+                    confidence=0.41,
+                    boundary_points=lambda: (),
+                )
+                self.last_arena_evidence = SimpleNamespace(
+                    reason="sem_limite_confiavel",
+                    boundary_confidence=0.41,
+                    floor_support=0.0,
+                    support_box=None,
+                    accepted=False,
+                )
+                return None
+
+        worker = LatestFrameBallDetector(
+            UncertainArenaDetector(),
+            max_width=320,
+            max_height=240,
+        )
+        try:
+            worker.submit(
+                np.zeros((240, 320, 3), dtype=np.uint8),
+                captured_at=10.0,
+            )
+            result = wait_result(worker)
+
+            self.assertEqual(
+                result.arena_reason,
+                "sem_limite_confiavel",
+            )
+            self.assertIsNone(result.arena_accepted)
+            self.assertAlmostEqual(result.arena_confidence, 0.41)
+        finally:
+            worker.close()
+
     def test_overlay_shows_blocked_even_when_boundary_exists(self):
         frame = np.zeros((240, 320, 3), dtype=np.uint8)
         result = SimpleNamespace(
@@ -374,6 +414,32 @@ class LatestFrameDetectorTests(unittest.TestCase):
             & (annotated[:, :, 2] > annotated[:, :, 1] * 2)
         )
         self.assertTrue(np.any(red_dominant))
+
+    def test_overlay_marks_uncertain_arena_without_blocking_red(self):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        result = SimpleNamespace(
+            arena_boundary_points=((10, 120), (310, 120)),
+            arena_reason="sem_limite_confiavel",
+            arena_confidence=0.41,
+            arena_accepted=None,
+            arena_floor_support=0.0,
+            arena_support_box=None,
+            marker_exclusion_boxes=(),
+        )
+
+        annotated = _annotate_arena_guard(frame, result)
+
+        orange = (
+            (annotated[:, :, 2] > 200)
+            & (annotated[:, :, 1] > 140)
+        )
+        blocked_red = (
+            (annotated[:, :, 2] > 200)
+            & (annotated[:, :, 1] < 120)
+            & (annotated[:, :, 0] < 80)
+        )
+        self.assertTrue(np.any(orange))
+        self.assertFalse(np.any(blocked_red))
 
     def test_pending_frame_is_replaced_instead_of_building_backlog(self):
         started = threading.Event()

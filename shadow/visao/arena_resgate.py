@@ -137,7 +137,7 @@ class MonocularArenaGuardian:
         self.min_floor_support = float(min_floor_support)
 
     def build_model(self, frame):
-        """Cria um modelo fail-closed para um frame BGR."""
+        """Cria a evidência de arena; o consumidor decide a política de veto."""
         if (
             frame is None
             or not isinstance(frame, np.ndarray)

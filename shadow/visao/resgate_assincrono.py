@@ -390,6 +390,8 @@ class LatestFrameBallDetector:
                     self.detector, "last_arena_model", None)
                 arena_evidence = getattr(
                     self.detector, "last_arena_evidence", None)
+                arena_vetoed = bool(getattr(
+                    self.detector, "last_arena_vetoed", False))
                 arena_boundary_points = (
                     tuple(arena_model.boundary_points())
                     if arena_model is not None else ()
@@ -398,7 +400,14 @@ class LatestFrameBallDetector:
                     arena_reason = str(arena_evidence.reason)
                     arena_confidence = float(
                         arena_evidence.boundary_confidence)
-                    arena_accepted = bool(arena_evidence.accepted)
+                    if arena_evidence.accepted:
+                        arena_accepted = True
+                    elif arena_vetoed:
+                        arena_accepted = False
+                    else:
+                        # Evidencia incerta nao autoriza nem bloqueia. Os
+                        # filtros independentes da esfera continuam decidindo.
+                        arena_accepted = None
                     arena_floor_support = float(
                         arena_evidence.floor_support)
                 else:
