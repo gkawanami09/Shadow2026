@@ -77,7 +77,7 @@ aceitos/propostas Hough brutas, motivo principal de rejeição, até quatro raio
 aceitos e frames descartados. Por exemplo, `H1/5:ok r42` significa que cinco
 círculos foram propostos, um passou pelos filtros e seu raio no preview é 42 px.
 
-O preview desenha uma cruz `PONTO GARRA` em `(0,50W, 0,98H)`. O círculo
+O preview desenha uma cruz `PONTO GARRA` em `(0,50W, 0,95H)`. O círculo
 suavizado da esfera recebe o rótulo `LOCK` depois de três associações
 consistentes. Quando esse mesmo círculo cobre o ponto, está centralizado, tem
 raio de pelo menos `0,085H` e possui histórico real de avanço, o robô para no
@@ -197,7 +197,7 @@ neural sendo treinada nesta etapa.
 ## Parada e segurança
 
 A chegada perto da bolinha é decidida exclusivamente pela câmera frontal. A
-primeira confirmação exige que o círculo travado alcance `0,98H`, sem folga.
+primeira confirmação exige que o círculo travado alcance `0,95H`, sem folga.
 A segunda medição fresca pode repetir o círculo ou usar a meia-lua larga,
 centralizada e contrastada caso o perímetro tenha sido cortado. Uma meia-lua
 sozinha nunca arma a coleta. O primeiro contato já produz `PARAR`, antes de

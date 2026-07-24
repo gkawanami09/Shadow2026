@@ -1692,27 +1692,6 @@ def annotate_rescue_frame(
         int(round(
             cfg.BALL_LOCKED_CIRCLE_POINT_Y_RATIO * height)),
     )
-    cv2.drawMarker(
-        annotated,
-        pickup_point,
-        gate_color,
-        cv2.MARKER_CROSS,
-        15,
-        gate_thickness,
-    )
-    cv2.putText(
-        annotated,
-        "PONTO GARRA",
-        (
-            min(pickup_point[0] + 9, max(width - 95, 0)),
-            max(pickup_point[1] - 8, 15),
-        ),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.40,
-        gate_color,
-        1,
-        cv2.LINE_AA,
-    )
     gate_center = (
         float(crescent_evidence.center_x_ratio)
         if crescent_evidence is not None else 0.5)
@@ -1852,4 +1831,27 @@ def annotate_rescue_frame(
     cv2.putText(
         annotated, motor_label, (8, height - 12),
         cv2.FONT_HERSHEY_SIMPLEX, 0.50, motor_color, 2, cv2.LINE_AA)
+    # O ponto fica por ultimo para continuar visivel mesmo muito perto da
+    # base, onde o texto de estado dos motores ocupa a mesma faixa.
+    cv2.drawMarker(
+        annotated,
+        pickup_point,
+        gate_color,
+        cv2.MARKER_CROSS,
+        15,
+        gate_thickness,
+    )
+    cv2.putText(
+        annotated,
+        "PONTO GARRA",
+        (
+            min(pickup_point[0] + 9, max(width - 95, 0)),
+            max(pickup_point[1] - 8, 15),
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.40,
+        gate_color,
+        1,
+        cv2.LINE_AA,
+    )
     return annotated

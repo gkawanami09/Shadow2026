@@ -171,7 +171,10 @@ BALL_STOP_CONFIRM_FRAMES = 3
 # vitima cobre um ponto perto da base. Tamanho, centro, crescimento anterior
 # e dois timestamps frescos impedem um reflexo pequeno de acionar a coleta.
 BALL_LOCKED_CIRCLE_POINT_X_RATIO = 0.50
-BALL_LOCKED_CIRCLE_POINT_Y_RATIO = 0.98
+# 0,98 ficou dentro da zona em que o Hough ja perde o circulo cortado. Em
+# 0,95 a borda ainda esta muito baixa, mas sobra uma janela real para obter as
+# duas medicoes frescas apesar do EMA, de um drop ou de pequeno erro lateral.
+BALL_LOCKED_CIRCLE_POINT_Y_RATIO = 0.95
 BALL_LOCKED_CIRCLE_POINT_SLACK_RATIO = 0.00
 BALL_LOCKED_CIRCLE_MIN_RADIUS_RATIO = 0.085
 BALL_LOCKED_CIRCLE_MAX_CENTER_ERROR = 0.16

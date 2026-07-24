@@ -791,6 +791,21 @@ class RescueBallDetectorTests(unittest.TestCase):
             roi_bottom,
         ))
 
+    def test_pickup_point_precedes_bottom_track_loss_with_real_margin(self):
+        detector_height = cfg.RESCUE_DETECTOR_MAX_HEIGHT
+        point_y = (
+            cfg.BALL_LOCKED_CIRCLE_POINT_Y_RATIO * detector_height)
+        last_allowed_bottom = (
+            detector_height
+            - 2
+            + detector_height * cfg.BALL_ROI_BOTTOM_OVERFLOW_RATIO
+        )
+
+        # O antigo 0,98 deixava pouca imagem util antes de o Hough perder a
+        # esfera real. O ponto operacional precisa conservar uma margem
+        # vertical suficiente para duas imagens distintas.
+        self.assertGreaterEqual(last_allowed_bottom - point_y, 17.0)
+
     def test_deduplicate_keeps_nested_radii_but_merges_near_duplicates(self):
         detector = BallDetector("silver")
         proposals = [
