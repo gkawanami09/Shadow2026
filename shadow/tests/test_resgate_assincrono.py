@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 
 import cv2
@@ -21,6 +22,7 @@ from visao.resgate_assincrono import (  # noqa: E402
     _scale_detection,
 )
 from visao.bola_resgate import BallDetection, BallDetector  # noqa: E402
+from resgate import _annotate_arena_guard  # noqa: E402
 
 
 def wait_result(worker, after_sequence=0, timeout=1.0):
@@ -310,6 +312,68 @@ class LatestFrameDetectorTests(unittest.TestCase):
             self.assertTupleEqual(result.candidate_radii, (45.0,))
         finally:
             worker.close()
+
+    def test_arena_decision_and_geometry_are_published_at_preview_scale(self):
+        class ArenaTelemetryDetector:
+            def detect(self, frame, timestamp):
+                self.last_arena_model = SimpleNamespace(
+                    reason="ok",
+                    confidence=0.91,
+                    boundary_points=lambda: ((10, 20), (100, 30)),
+                )
+                self.last_arena_evidence = SimpleNamespace(
+                    reason="fora_arena",
+                    boundary_confidence=0.91,
+                    floor_support=0.12,
+                    support_box=(12, 21, 36, 44),
+                    accepted=False,
+                )
+                return None
+
+        worker = LatestFrameBallDetector(
+            ArenaTelemetryDetector(),
+            max_width=320,
+            max_height=240,
+        )
+        try:
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            worker.submit(frame, captured_at=10.0)
+            result = wait_result(worker)
+
+            self.assertEqual(result.arena_reason, "fora_arena")
+            self.assertIs(result.arena_accepted, False)
+            self.assertAlmostEqual(result.arena_confidence, 0.91)
+            self.assertAlmostEqual(result.arena_floor_support, 0.12)
+            self.assertTupleEqual(
+                result.arena_boundary_points,
+                ((20, 40), (200, 60)),
+            )
+            self.assertTupleEqual(
+                result.arena_support_box,
+                (24, 42, 72, 88),
+            )
+        finally:
+            worker.close()
+
+    def test_overlay_shows_blocked_even_when_boundary_exists(self):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        result = SimpleNamespace(
+            arena_boundary_points=((10, 120), (310, 120)),
+            arena_reason="fora_arena",
+            arena_confidence=0.9,
+            arena_accepted=False,
+            arena_floor_support=0.0,
+            arena_support_box=(120, 100, 180, 140),
+            marker_exclusion_boxes=(),
+        )
+
+        annotated = _annotate_arena_guard(frame, result)
+
+        red_dominant = (
+            (annotated[:, :, 2] > 200)
+            & (annotated[:, :, 2] > annotated[:, :, 1] * 2)
+        )
+        self.assertTrue(np.any(red_dominant))
 
     def test_pending_frame_is_replaced_instead_of_building_backlog(self):
         started = threading.Event()

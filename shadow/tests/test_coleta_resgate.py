@@ -58,6 +58,11 @@ def _run_sequence(target_kind):
         cfg.BALL_PICKUP_LIFT_MS / 1000.0
         + cfg.BALL_PICKUP_LIFT_GUARD_S
     )
+    carry = pickup.update(now=now)
+    actions.append(carry)
+    _ack_step(pickup, carry, now)
+    if not pickup.resume_deposit():
+        raise AssertionError("deposito nao foi liberado no estado de transporte")
     lower = pickup.update(now=now)
     actions.append(lower)
     _ack_step(pickup, lower, now)
@@ -151,6 +156,54 @@ class BallPickupSequencerTests(unittest.TestCase):
             (
                 cfg.BALL_PICKUP_LEFT_DELTA,
                 cfg.BALL_PICKUP_RIGHT_DELTA,
+            ),
+        )
+
+    def test_release_is_blocked_while_carrying_until_marker_arrival(self):
+        pickup = BallPickupSequencer()
+        pickup.start("silver")
+        now = 0.0
+
+        down = pickup.update(now=now)
+        _ack_step(pickup, down, now)
+        now += (
+            cfg.BALL_PICKUP_FUTABA_MS / 1000.0
+            + cfg.BALL_PICKUP_FUTABA_GUARD_S
+        )
+        forward = pickup.update(now=now)
+        _ack_step(pickup, forward, now)
+        now += cfg.BALL_PICKUP_FORWARD_S
+        close = pickup.update(now=now)
+        _ack_step(pickup, close, now)
+        now += cfg.BALL_PICKUP_GRIPPER_SETTLE_S
+        lift = pickup.update(now=now)
+        _ack_step(pickup, lift, now)
+        now += (
+            cfg.BALL_PICKUP_LIFT_MS / 1000.0
+            + cfg.BALL_PICKUP_LIFT_GUARD_S
+        )
+
+        carry = pickup.update(now=now)
+        self.assertEqual(carry.state, pickup.CARRY_READY)
+        self.assertTrue(carry.stop_futaba)
+        self.assertTrue(pickup.ready_for_deposit)
+        self.assertIsNone(carry.futaba_action)
+        self.assertIsNone(carry.gripper_action)
+
+        for later in (now + 1.0, now + 30.0):
+            waiting = pickup.update(now=later)
+            self.assertEqual(waiting.state, pickup.CARRY_READY)
+            self.assertIsNone(waiting.futaba_action)
+            self.assertIsNone(waiting.gripper_action)
+
+        self.assertTrue(pickup.resume_deposit())
+        self.assertFalse(pickup.resume_deposit())
+        lower = pickup.update(now=now + 30.0)
+        self.assertEqual(
+            lower.futaba_action,
+            (
+                cfg.BALL_PICKUP_LOWER_POWER,
+                cfg.BALL_PICKUP_LOWER_MS,
             ),
         )
 

@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -52,6 +53,74 @@ def silver_ball_frame(center=(320, 300)):
         cv2.LINE_AA,
     )
     cv2.circle(frame, center, 44, (65, 65, 65), 2, cv2.LINE_AA)
+    return frame
+
+
+def wood_with_lines_frame():
+    """Madeira texturizada com linhas e arco que nao formam uma esfera."""
+    frame = base_frame()
+    cv2.rectangle(frame, (0, 220), (639, 479), (105, 130, 155), -1)
+    cv2.line(
+        frame, (40, 430), (585, 245), (60, 82, 105), 10, cv2.LINE_AA)
+    cv2.line(
+        frame, (55, 250), (580, 430), (75, 96, 118), 7, cv2.LINE_AA)
+    cv2.ellipse(
+        frame,
+        (320, 335),
+        (132, 82),
+        0,
+        205,
+        335,
+        (55, 72, 88),
+        7,
+        cv2.LINE_AA,
+    )
+    return frame
+
+
+def neutral_wood_knot_frame():
+    """No de madeira quase cinza: circular e texturizado, mas sem reflexos."""
+    frame = base_frame()
+    yy, xx = np.indices(frame.shape[:2])
+    disk = np.hypot(xx - 320, yy - 310) <= 110
+    rng = np.random.default_rng(2)
+    values = np.clip(
+        125
+        + 35 * np.sin(xx / 9.0)
+        + 25 * np.sin(yy / 13.0)
+        + rng.normal(0, 13, frame.shape[:2]),
+        20,
+        190,
+    ).astype(np.uint8)
+    texture = np.dstack((values, values, values))
+    frame[disk] = texture[disk]
+    cv2.circle(
+        frame, (320, 310), 110, (65, 65, 65), 3, cv2.LINE_AA)
+    return frame
+
+
+def circular_shadow_frame():
+    """Sombra circular grande com transicao suave, sem borda de objeto."""
+    mask = np.zeros((480, 640), dtype=np.uint8)
+    cv2.circle(mask, (320, 310), 112, 255, -1)
+    mask = cv2.GaussianBlur(mask, (0, 0), 6)
+    alpha = mask.astype(np.float32) / 255.0
+    values = (
+        145.0 * (1.0 - alpha)
+        + 48.0 * alpha
+    ).astype(np.uint8)
+    return cv2.cvtColor(values, cv2.COLOR_GRAY2BGR)
+
+
+def dark_triangle_frame():
+    frame = base_frame()
+    triangle = np.asarray(
+        ((320, 205), (190, 415), (510, 415)),
+        dtype=np.int32,
+    )
+    cv2.fillPoly(frame, [triangle], (35, 35, 35), cv2.LINE_AA)
+    cv2.line(
+        frame, (190, 415), (510, 415), (20, 20, 20), 5, cv2.LINE_AA)
     return frame
 
 
@@ -1116,6 +1185,161 @@ class RescueBallDetectorTests(unittest.TestCase):
                 result is not None and result.confirmed
                 for result in results
             ))
+
+    def test_distributed_gates_preserve_real_balls_at_320_and_640(self):
+        for original, target in (
+            (black_ball_frame(), "black"),
+            (silver_ball_frame(), "silver"),
+        ):
+            for size in ((320, 240), (640, 480)):
+                with self.subTest(target=target, size=size):
+                    frame = cv2.resize(
+                        original,
+                        size,
+                        interpolation=cv2.INTER_AREA,
+                    )
+                    result = self._confirmed(
+                        BallDetector(target), frame)
+                    self.assertIsNotNone(result)
+                    self.assertTrue(result.confirmed)
+                    self.assertEqual(result.kind, target)
+
+    def test_rejects_wood_shadow_and_triangle_at_320_and_640(self):
+        scenes = (
+            wood_with_lines_frame(),
+            neutral_wood_knot_frame(),
+            circular_shadow_frame(),
+            dark_triangle_frame(),
+        )
+        for scene_index, original in enumerate(scenes):
+            for size in ((320, 240), (640, 480)):
+                with self.subTest(scene=scene_index, size=size):
+                    frame = cv2.resize(
+                        original,
+                        size,
+                        interpolation=cv2.INTER_AREA,
+                    )
+                    detector = BallDetector("any")
+                    results = [
+                        detector.detect(
+                            frame, timestamp=index * 0.03)
+                        for index in range(
+                            cfg.BALL_ACQUIRE_HITS + 1)
+                    ]
+                    self.assertTrue(
+                        all(result is None for result in results),
+                        (
+                            f"falso alvo {scene_index} em {size}: "
+                            f"{results[-1]}"
+                        ),
+                    )
+                    self.assertFalse(detector._track_locked)
+
+    def test_huge_weaker_candidate_does_not_beat_real_ball(self):
+        detector = BallDetector("any")
+        detector._pixel_scale = 1.0
+        real_ball = _Candidate(
+            "silver", 250, 320, 34, 0.82)
+        huge_wood_circle = _Candidate(
+            "silver", 470, 300, 132, 0.72)
+
+        selected = detector._select_candidate(
+            [huge_wood_circle, real_ball])
+
+        self.assertIs(selected, real_ball)
+
+    def test_arena_guard_fails_closed_without_reliable_boundary(self):
+        detector = BallDetector(
+            "silver",
+            enforce_arena=True,
+            enhance=False,
+        )
+
+        results = [
+            detector.detect(
+                silver_ball_frame(),
+                timestamp=index * 0.03,
+            )
+            for index in range(cfg.BALL_ACQUIRE_HITS)
+        ]
+
+        self.assertTrue(all(result is None for result in results))
+        self.assertTrue(
+            detector.last_diagnostic.startswith("arena_"),
+            detector.last_diagnostic,
+        )
+
+    def test_arena_guard_allows_supported_ball_before_lock(self):
+        class AcceptingGuardian:
+            def __init__(self):
+                self.evaluations = 0
+
+            @staticmethod
+            def build_model(_frame):
+                return SimpleNamespace(
+                    valid=True,
+                    reason="ok",
+                    confidence=0.95,
+                    boundary_points=lambda: (),
+                )
+
+            def evaluate(self, model, proposal):
+                del model, proposal
+                self.evaluations += 1
+                return SimpleNamespace(
+                    accepted=True,
+                    valid=True,
+                    reason="ok",
+                    boundary_confidence=0.95,
+                    floor_support=0.90,
+                    support_box=None,
+                )
+
+        guardian = AcceptingGuardian()
+        detector = BallDetector(
+            "silver",
+            enhance=False,
+            arena_guardian=guardian,
+        )
+
+        result = self._confirmed(
+            detector, silver_ball_frame())
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertGreater(guardian.evaluations, 0)
+
+    def test_validated_marker_bbox_excludes_overlapping_circle(self):
+        proposal = _Proposal(
+            320.0, 310.0, 45.0, 1.0, 1.0, "edge")
+        marker = SimpleNamespace(
+            bbox=(285, 255, 90, 110),
+            kind="green",
+        )
+        distant = SimpleNamespace(
+            bbox=(20, 250, 60, 90),
+            kind="red",
+        )
+
+        self.assertTrue(
+            BallDetector._overlaps_marker(proposal, (marker,)))
+        self.assertFalse(
+            BallDetector._overlaps_marker(proposal, (distant,)))
+
+    def test_large_candidate_has_tight_gate_only_during_acquisition(self):
+        detector = BallDetector("silver")
+        detector._pixel_scale = 1.0
+        detector._tracked = _Candidate(
+            "silver", 250, 300, 120, 0.90)
+        moved = _Candidate(
+            "silver", 290, 300, 120, 0.90)
+
+        detector._hits = 1
+        self.assertFalse(detector._track_match(moved)[0])
+
+        detector._hits = cfg.BALL_ACQUIRE_HITS
+        detector._track_locked = True
+        self.assertTrue(detector._track_match(moved)[0])
 
     def test_hough_telemetry_survives_internal_track_reset(self):
         detector = BallDetector("any")

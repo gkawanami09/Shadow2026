@@ -27,6 +27,10 @@ python3 shadow/resgate.py --camera-index 0 --debug
 python3 shadow/resgate.py --camera-index 0 --drive --debug
 ```
 
+Na busca, a visão rejeita alvos fora da soleira da arena, madeira, sombras e
+triângulos. Depois da coleta, prata é levada ao triângulo verde e preta ao
+vermelho; o movimento de garra só é liberado depois da chegada confirmada.
+
 Os dois programas não podem rodar ao mesmo tempo porque compartilham os
 motores e a conexão serial.
 

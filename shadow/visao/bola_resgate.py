@@ -14,6 +14,8 @@ import cv2
 import numpy as np
 
 import config_resgate as cfg
+from visao.arena_resgate import MonocularArenaGuardian
+from visao.marcador_resgate import MarkerDetector, color_masks
 
 
 @dataclass(frozen=True)
@@ -910,6 +912,8 @@ class _Proposal:
     fill_ratio: float
     source: str
     edge_support: float = 0.0
+    edge_sector_count: int = 0
+    radial_dispersion: float = 1.0
 
 
 @dataclass
@@ -919,6 +923,7 @@ class _Candidate:
     center_y: float
     radius: float
     confidence: float
+    arena_evidence: object = None
 
 
 class RescueEnhancer:
@@ -948,11 +953,32 @@ class RescueEnhancer:
 class BallDetector:
     """Detector stateful: uma esfera so e confirmada apos varios frames."""
 
-    def __init__(self, target_kind="any", enhance=True):
+    def __init__(
+        self,
+        target_kind="any",
+        enhance=True,
+        enforce_arena=False,
+        exclude_markers=False,
+        arena_guardian=None,
+    ):
         if target_kind not in ("any", "black", "silver"):
             raise ValueError("target_kind deve ser any, black ou silver")
         self.target_kind = target_kind
         self.enhancer = RescueEnhancer() if enhance else None
+        self.enforce_arena = bool(
+            enforce_arena or arena_guardian is not None)
+        self.arena_guardian = (
+            arena_guardian
+            if arena_guardian is not None
+            else (
+                MonocularArenaGuardian()
+                if self.enforce_arena else None
+            )
+        )
+        self.marker_guards = (
+            (MarkerDetector("green"), MarkerDetector("red"))
+            if exclude_markers else ()
+        )
         self._tracked = None
         self._hits = 0
         self._misses = 0
@@ -967,6 +993,9 @@ class BallDetector:
         self.last_diagnostic = "inicio"
         self.last_crescent_evidence = None
         self.last_locked_detection = None
+        self.last_arena_model = None
+        self.last_arena_evidence = None
+        self.last_marker_exclusions = ()
         self._frame_rejections = {}
 
     def reset(self):
@@ -981,6 +1010,11 @@ class BallDetector:
         self.last_diagnostic = "reset"
         self.last_crescent_evidence = None
         self.last_locked_detection = None
+        self.last_arena_model = None
+        self.last_arena_evidence = None
+        self.last_marker_exclusions = ()
+        for marker_guard in self.marker_guards:
+            marker_guard.reset()
         self._frame_rejections = {}
 
     def detect(self, frame, timestamp=None):
@@ -993,6 +1027,48 @@ class BallDetector:
 
         height, width = frame.shape[:2]
         self._pixel_scale = cfg.ball_pixel_scale(width, height)
+        acquiring = not (
+            self._track_locked
+            or self._hits >= cfg.BALL_ACQUIRE_HITS
+        )
+        self.last_arena_model = None
+        self.last_arena_evidence = None
+        if (
+            acquiring
+            and self.enforce_arena
+            and self.arena_guardian is not None
+        ):
+            self.last_arena_model = self.arena_guardian.build_model(frame)
+
+        marker_exclusions = []
+        if acquiring and self.marker_guards:
+            precomputed_masks = color_masks(frame)
+            minimum_marker_pixels = max(
+                8,
+                int(round(
+                    cfg.MARKER_MIN_AREA_RATIO
+                    * width
+                    * height
+                    * 0.50
+                )),
+            )
+            for marker_guard in self.marker_guards:
+                marker_mask = precomputed_masks[
+                    marker_guard.target_kind]
+                if (
+                    np.count_nonzero(marker_mask)
+                    < minimum_marker_pixels
+                ):
+                    marker_guard.reset()
+                    continue
+                marker_guard.detect(
+                    frame,
+                    timestamp=timestamp,
+                    masks=precomputed_masks,
+                )
+                marker_exclusions.extend(marker_guard.last_candidates)
+        self.last_marker_exclusions = tuple(marker_exclusions)
+
         enhanced = (
             self.enhancer.apply(frame) if self.enhancer is not None
             else frame.copy())
@@ -1007,6 +1083,10 @@ class BallDetector:
         lower = int(max(20, (1.0 - cfg.BALL_CANNY_SIGMA) * median))
         upper = int(min(255, max(lower + 30, (1.0 + cfg.BALL_CANNY_SIGMA) * median)))
         raw_edges = cv2.Canny(gray_blur, lower, upper)
+        gradient_x = cv2.Sobel(
+            gray_blur, cv2.CV_32F, 1, 0, ksize=3)
+        gradient_y = cv2.Sobel(
+            gray_blur, cv2.CV_32F, 0, 1, ksize=3)
         crescent_evidence = _detect_close_crescent(
             appearance_gray,
             raw_edges,
@@ -1052,6 +1132,11 @@ class BallDetector:
             height,
             roi_top,
             roi_bottom,
+            gradient_x,
+            gradient_y,
+            self.last_arena_model,
+            self.last_marker_exclusions,
+            acquiring,
         )
 
         # Hough e, de longe, o trecho mais caro no Raspberry Pi. Um contorno
@@ -1089,6 +1174,11 @@ class BallDetector:
                 height,
                 roi_top,
                 roi_bottom,
+                gradient_x,
+                gradient_y,
+                self.last_arena_model,
+                self.last_marker_exclusions,
+                acquiring,
             )
             candidates.extend(hough_candidates)
 
@@ -1096,6 +1186,13 @@ class BallDetector:
         self.last_enhanced = enhanced
         self.last_edges = edges
         selected = self._select_candidate(candidates)
+        if (
+            selected is not None
+            and selected.arena_evidence is not None
+        ):
+            # A telemetria deve descrever exatamente a proposta escolhida,
+            # nao outra circunferencia avaliada antes/depois no mesmo frame.
+            self.last_arena_evidence = selected.arena_evidence
         detection = self._update_track(selected, timestamp)
         self.last_crescent_evidence = crescent_evidence
         self.last_diagnostic = self._diagnostic(selected)
@@ -1111,16 +1208,60 @@ class BallDetector:
         height,
         roi_top,
         roi_bottom,
+        gradient_x=None,
+        gradient_y=None,
+        arena_model=None,
+        marker_exclusions=(),
+        acquiring=True,
     ):
         candidates = []
         for proposal in proposals:
+            arena_evidence = None
             if not self._inside_roi(proposal, width, height, roi_top, roi_bottom):
                 self._reject("roi")
                 continue
-            proposal.edge_support = self._radial_edge_support(
-                edge_dilated, proposal)
-            if proposal.edge_support < cfg.BALL_MIN_EDGE_SUPPORT:
-                self._reject("borda")
+            if (
+                acquiring
+                and self._overlaps_marker(
+                    proposal, marker_exclusions)
+            ):
+                self._reject("marcador")
+                continue
+            if (
+                acquiring
+                and self.enforce_arena
+                and self.arena_guardian is not None
+            ):
+                arena_evidence = self.arena_guardian.evaluate(
+                    arena_model, proposal)
+                if (
+                    self.last_arena_evidence is None
+                    or arena_evidence.accepted
+                ):
+                    self.last_arena_evidence = arena_evidence
+                if not arena_evidence.accepted:
+                    self._reject(arena_evidence.reason)
+                    continue
+            (
+                proposal.edge_support,
+                proposal.edge_sector_count,
+                proposal.radial_dispersion,
+                anchor_sectors_valid,
+            ) = self._radial_perimeter_metrics(
+                edge_dilated,
+                gradient_x,
+                gradient_y,
+                proposal,
+            )
+            if (
+                proposal.edge_support < cfg.BALL_MIN_EDGE_SUPPORT
+                or proposal.edge_sector_count
+                < cfg.BALL_RADIAL_MIN_GOOD_SECTORS
+                or proposal.radial_dispersion
+                > cfg.BALL_RADIAL_MAX_DISPERSION_RATIO
+                or not anchor_sectors_valid
+            ):
+                self._reject("perimetro")
                 continue
             candidate = self._classify(frame, hsv, proposal)
             if candidate is None:
@@ -1128,8 +1269,36 @@ class BallDetector:
             if self.target_kind != "any" and candidate.kind != self.target_kind:
                 self._reject("tipo")
                 continue
+            candidate.arena_evidence = arena_evidence
             candidates.append(candidate)
         return candidates
+
+    @staticmethod
+    def _overlaps_marker(proposal, marker_exclusions):
+        """Triangulos validados nunca entram como propostas de esfera."""
+        for marker in marker_exclusions:
+            x, y, width, height = marker.bbox
+            padding = max(
+                2.0,
+                0.08 * max(float(width), float(height)),
+            )
+            nearest_x = float(np.clip(
+                proposal.center_x,
+                float(x) - padding,
+                float(x + width) + padding,
+            ))
+            nearest_y = float(np.clip(
+                proposal.center_y,
+                float(y) - padding,
+                float(y + height) + padding,
+            ))
+            distance = math.hypot(
+                proposal.center_x - nearest_x,
+                proposal.center_y - nearest_y,
+            )
+            if distance <= proposal.radius:
+                return True
+        return False
 
     def _hough_proposals(self, gray, roi_top, roi_bottom, pixel_scale):
         roi = gray[roi_top:roi_bottom, :]
@@ -1153,8 +1322,8 @@ class BallDetector:
                 float(circle[0]),
                 float(circle[1] + roi_top),
                 float(circle[2]),
-                cfg.BALL_MIN_CIRCULARITY,
-                cfg.BALL_MIN_FILL_RATIO,
+                0.0,
+                0.0,
                 "hough")
             for circle in circles[0]
         ]
@@ -1211,7 +1380,131 @@ class BallDetector:
         )
 
     @staticmethod
+    def _radial_perimeter_metrics(
+        edges,
+        gradient_x,
+        gradient_y,
+        proposal,
+    ):
+        """Mede cobertura, distribuicao e forma real do perimetro proposto."""
+        if (
+            gradient_x is None
+            or gradient_y is None
+            or gradient_x.shape != edges.shape
+            or gradient_y.shape != edges.shape
+        ):
+            float_edges = edges.astype(np.float32)
+            gradient_x = cv2.Sobel(
+                float_edges, cv2.CV_32F, 1, 0, ksize=3)
+            gradient_y = cv2.Sobel(
+                float_edges, cv2.CV_32F, 0, 1, ksize=3)
+
+        radius = max(float(proposal.radius), 1.0)
+        sample_count = min(
+            max(int(cfg.BALL_RADIAL_SAMPLES), 24),
+            max(24, int(round(2.0 * math.pi * radius))),
+        )
+        angles = np.linspace(
+            0.0, 2.0 * math.pi, sample_count, endpoint=False)
+        cosines = np.cos(angles)
+        sines = np.sin(angles)
+
+        band = max(
+            radius * cfg.BALL_RADIAL_SEARCH_BAND_RATIO,
+            1.0,
+        )
+        radial_steps = min(
+            max(int(math.ceil(2.0 * band)) + 1, 5),
+            max(int(cfg.BALL_RADIAL_MAX_STEPS), 5),
+        )
+        offsets = np.linspace(-band, band, radial_steps)
+        sampled_radii = np.maximum(radius + offsets, 1.0)
+        xs = np.rint(
+            proposal.center_x
+            + cosines[:, None] * sampled_radii[None, :]
+        ).astype(np.int32)
+        ys = np.rint(
+            proposal.center_y
+            + sines[:, None] * sampled_radii[None, :]
+        ).astype(np.int32)
+
+        valid = (
+            (xs >= 0)
+            & (xs < edges.shape[1])
+            & (ys >= 0)
+            & (ys < edges.shape[0])
+        )
+        safe_xs = np.clip(xs, 0, edges.shape[1] - 1)
+        safe_ys = np.clip(ys, 0, edges.shape[0] - 1)
+        gx = gradient_x[safe_ys, safe_xs]
+        gy = gradient_y[safe_ys, safe_xs]
+        magnitude = np.hypot(gx, gy)
+        radial_gradient = (
+            gx * cosines[:, None]
+            + gy * sines[:, None]
+        )
+        alignment = (
+            np.abs(radial_gradient)
+            / np.maximum(magnitude, 1e-6)
+        )
+        eligible = (
+            valid
+            & (edges[safe_ys, safe_xs] > 0)
+            & (magnitude >= cfg.BALL_RADIAL_MIN_GRADIENT)
+            & (alignment >= cfg.BALL_RADIAL_MIN_ALIGNMENT)
+        )
+        scores = np.where(eligible, np.abs(radial_gradient), -1.0)
+        best_indices = np.argmax(scores, axis=1)
+        hits = np.any(eligible, axis=1)
+        support = float(np.mean(hits))
+
+        sector_count = max(int(cfg.BALL_RADIAL_SECTORS), 4)
+        sector_width = 2.0 * math.pi / sector_count
+        # Deslocar meia largura faz os setores 0, 2, 4 e 6 ficarem centrados
+        # em direita, baixo, esquerda e topo, respectivamente.
+        sector_indices = np.floor(
+            ((angles + sector_width / 2.0) % (2.0 * math.pi))
+            / sector_width
+        ).astype(np.int32)
+        sector_supports = np.asarray([
+            float(np.mean(hits[sector_indices == index]))
+            if np.any(sector_indices == index) else 0.0
+            for index in range(sector_count)
+        ])
+        good_sectors = int(np.count_nonzero(
+            sector_supports >= cfg.BALL_RADIAL_MIN_SECTOR_SUPPORT))
+
+        cardinal_indices = (
+            0,
+            sector_count // 2,
+            (3 * sector_count) // 4,
+        )
+        anchor_sectors_valid = all(
+            sector_supports[index]
+            >= cfg.BALL_RADIAL_MIN_SECTOR_SUPPORT
+            for index in cardinal_indices
+        )
+
+        if np.any(hits):
+            selected_offsets = offsets[best_indices[hits]]
+            centered_offsets = (
+                selected_offsets - np.median(selected_offsets))
+            radial_dispersion = float(
+                np.sqrt(np.mean(np.square(centered_offsets)))
+                / radius
+            )
+        else:
+            radial_dispersion = 1.0
+        return (
+            support,
+            good_sectors,
+            radial_dispersion,
+            anchor_sectors_valid,
+        )
+
+    @staticmethod
     def _radial_edge_support(edges, proposal):
+        """Compatibilidade: suporte simples usado por ferramentas antigas."""
         angles = np.linspace(0.0, 2.0 * math.pi, 72, endpoint=False)
         supported = np.zeros(angles.shape, dtype=bool)
         for radius_factor in (0.88, 1.0, 1.12):
@@ -1246,6 +1539,121 @@ class BallDetector:
         crop = hsv[y0:y1, x0:x1]
         return crop[:, :, 1][inner], crop[:, :, 2][inner], crop[:, :, 2][annulus]
 
+    @staticmethod
+    def _distributed_appearance_metrics(hsv, proposal):
+        """Mede textura interna e contraste de borda por setores."""
+        height, width = hsv.shape[:2]
+        outer = int(math.ceil(proposal.radius * 1.42))
+        x0 = max(int(proposal.center_x) - outer, 0)
+        x1 = min(int(proposal.center_x) + outer + 1, width)
+        y0 = max(int(proposal.center_y) - outer, 0)
+        y1 = min(int(proposal.center_y) + outer + 1, height)
+        crop = hsv[y0:y1, x0:x1]
+        if crop.size == 0:
+            return 0, 0, 0, 0, 0.0
+
+        yy, xx = np.ogrid[y0:y1, x0:x1]
+        dx = xx - proposal.center_x
+        dy = yy - proposal.center_y
+        distance = np.sqrt(np.square(dx) + np.square(dy))
+        angles = (
+            np.arctan2(dy, dx) + 2.0 * math.pi
+        ) % (2.0 * math.pi)
+        saturation = crop[:, :, 1]
+        value = crop[:, :, 2]
+        min_samples = max(
+            int(cfg.BALL_APPEARANCE_MIN_SECTOR_SAMPLES), 1)
+
+        texture_sectors = 0
+        reflective_sectors = 0
+        silver_sector_count = max(
+            int(cfg.BALL_SILVER_TEXTURE_SECTORS), 1)
+        for index in range(silver_sector_count):
+            lower_angle = 2.0 * math.pi * index / silver_sector_count
+            upper_angle = (
+                2.0 * math.pi * (index + 1) / silver_sector_count)
+            sector = (
+                (angles >= lower_angle)
+                & (angles < upper_angle)
+                & (distance >= proposal.radius * 0.15)
+                & (distance <= proposal.radius * 0.78)
+            )
+            sector_values = value[sector]
+            sector_saturation = saturation[sector]
+            if sector_values.size < min_samples:
+                continue
+            dynamic_range = float(
+                np.percentile(sector_values, 90)
+                - np.percentile(sector_values, 10)
+            )
+            if (
+                dynamic_range
+                >= cfg.BALL_SILVER_SECTOR_DYNAMIC_RANGE_MIN
+            ):
+                texture_sectors += 1
+            neutral_highlights = (
+                (sector_values >= cfg.BALL_SILVER_HIGHLIGHT_V)
+                & (
+                    sector_saturation
+                    <= cfg.BALL_SILVER_TINTED_NEUTRAL_S_MAX
+                )
+            )
+            if float(np.mean(neutral_highlights)) >= (
+                cfg.BALL_SILVER_SECTOR_HIGHLIGHT_FRACTION_MIN
+            ):
+                reflective_sectors += 1
+
+        contrast_sectors = 0
+        usable_contrast_sectors = 0
+        sector_contrasts = []
+        contrast_sector_count = max(
+            int(cfg.BALL_APPEARANCE_SECTORS), 1)
+        for index in range(contrast_sector_count):
+            lower_angle = 2.0 * math.pi * index / contrast_sector_count
+            upper_angle = (
+                2.0 * math.pi * (index + 1) / contrast_sector_count)
+            in_angle = (
+                (angles >= lower_angle)
+                & (angles < upper_angle)
+            )
+            inner = (
+                in_angle
+                & (distance >= proposal.radius * 0.45)
+                & (distance <= proposal.radius * 0.82)
+            )
+            exterior = (
+                in_angle
+                & (distance >= proposal.radius * 1.12)
+                & (distance <= proposal.radius * 1.38)
+            )
+            inner_values = value[inner]
+            exterior_values = value[exterior]
+            if (
+                inner_values.size < min_samples
+                or exterior_values.size < min_samples
+            ):
+                continue
+            usable_contrast_sectors += 1
+            contrast = float(
+                np.median(exterior_values)
+                - np.median(inner_values)
+            )
+            sector_contrasts.append(contrast)
+            if contrast >= cfg.BALL_BLACK_LOCAL_CONTRAST_MIN:
+                contrast_sectors += 1
+
+        median_contrast = (
+            float(np.median(sector_contrasts))
+            if sector_contrasts else 0.0
+        )
+        return (
+            texture_sectors,
+            reflective_sectors,
+            contrast_sectors,
+            usable_contrast_sectors,
+            median_contrast,
+        )
+
     def _classify(self, frame, hsv, proposal):
         del frame  # reservado para futuros descritores sem alterar a API
         inner_s, inner_v, annulus_v = self._circle_samples(hsv, proposal)
@@ -1256,7 +1664,6 @@ class BallDetector:
         inner_mean = float(np.mean(inner_v))
         annulus_mean = float(np.mean(annulus_v))
         dark_fraction = float(np.mean(inner_v <= cfg.BALL_BLACK_V_MAX))
-        local_dark_contrast = annulus_mean - inner_mean
         low_sat_fraction = float(np.mean(inner_s <= cfg.BALL_SILVER_S_MAX))
         dynamic_range = float(
             np.percentile(inner_v, 90) - np.percentile(inner_v, 10))
@@ -1266,21 +1673,59 @@ class BallDetector:
             (inner_v >= cfg.BALL_SILVER_HIGHLIGHT_V)
             & (inner_s <= cfg.BALL_SILVER_TINTED_NEUTRAL_S_MAX)
         ))
+        (
+            texture_sectors,
+            reflective_sectors,
+            black_contrast_sectors,
+            usable_contrast_sectors,
+            radial_dark_contrast,
+        ) = self._distributed_appearance_metrics(hsv, proposal)
 
-        geometry = float(np.clip(
-            0.35 * proposal.circularity
-            + 0.20 * proposal.fill_ratio
-            + 0.45 * min(proposal.edge_support / 0.65, 1.0),
-            0.0, 1.0))
+        sector_geometry = float(np.clip(
+            proposal.edge_sector_count
+            / max(float(cfg.BALL_RADIAL_SECTORS), 1.0),
+            0.0,
+            1.0,
+        ))
+        dispersion_geometry = float(np.clip(
+            1.0
+            - proposal.radial_dispersion
+            / max(cfg.BALL_RADIAL_MAX_DISPERSION_RATIO, 1e-6),
+            0.0,
+            1.0,
+        ))
+        perimeter_geometry = float(np.clip(
+            0.55 * proposal.edge_support
+            + 0.25 * sector_geometry
+            + 0.20 * dispersion_geometry,
+            0.0,
+            1.0,
+        ))
+        if proposal.source == "hough":
+            # Hough propoe a circunferencia, mas nao mede area nem
+            # circularidade de um objeto. So evidencia realmente observada
+            # participa do score.
+            geometry = perimeter_geometry
+        else:
+            geometry = float(np.clip(
+                0.25 * proposal.circularity
+                + 0.15 * proposal.fill_ratio
+                + 0.60 * perimeter_geometry,
+                0.0,
+                1.0,
+            ))
 
         black_valid = (
             dark_fraction >= cfg.BALL_BLACK_DARK_FRACTION_MIN
-            and (
-                local_dark_contrast >= cfg.BALL_BLACK_LOCAL_CONTRAST_MIN
-                or inner_mean <= cfg.BALL_BLACK_V_MAX * 0.62))
+            and usable_contrast_sectors
+            >= cfg.BALL_BLACK_MIN_USABLE_CONTRAST_SECTORS
+            and black_contrast_sectors
+            >= cfg.BALL_BLACK_MIN_CONTRAST_SECTORS
+        )
         black_score = float(np.clip(
             0.42 * dark_fraction
-            + 0.25 * np.clip(local_dark_contrast / 55.0, 0.0, 1.0)
+            + 0.25 * np.clip(
+                radial_dark_contrast / 55.0, 0.0, 1.0)
             + 0.33 * geometry,
             0.0, 1.0))
 
@@ -1298,6 +1743,9 @@ class BallDetector:
         silver_valid = (
             inner_mean > cfg.BALL_BLACK_V_MAX * 0.62
             and dynamic_range >= cfg.BALL_SILVER_DYNAMIC_RANGE_MIN
+            and texture_sectors >= cfg.BALL_SILVER_MIN_TEXTURE_SECTORS
+            and reflective_sectors
+            >= cfg.BALL_SILVER_MIN_REFLECTIVE_SECTORS
             and (neutral_silver_valid or tinted_reflective_valid)
             and (
                 highlight_fraction >= cfg.BALL_SILVER_HIGHLIGHT_FRACTION_MIN
@@ -1327,10 +1775,17 @@ class BallDetector:
                 self._reject("saturacao")
             if dynamic_range < cfg.BALL_SILVER_DYNAMIC_RANGE_MIN:
                 self._reject("textura")
+            if texture_sectors < cfg.BALL_SILVER_MIN_TEXTURE_SECTORS:
+                self._reject("textura")
             if (
-                highlight_fraction < cfg.BALL_SILVER_HIGHLIGHT_FRACTION_MIN
-                and abs(annulus_mean - inner_mean)
-                < cfg.BALL_BLACK_LOCAL_CONTRAST_MIN
+                reflective_sectors
+                < cfg.BALL_SILVER_MIN_REFLECTIVE_SECTORS
+                or (
+                    highlight_fraction
+                    < cfg.BALL_SILVER_HIGHLIGHT_FRACTION_MIN
+                    and abs(annulus_mean - inner_mean)
+                    < cfg.BALL_BLACK_LOCAL_CONTRAST_MIN
+                )
             ):
                 self._reject("reflexo")
             return None
@@ -1356,6 +1811,11 @@ class BallDetector:
     def _diagnostic(self, selected):
         if selected is not None:
             return "ok"
+        if (
+            self.last_arena_model is not None
+            and not self.last_arena_model.valid
+        ):
+            return f"arena_{self.last_arena_model.reason}"
         if self.last_hough_used and self.last_hough_proposals == 0:
             return "sem_circulo"
         if self._frame_rejections:
@@ -1367,6 +1827,13 @@ class BallDetector:
                 "reflexo": 6,
                 "confianca": 5,
                 "borda": 4,
+                "perimetro": 4,
+                "marcador": 4,
+                "fora_arena": 4,
+                "sem_apoio_piso": 4,
+                "sem_area_apoio": 4,
+                "sem_piso_conectado": 4,
+                "sem_limite_confiavel": 4,
                 "tipo": 3,
                 "roi": 2,
                 "amostra": 1,
@@ -1475,9 +1942,7 @@ class BallDetector:
             candidates = self._prefer_outer_candidates(candidates)
             return max(
                 candidates,
-                key=lambda item: (
-                    item.confidence
-                    + min(item.radius / (160.0 * self._pixel_scale), 0.35)))
+                key=lambda item: (item.confidence, item.radius))
 
         matches = []
         for candidate in candidates:
@@ -1508,9 +1973,7 @@ class BallDetector:
         candidates = self._prefer_outer_candidates(candidates)
         return max(
             candidates,
-            key=lambda item: (
-                item.confidence
-                + min(item.radius / (160.0 * self._pixel_scale), 0.35)))
+            key=lambda item: (item.confidence, item.radius))
 
     def _track_match(self, candidate):
         if self._tracked is None:
@@ -1530,16 +1993,23 @@ class BallDetector:
         if acquiring:
             association_min = cfg.BALL_ACQUIRE_ASSOCIATION_MIN_PX
             radius_factor = cfg.BALL_ACQUIRE_ASSOCIATION_RADIUS_FACTOR
+            association_max = cfg.BALL_ACQUIRE_ASSOCIATION_MAX_PX
             radius_ratio_min = cfg.BALL_ACQUIRE_RADIUS_RATIO_MIN
             radius_ratio_max = cfg.BALL_ACQUIRE_RADIUS_RATIO_MAX
         else:
             association_min = cfg.BALL_ASSOCIATION_MIN_PX
             radius_factor = cfg.BALL_ASSOCIATION_RADIUS_FACTOR
+            association_max = None
             radius_ratio_min = cfg.BALL_RADIUS_RATIO_MIN
             radius_ratio_max = cfg.BALL_RADIUS_RATIO_MAX
         gate = max(
             association_min * self._pixel_scale,
             radius_factor * max(candidate.radius, self._tracked.radius))
+        if association_max is not None:
+            gate = min(
+                gate,
+                association_max * self._pixel_scale,
+            )
         radius_ratio = candidate.radius / max(self._tracked.radius, 1.0)
         compatible = (
             distance <= gate
@@ -1568,6 +2038,9 @@ class BallDetector:
                     self.last_contour_proposals,
                     self.last_hough_proposals,
                     dict(self._frame_rejections),
+                    self.last_arena_model,
+                    self.last_arena_evidence,
+                    self.last_marker_exclusions,
                 )
                 self.reset()
                 # reset() externo limpa telemetria; aqui o frame atual acabou
@@ -1577,6 +2050,9 @@ class BallDetector:
                     self.last_contour_proposals,
                     self.last_hough_proposals,
                     self._frame_rejections,
+                    self.last_arena_model,
+                    self.last_arena_evidence,
+                    self.last_marker_exclusions,
                 ) = frame_metrics
             return None
 

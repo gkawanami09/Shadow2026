@@ -44,6 +44,8 @@ class BallPickupSequencer:
     GRIPPERS_WAIT = "PICKUP_GRIPPERS"
     LIFT_PENDING = "PICKUP_LIFT_PENDING"
     LIFT_WAIT = "PICKUP_LIFT"
+    CARRY_READY = "PICKUP_CARRY_READY"
+    DEPOSIT_START = "PICKUP_DEPOSIT_START"
     LOWER_PENDING = "PICKUP_LOWER_PENDING"
     LOWER_WAIT = "PICKUP_LOWER"
     RELEASE_PENDING = "PICKUP_RELEASE_PENDING"
@@ -74,6 +76,11 @@ class BallPickupSequencer:
     @property
     def target_kind(self):
         return self._kind
+
+    @property
+    def ready_for_deposit(self):
+        """A esfera esta fechada e elevada, pronta para ser transportada."""
+        return self.state == self.CARRY_READY
 
     def start(self, target_kind):
         """Arma a sequencia e congela a cor ate o estado terminal."""
@@ -195,12 +202,25 @@ class BallPickupSequencer:
                     self.LIFT_WAIT,
                     "subindo o Futaba por 2,5 s",
                 )
-            self.state = self.LOWER_PENDING
+            self.state = self.CARRY_READY
             self._deadline = None
             return PickupStep(
-                self.LOWER_PENDING,
-                "subida concluida; descendo o Futaba por 25 ms",
+                self.CARRY_READY,
+                "esfera presa e elevada; aguardando o marcador de deposito",
                 stop_futaba=True,
+            )
+
+        if self.state == self.CARRY_READY:
+            return PickupStep(
+                self.CARRY_READY,
+                "transportando a esfera; liberacao ainda bloqueada",
+            )
+
+        if self.state == self.DEPOSIT_START:
+            self.state = self.LOWER_PENDING
+            return PickupStep(
+                self.LOWER_PENDING,
+                "marcador correto alcancado; descendo o Futaba por 25 ms",
                 futaba_action=(
                     cfg.BALL_PICKUP_LOWER_POWER,
                     cfg.BALL_PICKUP_LOWER_MS,
@@ -307,6 +327,13 @@ class BallPickupSequencer:
             self._terminal_detail,
             terminal=True,
         )
+
+    def resume_deposit(self):
+        """Libera uma unica vez o sufixo de deposito no marcador correto."""
+        if self.state != self.CARRY_READY:
+            return False
+        self.state = self.DEPOSIT_START
+        return True
 
     def mark_futaba_started(self, now=None):
         """Inicia cada prazo somente depois da escrita serial correspondente."""

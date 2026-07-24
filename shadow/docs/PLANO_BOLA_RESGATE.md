@@ -12,7 +12,10 @@ SEARCH -> SEARCH_TARGET_STOP -> SEARCH_VERIFY -> ALIGN
 ALIGN -> APPROACH -> NEAR_CONFIRM -> NEAR
       \-> LOST/FAULT (PARAR)
 NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
-     -> PICKUP_LIFT -> PICKUP_LOWER -> PICKUP_RELEASE
+     -> PICKUP_LIFT -> PICKUP_CARRY_READY
+     -> DEPOSIT_SEARCH -> DEPOSIT_VERIFY -> DEPOSIT_ALIGN
+     -> DEPOSIT_APPROACH -> DEPOSIT_ARRIVED
+     -> PICKUP_LOWER -> PICKUP_RELEASE
      -> PICKUP_WIGGLE -> PICKUP_RESTORE -> PICKUP_COMPLETE -> SEARCH
 ```
 
@@ -39,7 +42,16 @@ NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
 - `PICKUP_GRIPPERS`: ao final da reta, envia `PARAR` e só então esquerda `-50`
   e direita `+50` no mesmo pacote USB.
 - `PICKUP_LIFT`: depois de as garras fecharem, envia `FUTABA 20 2500`.
-- `PICKUP_LOWER`: ao fim da subida, envia `FUTABA -20 25`.
+- `PICKUP_CARRY_READY`: corta o Futaba ao fim da subida, mantém a esfera presa
+  e bloqueia todos os comandos de liberação.
+- `DEPOSIT_SEARCH`/`DEPOSIT_VERIFY`: prata procura exclusivamente o triângulo
+  verde; preta procura exclusivamente o vermelho. O giro é tanque lento e
+  cada candidato precisa ser reconfirmado com o chassi parado.
+- `DEPOSIT_ALIGN`/`DEPOSIT_APPROACH`: centraliza com curvas suaves e aproxima
+  somente pela câmera frontal, sem ultrassom.
+- `DEPOSIT_ARRIVED`: exige simultaneamente centro, largura, base baixa e três
+  timestamps novos; depois envia `PARAR` antes de autorizar a garra.
+- `PICKUP_LOWER`: somente no marcador correto, envia `FUTABA -20 25`.
 - `PICKUP_RELEASE`: prata abre primeiro a esquerda com `+50`; preta abre
   primeiro a direita com `-50`.
 - `PICKUP_WIGGLE`: prata move a direita `+40/-40` duas vezes; preta move a
@@ -78,6 +90,14 @@ O centro de qualquer candidato circular precisa estar em `0,50H` ou abaixo.
 A metade superior continua visível no preview, mas pessoas, roupas e objetos
 fora da arena nessa região são rejeitados antes de entrar no tracker ou obter
 `LOCK`. A linha laranja `IGNORAR CENTROS ACIMA` mostra esse limite no debug.
+
+Na aquisição, uma segunda trava estima a junção parede-piso e o piso conectado
+à base da imagem. Lacunas entre segmentos coerentes viram uma soleira virtual:
+um círculo visto através da entrada/saída, acima dessa soleira ou sem apoio no
+piso interno, não entra no tracker. Se o limite não for confiável, a aquisição
+falha fechada e o robô continua parado. Depois do `LOCK`, essa trava é relaxada
+para a esfera próxima não desaparecer quando encobrir o próprio piso. A linha
+`SOLEIRA ARENA` no debug mostra o limite realmente usado.
 
 Antes de liberar motores, execute:
 
@@ -155,21 +175,25 @@ Todos os limites medidos em pixels usam uma escala isotrópica derivada de
 5. Hough somente como fallback quando os contornos falham; ele continua
    disponível no frame da meia-lua para vetar um círculo ainda distante;
 6. raio, proporção, circularidade e preenchimento;
-7. suporte de borda ao redor da circunferência;
-8. contraste entre interior e anel de piso próximo;
-9. aparência escura para esfera preta;
-10. faixa dinâmica e reflexo para esfera prateada; baixa saturação aumenta a
+7. perímetro com gradiente alinhado à normal radial, distribuído em oito
+   setores, com topo e laterais obrigatórios e baixa dispersão do raio;
+8. soleira dinâmica da arena e apoio no piso conectado durante a aquisição;
+9. exclusão explícita de contornos triangulares verdes/vermelhos validados;
+10. contraste entre interior e exterior distribuído por setores para esfera
+    preta, sem aceitar uma mancha apenas por ser muito escura;
+11. textura e reflexos neutros distribuídos por setores para a esfera
+    prateada; baixa saturação aumenta a
     confiança, mas iluminação ciano/verde possui uma rota metálica mais estrita;
-11. classificação de todas as propostas Hough antes da deduplicação, para um
+12. classificação de todas as propostas Hough antes da deduplicação, para um
     halo inválido não apagar o perímetro verdadeiro;
-12. preferência pelo envelope externo somente quando um círculo menor está
+13. preferência pelo envelope externo somente quando um círculo menor está
     realmente contido nele e as duas confianças são compatíveis;
-13. associação espacial e de tamanho mais rígida, lock após três hits e
+14. associação espacial e de tamanho mais rígida, lock após três hits e
     suavização temporal; uma falha curta preserva a identidade com o robô
     parado, enquanto um brilho incompatível não pode roubar o track;
-14. gate primário pelo círculo travado cobrindo o ponto inferior, com duas
+15. gate primário pelo círculo travado cobrindo o ponto inferior, com duas
     medições novas, centralização, raio mínimo e histórico obrigatório;
-15. arco circular largo em `320x240`, com rota estrita e fallback metálico,
+16. arco circular largo em `320x240`, com rota estrita e fallback metálico,
     usado somente como segunda confirmação depois do contato inferior.
 
 Uma detecção incerta não movimenta o robô.
@@ -190,7 +214,10 @@ avanço é entregue. Durante toda a reta as garras permanecem abertas; no fim do
 prazo o programa envia `PARAR` e depois fecha as duas garras em uma única
 escrita serial. Após 0,50 s para o fechamento físico, `LADO 0 0` mantém as
 rodas paradas sem cortar o `FUTABA 20 2500`. Terminada a subida, o programa
-envia `FUTABA PARAR`, `FUTABA -20 25` e espera o pulso acabar.
+envia `FUTABA PARAR` e entra em `PICKUP_CARRY_READY`. A esfera continua fechada
+e elevada enquanto o robô procura o destino. Somente depois de o controlador
+confirmar e parar no triângulo correto o programa envia `FUTABA -20 25` e
+espera o pulso acabar.
 
 A cor é congelada no primeiro círculo travado que toca o ponto inferior. Para
 prata, a esquerda abre com `+50` e a direita alterna `+40/-40` duas vezes.
@@ -198,6 +225,14 @@ Para preta, a direita abre com `-50` e a esquerda alterna `-40/+40` duas
 vezes. Há 0,20 s entre cada delta da oscilação para o servo se mover
 fisicamente. Não existe comando de ré nessa sequência. Qualquer falha mantém
 rodas e Futaba parados e entra em `PICKUP_FAULT`.
+
+O detector dos destinos é independente do segue-linha. Verde e vermelho usam
+HSV próprio da câmera de resgate (duas bandas para vermelho), mas a cor sozinha
+não basta: o contorno precisa ser triangular, sólido, preenchido, contrastar
+com o anel vizinho e permanecer no mesmo lugar por três frames. O corte superior
+é `0,45H`, seguindo a estratégia da câmera de zona do projeto de referência.
+Se um giro completo não encontrar o marcador certo, o estado é `DEPOSIT_FAULT`
+com a esfera ainda presa; nunca há liberação no lugar errado.
 
 O PCA9685 precisa de alimentação externa regulada adequada para os servos, com
 GND comum ao Arduino. Não alimente Futaba e garras pelo pino 5 V do Uno.
@@ -248,6 +283,9 @@ Outras travas:
 - um lock de sistema impede segue-linha e resgate de comandarem os motores ao
   mesmo tempo;
 - contagem regressiva de 3 segundos com preview já funcionando e `PARAR`;
+- limite da arena ausente ou piso sem apoio durante a aquisição = alvo
+  recusado, sem movimento;
+- abertura de entrada/saída = soleira virtual interpolada entre as paredes;
 - perda da esfera = `PARAR`;
 - nenhuma leitura ultrassônica pode alterar, pausar ou encerrar a aproximação;
 - frame antigo = `PARAR`;
@@ -265,6 +303,13 @@ Outras travas:
   avanço já começou, `PARAR` é enviado imediatamente;
 - reconexão serial durante a coleta cancela a sequência, pois o Uno pode ter
   reiniciado a posição relativa das garras;
+- reconexão serial durante o transporte ao triângulo também cancela o ciclo e
+  bloqueia a liberação;
+- reconexão durante a busca invalida o cronômetro do giro; ela nunca conta como
+  parte de uma volta física;
+- aproximação do triângulo sem melhora de alinhamento, largura ou altura
+  aparente por 6 s = `DEPOSIT_FAULT`; há ainda um limite global de 45 s;
+- 360° sem o triângulo correto = `DEPOSIT_FAULT`, mantendo a esfera fechada;
 - `finally` sempre envia `PARAR`, `FUTABA PARAR` e fecha a serial;
 - PWM continua limitado pelo código existente e pelo firmware.
 
@@ -273,7 +318,7 @@ Outras travas:
 1. Testes offline:
 
    ```bash
-   python3 -m unittest discover -s shadow/tests -p "test_rescue_*.py" -v
+   python3 -m unittest discover -s shadow/tests -p "test_*.py" -v
    ```
 
 2. Visão, rodas suspensas ou robô desligado:
@@ -282,11 +327,12 @@ Outras travas:
    python3 shadow/resgate.py --camera-index 0 --debug
    ```
 
-3. Pressionar `s` e testar cenas reais: piso vazio, sombra, parede, reflexo,
-   esfera preta e prateada em 15, 20, 30, 50 e 80 cm.
+3. Pressionar `s` e testar cenas reais: piso vazio, sombra, madeira, entrada,
+   saída, triângulos verde/vermelho e esfera preta/prateada em 15, 20, 30, 50
+   e 80 cm.
 
 4. Ajustar somente `shadow/config_resgate.py`, principalmente os ratios,
-   suportes e contraste `BALL_CRESCENT_*`.
+   suportes `BALL_RADIAL_*`, arena, `MARKER_*` e `BALL_CRESCENT_*`.
 
 5. Primeiro movimento com rodas suspensas:
 
@@ -299,10 +345,12 @@ Outras travas:
 
 6. Ainda com as rodas suspensas e sem bolinha presa, confirme no log a ordem:
    `PICKUP_FUTABA`, `PICKUP_FORWARD`, `PICKUP_GRIPPERS`,
-   `PICKUP_LIFT`, `PICKUP_LOWER`, `PICKUP_RELEASE`, `PICKUP_WIGGLE`,
-   `PICKUP_RESTORE`, `PICKUP_COMPLETE` e uma nova `SEARCH`. Não pode aparecer
-   ré. As garras só podem fechar depois que a reta completar 1,50 s e as rodas
-   receberem `PARAR`. Mantenha acesso imediato à alimentação.
+   `PICKUP_LIFT`, `PICKUP_CARRY_READY`, busca/chegada ao triângulo,
+   `PICKUP_LOWER`, `PICKUP_RELEASE`, `PICKUP_WIGGLE`, `PICKUP_RESTORE`,
+   `PICKUP_COMPLETE` e uma nova `SEARCH`. Não pode aparecer ré nem liberação
+   antes de `DEPOSIT_ARRIVED`. As garras só podem fechar depois que a reta
+   completar 1,50 s e as rodas receberem `PARAR`. Mantenha acesso imediato à
+   alimentação.
 
 7. Teste no chão em velocidade baixa.
 

@@ -23,6 +23,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cv2  # noqa: E402
+import numpy as np  # noqa: E402
 
 import config_resgate as cfg  # noqa: E402
 from controle.aproximacao_resgate import (  # noqa: E402
@@ -31,6 +32,7 @@ from controle.aproximacao_resgate import (  # noqa: E402
 )
 from controle.busca_resgate import BallSearchController  # noqa: E402
 from controle.coleta_resgate import BallPickupSequencer  # noqa: E402
+from controle.deposito_resgate import DepositMarkerController  # noqa: E402
 from visao.resgate_assincrono import (  # noqa: E402
     FreshDetectionGate,
     LatestFrameBallDetector,
@@ -38,6 +40,7 @@ from visao.resgate_assincrono import (  # noqa: E402
 )
 from visao.bola_resgate import (BallDetector, annotate_rescue_frame)  # noqa: E402
 from visao.dados_resgate import RescueDatasetWriter  # noqa: E402
+from visao.marcador_resgate import MarkerDetector  # noqa: E402
 
 
 WINDOW = "Shadow2026 - aproximacao da bolinha"
@@ -96,6 +99,138 @@ def _best_effort(label, action):
         return None
 
 
+def _annotate_marker(frame, detection, target_kind):
+    """Desenha somente a telemetria do triangulo usado no transporte."""
+    if target_kind not in ("green", "red"):
+        return frame
+    color = (0, 210, 0) if target_kind == "green" else (0, 0, 255)
+    cv2.putText(
+        frame,
+        f"DESTINO: {target_kind.upper()}",
+        (max(frame.shape[1] - 235, 8), 28),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.62,
+        color,
+        2,
+        cv2.LINE_AA,
+    )
+    if detection is None:
+        return frame
+    x, y, width, height = detection.bbox
+    x0 = int(round(x))
+    y0 = int(round(y))
+    x1 = int(round(x + width))
+    y1 = int(round(y + height))
+    cv2.rectangle(frame, (x0, y0), (x1, y1), color, 2)
+    cv2.circle(
+        frame,
+        (int(round(detection.center_x)),
+         int(round(detection.center_y))),
+        4,
+        color,
+        -1,
+    )
+    cv2.putText(
+        frame,
+        (
+            f"{detection.kind} {detection.confidence:.2f} "
+            f"hits={detection.hits}"
+            f"{' LOCK' if detection.track_locked else ''}"
+        ),
+        (max(x0, 4), max(y0 - 8, 18)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        color,
+        2,
+        cv2.LINE_AA,
+    )
+    return frame
+
+
+def _annotate_arena_guard(frame, result):
+    """Mostra a soleira virtual e as exclusoes usadas na aquisicao."""
+    if result is None:
+        return frame
+    points = tuple(getattr(result, "arena_boundary_points", ()))
+    reason = str(getattr(result, "arena_reason", ""))
+    accepted = getattr(result, "arena_accepted", None)
+    blocked = (
+        accepted is False
+        or (accepted is None and reason not in ("", "ok"))
+    )
+    arena_color = (0, 80, 255) if blocked else (255, 210, 0)
+    if points:
+        cv2.polylines(
+            frame,
+            [np.asarray(points, dtype=np.int32)],
+            False,
+            arena_color,
+            2,
+            cv2.LINE_AA,
+        )
+        label_y = max(min(point[1] for point in points) - 8, 18)
+        if not blocked:
+            cv2.putText(
+                frame,
+                (
+                    "SOLEIRA ARENA "
+                    f"{getattr(result, 'arena_confidence', 0.0):.2f}"
+                ),
+                (8, label_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.50,
+                arena_color,
+                2,
+                cv2.LINE_AA,
+            )
+    if blocked:
+        cv2.putText(
+            frame,
+            f"ARENA BLOQUEADA: {reason}",
+            (
+                8,
+                (
+                    max(min(point[1] for point in points) - 8, 18)
+                    if points
+                    else max(int(round(frame.shape[0] * 0.46)), 20)
+                ),
+            ),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.52,
+            arena_color,
+            2,
+            cv2.LINE_AA,
+        )
+
+    support_box = getattr(result, "arena_support_box", None)
+    if support_box is not None:
+        x0, y0, x1, y1 = support_box
+        cv2.rectangle(
+            frame, (x0, y0), (x1, y1), arena_color, 1)
+    for x, y, width, height, kind in getattr(
+        result, "marker_exclusion_boxes", ()
+    ):
+        color = (0, 190, 0) if kind == "green" else (0, 0, 220)
+        cv2.rectangle(
+            frame,
+            (x, y),
+            (x + width, y + height),
+            color,
+            2,
+        )
+        cv2.putText(
+            frame,
+            f"{kind}: NAO E BOLA",
+            (x, max(y - 6, 18)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
+    return frame
+
+
 def _reset_for_next_search(detector_worker, fresh_gate, now):
     """Invalida o alvo anterior e cria um ciclo independente de busca."""
     detector_worker.reset_tracking()
@@ -104,6 +239,37 @@ def _reset_for_next_search(detector_worker, fresh_gate, now):
         BallSearchController(start_time=now),
         BallPickupSequencer(),
     )
+
+
+def _new_deposit_navigation(pickup, now):
+    """Cria o destino imutavel somente com a esfera presa e elevada."""
+    if not pickup.ready_for_deposit:
+        raise RuntimeError(
+            "navegacao de deposito exige esfera presa e elevada")
+    try:
+        marker_kind = cfg.DEPOSIT_MARKER_BY_BALL_KIND[
+            pickup.target_kind]
+    except KeyError as err:
+        raise RuntimeError(
+            f"cor de esfera sem destino: {pickup.target_kind}") from err
+    return (
+        MarkerDetector(marker_kind),
+        DepositMarkerController(marker_kind, start_time=now),
+    )
+
+
+def _authorize_marker_deposit(pickup, deposit_controller):
+    """Impede liberar antes de PARAR no triangulo da cor congelada."""
+    expected_marker = cfg.DEPOSIT_MARKER_BY_BALL_KIND.get(
+        pickup.target_kind)
+    if (
+        not pickup.ready_for_deposit
+        or deposit_controller is None
+        or not deposit_controller.arrived
+        or deposit_controller.target_kind != expected_marker
+    ):
+        return False
+    return pickup.resume_deposit()
 
 
 def _apply_pickup_actions(
@@ -284,6 +450,24 @@ def _dataset_metadata(
             "candidate_circles": [
                 list(circle) for circle in result.candidate_circles
             ],
+            "arena_guard": {
+                "reason": result.arena_reason,
+                "confidence": float(result.arena_confidence),
+                "accepted": result.arena_accepted,
+                "floor_support": float(result.arena_floor_support),
+                "boundary_points": [
+                    list(point)
+                    for point in result.arena_boundary_points
+                ],
+                "support_box": (
+                    list(result.arena_support_box)
+                    if result.arena_support_box is not None
+                    else None
+                ),
+            },
+            "marker_exclusion_boxes": [
+                list(box) for box in result.marker_exclusion_boxes
+            ],
             "crescent_evidence": crescent_data,
             "diagnostic": result.diagnostic,
             "detection": detection_data,
@@ -371,6 +555,8 @@ def main():
     controller = None
     search = None
     pickup = None
+    marker_detector = None
+    deposit_controller = None
     hardware_session = args.video is None
 
     last_state = None
@@ -378,7 +564,10 @@ def main():
     last_log_at = 0.0
     last_idle_control = 0.0
     pickup_connection_epoch = None
+    search_connection_epoch = None
     completed_pickups = 0
+    latest_marker_detection = None
+    latest_marker_captured_at = None
     capture_samples = deque(maxlen=60)
     detection_times = deque(maxlen=30)
 
@@ -416,6 +605,8 @@ def main():
             BallDetector(
                 target_kind=args.target,
                 enhance=not args.no_enhance,
+                enforce_arena=True,
+                exclude_markers=True,
             ),
             max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
             max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
@@ -504,7 +695,106 @@ def main():
             now = time.monotonic()
             command_updated = False
             pickup_step = None
-            if pickup.started:
+            if pickup.ready_for_deposit:
+                # A cor fica congelada desde o fechamento das garras. Enquanto
+                # a esfera esta elevada, a visao de bolas permanece desligada
+                # e somente o triangulo correspondente pode comandar o robo.
+                if result is not None:
+                    last_result_sequence = result.sequence
+                    last_metrics_result = result
+                    detection_times.append(result.completed_at)
+                if (
+                    arduino is not None
+                    and pickup_connection_epoch is not None
+                    and arduino.connection_epoch
+                    != pickup_connection_epoch
+                ):
+                    pickup_step = pickup.fail(
+                        "serial reconectou durante o transporte; "
+                        "esfera mantida e sequencia cancelada")
+                    command = pickup_step.motion_command()
+                    command_updated = True
+                else:
+                    if marker_detector is None:
+                        (
+                            marker_detector,
+                            deposit_controller,
+                        ) = _new_deposit_navigation(
+                            pickup,
+                            now,
+                        )
+                        marker_kind = deposit_controller.target_kind
+                        detector_worker.reset_tracking()
+                        fresh_gate.reset()
+                        latest_result = None
+                        latest_detection = None
+                        latest_marker_detection = None
+                        latest_marker_captured_at = None
+                        last_idle_control = 0.0
+                        print(
+                            f"[deposito] esfera {pickup.target_kind} presa; "
+                            f"procurando triangulo {marker_kind}")
+
+                    marker_frame_shape = (
+                        latest_frame.shape
+                        if latest_frame is not None
+                        else (
+                            cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                            cfg.RESCUE_CAMERA_MAX_WIDTH,
+                            3,
+                        )
+                    )
+                    marker_result = None
+                    if (
+                        new_frame
+                        and deposit_controller.frame_allowed(
+                            frame_packet.captured_at)
+                    ):
+                        marker_result = marker_detector.detect(
+                            latest_frame,
+                            timestamp=frame_packet.captured_at,
+                        )
+                        marker_now = time.monotonic()
+                        if (
+                            marker_now - frame_packet.captured_at
+                            > cfg.BALL_FRAME_STALE_S
+                        ):
+                            marker_result = None
+                        latest_marker_detection = marker_result
+                        latest_marker_captured_at = frame_packet.captured_at
+                        command = deposit_controller.update(
+                            marker_result,
+                            marker_frame_shape,
+                            now=marker_now,
+                        )
+                        command_updated = True
+                        last_idle_control = marker_now
+                    elif (
+                        latest_marker_captured_at is not None
+                        and now - latest_marker_captured_at
+                        > cfg.BALL_FRAME_STALE_S
+                    ):
+                        latest_marker_detection = None
+                        latest_marker_captured_at = None
+                        command = deposit_controller.update(
+                            None,
+                            marker_frame_shape,
+                            now=now,
+                        )
+                        command_updated = True
+                        last_idle_control = now
+                    elif (
+                        now - last_idle_control
+                        >= IDLE_CONTROL_INTERVAL_S
+                    ):
+                        command = deposit_controller.update(
+                            None,
+                            marker_frame_shape,
+                            now=now,
+                        )
+                        command_updated = True
+                        last_idle_control = now
+            elif pickup.started:
                 # Consumir um eventual resultado que ja estava em voo somente
                 # para telemetria. A visao nunca volta a comandar os motores
                 # depois que a coleta foi armada.
@@ -586,6 +876,7 @@ def main():
                                 now=now,
                             )
                             search = None
+                            search_connection_epoch = None
                     else:
                         command = controller.update(
                             control_detection,
@@ -646,6 +937,7 @@ def main():
                     fresh_gate,
                     now,
                 )
+                search_connection_epoch = None
                 controller = None
                 latest_result = None
                 latest_detection = None
@@ -653,6 +945,8 @@ def main():
                 command = search.update(None, now=now)
                 command_updated = True
 
+            motor_result = None
+            motion_connection_epoch = None
             if args.drive and arduino is not None:
                 from controle.direcao import steer
                 if pickup_step is not None:
@@ -699,10 +993,15 @@ def main():
                             fresh_gate,
                             action_completed_at,
                         )
+                        search_connection_epoch = None
                         controller = None
+                        marker_detector = None
+                        deposit_controller = None
                         pickup_connection_epoch = None
                         latest_result = None
                         latest_detection = None
+                        latest_marker_detection = None
+                        latest_marker_captured_at = None
                         detection_times.clear()
                         last_idle_control = 0.0
                         command = search.update(
@@ -713,12 +1012,88 @@ def main():
                             f"[resgate] deposito {completed_pickups} "
                             "concluido; procurando a proxima esfera")
                 elif command_updated:
+                    motion_connection_epoch = arduino.connection_epoch
                     motor_result = steer(command.angle, command.speed)
-                    if search is not None:
-                        if motor_result is False:
+                    if motor_result is False:
+                        raise RuntimeError(
+                            "comando de movimento nao foi enviado "
+                            "pela serial")
+                    if deposit_controller is not None:
+                        if (
+                            pickup_connection_epoch is not None
+                            and (
+                                not arduino.connected
+                                or arduino.connection_epoch
+                                != pickup_connection_epoch
+                            )
+                        ):
                             raise RuntimeError(
-                                "comando da busca nao foi enviado "
-                                "pela serial")
+                                "serial mudou durante o transporte; "
+                                "motores parados e deposito bloqueado")
+                        action_completed_at = time.monotonic()
+                        active_deposit = deposit_controller
+                        if active_deposit.consume_tracking_reset():
+                            marker_detector.reset()
+                            latest_marker_detection = None
+                            latest_marker_captured_at = None
+                        if (
+                            command.state
+                            == DepositMarkerController.START
+                        ):
+                            active_deposit.mark_rotation_started(
+                                action_completed_at)
+                        elif (
+                            command.state
+                            == DepositMarkerController.TARGET_STOP
+                        ):
+                            active_deposit.mark_target_stopped(
+                                action_completed_at)
+                            marker_detector.reset()
+                            latest_marker_detection = None
+                            latest_marker_captured_at = None
+                            last_idle_control = action_completed_at
+                        elif (
+                            command.state
+                            == DepositMarkerController.TURN_STOP
+                        ):
+                            active_deposit.mark_full_turn_stopped(
+                                action_completed_at)
+                            marker_detector.reset()
+                            latest_marker_detection = None
+                            latest_marker_captured_at = None
+                            last_idle_control = action_completed_at
+                        elif (
+                            command.state
+                            == DepositMarkerController.LOST_STOP
+                        ):
+                            active_deposit.mark_lost_stopped(
+                                action_completed_at)
+                            marker_detector.reset()
+                            latest_marker_detection = None
+                            latest_marker_captured_at = None
+                            last_idle_control = action_completed_at
+                        elif (
+                            command.state
+                            == DepositMarkerController.ARRIVAL_STOP
+                        ):
+                            active_deposit.mark_arrival_stopped(
+                                action_completed_at)
+                            if not _authorize_marker_deposit(
+                                pickup, active_deposit
+                            ):
+                                raise RuntimeError(
+                                    "deposito recusado: chegada/cor/estado "
+                                    "nao autorizados")
+                            print(
+                                f"[deposito] triangulo "
+                                f"{active_deposit.target_kind} alcancado; "
+                                "executando o movimento de garra preservado")
+                            marker_detector = None
+                            deposit_controller = None
+                            latest_marker_detection = None
+                            latest_marker_captured_at = None
+                            last_idle_control = action_completed_at
+                    elif search is not None:
                         action_completed_at = time.monotonic()
                         if search.consume_tracking_reset():
                             detector_worker.reset_tracking()
@@ -731,6 +1106,8 @@ def main():
                         ):
                             search.mark_rotation_started(
                                 action_completed_at)
+                            search_connection_epoch = (
+                                arduino.connection_epoch)
                         elif (
                             command.state
                             == BallSearchController.TARGET_STOP
@@ -753,12 +1130,46 @@ def main():
                             last_idle_control = action_completed_at
             if arduino is not None:
                 arduino.refresh(fail_closed=True)
+                if (
+                    motion_connection_epoch is not None
+                    and (
+                        not arduino.connected
+                        or arduino.connection_epoch
+                        != motion_connection_epoch
+                    )
+                ):
+                    raise RuntimeError(
+                        "serial mudou depois do comando visual; "
+                        "alvo invalidado e motores parados")
+                if (
+                    search is not None
+                    and search_connection_epoch is not None
+                    and (
+                        not arduino.connected
+                        or arduino.connection_epoch
+                        != search_connection_epoch
+                    )
+                ):
+                    raise RuntimeError(
+                        "serial mudou durante o giro de busca; "
+                        "360 invalidado e motores parados")
 
             if (
                 args.drive
                 and command.state == BallApproachController.NEAR
                 and not pickup.started
             ):
+                if (
+                    motor_result is not True
+                    or motion_connection_epoch is None
+                    or arduino is None
+                    or not arduino.connected
+                    or arduino.connection_epoch
+                    != motion_connection_epoch
+                ):
+                    raise RuntimeError(
+                        "coleta recusada: PARAR da aproximacao nao teve "
+                        "escrita serial estavel")
                 if command.target_kind not in ("silver", "black"):
                     raise RuntimeError(
                         "coleta recusada: cor da esfera nao foi confirmada")
@@ -769,8 +1180,8 @@ def main():
                 )
                 print(
                     f"[coleta] esfera {command.target_kind} no ponto "
-                    "inferior: avancando 1,5 s, prendendo, elevando e "
-                    "liberando conforme a cor")
+                    "inferior: avancando 1,5 s, prendendo e elevando; "
+                    "a liberacao so ocorrera no triangulo correto")
 
             log_now = time.monotonic()
             should_log = (
@@ -889,6 +1300,24 @@ def main():
                         if latest_result is not None else None
                     ),
                 )
+                annotated = _annotate_arena_guard(
+                    annotated, latest_result)
+                if deposit_controller is not None:
+                    marker_overlay = (
+                        latest_marker_detection
+                        if (
+                            latest_marker_captured_at is not None
+                            and time.monotonic()
+                            - latest_marker_captured_at
+                            <= cfg.BALL_FRAME_STALE_S
+                        )
+                        else None
+                    )
+                    annotated = _annotate_marker(
+                        annotated,
+                        marker_overlay,
+                        deposit_controller.target_kind,
+                    )
                 cv2.imshow(WINDOW, annotated)
 
             if args.debug:

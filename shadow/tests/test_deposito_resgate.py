@@ -1,0 +1,352 @@
+"""Testes da navegacao visual ate os triangulos de evacuacao."""
+
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+
+
+SHADOW_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SHADOW_ROOT))
+
+import config_resgate as cfg  # noqa: E402
+from controle.coleta_resgate import BallPickupSequencer  # noqa: E402
+from controle.deposito_resgate import DepositMarkerController  # noqa: E402
+from resgate import (  # noqa: E402
+    _authorize_marker_deposit,
+    _new_deposit_navigation,
+)
+
+
+FRAME_SHAPE = (480, 640, 3)
+
+
+def pickup_ready(target_kind):
+    """Avanca pela coleta real ate a esfera estar presa e elevada."""
+    pickup = BallPickupSequencer()
+    pickup.start(target_kind)
+    now = 0.0
+
+    pickup.update(now=now)
+    pickup.mark_futaba_started(now=now)
+    now += (
+        cfg.BALL_PICKUP_FUTABA_MS / 1000.0
+        + cfg.BALL_PICKUP_FUTABA_GUARD_S
+    )
+    pickup.update(now=now)
+    pickup.mark_forward_started(now=now)
+    now += cfg.BALL_PICKUP_FORWARD_S
+    pickup.update(now=now)
+    pickup.mark_grippers_started(now=now)
+    now += cfg.BALL_PICKUP_GRIPPER_SETTLE_S
+    pickup.update(now=now)
+    pickup.mark_futaba_started(now=now)
+    now += (
+        cfg.BALL_PICKUP_LIFT_MS / 1000.0
+        + cfg.BALL_PICKUP_LIFT_GUARD_S
+    )
+    pickup.update(now=now)
+
+    if not pickup.ready_for_deposit:
+        raise AssertionError("fixture nao chegou ao estado de transporte")
+    return pickup
+
+
+def marker(
+    timestamp,
+    kind="green",
+    center_x=320.0,
+    center_y=330.0,
+    width=120.0,
+    height=100.0,
+    bottom_y=380.0,
+    confidence=0.90,
+    confirmed=True,
+    track_locked=True,
+):
+    return SimpleNamespace(
+        kind=kind,
+        center_x=float(center_x),
+        center_y=float(center_y),
+        width=float(width),
+        height=float(height),
+        bottom_y=float(bottom_y),
+        area=float(width * height * 0.5),
+        confidence=float(confidence),
+        confirmed=bool(confirmed),
+        hits=3 if confirmed else 1,
+        timestamp=float(timestamp),
+        track_locked=bool(track_locked),
+    )
+
+
+class DepositMarkerControllerTests(unittest.TestCase):
+    def test_ball_kind_mapping_is_immutable(self):
+        self.assertEqual(
+            cfg.DEPOSIT_MARKER_BY_BALL_KIND,
+            {"silver": "green", "black": "red"},
+        )
+
+    def test_search_is_slow_tank_and_timer_starts_only_after_ack(self):
+        controller = DepositMarkerController("green", start_time=0.0)
+
+        start = controller.update(None, FRAME_SHAPE, now=100.0)
+        self.assertEqual(start.state, controller.START)
+        self.assertEqual(start.angle, 180)
+        self.assertEqual(start.speed, cfg.DEPOSIT_SEARCH_TANK_SPEED)
+
+        controller.mark_rotation_started(now=100.0)
+        before = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=100.0 + cfg.DEPOSIT_SEARCH_FULL_TURN_S - 0.001,
+        )
+        stop = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=100.0 + cfg.DEPOSIT_SEARCH_FULL_TURN_S,
+        )
+        self.assertEqual(before.state, controller.ROTATING)
+        self.assertEqual(stop.state, controller.TURN_STOP)
+        self.assertEqual(stop.angle, 190)
+
+    def test_wrong_color_is_ignored(self):
+        controller = DepositMarkerController("green", start_time=0.0)
+
+        command = controller.update(
+            marker(0.0, kind="red"),
+            FRAME_SHAPE,
+            now=0.0,
+        )
+
+        self.assertEqual(command.state, controller.START)
+        self.assertEqual(command.angle, 180)
+
+    def test_tentative_marker_brakes_but_pre_stop_frame_cannot_confirm(self):
+        controller = DepositMarkerController("green", start_time=0.0)
+        tentative = marker(
+            0.0,
+            confirmed=False,
+            track_locked=False,
+        )
+
+        stop = controller.update(
+            tentative, FRAME_SHAPE, now=0.0)
+        self.assertEqual(stop.state, controller.TARGET_STOP)
+        controller.mark_target_stopped(now=0.10)
+        self.assertFalse(controller.frame_allowed(0.10))
+        self.assertTrue(controller.frame_allowed(0.11))
+
+        old = controller.update(
+            marker(0.09), FRAME_SHAPE, now=0.20)
+        acquired = controller.update(
+            marker(0.21), FRAME_SHAPE, now=0.21)
+        self.assertEqual(old.state, controller.VERIFY)
+        self.assertEqual(acquired.state, controller.APPROACH)
+
+    def test_align_direction_and_speed_are_gentle(self):
+        for center_x, sign in ((520.0, 1), (120.0, -1)):
+            with self.subTest(center_x=center_x):
+                controller = DepositMarkerController(
+                    "green", start_time=0.0)
+                controller.state = controller.APPROACH
+
+                command = controller.update(
+                    marker(0.0, center_x=center_x),
+                    FRAME_SHAPE,
+                    now=0.0,
+                )
+
+                self.assertEqual(command.state, controller.ALIGN)
+                self.assertEqual(
+                    1 if command.angle > 0 else -1,
+                    sign,
+                )
+                self.assertLessEqual(
+                    command.speed,
+                    cfg.DEPOSIT_ALIGN_SPEED_MAX,
+                )
+
+    def test_arrival_needs_three_distinct_frames_and_stop_ack(self):
+        controller = DepositMarkerController("red", start_time=0.0)
+        controller.state = controller.APPROACH
+        near_kwargs = {
+            "kind": "red",
+            "width": 220.0,
+            "bottom_y": 440.0,
+        }
+
+        first = controller.update(
+            marker(0.00, **near_kwargs),
+            FRAME_SHAPE,
+            now=0.00,
+        )
+        repeated = controller.update(
+            marker(0.00, **near_kwargs),
+            FRAME_SHAPE,
+            now=0.05,
+        )
+        second = controller.update(
+            marker(0.10, **near_kwargs),
+            FRAME_SHAPE,
+            now=0.10,
+        )
+        third = controller.update(
+            marker(0.20, **near_kwargs),
+            FRAME_SHAPE,
+            now=0.20,
+        )
+
+        self.assertEqual(first.angle, 190)
+        self.assertEqual(repeated.state, controller.APPROACH)
+        self.assertEqual(second.state, controller.APPROACH)
+        self.assertEqual(third.state, controller.ARRIVAL_STOP)
+        self.assertFalse(third.terminal)
+        controller.mark_arrival_stopped(now=0.21)
+        arrived = controller.update(
+            None, FRAME_SHAPE, now=0.21)
+        self.assertEqual(arrived.state, controller.ARRIVED)
+        self.assertTrue(arrived.terminal)
+
+    def test_loss_stops_before_search_can_resume(self):
+        controller = DepositMarkerController("green", start_time=0.0)
+        controller.state = controller.APPROACH
+        controller._last_seen_at = 0.0
+
+        stop = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=cfg.DEPOSIT_REACQUIRE_TIMEOUT_S,
+        )
+
+        self.assertEqual(stop.state, controller.LOST_STOP)
+        self.assertEqual(stop.angle, 190)
+        controller.mark_lost_stopped(now=1.0)
+        self.assertTrue(controller.consume_tracking_reset())
+        restart = controller.update(
+            None, FRAME_SHAPE, now=1.0)
+        self.assertEqual(restart.state, controller.START)
+        self.assertEqual(restart.angle, 180)
+
+    def test_persistent_marker_without_visual_progress_faults(self):
+        controller = DepositMarkerController("green", start_time=0.0)
+        controller.state = controller.APPROACH
+        controller._active_started_at = 0.0
+        stuck = marker(
+            0.0,
+            width=120.0,
+            bottom_y=380.0,
+        )
+
+        moving = controller.update(
+            stuck, FRAME_SHAPE, now=0.0)
+        fault = controller.update(
+            marker(
+                cfg.DEPOSIT_PROGRESS_TIMEOUT_S,
+                width=120.0,
+                bottom_y=380.0,
+            ),
+            FRAME_SHAPE,
+            now=cfg.DEPOSIT_PROGRESS_TIMEOUT_S,
+        )
+
+        self.assertEqual(moving.state, controller.APPROACH)
+        self.assertEqual(fault.state, controller.FAULT)
+        self.assertTrue(fault.terminal)
+        self.assertIn("mantida", fault.detail)
+
+    def test_progress_resets_short_watchdog_but_global_timeout_still_stops(self):
+        controller = DepositMarkerController("red", start_time=0.0)
+        controller.state = controller.APPROACH
+        controller._active_started_at = 0.0
+
+        controller.update(
+            marker(0.0, kind="red", width=100.0, bottom_y=350.0),
+            FRAME_SHAPE,
+            now=0.0,
+        )
+        progressing = controller.update(
+            marker(
+                5.0,
+                kind="red",
+                width=120.0,
+                bottom_y=370.0,
+            ),
+            FRAME_SHAPE,
+            now=5.0,
+        )
+        global_fault = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=cfg.DEPOSIT_MAX_ACTIVE_S,
+        )
+
+        self.assertNotEqual(progressing.state, controller.FAULT)
+        self.assertEqual(global_fault.state, controller.FAULT)
+        self.assertTrue(global_fault.terminal)
+
+    def test_no_marker_after_full_turn_faults_without_authorizing_deposit(self):
+        controller = DepositMarkerController("red", start_time=0.0)
+        controller.update(None, FRAME_SHAPE, now=0.0)
+        controller.mark_rotation_started(now=0.0)
+        turn_stop = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=cfg.DEPOSIT_SEARCH_FULL_TURN_S,
+        )
+        self.assertEqual(turn_stop.state, controller.TURN_STOP)
+        controller.mark_full_turn_stopped(
+            now=cfg.DEPOSIT_SEARCH_FULL_TURN_S)
+
+        fault = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=(
+                cfg.DEPOSIT_SEARCH_FULL_TURN_S
+                + cfg.DEPOSIT_SEARCH_VERIFY_TIMEOUT_S
+            ),
+        )
+
+        self.assertEqual(fault.state, controller.FAULT)
+        self.assertTrue(fault.terminal)
+        self.assertFalse(controller.arrived)
+        self.assertIn("mantida", fault.detail)
+
+    def test_navigation_can_only_start_with_ball_held_and_uses_fixed_color(self):
+        with self.assertRaisesRegex(RuntimeError, "presa e elevada"):
+            _new_deposit_navigation(BallPickupSequencer(), now=0.0)
+
+        for ball_kind, marker_kind in (
+            ("silver", "green"),
+            ("black", "red"),
+        ):
+            with self.subTest(ball_kind=ball_kind):
+                detector, controller = _new_deposit_navigation(
+                    pickup_ready(ball_kind),
+                    now=12.0,
+                )
+                self.assertEqual(detector.target_kind, marker_kind)
+                self.assertEqual(controller.target_kind, marker_kind)
+
+    def test_release_requires_arrived_controller_of_the_frozen_color(self):
+        pickup = pickup_ready("silver")
+        correct = DepositMarkerController("green", start_time=0.0)
+        wrong = DepositMarkerController("red", start_time=0.0)
+
+        self.assertFalse(_authorize_marker_deposit(pickup, correct))
+        self.assertTrue(pickup.ready_for_deposit)
+
+        wrong.state = wrong.ARRIVAL_STOP
+        wrong.mark_arrival_stopped(now=1.0)
+        self.assertFalse(_authorize_marker_deposit(pickup, wrong))
+        self.assertTrue(pickup.ready_for_deposit)
+
+        correct.state = correct.ARRIVAL_STOP
+        correct.mark_arrival_stopped(now=1.0)
+        self.assertTrue(_authorize_marker_deposit(pickup, correct))
+        self.assertEqual(pickup.state, pickup.DEPOSIT_START)
+        self.assertFalse(_authorize_marker_deposit(pickup, correct))
+
+
+if __name__ == "__main__":
+    unittest.main()

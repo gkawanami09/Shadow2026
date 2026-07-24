@@ -73,7 +73,24 @@ BALL_MAX_RADIUS_PX = 135
 BALL_MIN_CIRCULARITY = 0.56
 BALL_MIN_FILL_RATIO = 0.50
 BALL_MAX_ASPECT_RATIO = 1.32
-BALL_MIN_EDGE_SUPPORT = 0.22
+# O perimetro precisa existir ao redor da proposta, e nao apenas em alguns
+# pontos que por acaso formam um arco de Hough. A busca radial usa gradiente
+# alinhado com a normal do circulo, divide a volta em oito setores e mede a
+# dispersao da borda encontrada. O setor inferior pode faltar quando a esfera
+# toca o piso ou comeca a sair do quadro; topo e laterais continuam obrigatorios.
+BALL_RADIAL_SAMPLES = 72
+BALL_RADIAL_SECTORS = 8
+# Hough frequentemente encaixa um reflexo interno com raio cerca de 25% menor
+# que o envelope real. A faixa larga permite encontrar o perimetro externo; a
+# dispersao radial abaixo impede que lados de triangulos/elipses se aproveitem.
+BALL_RADIAL_SEARCH_BAND_RATIO = 0.40
+BALL_RADIAL_MAX_STEPS = 25
+BALL_RADIAL_MIN_GRADIENT = 20.0
+BALL_RADIAL_MIN_ALIGNMENT = 0.72
+BALL_MIN_EDGE_SUPPORT = 0.58
+BALL_RADIAL_MIN_SECTOR_SUPPORT = 0.25
+BALL_RADIAL_MIN_GOOD_SECTORS = 6
+BALL_RADIAL_MAX_DISPERSION_RATIO = 0.10
 
 # Hough + bordas. Os contornos de mascara cobrem a esfera preta; Hough e
 # contraste local cobrem a esfera prateada/reflexiva.
@@ -92,6 +109,13 @@ BALL_CONTOUR_FAST_CONFIDENCE = 0.78
 BALL_BLACK_V_MAX = 105
 BALL_BLACK_DARK_FRACTION_MIN = 0.52
 BALL_BLACK_LOCAL_CONTRAST_MIN = 8.0
+# Uma mancha escura uniforme nao vira esfera apenas por ser muito preta. O
+# exterior deve ser mais claro que o interior em varios trechos independentes
+# do perimetro.
+BALL_APPEARANCE_SECTORS = 8
+BALL_APPEARANCE_MIN_SECTOR_SAMPLES = 4
+BALL_BLACK_MIN_USABLE_CONTRAST_SECTORS = 6
+BALL_BLACK_MIN_CONTRAST_SECTORS = 5
 BALL_SILVER_S_MAX = 88
 # Referencia de bonus, nao gate: aluminio reflete a cor do iluminante e pode
 # ficar ciano/verde com saturacao alta mesmo continuando metalico.
@@ -99,6 +123,13 @@ BALL_SILVER_LOW_SAT_FRACTION_MIN = 0.62
 BALL_SILVER_DYNAMIC_RANGE_MIN = 20.0
 BALL_SILVER_HIGHLIGHT_V = 195
 BALL_SILVER_HIGHLIGHT_FRACTION_MIN = 0.015
+# Madeira clara e sombras com uma linha podiam satisfazer um unico percentil
+# global. O aluminio precisa distribuir textura e reflexos por varios setores.
+BALL_SILVER_TEXTURE_SECTORS = 6
+BALL_SILVER_MIN_TEXTURE_SECTORS = 4
+BALL_SILVER_MIN_REFLECTIVE_SECTORS = 2
+BALL_SILVER_SECTOR_DYNAMIC_RANGE_MIN = 18.0
+BALL_SILVER_SECTOR_HIGHLIGHT_FRACTION_MIN = 0.01
 # Rota conservadora para aluminio refletindo luz ciano/verde. Ela dispensa a
 # neutralidade global somente quando textura, brilho quase neutro e borda sao
 # simultaneamente muito fortes.
@@ -124,7 +155,8 @@ BALL_RADIUS_RATIO_MAX = 1.60
 # o mesmo perimetro externo. Depois da confirmacao, os limites amplos acima
 # continuam cobrindo o movimento real do robo e pequenas perdas de quadro.
 BALL_ACQUIRE_ASSOCIATION_MIN_PX = 16
-BALL_ACQUIRE_ASSOCIATION_RADIUS_FACTOR = 0.80
+BALL_ACQUIRE_ASSOCIATION_RADIUS_FACTOR = 0.45
+BALL_ACQUIRE_ASSOCIATION_MAX_PX = 32
 BALL_ACQUIRE_RADIUS_RATIO_MIN = 0.72
 BALL_ACQUIRE_RADIUS_RATIO_MAX = 1.40
 BALL_TRACK_EMA_ALPHA = 0.40
@@ -310,6 +342,49 @@ BALL_SEARCH_FULL_TURN_S = 6.55
 BALL_SEARCH_BRAKE_MIN_CONFIDENCE = BALL_MIN_CONFIDENCE
 BALL_SEARCH_VERIFY_TIMEOUT_S = 1.00
 
+# Transporte ate o ponto de evacuacao. O marcador correto e imutavel durante
+# o ciclo: esfera prata -> verde; esfera preta -> vermelho. A navegacao usa
+# apenas a camera frontal de resgate e sempre para antes de liberar a esfera.
+DEPOSIT_MARKER_BY_BALL_KIND = {
+    "silver": "green",
+    "black": "red",
+}
+DEPOSIT_SEARCH_TANK_ANGLE = 180
+DEPOSIT_SEARCH_TANK_SPEED = 0.22
+# Mesmo chassi/calibracao do giro das bolas, compensado pela menor velocidade.
+DEPOSIT_SEARCH_FULL_TURN_S = (
+    BALL_SEARCH_FULL_TURN_S
+    * BALL_SEARCH_TANK_SPEED
+    / DEPOSIT_SEARCH_TANK_SPEED
+)
+DEPOSIT_SEARCH_VERIFY_TIMEOUT_S = 1.00
+DEPOSIT_REACQUIRE_TIMEOUT_S = 0.60
+# O transporte nunca pode comandar rodas indefinidamente. O limite global
+# comeca somente depois da primeira escrita serial de movimento; o watchdog
+# curto exige melhora de alinhamento, largura ou altura aparente do marcador.
+DEPOSIT_MAX_ACTIVE_S = 45.0
+DEPOSIT_PROGRESS_TIMEOUT_S = 6.0
+DEPOSIT_PROGRESS_MIN_ERROR = 0.05
+DEPOSIT_PROGRESS_MIN_WIDTH_RATIO = 0.025
+DEPOSIT_PROGRESS_MIN_BOTTOM_RATIO = 0.030
+DEPOSIT_ALIGN_ENTER_ERROR = 0.22
+DEPOSIT_ALIGN_EXIT_ERROR = 0.12
+DEPOSIT_ALIGN_ANGLE_MIN = 62
+DEPOSIT_ALIGN_ANGLE_MAX = 76
+DEPOSIT_ALIGN_SPEED_MIN = 0.25
+DEPOSIT_ALIGN_SPEED_MAX = 0.29
+DEPOSIT_APPROACH_CENTER_DEADBAND = 0.08
+DEPOSIT_APPROACH_STEER_MAX_ANGLE = 45
+DEPOSIT_APPROACH_SPEED_FAR = 0.30
+DEPOSIT_APPROACH_SPEED_NEAR = 0.23
+# Gate conservador de chegada; deve ser refinado com PNGs brutos dos dois
+# triangulos na arena real. Largura e base baixa precisam ocorrer juntas.
+DEPOSIT_NEAR_MIN_WIDTH_RATIO = 0.30
+DEPOSIT_NEAR_MIN_BOTTOM_RATIO = 0.84
+DEPOSIT_NEAR_MAX_CENTER_ERROR = 0.16
+DEPOSIT_NEAR_CONFIRM_FRAMES = 3
+DEPOSIT_NEAR_CONFIRM_WINDOW_S = 0.45
+
 # Hough + filtros medidos no Pi podem ultrapassar 0.20 s. O timestamp agora e
 # tirado depois da captura; 0.75 s ainda impede movimento com imagem congelada,
 # mas nao rejeita todo frame valido como ocorreu no primeiro teste fisico.
@@ -320,3 +395,61 @@ BALL_MAX_ACTIVE_S = 45.0
 BALL_PROGRESS_WINDOW_S = 3.0
 BALL_PROGRESS_MIN_RADIUS_PX = 3.0
 BALL_PROGRESS_MIN_BOTTOM_Y_PX = 8.0
+
+# ---------------------------------------------------------------------------
+# Marcadores triangulares de deposito
+# ---------------------------------------------------------------------------
+# Esta calibracao pertence exclusivamente a camera frontal de resgate. Os
+# limites do segue-linha usam outro sensor, outra orientacao e outra iluminacao.
+MARKER_BASE_WIDTH = 640
+MARKER_BASE_HEIGHT = 480
+
+# O codigo de referencia descarta aproximadamente os 45% superiores da camera
+# da zona. Aqui o mesmo corte impede roupa/cadeiras acima da parede de virar
+# destino; o contorno pode tocar a linha, mas seu centro util fica na arena.
+MARKER_ROI_TOP = 0.45
+
+# HSV do OpenCV (H em 0..180). Vermelho cruza a origem e, por isso, usa duas
+# bandas. O contraste cromatico local abaixo continua obrigatorio: o HSV
+# sozinho nao aceita um banho uniforme de luz ciano/verde.
+MARKER_GREEN_HSV_MIN = (45, 80, 40)
+MARKER_GREEN_HSV_MAX = (95, 255, 255)
+MARKER_RED_HSV_MIN_1 = (0, 90, 50)
+MARKER_RED_HSV_MAX_1 = (12, 255, 255)
+MARKER_RED_HSV_MIN_2 = (168, 90, 50)
+MARKER_RED_HSV_MAX_2 = (180, 255, 255)
+
+# Limpeza da mascara. Os tamanhos sao definidos na base 640x480 e escalados
+# automaticamente para o detector continuar equivalente em 320x240.
+MARKER_MORPH_OPEN_PX = 3
+MARKER_MORPH_CLOSE_PX = 5
+
+# Geometria do triangulo. A razao principal e area(hull) dividida pela area do
+# menor triangulo que envolve o hull: triangulos se aproximam de 1; circulos,
+# retangulos e manchas difusas ficam muito abaixo.
+MARKER_MIN_AREA_RATIO = 0.0015
+MARKER_MAX_AREA_RATIO = 0.55
+MARKER_MIN_SIDE_PX = 9
+MARKER_MAX_ASPECT_RATIO = 3.0
+MARKER_MIN_SOLIDITY = 0.82
+MARKER_MIN_MASK_FILL = 0.78
+MARKER_APPROX_EPSILON_RATIO = 0.055
+MARKER_MAX_APPROX_VERTICES = 5
+MARKER_MIN_TRIANGULARITY = 0.78
+
+# Aparencia local. Para verde mede G-max(R,B); para vermelho mede
+# R-max(G,B). O anel ao redor do contorno precisa ser cromaticamente mais
+# neutro que o interior, rejeitando iluminacao colorida uniforme.
+MARKER_RING_WIDTH_PX = 12
+MARKER_RING_MIN_PIXELS = 24
+MARKER_MIN_INSIDE_CHROMA = 45.0
+MARKER_MIN_CHROMA_CONTRAST = 30.0
+MARKER_MIN_CONFIDENCE = 0.58
+
+# Rastreamento temporal e espacial de um unico destino.
+MARKER_ACQUIRE_HITS = 3
+MARKER_MAX_TRACK_MISSES = 2
+MARKER_ASSOCIATION_MIN_PX = 28
+MARKER_ASSOCIATION_SIZE_FACTOR = 0.85
+MARKER_AREA_RATIO_MIN = 0.30
+MARKER_AREA_RATIO_MAX = 3.50

@@ -65,6 +65,13 @@ class AsyncDetectionResult:
     candidate_circles: tuple = ()
     crescent_evidence: object = None
     locked_detection: object = None
+    arena_boundary_points: tuple = ()
+    arena_reason: str = ""
+    arena_confidence: float = 0.0
+    arena_accepted: object = None
+    arena_floor_support: float = 0.0
+    arena_support_box: object = None
+    marker_exclusion_boxes: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -379,6 +386,43 @@ class LatestFrameBallDetector:
                     "last_locked_detection",
                     None,
                 )
+                arena_model = getattr(
+                    self.detector, "last_arena_model", None)
+                arena_evidence = getattr(
+                    self.detector, "last_arena_evidence", None)
+                arena_boundary_points = (
+                    tuple(arena_model.boundary_points())
+                    if arena_model is not None else ()
+                )
+                if arena_evidence is not None:
+                    arena_reason = str(arena_evidence.reason)
+                    arena_confidence = float(
+                        arena_evidence.boundary_confidence)
+                    arena_accepted = bool(arena_evidence.accepted)
+                    arena_floor_support = float(
+                        arena_evidence.floor_support)
+                else:
+                    arena_reason = (
+                        str(arena_model.reason)
+                        if arena_model is not None else ""
+                    )
+                    arena_confidence = (
+                        float(arena_model.confidence)
+                        if arena_model is not None else 0.0
+                    )
+                    arena_accepted = None
+                    arena_floor_support = 0.0
+                arena_support_box = (
+                    arena_evidence.support_box
+                    if arena_evidence is not None else None
+                )
+                marker_exclusions = tuple(
+                    getattr(
+                        self.detector,
+                        "last_marker_exclusions",
+                        (),
+                    )
+                )
                 detection = _scale_detection(
                     detection, detector_frame.shape, frame.shape)
                 locked_detection = _scale_detection(
@@ -394,6 +438,31 @@ class LatestFrameBallDetector:
                 )
                 scale_x = float(frame_width) / max(detector_width, 1)
                 scale_y = float(frame_height) / max(detector_height, 1)
+                arena_boundary_points = tuple(
+                    (
+                        int(round(float(x) * scale_x)),
+                        int(round(float(y) * scale_y)),
+                    )
+                    for x, y in arena_boundary_points
+                )
+                if arena_support_box is not None:
+                    x0, y0, x1, y1 = arena_support_box
+                    arena_support_box = (
+                        int(round(float(x0) * scale_x)),
+                        int(round(float(y0) * scale_y)),
+                        int(round(float(x1) * scale_x)),
+                        int(round(float(y1) * scale_y)),
+                    )
+                marker_exclusion_boxes = tuple(
+                    (
+                        int(round(float(marker.bbox[0]) * scale_x)),
+                        int(round(float(marker.bbox[1]) * scale_y)),
+                        int(round(float(marker.bbox[2]) * scale_x)),
+                        int(round(float(marker.bbox[3]) * scale_y)),
+                        str(marker.kind),
+                    )
+                    for marker in marker_exclusions
+                )
                 candidate_circles = tuple(sorted(
                     (
                         (
@@ -431,6 +500,13 @@ class LatestFrameBallDetector:
                     candidate_circles=candidate_circles,
                     crescent_evidence=crescent_evidence,
                     locked_detection=locked_detection,
+                    arena_boundary_points=arena_boundary_points,
+                    arena_reason=arena_reason,
+                    arena_confidence=arena_confidence,
+                    arena_accepted=arena_accepted,
+                    arena_floor_support=arena_floor_support,
+                    arena_support_box=arena_support_box,
+                    marker_exclusion_boxes=marker_exclusion_boxes,
                 )
             except Exception as err:
                 with self._condition:
