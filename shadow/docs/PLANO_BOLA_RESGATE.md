@@ -49,9 +49,11 @@ NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
 - `PICKUP_COMPLETE`: confirma o depósito, reinicia o rastreador e volta a
   `SEARCH`.
 
-O giro de 360° é temporizado porque o robô não possui IMU. O valor inicial de
-4,90 s foi escalado da calibração já registrada e deve ser conferido no piso
-real com a bateria usada na competição.
+O giro de 360° é temporizado porque o robô não possui IMU. Com o giro tanque
+reduzido para `0,30`, o valor inicial passou a `6,55 s`; ambos devem ser
+conferidos no piso real com a bateria usada na competição. Durante o giro, o
+primeiro candidato visual válido já produz `PARAR`, mas a aproximação só começa
+depois das confirmações fortes feitas com o chassi parado.
 
 ## Câmera
 

@@ -720,15 +720,15 @@ def main():
                                 "comando da busca nao foi enviado "
                                 "pela serial")
                         action_completed_at = time.monotonic()
+                        if search.consume_tracking_reset():
+                            detector_worker.reset_tracking()
+                            fresh_gate.reset()
+                            latest_result = None
+                            latest_detection = None
                         if (
                             command.state
                             == BallSearchController.START
                         ):
-                            if search.consume_tracking_reset():
-                                detector_worker.reset_tracking()
-                                fresh_gate.reset()
-                                latest_result = None
-                                latest_detection = None
                             search.mark_rotation_started(
                                 action_completed_at)
                         elif (

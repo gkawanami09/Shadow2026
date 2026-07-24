@@ -19,15 +19,17 @@ def _detection(
     kind="silver",
     confirmed=True,
     track_locked=True,
+    confidence=0.90,
+    hits=3,
 ):
     return BallDetection(
         kind=kind,
         center_x=320.0,
         center_y=260.0,
         radius=40.0,
-        confidence=0.90,
+        confidence=confidence,
         confirmed=confirmed,
-        hits=3,
+        hits=hits,
         timestamp=float(timestamp),
         track_locked=track_locked,
     )
@@ -41,8 +43,8 @@ class BallSearchControllerTests(unittest.TestCase):
 
         self.assertEqual(command.state, search.START)
         self.assertEqual(command.angle, 180)
-        self.assertEqual(command.speed, cfg.BALL_SEARCH_TANK_SPEED)
-        self.assertEqual(cfg.BALL_SEARCH_FULL_TURN_S, 4.90)
+        self.assertEqual(command.speed, 0.30)
+        self.assertEqual(cfg.BALL_SEARCH_FULL_TURN_S, 6.55)
         self.assertFalse(command.terminal)
 
     def test_full_turn_timer_only_starts_after_serial_ack(self):
@@ -136,17 +138,74 @@ class BallSearchControllerTests(unittest.TestCase):
         self.assertTrue(search.target_acquired)
         self.assertEqual(search.target_kind, "silver")
 
-    def test_unconfirmed_or_unlocked_circle_does_not_stop_search(self):
+    def test_first_plausible_candidate_brakes_during_rotation(self):
         search = BallSearchController(start_time=0.0)
-        start = search.update(
-            _detection(0.0, confirmed=False),
+        search.update(None, now=0.0)
+        search.mark_rotation_started(now=0.0)
+
+        stop = search.update(
+            _detection(
+                0.10,
+                confirmed=False,
+                track_locked=False,
+                hits=1,
+            ),
+            now=0.10,
+        )
+
+        self.assertEqual(stop.state, search.TARGET_STOP)
+        self.assertEqual(stop.angle, 190)
+        self.assertIn("freando", stop.detail)
+
+    def test_tentative_candidate_still_requires_stationary_confirmation(self):
+        search = BallSearchController(start_time=0.0)
+        stop = search.update(
+            _detection(
+                0.0,
+                kind="silver",
+                confirmed=False,
+                track_locked=False,
+                hits=1,
+            ),
             now=0.0,
         )
-        self.assertEqual(start.state, search.START)
+        self.assertEqual(stop.state, search.TARGET_STOP)
+        search.mark_target_stopped(now=0.10)
+
+        still_waiting = search.update(
+            _detection(
+                0.20,
+                kind="black",
+                confirmed=False,
+                track_locked=False,
+                hits=2,
+            ),
+            now=0.20,
+        )
+        acquired = search.update(
+            _detection(0.30, kind="black"),
+            now=0.30,
+        )
+
+        self.assertEqual(still_waiting.state, search.VERIFY)
+        self.assertEqual(acquired.state, search.ACQUIRED)
+        self.assertEqual(acquired.target_kind, "black")
+
+    def test_weak_candidate_does_not_interrupt_turn(self):
+        search = BallSearchController(start_time=0.0)
+        search.update(None, now=0.0)
         search.mark_rotation_started(now=0.0)
 
         rotating = search.update(
-            _detection(0.10, track_locked=False),
+            _detection(
+                0.10,
+                confirmed=False,
+                track_locked=False,
+                confidence=(
+                    cfg.BALL_SEARCH_BRAKE_MIN_CONFIDENCE - 0.01
+                ),
+                hits=1,
+            ),
             now=0.10,
         )
 
@@ -169,6 +228,42 @@ class BallSearchControllerTests(unittest.TestCase):
         self.assertFalse(search.consume_tracking_reset())
         search.mark_rotation_started(now=1.10)
         self.assertEqual(search.state, search.ROTATING)
+
+    def test_false_candidate_resumes_only_remaining_rotation_time(self):
+        search = BallSearchController(start_time=0.0)
+        search.update(None, now=0.0)
+        search.mark_rotation_started(now=0.0)
+        stop = search.update(
+            _detection(
+                2.0,
+                confirmed=False,
+                track_locked=False,
+                hits=1,
+            ),
+            now=2.0,
+        )
+        self.assertEqual(stop.state, search.TARGET_STOP)
+        search.mark_target_stopped(now=2.0)
+
+        restart = search.update(
+            None,
+            now=2.0 + cfg.BALL_SEARCH_VERIFY_TIMEOUT_S,
+        )
+        self.assertEqual(restart.state, search.START)
+        search.mark_rotation_started(now=3.0)
+        remaining = cfg.BALL_SEARCH_FULL_TURN_S - 2.0
+
+        before = search.update(
+            None,
+            now=3.0 + remaining - 0.001,
+        )
+        finished = search.update(
+            None,
+            now=3.0 + remaining,
+        )
+
+        self.assertEqual(before.state, search.ROTATING)
+        self.assertEqual(finished.state, search.TURN_STOP)
 
     def test_other_color_cannot_replace_target_during_stationary_check(self):
         search = BallSearchController(start_time=0.0)

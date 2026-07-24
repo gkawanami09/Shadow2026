@@ -28,8 +28,10 @@ class BallSearchController:
             else float(start_time)
         )
         self._rotation_started_at = None
+        self._rotation_elapsed_s = 0.0
         self._target_stopped_at = None
         self._target_kind = None
+        self._tentative_target = False
         self._tracking_reset_requested = False
 
     @property
@@ -63,6 +65,9 @@ class BallSearchController:
         if self.state == self.START:
             if self._valid_target(detection, now):
                 return self._request_target_stop(detection)
+            if self._plausible_target(detection, now):
+                return self._request_target_stop(
+                    detection, tentative=True)
             return self._tank_command(
                 self.START,
                 "iniciando giro tanque para procurar outra esfera",
@@ -74,10 +79,13 @@ class BallSearchController:
             # descartada por ordem de avaliacao.
             if self._valid_target(detection, now):
                 return self._request_target_stop(detection)
+            if self._plausible_target(detection, now):
+                return self._request_target_stop(
+                    detection, tentative=True)
             if (
                 self._rotation_started_at is not None
-                and now - self._rotation_started_at
-                >= cfg.BALL_SEARCH_FULL_TURN_S
+                and self._rotation_elapsed(now)
+                >= cfg.BALL_SEARCH_FULL_TURN_S - 1e-9
             ):
                 self.state = self.TURN_STOP
                 return self._stop_command(
@@ -106,9 +114,15 @@ class BallSearchController:
             if self._valid_target(
                 detection,
                 now,
-                expected_kind=self._target_kind,
+                expected_kind=(
+                    None
+                    if self._tentative_target
+                    else self._target_kind
+                ),
                 captured_after=self._target_stopped_at,
             ):
+                self._target_kind = detection.kind
+                self._tentative_target = False
                 self.state = self.ACQUIRED
                 return self._stop_command(
                     self.ACQUIRED,
@@ -120,14 +134,24 @@ class BallSearchController:
                 and now - self._target_stopped_at
                 >= cfg.BALL_SEARCH_VERIFY_TIMEOUT_S
             ):
-                self.state = self.START
-                self._rotation_started_at = None
+                self.state = (
+                    self.TURN_STOP
+                    if self._rotation_elapsed_s
+                    >= cfg.BALL_SEARCH_FULL_TURN_S - 1e-9
+                    else self.START
+                )
                 self._target_stopped_at = None
                 self._target_kind = None
+                self._tentative_target = False
                 self._tracking_reset_requested = True
+                if self.state == self.TURN_STOP:
+                    return self._stop_command(
+                        self.TURN_STOP,
+                        "falso alvo descartado no fim do 360",
+                    )
                 return self._tank_command(
                     self.START,
-                    "falso alvo descartado; reiniciando o giro tanque",
+                    "falso alvo descartado; retomando o restante do 360",
                 )
             return self._stop_command(
                 self.VERIFY,
@@ -181,6 +205,7 @@ class BallSearchController:
             raise RuntimeError(
                 "confirmacao de PARAR fora do estado de alvo")
         now = time.monotonic() if now is None else float(now)
+        self._finish_rotation_segment(now)
         self.state = self.VERIFY
         self._target_stopped_at = now
 
@@ -190,6 +215,7 @@ class BallSearchController:
             raise RuntimeError(
                 "confirmacao de PARAR fora do fim do 360")
         now = time.monotonic() if now is None else float(now)
+        self._finish_rotation_segment(now)
         self.state = self.FINAL_VERIFY
         self._target_stopped_at = now
 
@@ -207,14 +233,44 @@ class BallSearchController:
         self._tracking_reset_requested = False
         return requested
 
-    def _request_target_stop(self, detection):
+    def _rotation_elapsed(self, now):
+        elapsed = self._rotation_elapsed_s
+        if self._rotation_started_at is not None:
+            elapsed += max(float(now) - self._rotation_started_at, 0.0)
+        return elapsed
+
+    def _finish_rotation_segment(self, now):
+        if self._rotation_started_at is None:
+            return
+        self._rotation_elapsed_s = self._rotation_elapsed(now)
+        self._rotation_started_at = None
+
+    def _request_target_stop(self, detection, tentative=False):
         self.state = self.TARGET_STOP
         self._target_kind = detection.kind
+        self._tentative_target = bool(tentative)
         return self._stop_command(
             self.TARGET_STOP,
-            "alvo unico travado; parando antes de confirmar",
+            (
+                "candidato visual encontrado; freando para confirmar"
+                if tentative
+                else "alvo unico travado; parando antes de confirmar"
+            ),
             target_kind=self._target_kind,
         )
+
+    @staticmethod
+    def _plausible_target(detection, now):
+        """Freia cedo; a confirmacao forte continua obrigatoria ja parado."""
+        if (
+            detection is None
+            or detection.kind not in ("silver", "black")
+            or float(detection.confidence)
+            < cfg.BALL_SEARCH_BRAKE_MIN_CONFIDENCE
+        ):
+            return False
+        age = now - float(detection.timestamp)
+        return -0.05 <= age <= cfg.BALL_FRAME_STALE_S
 
     @staticmethod
     def _valid_target(

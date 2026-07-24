@@ -297,11 +297,13 @@ BALL_PICKUP_WIGGLE_REPETITIONS = 2
 BALL_PICKUP_WIGGLE_STEP_S = 0.20
 
 # Busca das proximas vitimas. O Shadow nao possui IMU: o 360 e temporizado a
-# partir da calibracao existente de 0,70 s ~= 90 graus em velocidade 0,70,
-# escalada para o giro tanque visual mais lento de 0,40.
+# partir da calibracao existente de 0,70 s ~= 90 graus em velocidade 0,70.
+# O giro tanque foi reduzido para 0,30 para preservar nitidez e tempo de campo
+# suficientes para frear assim que o detector produzir o primeiro candidato.
 BALL_SEARCH_TANK_ANGLE = 180
-BALL_SEARCH_TANK_SPEED = 0.40
-BALL_SEARCH_FULL_TURN_S = 4.90
+BALL_SEARCH_TANK_SPEED = 0.30
+BALL_SEARCH_FULL_TURN_S = 6.55
+BALL_SEARCH_BRAKE_MIN_CONFIDENCE = BALL_MIN_CONFIDENCE
 BALL_SEARCH_VERIFY_TIMEOUT_S = 1.00
 
 # Hough + filtros medidos no Pi podem ultrapassar 0.20 s. O timestamp agora e
