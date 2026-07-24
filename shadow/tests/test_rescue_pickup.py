@@ -89,13 +89,13 @@ class BallPickupSequencerTests(unittest.TestCase):
         )
         self.assertEqual(
             (cfg.BALL_PICKUP_LIFT_POWER, cfg.BALL_PICKUP_LIFT_MS),
-            (20, 2000),
+            (20, 2500),
         )
         self.assertEqual(
             (cfg.BALL_PICKUP_LOWER_POWER, cfg.BALL_PICKUP_LOWER_MS),
             (-20, 25),
         )
-        self.assertEqual(cfg.BALL_PICKUP_WIGGLE_DELTA, 10)
+        self.assertEqual(cfg.BALL_PICKUP_WIGGLE_DELTA, 40)
         self.assertEqual(cfg.BALL_PICKUP_WIGGLE_REPETITIONS, 2)
 
     def test_start_requires_confirmed_kind_and_never_changes_it(self):
@@ -156,16 +156,16 @@ class BallPickupSequencerTests(unittest.TestCase):
             [
                 (-50, 50),
                 (50, 0),
-                (0, 10),
-                (0, -10),
-                (0, 10),
-                (0, -10),
+                (0, 40),
+                (0, -40),
+                (0, 40),
+                (0, -40),
             ],
         )
         self.assertEqual(
             [step.futaba_action for step in actions
              if step.futaba_action is not None],
-            [(-20, 1500), (20, 2000), (-20, 25)],
+            [(-20, 1500), (20, 2500), (-20, 25)],
         )
         self.assertTrue(complete.terminal)
         self.assertEqual(complete.state, pickup.COMPLETE)
@@ -179,10 +179,10 @@ class BallPickupSequencerTests(unittest.TestCase):
             [
                 (-50, 50),
                 (0, -50),
-                (-10, 0),
-                (10, 0),
-                (-10, 0),
-                (10, 0),
+                (-40, 0),
+                (40, 0),
+                (-40, 0),
+                (40, 0),
             ],
         )
         self.assertTrue(complete.terminal)
@@ -262,7 +262,7 @@ class PickupActionApplicationTests(unittest.TestCase):
             "LIFT",
             "subindo",
             motor_action="hold",
-            futaba_action=(20, 2000),
+            futaba_action=(20, 2500),
         )
 
         error = _apply_pickup_actions(
@@ -274,7 +274,7 @@ class PickupActionApplicationTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(
             arduino.calls,
-            [("lado", 0, 0), ("futaba", 20, 2000)],
+            [("lado", 0, 0), ("futaba", 20, 2500)],
         )
 
     def test_previous_futaba_is_stopped_before_25ms_pulse(self):
@@ -325,20 +325,20 @@ class PickupActionApplicationTests(unittest.TestCase):
                 "silver",
                 [
                     ("garras", 50, 0),
-                    ("garras", 0, 10),
-                    ("garras", 0, -10),
-                    ("garras", 0, 10),
-                    ("garras", 0, -10),
+                    ("garras", 0, 40),
+                    ("garras", 0, -40),
+                    ("garras", 0, 40),
+                    ("garras", 0, -40),
                 ],
             ),
             (
                 "black",
                 [
                     ("garras", 0, -50),
-                    ("garras", -10, 0),
-                    ("garras", 10, 0),
-                    ("garras", -10, 0),
-                    ("garras", 10, 0),
+                    ("garras", -40, 0),
+                    ("garras", 40, 0),
+                    ("garras", -40, 0),
+                    ("garras", 40, 0),
                 ],
             ),
         ):
@@ -360,7 +360,7 @@ class PickupActionApplicationTests(unittest.TestCase):
                         ("steer", 190, 0.8),
                         ("garras", -50, 50),
                         ("lado", 0, 0),
-                        ("futaba", 20, 2000),
+                        ("futaba", 20, 2500),
                         ("parar_futaba",),
                         ("futaba", -20, 25),
                         ("parar_futaba",),
@@ -422,7 +422,7 @@ class PickupActionApplicationTests(unittest.TestCase):
             "LIFT",
             "subindo",
             motor_action="hold",
-            futaba_action=(20, 2000),
+            futaba_action=(20, 2500),
         )
 
         error = _apply_pickup_actions(

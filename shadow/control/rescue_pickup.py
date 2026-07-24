@@ -173,7 +173,7 @@ class BallPickupSequencer:
             self._deadline = None
             return PickupStep(
                 self.LIFT_PENDING,
-                "garras fechadas; subindo o Futaba por 2 s",
+                "garras fechadas; subindo o Futaba por 2,5 s",
                 motor_action="hold",
                 futaba_action=(
                     cfg.BALL_PICKUP_LIFT_POWER,
@@ -191,7 +191,7 @@ class BallPickupSequencer:
             if now < self._deadline:
                 return PickupStep(
                     self.LIFT_WAIT,
-                    "subindo o Futaba por 2 s",
+                    "subindo o Futaba por 2,5 s",
                 )
             self.state = self.LOWER_PENDING
             self._deadline = None

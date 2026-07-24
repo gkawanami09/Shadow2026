@@ -29,12 +29,12 @@ NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
 - `PICKUP_FORWARD`: mantém as garras abertas durante os 1,50 s de avanço reto.
 - `PICKUP_GRIPPERS`: ao final da reta, envia `PARAR` e só então esquerda `-50`
   e direita `+50` no mesmo pacote USB.
-- `PICKUP_LIFT`: depois de as garras fecharem, envia `FUTABA 20 2000`.
+- `PICKUP_LIFT`: depois de as garras fecharem, envia `FUTABA 20 2500`.
 - `PICKUP_LOWER`: ao fim da subida, envia `FUTABA -20 25`.
 - `PICKUP_RELEASE`: prata abre primeiro a esquerda com `+50`; preta abre
   primeiro a direita com `-50`.
-- `PICKUP_WIGGLE`: prata move a direita `+10/-10` duas vezes; preta move a
-  esquerda `-10/+10` duas vezes.
+- `PICKUP_WIGGLE`: prata move a direita `+40/-40` duas vezes; preta move a
+  esquerda `-40/+40` duas vezes.
 - `PICKUP_COMPLETE`: confirma a coleta e encerra com as rodas já paradas.
 
 Ainda não há busca cega por rotação, transporte, depósito ou navegação completa
@@ -169,12 +169,12 @@ por segurança e inicia o avanço reto. O cronômetro de 1,50 s começa quando o
 avanço é entregue. Durante toda a reta as garras permanecem abertas; no fim do
 prazo o programa envia `PARAR` e depois fecha as duas garras em uma única
 escrita serial. Após 0,50 s para o fechamento físico, `LADO 0 0` mantém as
-rodas paradas sem cortar o `FUTABA 20 2000`. Terminada a subida, o programa
+rodas paradas sem cortar o `FUTABA 20 2500`. Terminada a subida, o programa
 envia `FUTABA PARAR`, `FUTABA -20 25` e espera o pulso acabar.
 
 A cor é congelada no primeiro círculo travado que toca o ponto inferior. Para
-prata, a esquerda abre com `+50` e a direita alterna `+10/-10` duas vezes.
-Para preta, a direita abre com `-50` e a esquerda alterna `-10/+10` duas
+prata, a esquerda abre com `+50` e a direita alterna `+40/-40` duas vezes.
+Para preta, a direita abre com `-50` e a esquerda alterna `-40/+40` duas
 vezes. Há 0,20 s entre cada delta da oscilação para o servo se mover
 fisicamente. Não existe comando de ré nessa sequência. Qualquer falha mantém
 rodas e Futaba parados e entra em `PICKUP_FAULT`.
