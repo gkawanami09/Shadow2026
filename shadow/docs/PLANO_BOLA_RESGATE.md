@@ -74,6 +74,11 @@ da câmera padrão do Picamera2:
    não é aberta por `resgate.py`;
 10. `shadow/main.py` e `shadow/resgate.py` nunca devem rodar juntos.
 
+O centro de qualquer candidato circular precisa estar em `0,50H` ou abaixo.
+A metade superior continua visível no preview, mas pessoas, roupas e objetos
+fora da arena nessa região são rejeitados antes de entrar no tracker ou obter
+`LOCK`. A linha laranja `IGNORAR CENTROS ACIMA` mostra esse limite no debug.
+
 Antes de liberar motores, execute:
 
 ```bash

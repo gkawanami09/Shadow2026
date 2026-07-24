@@ -38,13 +38,19 @@ def black_ball_frame():
     return frame
 
 
-def silver_ball_frame():
+def silver_ball_frame(center=(320, 300)):
     frame = base_frame()
-    center = (320, 300)
     for radius, value in (
         (44, 70), (40, 95), (34, 125), (27, 160), (19, 195)):
         cv2.circle(frame, center, radius, (value, value, value), -1, cv2.LINE_AA)
-    cv2.circle(frame, (307, 286), 8, (245, 245, 245), -1, cv2.LINE_AA)
+    cv2.circle(
+        frame,
+        (center[0] - 13, center[1] - 14),
+        8,
+        (245, 245, 245),
+        -1,
+        cv2.LINE_AA,
+    )
     cv2.circle(frame, center, 44, (65, 65, 65), 2, cv2.LINE_AA)
     return frame
 
@@ -792,6 +798,43 @@ class RescueBallDetectorTests(unittest.TestCase):
             roi_top,
             roi_bottom,
         ))
+
+    def test_roi_rejects_every_circle_center_above_half_frame(self):
+        width, height = 320, 240
+        roi_top = int(height * cfg.BALL_ROI_TOP)
+        roi_bottom = int(height * cfg.BALL_ROI_BOTTOM)
+        boundary = height * cfg.BALL_TARGET_MIN_CENTER_Y_RATIO
+        above = _Proposal(
+            160, boundary - 1, 20, 0.80, 0.80, "hough")
+        at_boundary = _Proposal(
+            160, boundary, 20, 0.80, 0.80, "hough")
+
+        self.assertFalse(BallDetector._inside_roi(
+            above,
+            width,
+            height,
+            roi_top,
+            roi_bottom,
+        ))
+        self.assertTrue(BallDetector._inside_roi(
+            at_boundary,
+            width,
+            height,
+            roi_top,
+            roi_bottom,
+        ))
+
+    def test_upper_half_silver_object_never_enters_tracker(self):
+        detector = BallDetector("any")
+        upper_object = silver_ball_frame(center=(320, 200))
+
+        results = [
+            detector.detect(upper_object, timestamp=index * 0.03)
+            for index in range(cfg.BALL_ACQUIRE_HITS + 2)
+        ]
+
+        self.assertTrue(all(result is None for result in results))
+        self.assertIsNone(detector._tracked)
 
     def test_pickup_point_precedes_bottom_track_loss_with_real_margin(self):
         detector_height = cfg.RESCUE_DETECTOR_MAX_HEIGHT

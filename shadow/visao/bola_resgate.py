@@ -1203,6 +1203,8 @@ class BallDetector:
         return (
             proposal.center_x - proposal.radius >= margin
             and proposal.center_x + proposal.radius < width - margin
+            and proposal.center_y
+            >= height * cfg.BALL_TARGET_MIN_CENTER_Y_RATIO
             and proposal.center_y - proposal.radius >= roi_top
             and proposal.center_y + proposal.radius
             < min(roi_bottom, height) - margin + bottom_overflow
@@ -1671,8 +1673,27 @@ def annotate_rescue_frame(
     height, width = annotated.shape[:2]
     roi_top = int(height * cfg.BALL_ROI_TOP)
     roi_bottom = int(height * cfg.BALL_ROI_BOTTOM)
+    target_center_min_y = int(round(
+        height * cfg.BALL_TARGET_MIN_CENTER_Y_RATIO))
     cv2.line(annotated, (0, roi_top), (width, roi_top), (90, 90, 90), 1)
     cv2.line(annotated, (0, roi_bottom), (width, roi_bottom), (90, 90, 90), 1)
+    cv2.line(
+        annotated,
+        (0, target_center_min_y),
+        (width, target_center_min_y),
+        (0, 80, 255),
+        2,
+    )
+    cv2.putText(
+        annotated,
+        "IGNORAR CENTROS ACIMA",
+        (8, max(target_center_min_y - 7, 15)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.42,
+        (0, 80, 255),
+        1,
+        cv2.LINE_AA,
+    )
     cv2.line(
         annotated,
         (width // 2, 0),

@@ -59,6 +59,10 @@ def ball_pixel_scale(frame_width, frame_height):
 
 
 BALL_ROI_TOP = 0.12
+# Pessoas, roupas e objetos externos aparecem acima da parede da arena. Uma
+# esfera so pode entrar no detector/tracker quando o centro estiver na metade
+# inferior; o raio ainda pode atravessar a linha quando a vitima estiver perto.
+BALL_TARGET_MIN_CENTER_Y_RATIO = 0.50
 # O circulo pode continuar valido ate a ultima linha. Uma tolerancia pequena
 # deixa o lock sobreviver quando a base acabou de ser cortada, sem mover para
 # cima o ponto fisico que dispara a coleta.
