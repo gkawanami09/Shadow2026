@@ -1492,9 +1492,12 @@ class BallDetector:
                 item for item in matches
                 if id(item[0]) in preferred_ids
             ]
-            return max(
+            # Com dois ou mais circulos compativeis, preserve a identidade
+            # espacial do alvo ja rastreado. Confianca serve apenas como
+            # desempate; um brilho vizinho nao pode roubar a aproximacao.
+            return min(
                 matches,
-                key=lambda item: item[0].confidence - 0.25 * item[1])[0]
+                key=lambda item: (item[1], -item[0].confidence))[0]
         if self._track_locked or self._hits >= cfg.BALL_ACQUIRE_HITS:
             # Depois de confirmar a vitima, um brilho incompatível nao pode
             # roubar o circulo. A perda para o robo imediatamente; o lock fica

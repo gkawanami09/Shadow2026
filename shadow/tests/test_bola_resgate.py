@@ -935,6 +935,23 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertTrue(detector._track_locked)
         self.assertEqual(detector._hits, cfg.BALL_ACQUIRE_HITS)
 
+    def test_multiple_compatible_balls_keep_nearest_tracked_target(self):
+        detector = BallDetector("any")
+        detector._pixel_scale = 1.0
+        detector._tracked = _Candidate(
+            "silver", 320, 300, 50, 0.90)
+        detector._hits = cfg.BALL_ACQUIRE_HITS
+        detector._track_locked = True
+        same_ball = _Candidate(
+            "silver", 325, 300, 50, 0.70)
+        tempting_neighbor = _Candidate(
+            "silver", 350, 300, 50, 0.99)
+
+        selected = detector._select_candidate(
+            [tempting_neighbor, same_ball])
+
+        self.assertIs(selected, same_ball)
+
     def test_any_target_lock_survives_silver_black_class_flip(self):
         detector = BallDetector("any")
         detector._pixel_scale = 1.0

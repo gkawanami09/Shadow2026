@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resgate: detecta, aproxima e executa a coleta inicial.
+"""Resgate: procura, aproxima, coleta e deposita todas as esferas visiveis.
 
 Este executavel e independente do segue-linha. Nunca rode ``shadow/main.py`` e
 ``shadow/resgate.py`` ao mesmo tempo: cada um precisa ser o unico dono de
@@ -29,6 +29,7 @@ from controle.aproximacao_resgate import (  # noqa: E402
     BallApproachController,
     MotionCommand,
 )
+from controle.busca_resgate import BallSearchController  # noqa: E402
 from controle.coleta_resgate import BallPickupSequencer  # noqa: E402
 from visao.resgate_assincrono import (  # noqa: E402
     FreshDetectionGate,
@@ -93,6 +94,16 @@ def _best_effort(label, action):
     except Exception as err:
         print(f"[resgate] falha ao {label}: {err}")
         return None
+
+
+def _reset_for_next_search(detector_worker, fresh_gate, now):
+    """Invalida o alvo anterior e cria um ciclo independente de busca."""
+    detector_worker.reset_tracking()
+    fresh_gate.reset()
+    return (
+        BallSearchController(start_time=now),
+        BallPickupSequencer(),
+    )
 
 
 def _apply_pickup_actions(
@@ -358,6 +369,7 @@ def main():
     detector_worker = None
     dataset_worker = None
     controller = None
+    search = None
     pickup = None
     hardware_session = args.video is None
 
@@ -366,6 +378,7 @@ def main():
     last_log_at = 0.0
     last_idle_control = 0.0
     pickup_connection_epoch = None
+    completed_pickups = 0
     capture_samples = deque(maxlen=60)
     detection_times = deque(maxlen=30)
 
@@ -416,10 +429,23 @@ def main():
         armed_at = (
             loop_started + cfg.RESCUE_ARM_DELAY_S
             if args.drive else loop_started)
-        controller = BallApproachController(start_time=armed_at)
+        controller = (
+            None
+            if args.drive
+            else BallApproachController(start_time=armed_at)
+        )
+        search = (
+            BallSearchController(start_time=armed_at)
+            if args.drive
+            else None
+        )
         pickup = BallPickupSequencer()
         command = MotionCommand(
-            "ARMING" if args.drive else controller.WAIT_TARGET,
+            (
+                "ARMING"
+                if args.drive
+                else BallApproachController.WAIT_TARGET
+            ),
             detail=(
                 "camera ativa; mantendo PARAR durante a contagem"
                 if args.drive else
@@ -515,12 +541,15 @@ def main():
                 if result_age > cfg.BALL_FRAME_STALE_S:
                     # Nunca mover com uma imagem que venceu durante o
                     # processamento.
-                    command = controller.update(
-                        result.detection,
-                        result.frame_shape,
-                        crescent_evidence=result.crescent_evidence,
-                        now=now,
-                    )
+                    if search is not None:
+                        command = search.update(None, now=now)
+                    else:
+                        command = controller.update(
+                            result.detection,
+                            result.frame_shape,
+                            crescent_evidence=result.crescent_evidence,
+                            now=now,
+                        )
                     command_updated = True
                     latest_result = None
                     latest_detection = None
@@ -528,27 +557,58 @@ def main():
                     last_idle_control = now
                 else:
                     latest_result = result
-                    control_detection = fresh_gate.accept(result.detection)
+                    if (
+                        search is not None
+                        and not search.frame_allowed(result.captured_at)
+                    ):
+                        # Um frame capturado enquanto o chassi ainda girava
+                        # nao pode reconfirmar o alvo depois de PARAR.
+                        fresh_gate.reset()
+                        control_detection = None
+                    else:
+                        control_detection = fresh_gate.accept(
+                            result.detection)
                     latest_detection = control_detection
 
-                    command = controller.update(
-                        control_detection,
-                        result.frame_shape,
-                        crescent_evidence=result.crescent_evidence,
-                        now=now,
-                    )
+                    if search is not None:
+                        command = search.update(
+                            control_detection,
+                            now=now,
+                        )
+                        if search.target_acquired:
+                            controller = BallApproachController(
+                                start_time=now)
+                            command = controller.update(
+                                control_detection,
+                                result.frame_shape,
+                                crescent_evidence=(
+                                    result.crescent_evidence),
+                                now=now,
+                            )
+                            search = None
+                    else:
+                        command = controller.update(
+                            control_detection,
+                            result.frame_shape,
+                            crescent_evidence=result.crescent_evidence,
+                            now=now,
+                        )
                     command_updated = True
             elif (
                 latest_result is not None
                 and now - latest_result.captured_at
                 > cfg.BALL_FRAME_STALE_S
             ):
-                command = controller.update(
-                    latest_result.detection,
-                    latest_result.frame_shape,
-                    crescent_evidence=latest_result.crescent_evidence,
-                    now=now,
-                )
+                if search is not None:
+                    command = search.update(None, now=now)
+                else:
+                    command = controller.update(
+                        latest_result.detection,
+                        latest_result.frame_shape,
+                        crescent_evidence=(
+                            latest_result.crescent_evidence),
+                        now=now,
+                    )
                 command_updated = True
                 latest_result = None
                 latest_detection = None
@@ -564,9 +624,34 @@ def main():
                     else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
                           cfg.RESCUE_CAMERA_MAX_WIDTH, 3)
                 )
-                command = controller.update(None, frame_shape, now=now)
+                if search is not None:
+                    command = search.update(None, now=now)
+                else:
+                    command = controller.update(
+                        None, frame_shape, now=now)
                 command_updated = True
                 last_idle_control = now
+
+            if (
+                args.drive
+                and search is None
+                and controller is not None
+                and not pickup.started
+                and command.state == BallApproachController.WAIT_TARGET
+            ):
+                # Se um alvo sumiu durante a aproximacao, nao espere parado
+                # por 30 s: descarte esse track e volte a procurar.
+                search, pickup = _reset_for_next_search(
+                    detector_worker,
+                    fresh_gate,
+                    now,
+                )
+                controller = None
+                latest_result = None
+                latest_detection = None
+                last_idle_control = 0.0
+                command = search.update(None, now=now)
+                command_updated = True
 
             if args.drive and arduino is not None:
                 from controle.direcao import steer
@@ -604,14 +689,74 @@ def main():
                             steer,
                         )
                         command_updated = True
+                    elif (
+                        pickup_step.state
+                        == BallPickupSequencer.COMPLETE
+                    ):
+                        completed_pickups += 1
+                        search, pickup = _reset_for_next_search(
+                            detector_worker,
+                            fresh_gate,
+                            action_completed_at,
+                        )
+                        controller = None
+                        pickup_connection_epoch = None
+                        latest_result = None
+                        latest_detection = None
+                        detection_times.clear()
+                        last_idle_control = 0.0
+                        command = search.update(
+                            None, now=action_completed_at)
+                        command_updated = True
+                        pickup_step = None
+                        print(
+                            f"[resgate] deposito {completed_pickups} "
+                            "concluido; procurando a proxima esfera")
                 elif command_updated:
-                    steer(command.angle, command.speed)
+                    motor_result = steer(command.angle, command.speed)
+                    if search is not None:
+                        if motor_result is False:
+                            raise RuntimeError(
+                                "comando da busca nao foi enviado "
+                                "pela serial")
+                        action_completed_at = time.monotonic()
+                        if (
+                            command.state
+                            == BallSearchController.START
+                        ):
+                            if search.consume_tracking_reset():
+                                detector_worker.reset_tracking()
+                                fresh_gate.reset()
+                                latest_result = None
+                                latest_detection = None
+                            search.mark_rotation_started(
+                                action_completed_at)
+                        elif (
+                            command.state
+                            == BallSearchController.TARGET_STOP
+                        ):
+                            search.mark_target_stopped(
+                                action_completed_at)
+                            fresh_gate.reset()
+                            latest_result = None
+                            latest_detection = None
+                            last_idle_control = action_completed_at
+                        elif (
+                            command.state
+                            == BallSearchController.TURN_STOP
+                        ):
+                            search.mark_full_turn_stopped(
+                                action_completed_at)
+                            fresh_gate.reset()
+                            latest_result = None
+                            latest_detection = None
+                            last_idle_control = action_completed_at
             if arduino is not None:
                 arduino.refresh(fail_closed=True)
 
             if (
                 args.drive
-                and command.state == controller.NEAR
+                and command.state == BallApproachController.NEAR
                 and not pickup.started
             ):
                 if command.target_kind not in ("silver", "black"):
@@ -793,7 +938,7 @@ def main():
             if command.terminal:
                 approach_handoff = (
                     args.drive
-                    and command.state == controller.NEAR
+                    and command.state == BallApproachController.NEAR
                     and pickup.started
                 )
                 if args.drive and not approach_handoff:

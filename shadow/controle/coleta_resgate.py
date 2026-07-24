@@ -50,6 +50,8 @@ class BallPickupSequencer:
     RELEASE_WAIT = "PICKUP_RELEASE"
     WIGGLE_PENDING = "PICKUP_WIGGLE_PENDING"
     WIGGLE_WAIT = "PICKUP_WIGGLE"
+    RESTORE_PENDING = "PICKUP_RESTORE_PENDING"
+    RESTORE_WAIT = "PICKUP_RESTORE"
     COMPLETE = "PICKUP_COMPLETE"
     FAULT = "PICKUP_FAULT"
 
@@ -270,7 +272,28 @@ class BallPickupSequencer:
                     gripper_action=self._wiggle_actions[
                         self._wiggle_index],
                 )
+            self.state = self.RESTORE_PENDING
+            self._deadline = None
+            return PickupStep(
+                self.RESTORE_PENDING,
+                "liberacao concluida; restaurando as garras",
+                gripper_action=self._restore_action(),
+            )
+
+        if self.state == self.RESTORE_PENDING:
+            return PickupStep(
+                self.RESTORE_PENDING,
+                "aguardando confirmacao da posicao inicial das garras",
+            )
+
+        if self.state == self.RESTORE_WAIT:
+            if now < self._deadline:
+                return PickupStep(
+                    self.RESTORE_WAIT,
+                    "aguardando as garras voltarem a posicao inicial",
+                )
             self.state = self.COMPLETE
+            self._deadline = None
             self._terminal_detail = (
                 f"coleta e liberacao da esfera {self._kind} concluidas")
             return PickupStep(
@@ -339,6 +362,10 @@ class BallPickupSequencer:
             self.state = self.WIGGLE_WAIT
             self._deadline = now + cfg.BALL_PICKUP_WIGGLE_STEP_S
             return
+        if self.state == self.RESTORE_PENDING:
+            self.state = self.RESTORE_WAIT
+            self._deadline = now + cfg.BALL_PICKUP_GRIPPER_SETTLE_S
+            return
         raise RuntimeError(
             "confirmacao das garras fora de um estado de partida")
 
@@ -363,6 +390,24 @@ class BallPickupSequencer:
         if self._kind == "silver":
             return "esfera prata; abrindo primeiro a garra esquerda"
         return "esfera preta; abrindo primeiro a garra direita"
+
+    def _restore_action(self):
+        """Compensa exatamente os deltas da liberacao e volta a (180, 0)."""
+        if self._kind == "silver":
+            return (
+                -(
+                    cfg.BALL_PICKUP_LEFT_DELTA
+                    + cfg.BALL_PICKUP_RELEASE_DELTA
+                ),
+                -cfg.BALL_PICKUP_RIGHT_DELTA,
+            )
+        return (
+            -cfg.BALL_PICKUP_LEFT_DELTA,
+            -(
+                cfg.BALL_PICKUP_RIGHT_DELTA
+                - cfg.BALL_PICKUP_RELEASE_DELTA
+            ),
+        )
 
     def _build_wiggle_actions(self, target_kind):
         delta = cfg.BALL_PICKUP_WIGGLE_DELTA

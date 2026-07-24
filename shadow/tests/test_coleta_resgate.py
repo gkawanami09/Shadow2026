@@ -77,6 +77,11 @@ def _run_sequence(target_kind):
         _ack_step(pickup, wiggle, now)
         now += cfg.BALL_PICKUP_WIGGLE_STEP_S
 
+    restore = pickup.update(now=now)
+    actions.append(restore)
+    _ack_step(pickup, restore, now)
+    now += cfg.BALL_PICKUP_GRIPPER_SETTLE_S
+
     complete = pickup.update(now=now)
     return pickup, actions, complete
 
@@ -162,6 +167,7 @@ class BallPickupSequencerTests(unittest.TestCase):
                 (0, -40),
                 (0, 40),
                 (0, -40),
+                (0, -50),
             ],
         )
         self.assertEqual(
@@ -185,10 +191,29 @@ class BallPickupSequencerTests(unittest.TestCase):
                 (40, 0),
                 (-40, 0),
                 (40, 0),
+                (50, 0),
             ],
         )
         self.assertTrue(complete.terminal)
         self.assertEqual(complete.state, pickup.COMPLETE)
+
+    def test_both_colors_restore_exact_initial_gripper_positions(self):
+        for kind in ("silver", "black"):
+            with self.subTest(kind=kind):
+                positions = [180, 0]
+                for _cycle in range(2):
+                    _pickup, actions, _complete = _run_sequence(kind)
+                    for step in actions:
+                        if step.gripper_action is None:
+                            continue
+                        for index, delta in enumerate(
+                            step.gripper_action
+                        ):
+                            positions[index] = min(
+                                180,
+                                max(0, positions[index] + delta),
+                            )
+                    self.assertEqual(positions, [180, 0])
 
     def test_each_serial_action_is_one_shot_until_acknowledged(self):
         pickup = BallPickupSequencer()
@@ -331,6 +356,7 @@ class PickupActionApplicationTests(unittest.TestCase):
                     ("garras", 0, -40),
                     ("garras", 0, 40),
                     ("garras", 0, -40),
+                    ("garras", 0, -50),
                 ],
             ),
             (
@@ -341,6 +367,7 @@ class PickupActionApplicationTests(unittest.TestCase):
                     ("garras", 40, 0),
                     ("garras", -40, 0),
                     ("garras", 40, 0),
+                    ("garras", 50, 0),
                 ],
             ),
         ):

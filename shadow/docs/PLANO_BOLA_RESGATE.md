@@ -1,4 +1,4 @@
-# Plano de resgate: detectar, aproximar e iniciar a coleta
+# Plano de resgate: buscar, coletar e depositar todas as esferas
 
 Esta etapa é deliberadamente independente do segue-linha. A lógica de linha,
 a máquina de estados existente e o firmware não foram alterados; a única
@@ -7,14 +7,23 @@ integração no controle de linha é enviar `LED ACESO` ao iniciar esse modo.
 ## Escopo
 
 ```text
-WAIT_TARGET -> ALIGN -> APPROACH -> NEAR_CONFIRM -> NEAR
-                    \-> LOST/FAULT (PARAR)
+SEARCH -> SEARCH_TARGET_STOP -> SEARCH_VERIFY -> ALIGN
+       -> SEARCH_TURN_STOP -> SEARCH_FINAL_VERIFY -> SEARCH_COMPLETE
+ALIGN -> APPROACH -> NEAR_CONFIRM -> NEAR
+      \-> LOST/FAULT (PARAR)
 NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
      -> PICKUP_LIFT -> PICKUP_LOWER -> PICKUP_RELEASE
-     -> PICKUP_WIGGLE -> PICKUP_COMPLETE
+     -> PICKUP_WIGGLE -> PICKUP_RESTORE -> PICKUP_COMPLETE -> SEARCH
 ```
 
-- `WAIT_TARGET`: motores parados até uma esfera aparecer de forma consistente.
+- `SEARCH`: giro tanque temporizado; o prazo só começa depois de a serial
+  confirmar o comando físico.
+- `SEARCH_TARGET_STOP`/`SEARCH_VERIFY`: para ao travar uma esfera e exige
+  novas confirmações capturadas com o chassi já parado.
+- `SEARCH_TURN_STOP`/`SEARCH_FINAL_VERIFY`: depois do tempo calibrado para
+  360°, para e verifica os últimos frames antes de declarar a busca vazia.
+- `SEARCH_COMPLETE`: encerra com `PARAR` somente quando o 360° e a verificação
+  final não encontraram outra esfera.
 - `ALIGN`: curva curta para a frente, proporcional ao erro e com histerese,
   para centralizar sem ultrapassar a esfera de um lado para o outro.
 - `APPROACH`: avanço em arco; a velocidade diminui à medida que a esfera cresce.
@@ -35,10 +44,14 @@ NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
   primeiro a direita com `-50`.
 - `PICKUP_WIGGLE`: prata move a direita `+40/-40` duas vezes; preta move a
   esquerda `-40/+40` duas vezes.
-- `PICKUP_COMPLETE`: confirma a coleta e encerra com as rodas já paradas.
+- `PICKUP_RESTORE`: prata aplica direita `-50`; preta aplica esquerda `+50`,
+  restaurando exatamente as posições iniciais `(180°, 0°)`.
+- `PICKUP_COMPLETE`: confirma o depósito, reinicia o rastreador e volta a
+  `SEARCH`.
 
-Ainda não há busca cega por rotação, transporte, depósito ou navegação completa
-pela zona.
+O giro de 360° é temporizado porque o robô não possui IMU. O valor inicial de
+4,90 s foi escalado da calibração já registrada e deve ser conferido no piso
+real com a bateria usada na competição.
 
 ## Câmera
 
@@ -279,10 +292,10 @@ Outras travas:
 
 6. Ainda com as rodas suspensas e sem bolinha presa, confirme no log a ordem:
    `PICKUP_FUTABA`, `PICKUP_FORWARD`, `PICKUP_GRIPPERS`,
-   `PICKUP_LIFT`, `PICKUP_LOWER`, `PICKUP_RELEASE`, `PICKUP_WIGGLE` e
-   `PICKUP_COMPLETE`. Não pode aparecer ré. As garras só podem fechar depois
-   que a reta completar 1,50 s e as rodas receberem `PARAR`. Mantenha acesso
-   imediato à alimentação.
+   `PICKUP_LIFT`, `PICKUP_LOWER`, `PICKUP_RELEASE`, `PICKUP_WIGGLE`,
+   `PICKUP_RESTORE`, `PICKUP_COMPLETE` e uma nova `SEARCH`. Não pode aparecer
+   ré. As garras só podem fechar depois que a reta completar 1,50 s e as rodas
+   receberem `PARAR`. Mantenha acesso imediato à alimentação.
 
 7. Teste no chão em velocidade baixa.
 
