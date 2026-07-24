@@ -65,7 +65,7 @@ O Uno usa o firmware **SPEC 01 já existente** no repositório Shadow2026 —
 o `shadow/` não traz firmware próprio.
 
 1. Verifique se já está gravado: abra o Serial Monitor (Arduino IDE ou
-   `python3 -m shadow.tools.serial_smoke`) a **115200** e pressione reset —
+   `python3 -m shadow.tools.teste_serial`) a **115200** e pressione reset —
    deve aparecer `Arduino pronto - SPEC 01` uma única vez.
 2. Se não aparecer: abra
    `~/Shadow2026/arduino/motor_controller/motor_controller.ino`
@@ -79,7 +79,7 @@ Com as **rodas suspensas** (robô sobre um apoio):
 
 ```bash
 cd ~/Overengineering-squared-RoboCup
-python3 -m shadow.tools.serial_smoke
+python3 -m shadow.tools.teste_serial
 ```
 
 O ciclo é: para → **frente** 2 s → para → **ré** 2 s → para (PWM 60).
@@ -93,33 +93,33 @@ Para **cada roda** que girar ao contrário do anunciado:
 Depois valide o watchdog:
 
 ```bash
-python3 -m shadow.tools.serial_smoke --watchdog
+python3 -m shadow.tools.teste_serial --watchdog
 ```
 
 Os motores devem parar **sozinhos ~1 s** após o script silenciar. Se não
 pararem, NÃO prossiga — confira o firmware.
 
-Opcional: dirija com o teclado — `python3 -m shadow.tools.steer_test`
+Opcional: dirija com o teclado — `python3 -m shadow.tools.teste_direcao`
 (w/a/s/d, espaço para parar, x para sair).
 
 ## 6. Calibração de cores
 
 ```bash
-python3 -m shadow.tools.color_slider
+python3 -m shadow.tools.calibrar_cores
 ```
 
 Com o robô sobre a pista, na iluminação real (precisa de monitor ou X11):
 
 - **Teclas 1/2** — tetos BGR do preto (faixa distante 0-40 % / próxima
-  40-100 % da imagem, como no Hotspot 1 do OE²). "Bom" = linha branca sólida
+  40-100 % da imagem). "Bom" = linha branca sólida
   na máscara, fundo totalmente preto.
 - **Tecla 3** — teto de rampa (bem escuro; usado só quando "escuro à frente").
 - **Tecla 4** — HSV do verde: marcador branco sólido, resto preto.
 - **Teclas 5/6** — HSV do vermelho (duas bandas de hue: 0-10 e 170-180).
 - **`s` salva o grupo atual** em `shadow/config.ini`; `q` sai.
 
-Detalhes e critérios em [docs/CALIBRATION_GUIDE.md](docs/CALIBRATION_GUIDE.md).
-Cheque a câmera isolada antes, se quiser: `python3 -m shadow.tools.camera_smoke`
+Detalhes e critérios em [docs/GUIA_CALIBRACAO.md](docs/GUIA_CALIBRACAO.md).
+Cheque a câmera isolada antes, se quiser: `python3 -m shadow.tools.teste_camera`
 (salva um JPEG 448×252 e mede o FPS — alvo 40).
 
 ## 7. Primeiro teste de direção (suspenso)
@@ -213,11 +213,11 @@ journalctl -u shadow-line -f                      # logs
 | Motores não giram, serial OK | STBY do TB6612 solto; VM sem bateria; GND não comum | Seção 2 |
 | Uma roda gira ao contrário | Polaridade | `DIRECAO_*` no `config.h` do Shadow2026 (seção 5) |
 | Motores param sozinhos andando | Watchdog disparando → loop Python travado/lento | Veja o terminal; reporte — não deveria ocorrer com `sleep_steering` |
-| Câmera não encontrada | Cabo CSI; picamera2 ausente | `python3 -m shadow.tools.camera_smoke`; seção 3 |
-| Linha não detectada (máscara vazia) | Tetos de preto baixos | `color_slider` grupos 1/2 |
+| Câmera não encontrada | Cabo CSI; picamera2 ausente | `python3 -m shadow.tools.teste_camera`; seção 3 |
+| Linha não detectada (máscara vazia) | Tetos de preto baixos | `calibrar_cores` grupos 1/2 |
 | Robô lento sem motivo, círculo preto no canto do --debug | `ramp_ahead` disparando com chão fora da pista (fish-eye) | Suba `RAMP_SWAP_TRIGGER` (90 → 110-130) em `config.py` |
-| "Perde" a linha na descida de rampa | Teto de rampa errado | `color_slider` grupo 3 |
-| Robô pivota para o lado errado no verde | Marcador validado com a linha errada — máscara verde suja ou preta fraca | `color_slider` grupos 1/2/4; confira no `--debug` |
+| "Perde" a linha na descida de rampa | Teto de rampa errado | `calibrar_cores` grupo 3 |
+| Robô pivota para o lado errado no verde | Marcador validado com a linha errada — máscara verde suja ou preta fraca | `calibrar_cores` grupos 1/2/4; confira no `--debug` |
 | Verde ignorado | Área < 2500 px² ou vizinhança preta não bate | `GREEN_MIN_AREA`; recalibre preto+verde |
 | 180° passa/falta do alvo | `T_180` fora | Cronometre e ajuste `T_180` em `config.py` |
 | Vermelho nunca para | Contorno < 15000 px² | Desça `RED_MIN_CONTOUR`; recalibre grupos 5/6 |

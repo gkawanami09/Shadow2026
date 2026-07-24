@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""
-main.py — Shadow2026 line follower entry point.
-Ported from Overengineering² Reading Dossier, Section 7 (process model)
-  Original source: robot_v.3/Python/main/main.py (lines 592-609 — process
-  spawning; the CustomTkinter GUI, lines 40-590, was NOT ported)
-Shadow2026 adaptations:
-  - 4 workers + GUI → 2 processes: vision (Picamera2 + detection) and control
-    (state machine + serial). Headless by default.
-  - --debug: opens ONE OpenCV window with the annotated line-camera frame,
-    transported via multiprocessing.shared_memory (created here, written by
-    the vision process). 'q' in the window or Ctrl-C stops everything.
-  - --vision-only: spawns only the vision process (Phase B bring-up).
-  - Shutdown: terminate flag → children exit their loops → control's finally
-    sends PARAR and closes the serial port. Children ignore SIGINT so the
-    parent coordinates the shutdown order.
-
-Uso:
-    python3 shadow/main.py            # operacao normal (headless)
-    python3 shadow/main.py --debug    # com janela anotada
-    python3 shadow/main.py --vision-only --debug   # so visao (Fase B)
-"""
+"""Inicia os processos de visão e controle do segue-linha."""
 
 import argparse
 import signal
@@ -34,19 +14,19 @@ from multiprocessing import Process, shared_memory  # noqa: E402
 import config  # noqa: E402
 
 
-def vision_main(debug):
+def iniciar_visao(debug):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    from vision.pipeline import vision_loop
+    from visao.processamento import vision_loop
     vision_loop(debug)
 
 
-def control_main():
+def iniciar_controle():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    from control.loop import control_loop
+    from controle.ciclo import control_loop
     control_loop()
 
 
-def _create_debug_shm():
+def _criar_memoria_debug():
     try:
         return shared_memory.SharedMemory(name=config.DEBUG_SHM_NAME, create=True,
                                           size=config.DEBUG_SHM_SIZE)
@@ -60,7 +40,7 @@ def _create_debug_shm():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Shadow2026 line follower")
+    parser = argparse.ArgumentParser(description="Segue-linha do Shadow2026")
     parser.add_argument("--debug", action="store_true",
                         help="mostra a janela com o frame anotado")
     parser.add_argument("--vision-only", action="store_true",
@@ -69,25 +49,26 @@ def main():
 
     motor_lock = None
     if not args.vision_only:
-        from control.motor_lock import MotorLockError, MotorOwnerLock
+        from controle.trava_motores import MotorLockError, MotorOwnerLock
         motor_lock = MotorOwnerLock("segue-linha")
         try:
             motor_lock.acquire()
         except MotorLockError as err:
             parser.error(str(err))
 
-    # importa mp_manager APOS o parse (instancia o Manager)
-    from shared.mp_manager import status, terminate
+    # Importa os dados compartilhados depois de ler os argumentos.
+    from shared.dados_compartilhados import status, terminate
 
-    shm = _create_debug_shm() if args.debug else None
+    shm = _criar_memoria_debug() if args.debug else None
 
-    vision_p = Process(target=vision_main, args=(args.debug,), name="shadow-vision")
+    vision_p = Process(target=iniciar_visao, args=(args.debug,),
+                       name="shadow-visao")
     vision_p.start()
 
     control_p = None
     if not args.vision_only:
-        time.sleep(.5)  # partida escalonada, como no OE²
-        control_p = Process(target=control_main, name="shadow-control")
+        time.sleep(.5)
+        control_p = Process(target=iniciar_controle, name="shadow-controle")
         control_p.start()
 
     children = [p for p in (vision_p, control_p) if p is not None]

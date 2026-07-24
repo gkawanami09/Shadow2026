@@ -1,76 +1,73 @@
-# Robô Seguidor de Linha — OBR Prática
+# Shadow2026
 
-Projeto de ensino médio para desenvolver um robô seguidor de linha para a OBR Prática.
+Código do robô Shadow para a OBR. A pasta principal é `shadow/`.
 
-A Raspberry Pi 5 executará os programas em Python, fará a captura da câmera e, nas fases futuras, tomará decisões a partir da imagem. O Arduino Uno controlará os motores. Os dois dispositivos se comunicarão por USB Serial.
+O projeto possui dois programas separados:
 
-## Estado atual
+- `shadow/main.py`: segue a linha, lê verde e vermelho e trata gap;
+- `shadow/resgate.py`: encontra a vítima, aproxima e executa a coleta.
 
-As Fases 1, 2 e 3 estão prontas para testes físicos: a Raspberry envia comandos pela USB Serial ao Arduino, captura imagens da câmera CSI e detecta a linha preta em uma imagem. Ainda não há movimento automático do robô.
+Os dois programas não devem ser executados ao mesmo tempo, pois usam as
+câmeras, os motores e a mesma conexão serial.
 
-Por segurança, os motores iniciam parados, a velocidade é limitada a 120 e o Arduino para todos os motores após 1 segundo sem receber um comando completo.
+## Instalação
 
-## Próximas fases
-
-1. Segue-linha inicial.
-2. Detecção de verde e vermelho.
-3. Obstáculos e ajustes para a OBR.
-
-## Uso inicial
-
-Na Raspberry Pi, instale as dependências com `pip install -r requirements.txt` e execute `python raspberry/main.py`.
-
-Envie `arduino/motor_controller/motor_controller.ino` ao Arduino. Com o robô suspenso, teste a comunicação com:
+Na Raspberry Pi:
 
 ```bash
-python3 raspberry/serial_test.py --porta auto --comando PING
+python3 -m pip install -r shadow/requirements.txt --break-system-packages
 ```
 
-Para testar cada motor, use `python3 raspberry/serial_test.py --porta auto --teste-motores`. Mantenha as rodas fora do chão durante esse teste.
+`picamera2` e `libcamera` devem ser instalados pelos pacotes do Raspberry Pi OS,
+como explicado em `shadow/RUNBOOK.md`.
 
-Para salvar uma imagem da câmera CSI, use `python3 raspberry/camera_test.py`. As imagens de teste são salvas em `captures/`.
-
-Para detectar a linha em uma imagem salva, use `python3 raspberry/line_test.py --imagem captures/NOME_DA_IMAGEM.jpg --salvar-mascara`.
-
-### Verde V2 - detector visual novo
+## Segue-linha
 
 ```bash
-python3 raspberry/verdes.py --imagem captures/NOME_DA_IMAGEM.jpg --salvar-debug --log-detalhe
-python3 raspberry/verdes.py --camera --salvar-debug --log-detalhe
-python3 raspberry/verdes.py --camera --mostrar
+python3 shadow/main.py
+python3 shadow/main.py --debug
+python3 shadow/main.py --vision-only --debug
 ```
 
-Este detector e apenas visual. Ele nao move motores, nao abre Serial e nao altera o segue-linha.
-Ele detecta linha preta, cruzamento e marcadores verdes para decidir:
+## Resgate
 
-- `RETO`
-- `ESQUERDA`
-- `DIREITA`
-- `RETORNO`
-- `NENHUM`
-- `INSEGURO`
-
-Use esse arquivo para validar imagens reais antes de integrar com o `follow_destinos.py`.
-
-### Verde legado
+Primeiro teste sem liberar os motores:
 
 ```bash
-raspberry/green_detector.py
-raspberry/green_action.py
-raspberry/green_obr_analyzer.py
-raspberry/green_test.py
-raspberry/green_action_test.py
+python3 shadow/resgate.py --camera-index 0 --debug
 ```
 
-Esses arquivos antigos ficam apenas como referencia historica. Para testes atuais de verde, use `raspberry/verdes.py`.
-
-## Follow Destinos 1.0
-
-O controlador experimental `follow_destinos.py` escolhe um destino visual por raios, com prioridade para frente, depois curva e por fim retorno. O `follow_clean.py` continua disponivel como controlador de backup.
+Depois da conferência visual:
 
 ```bash
-python3 raspberry/follow_destinos.py --camera --salvar-debug
-python3 raspberry/follow_destinos.py --camera --motores --porta auto --salvar-debug
+python3 shadow/resgate.py --camera-index 0 --drive --debug
 ```
 
-Teste primeiro sem motores e depois com o robo suspenso. A parada normal e `CTRL+C`.
+## Ferramentas
+
+```bash
+python3 -m shadow.tools.calibrar_cores
+python3 -m shadow.tools.visualizar_cameras
+python3 -m shadow.tools.teste_camera
+python3 -m shadow.tools.teste_serial
+python3 -m shadow.tools.teste_direcao
+python3 -m shadow.tools.controle_serial
+```
+
+## Arduino
+
+O firmware usado pelo robô continua sendo:
+
+```text
+arduino/motor_controller/motor_controller.ino
+```
+
+O pinout e o protocolo não foram alterados pela limpeza do projeto.
+
+## Testes
+
+```bash
+python3 -m unittest discover -s shadow/tests -p "test_*.py" -v
+```
+
+Mais detalhes estão em `shadow/README.md` e `shadow/RUNBOOK.md`.

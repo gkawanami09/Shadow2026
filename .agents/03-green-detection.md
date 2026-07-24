@@ -63,9 +63,9 @@ Não confundir objeto verde no fundo com marcador de pista.
 Não confundir área de resgate verde com marcador verde do percurso.
 Quando estiver dentro da sala de resgate, desativar lógica de marcador verde do percurso.
 
-## Responsabilidade correta do verdes.py
+## Responsabilidade correta do verde.py
 
-O arquivo `raspberry/verdes.py` deve detectar apenas marcadores verdes.
+O arquivo `shadow/visao/verde.py` deve detectar apenas marcadores verdes.
 
 Decisões permitidas no detector de verde:
 

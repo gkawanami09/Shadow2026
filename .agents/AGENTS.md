@@ -1,7 +1,8 @@
 AGENTS.md — Shadow Robot
 Projeto
 
-Este repositório controla o robô Shadow para OBR/Robótica de Resgate. O objetivo atual é completar com alta confiabilidade a parte de percurso: seguir linha preta, detectar verde, lidar com gap, parar no vermelho e identificar a entrada da sala de resgate pela fita prata.
+Este repositório controla o robô Shadow para OBR/Robótica de Resgate. O projeto
+possui um programa de percurso e outro programa separado para o resgate.
 
 Fonte de verdade
 
@@ -21,13 +22,9 @@ Decisão correta em interseções e becos.
 Recuperação em gap.
 Parada correta no vermelho.
 Detecção de prata para saber que entrou/está entrando na sala de resgate.
-Ainda não implementar
-
-Não implementar resgate completo de vítimas sem pedido explícito e sem hardware adequado.
+Detecção, aproximação e coleta das vítimas na área de resgate.
 
 Não implementar desvio completo de obstáculo sem pedido explícito e sem sensor/hardware adequado.
-
-Não transformar a sala de resgate em lógica principal agora. A prioridade atual é chegar até a entrada da sala com confiabilidade.
 
 Contexto obrigatório
 

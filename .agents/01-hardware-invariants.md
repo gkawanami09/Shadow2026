@@ -10,8 +10,11 @@ O projeto é um robô seguidor de linha para OBR/Resgate.
 - Motores: 4 motores DC, divididos entre lado esquerdo e lado direito.
 
 ## Câmera
-- Câmera frontal usada para seguir linha e detectar cores.
-- A câmera fica baixa, próxima do chão.
+- A câmera de índice 1 é usada para seguir linha e detectar cores.
+- A câmera de índice 0 é usada no resgate.
+- As duas câmeras possuem programas separados e não devem ser abertas duas
+  vezes ao mesmo tempo.
+- A câmera de linha fica baixa, próxima do chão.
 - Usar preferencialmente a região inferior da imagem para seguir linha.
 - Considerar distorção, variação de luz e reflexos.
 
@@ -23,4 +26,5 @@ O projeto é um robô seguidor de linha para OBR/Resgate.
 - Sempre considerar derrapagem, bateria fraca, diferença entre rodas e iluminação variável.
 
 ## Comunicação
-Se existir comunicação serial entre Raspberry Pi e Arduino, preserve os comandos existentes. Não mude o protocolo sem explicar a razão.
+A comunicação serial entre Raspberry Pi e Arduino usa o firmware SPEC 01.
+Preserve os comandos existentes e não mude o protocolo sem explicar a razão.

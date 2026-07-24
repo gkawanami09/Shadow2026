@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from serial_link.arduino import Arduino  # noqa: E402
+from comunicacao_serial.arduino import Arduino  # noqa: E402
 
 
 AJUDA = """
