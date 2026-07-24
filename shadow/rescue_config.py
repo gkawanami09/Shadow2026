@@ -276,11 +276,10 @@ BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
 BALL_PICKUP_LEFT_DELTA = -50
 BALL_PICKUP_RIGHT_DELTA = 50
-# O motor recebe o avanco antes das garras. Esta curta vantagem deixa as rodas
-# vencerem a inercia; depois ambas as garras fecham no mesmo lote USB. Os
-# 2,00 s sao contados desde o comando das rodas, incluindo essa vantagem.
-BALL_PICKUP_FORWARD_LEAD_S = 0.12
 BALL_PICKUP_FORWARD_S = 2.00
+# As garras so fecham depois que a reta inteira termina. O alias e mantido
+# para o sequenciador representar o intervalo entre iniciar o avanco e fechar.
+BALL_PICKUP_FORWARD_LEAD_S = BALL_PICKUP_FORWARD_S
 BALL_PICKUP_FORWARD_SPEED = BALL_APPROACH_SPEED_NEAR
 
 # Hough + filtros medidos no Pi podem ultrapassar 0.20 s. O timestamp agora e

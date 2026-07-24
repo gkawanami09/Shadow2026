@@ -25,11 +25,10 @@ NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
 - `FAULT`: timeout ou falta de progresso produz `PARAR` travado.
 - `PICKUP_FUTABA`: rodas zeradas e `FUTABA -20 1500`; aguarda 1,50 s
   mais 0,10 s de margem.
-- `PICKUP_FORWARD`: envia primeiro o avanço reto e espera 0,12 s para as rodas
-  vencerem a inércia.
-- `PICKUP_GRIPPERS`: já em avanço, envia esquerda `-50` e direita `+50` no
-  mesmo pacote USB; o avanço continua até completar 2,00 s no total.
-- `PICKUP_COMPLETE`: envia `PARAR` e encerra.
+- `PICKUP_FORWARD`: mantém as garras abertas durante os 2,00 s de avanço reto.
+- `PICKUP_GRIPPERS`: ao final da reta, envia `PARAR` e só então esquerda `-50`
+  e direita `+50` no mesmo pacote USB.
+- `PICKUP_COMPLETE`: confirma a coleta e encerra com as rodas já paradas.
 
 Ainda não há busca cega por rotação, transporte, depósito ou navegação completa
 pela zona.
@@ -159,12 +158,11 @@ deslocamentos relativos e não podem ser repetidos.
 finaliza a aproximação, o primeiro passo da coleta usa `LADO 0 0` para manter
 as quatro rodas zeradas. O keepalive repete esse comando enquanto CH3 desce,
 sem interromper os 1500 ms. Depois do prazo, o programa envia `FUTABA PARAR`
-por segurança e inicia o avanço reto. Após 0,12 s, envia as duas linhas das
-garras em uma única escrita serial. O cronômetro de 2,00 s começa quando o
-avanço é entregue, portanto restam aproximadamente 1,88 s de movimento
-enquanto elas fecham. Não existe comando de ré nessa sequência. Se o lote das
-garras falhar, o programa envia `PARAR` imediatamente e entra em
-`PICKUP_FAULT`.
+por segurança e inicia o avanço reto. O cronômetro de 2,00 s começa quando o
+avanço é entregue. Durante toda a reta as garras permanecem abertas; no fim do
+prazo o programa envia `PARAR` e depois fecha as duas garras em uma única
+escrita serial. Não existe comando de ré nessa sequência. Se o lote das garras
+falhar, o programa mantém `PARAR` e entra em `PICKUP_FAULT`.
 
 O PCA9685 precisa de alimentação externa regulada adequada para os servos, com
 GND comum ao Arduino. Não alimente Futaba e garras pelo pino 5 V do Uno.
@@ -267,8 +265,8 @@ Outras travas:
 6. Ainda com as rodas suspensas e sem bolinha presa, confirme no log a ordem:
    `PICKUP_FUTABA`, `PICKUP_FORWARD`, `PICKUP_GRIPPERS`,
    `PICKUP_COMPLETE`. Não pode aparecer ré. O avanço precisa aparecer antes
-   das garras; após 0,12 s elas fecham e o avanço termina ao completar 2,00 s
-   no total. Mantenha acesso imediato à alimentação.
+   das garras; elas só podem fechar depois que a reta completar 2,00 s e as
+   rodas receberem `PARAR`. Mantenha acesso imediato à alimentação.
 
 7. Teste no chão em velocidade baixa.
 

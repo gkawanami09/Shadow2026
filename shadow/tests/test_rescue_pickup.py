@@ -14,8 +14,11 @@ from rescue_main import _apply_pickup_actions  # noqa: E402
 class BallPickupSequencerTests(unittest.TestCase):
     def test_collection_motion_durations_match_requested_sequence(self):
         self.assertFalse(hasattr(cfg, "BALL_PICKUP_REVERSE_S"))
-        self.assertEqual(cfg.BALL_PICKUP_FORWARD_LEAD_S, 0.12)
         self.assertEqual(cfg.BALL_PICKUP_FORWARD_S, 2.0)
+        self.assertEqual(
+            cfg.BALL_PICKUP_FORWARD_LEAD_S,
+            cfg.BALL_PICKUP_FORWARD_S,
+        )
         self.assertEqual(
             cfg.BALL_PICKUP_FORWARD_SPEED,
             cfg.BALL_APPROACH_SPEED_NEAR,
@@ -69,7 +72,7 @@ class BallPickupSequencerTests(unittest.TestCase):
         grippers_started_at = (
             forward_started_at + cfg.BALL_PICKUP_FORWARD_LEAD_S)
         grippers = pickup.update(now=grippers_started_at)
-        self.assertEqual(grippers.motor_action, "")
+        self.assertEqual(grippers.motor_action, "stop")
         self.assertFalse(grippers.stop_futaba)
         self.assertEqual(
             grippers.gripper_action,
@@ -80,26 +83,11 @@ class BallPickupSequencerTests(unittest.TestCase):
         )
         pickup.mark_grippers_started(now=grippers_started_at)
 
-        settling = pickup.update(
-            now=forward_started_at
-            + cfg.BALL_PICKUP_FORWARD_S
-            - 0.001
-        )
-        self.assertEqual(settling.state, pickup.GRIPPERS_WAIT)
-        self.assertEqual(settling.motor_action, "")
-        self.assertEqual(settling.angle, 0)
-        self.assertEqual(
-            settling.speed,
-            cfg.BALL_PICKUP_FORWARD_SPEED,
-        )
-        self.assertIsNone(settling.gripper_action)
-        self.assertFalse(settling.terminal)
-
         complete = pickup.update(
             now=forward_started_at
             + cfg.BALL_PICKUP_FORWARD_S
         )
-        self.assertEqual(complete.motor_action, "stop")
+        self.assertEqual(complete.motor_action, "")
         self.assertTrue(complete.terminal)
 
         latched = pickup.update(now=99.0)
@@ -232,6 +220,7 @@ class PickupActionApplicationTests(unittest.TestCase):
                     0,
                     cfg.BALL_PICKUP_FORWARD_SPEED,
                 ),
+                ("steer", 190, 0.8),
                 (
                     "garras",
                     cfg.BALL_PICKUP_LEFT_DELTA,
@@ -284,31 +273,33 @@ class PickupActionApplicationTests(unittest.TestCase):
         at_grip = pickup.update(
             now=forward_started_at + cfg.BALL_PICKUP_FORWARD_LEAD_S)
         self.assertIsNotNone(at_grip.gripper_action)
-        self.assertEqual(at_grip.motor_action, "")
+        self.assertEqual(at_grip.motor_action, "stop")
 
     def test_forward_deadline_starts_after_motor_delivery(self):
         pickup = BallPickupSequencer()
-        grippers, gripper_time, forward = (
-            self.advance_to_gripper_step(pickup))
+        forward, forward_time = self.advance_to_forward_step(pickup)
         self.assertEqual(forward.motor_action, "forward")
         self.assertIsNone(forward.gripper_action)
-        self.assertEqual(grippers.motor_action, "")
-        self.assertIsNotNone(grippers.gripper_action)
 
-        # Mesmo se o lote das garras levar algum tempo, os 2 s totais
-        # continuam ancorados na entrega anterior do comando de avanco.
-        delivered_at = gripper_time + 0.20
-        pickup.mark_grippers_started(now=delivered_at)
-        forward_started_at = (
-            gripper_time - cfg.BALL_PICKUP_FORWARD_LEAD_S)
+        # Simula demora para entregar o comando: os 2 s com garras abertas
+        # comecam somente quando a escrita dos motores termina.
+        delivered_at = forward_time + 0.20
+        pickup.mark_forward_started(now=delivered_at)
 
         before = pickup.update(
-            now=forward_started_at + cfg.BALL_PICKUP_FORWARD_S - 0.001)
-        self.assertEqual(before.state, pickup.GRIPPERS_WAIT)
-        self.assertFalse(before.terminal)
+            now=delivered_at + cfg.BALL_PICKUP_FORWARD_S - 0.001)
+        self.assertEqual(before.state, pickup.FORWARD_LEAD)
+        self.assertIsNone(before.gripper_action)
+
+        grippers = pickup.update(
+            now=delivered_at + cfg.BALL_PICKUP_FORWARD_S)
+        self.assertEqual(grippers.motor_action, "stop")
+        self.assertIsNotNone(grippers.gripper_action)
+        pickup.mark_grippers_started(
+            now=delivered_at + cfg.BALL_PICKUP_FORWARD_S + 0.20)
         complete = pickup.update(
-            now=forward_started_at + cfg.BALL_PICKUP_FORWARD_S)
-        self.assertEqual(complete.motor_action, "stop")
+            now=delivered_at + cfg.BALL_PICKUP_FORWARD_S + 0.20)
+        self.assertEqual(complete.motor_action, "")
         self.assertTrue(complete.terminal)
 
     def test_failed_gripper_write_stops_forward_immediately(self):
@@ -333,12 +324,12 @@ class PickupActionApplicationTests(unittest.TestCase):
             [
                 ("parar_futaba",),
                 ("steer", 0, cfg.BALL_PICKUP_FORWARD_SPEED),
+                ("steer", 190, 0.8),
                 (
                     "garras",
                     cfg.BALL_PICKUP_LEFT_DELTA,
                     cfg.BALL_PICKUP_RIGHT_DELTA,
                 ),
-                ("steer", 190, 0.8),
             ],
         )
 
@@ -408,12 +399,12 @@ class PickupActionApplicationTests(unittest.TestCase):
                     0,
                     cfg.BALL_PICKUP_FORWARD_SPEED,
                 ),
+                ("steer", 190, 0.8),
                 (
                     "garras",
                     cfg.BALL_PICKUP_LEFT_DELTA,
                     cfg.BALL_PICKUP_RIGHT_DELTA,
                 ),
-                ("steer", 190, 0.8),
             ],
         )
 
@@ -483,12 +474,12 @@ class PickupActionApplicationTests(unittest.TestCase):
             [
                 ("parar_futaba",),
                 ("steer", 0, cfg.BALL_PICKUP_FORWARD_SPEED),
+                ("steer", 190, 0.8),
                 (
                     "garras",
                     cfg.BALL_PICKUP_LEFT_DELTA,
                     cfg.BALL_PICKUP_RIGHT_DELTA,
                 ),
-                ("steer", 190, 0.8),
             ],
         )
 

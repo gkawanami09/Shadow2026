@@ -123,7 +123,7 @@ class BallPickupSequencer:
             if now < self._deadline:
                 return PickupStep(
                     self.FORWARD_LEAD,
-                    "avancando antes de fechar as garras",
+                    "avancando por 2 s com as garras abertas",
                     angle=0,
                     speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 )
@@ -132,9 +132,8 @@ class BallPickupSequencer:
             self._deadline = None
             return PickupStep(
                 self.GRIPPERS_START,
-                "avanco iniciado; fechando as duas garras",
-                angle=0,
-                speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+                "reta de 2 s concluida; parando e fechando as garras",
+                motor_action="stop",
                 gripper_action=(
                     cfg.BALL_PICKUP_LEFT_DELTA,
                     cfg.BALL_PICKUP_RIGHT_DELTA,
@@ -144,25 +143,20 @@ class BallPickupSequencer:
         if self.state == self.GRIPPERS_START:
             return PickupStep(
                 self.GRIPPERS_START,
-                "aguardando confirmacao do avanco e das garras",
-                angle=0,
-                speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+                "aguardando confirmacao do fechamento das garras",
             )
 
         if self.state == self.GRIPPERS_WAIT:
             if now < self._deadline:
                 return PickupStep(
                     self.GRIPPERS_WAIT,
-                    "avancando enquanto as garras fecham",
-                    angle=0,
-                    speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+                    "rodas paradas; garras fechadas",
                 )
             self.state = self.COMPLETE
             self._terminal_detail = "sequencia de coleta concluida"
             return PickupStep(
                 self.COMPLETE,
                 self._terminal_detail,
-                motor_action="stop",
                 terminal=True,
             )
 
@@ -186,7 +180,7 @@ class BallPickupSequencer:
         )
 
     def mark_forward_started(self, now=None):
-        """Inicia os 2 s totais e a vantagem antes das garras."""
+        """Inicia os 2 s completos de reta antes das garras."""
         if self.state != self.FORWARD_START:
             raise RuntimeError(
                 "confirmacao do avanco fora do estado de partida")
@@ -196,7 +190,7 @@ class BallPickupSequencer:
         self._forward_deadline = now + cfg.BALL_PICKUP_FORWARD_S
 
     def mark_grippers_started(self, now=None):
-        """Mantem o prazo total contado desde o inicio do avanco."""
+        """Confirma o fechamento emitido depois do fim do avanco."""
         if self.state != self.GRIPPERS_START:
             raise RuntimeError(
                 "confirmacao das garras fora do estado de partida")

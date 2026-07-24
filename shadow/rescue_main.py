@@ -103,6 +103,7 @@ def _apply_pickup_actions(
 ):
     """Aplica somente os eventos one-shot emitidos pelo sequenciador."""
     forward_started = False
+    motor_stopped = False
 
     def link_changed():
         return (
@@ -120,7 +121,10 @@ def _apply_pickup_actions(
         # No passo das garras o avanco ja foi iniciado no estado anterior.
         # Qualquer falha precisa cortar as rodas aqui, sem esperar o proximo
         # tick; o caller ainda repete PARAR ao entrar em PICKUP_FAULT.
-        if forward_started or step.gripper_action is not None:
+        if (
+            not motor_stopped
+            and (forward_started or step.gripper_action is not None)
+        ):
             try:
                 steer_action()
             except Exception:
@@ -138,6 +142,7 @@ def _apply_pickup_actions(
         elif step.motor_action == "stop":
             if steer_action() is False:
                 return "PARAR nao foi enviado pela serial"
+            motor_stopped = True
         elif step.motor_action not in ("", "forward"):
             return f"acao de motor desconhecida: {step.motor_action}"
         if link_changed():
@@ -156,9 +161,9 @@ def _apply_pickup_actions(
             if link_changed():
                 return abort(link_error())
 
-        # A ordem fisica pedida e FUTABA PARAR -> avanco -> garras. O avanco
-        # possui um estado proprio e uma curta vantagem monotonic antes de o
-        # lote simultaneo das duas garras ser emitido.
+        # A ordem fisica pedida e FUTABA PARAR -> avanco completo -> PARAR ->
+        # garras. O passo final traz PARAR e as duas garras; como motores sao
+        # aplicados acima, as rodas param antes do lote simultaneo das garras.
         if step.motor_action == "forward":
             if steer_action(step.angle, step.speed) is False:
                 return "comando de avanco nao foi enviado pela serial"
