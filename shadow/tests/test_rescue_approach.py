@@ -680,6 +680,7 @@ class BallApproachControllerTests(unittest.TestCase):
         self.assertEqual(contact.state, controller.NEAR_CONFIRM)
         self.assertEqual(command.state, controller.NEAR)
         self.assertTrue(command.terminal)
+        self.assertEqual(command.target_kind, "silver")
 
     def test_black_ball_can_finish_with_the_same_crescent_gate(self):
         controller = BallApproachController(start_time=0.0)
@@ -702,6 +703,88 @@ class BallApproachControllerTests(unittest.TestCase):
         )
         self.assertEqual(command.state, controller.NEAR)
         self.assertTrue(command.terminal)
+        self.assertEqual(command.target_kind, "black")
+
+    def test_near_confirmations_of_different_colors_are_not_combined(self):
+        controller = BallApproachController(start_time=0.0)
+        history_end = arm_crescent_history(controller, self.shape)
+        first_time = history_end + 0.05
+        silver = arm_bottom_contact(
+            controller, self.shape, first_time, kind="silver")
+        black = arm_bottom_contact(
+            controller, self.shape, first_time + 0.05, kind="black")
+
+        self.assertEqual(silver.state, controller.NEAR_CONFIRM)
+        self.assertEqual(silver.target_kind, "silver")
+        self.assertNotEqual(black.state, controller.NEAR_CONFIRM)
+        self.assertNotEqual(black.state, controller.NEAR)
+        self.assertEqual(black.pickup_confirmations, 0)
+        self.assertIsNone(black.target_kind)
+
+    def test_crescent_cannot_confirm_a_different_detected_color(self):
+        controller = BallApproachController(start_time=0.0)
+        history_end = arm_crescent_history(controller, self.shape)
+        first_time = history_end + 0.05
+        silver = arm_bottom_contact(
+            controller, self.shape, first_time, kind="silver")
+        now = first_time + 0.05
+        conflicting = controller.update(
+            detection(
+                x=self.shape[1] / 2.0,
+                y=400,
+                radius=20,
+                timestamp=now,
+                kind="black",
+                track_locked=True,
+            ),
+            self.shape,
+            crescent_evidence=crescent_evidence(timestamp=now),
+            now=now,
+        )
+
+        self.assertEqual(silver.state, controller.NEAR_CONFIRM)
+        self.assertEqual(silver.target_kind, "silver")
+        self.assertNotEqual(conflicting.state, controller.NEAR)
+        self.assertFalse(conflicting.terminal)
+        self.assertIsNone(conflicting.target_kind)
+
+    def test_approach_history_token_cannot_cross_colors(self):
+        controller = BallApproachController(start_time=0.0)
+        silver_history_end = arm_crescent_history(
+            controller, self.shape, kind="silver")
+        refused = arm_bottom_contact(
+            controller,
+            self.shape,
+            silver_history_end + 0.05,
+            kind="black",
+        )
+
+        self.assertNotEqual(refused.state, controller.NEAR_CONFIRM)
+        self.assertNotEqual(refused.state, controller.NEAR)
+        self.assertIsNone(refused.target_kind)
+
+        black_history_end = arm_crescent_history(
+            controller,
+            self.shape,
+            start_time=silver_history_end + 0.10,
+            kind="black",
+        )
+        first = arm_bottom_contact(
+            controller,
+            self.shape,
+            black_history_end + 0.05,
+            kind="black",
+        )
+        confirmed = arm_bottom_contact(
+            controller,
+            self.shape,
+            black_history_end + 0.10,
+            kind="black",
+        )
+
+        self.assertEqual(first.state, controller.NEAR_CONFIRM)
+        self.assertEqual(confirmed.state, controller.NEAR)
+        self.assertEqual(confirmed.target_kind, "black")
 
     def test_wide_fov_uses_isotropic_not_horizontal_scale(self):
         shape = (540, 960, 3)

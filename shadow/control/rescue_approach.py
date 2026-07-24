@@ -18,6 +18,7 @@ class MotionCommand:
     terminal: bool = False
     pickup_in_range: bool = False
     pickup_confirmations: int = 0
+    target_kind: object = None
 
 
 class BallApproachController:
@@ -40,14 +41,17 @@ class BallApproachController:
         self.visual_near_count = 0
         self.progress = deque()
         self.approach_history = deque()
+        self._history_kind = None
         self._crescent_token_until = None
         self._crescent_token_center = None
+        self._crescent_token_kind = None
         self._last_history_timestamp = None
         self._last_near_timestamp = None
         self._near_source = None
         self._near_first_at = None
         self._near_hold_until = None
         self._near_misses = 0
+        self._near_kind = None
         self._pixel_scale = 1.0
         self._terminal_detail = ""
 
@@ -69,6 +73,7 @@ class BallApproachController:
                 terminal=True,
                 pickup_in_range=True,
                 pickup_confirmations=cfg.BALL_STOP_CONFIRM_FRAMES,
+                target_kind=self._near_kind,
             )
         if self.state == self.FAULT:
             return MotionCommand(
@@ -125,16 +130,23 @@ class BallApproachController:
         near_source = None
         near_label = None
         near_timestamp = None
+        near_kind = None
         near_required = cfg.BALL_STOP_CONFIRM_FRAMES
         if locked_circle_near:
             near_source = "contato inferior"
             near_label = "circulo no ponto inferior"
             near_timestamp = float(detection.timestamp)
+            near_kind = detection.kind
             near_required = cfg.BALL_LOCKED_CIRCLE_CONFIRM_FRAMES
         elif (
             crescent_near
             and self._near_source == "contato inferior"
             and self.visual_near_count > 0
+            and self._near_kind == self._crescent_token_kind
+            and (
+                not detection_confirmed
+                or detection.kind == self._near_kind
+            )
             and self._near_hold_until is not None
             and now <= self._near_hold_until
             and self._near_misses
@@ -146,7 +158,19 @@ class BallApproachController:
             near_source = "contato inferior"
             near_label = "meia-lua apos contato"
             near_timestamp = float(crescent_evidence.timestamp)
+            near_kind = self._near_kind
             near_required = cfg.BALL_LOCKED_CIRCLE_CONFIRM_FRAMES
+
+        # Uma meia-lua nao possui cor propria. Se o mesmo frame ainda traz
+        # uma deteccao confirmada de outra cor, ela nao pode confirmar o latch
+        # anterior nem sobreviver pela tolerancia de um miss.
+        if (
+            near_source is None
+            and detection_confirmed
+            and self._near_kind is not None
+            and detection.kind != self._near_kind
+        ):
+            self._reset_near_confirmation()
 
         # A janela curta existe para uma unica falha visual, nao para unir
         # confirmacoes de tracks diferentes depois de uma reacquisicao.
@@ -163,16 +187,22 @@ class BallApproachController:
             if self.active_started is None:
                 self.active_started = now
             self.last_seen = now
-            if self._near_source != near_source:
+            if (
+                self._near_source != near_source
+                or (
+                    self._near_kind is not None
+                    and near_kind != self._near_kind
+                )
+            ):
                 self._reset_near_confirmation()
-            self._near_source = near_source
             if (
                 self._near_first_at is not None
                 and now - self._near_first_at
                 > cfg.BALL_NEAR_CONFIRM_WINDOW_S
             ):
                 self._reset_near_confirmation()
-                self._near_source = near_source
+            self._near_source = near_source
+            self._near_kind = near_kind
             if (
                 self._last_near_timestamp is None
                 or near_timestamp
@@ -197,6 +227,7 @@ class BallApproachController:
                     terminal=True,
                     pickup_in_range=True,
                     pickup_confirmations=cfg.BALL_STOP_CONFIRM_FRAMES,
+                    target_kind=self._near_kind,
                 )
 
             self.state = self.NEAR_CONFIRM
@@ -209,6 +240,7 @@ class BallApproachController:
                     f"{near_required}"),
                 pickup_in_range=True,
                 pickup_confirmations=self.visual_near_count,
+                target_kind=self._near_kind,
             )
 
         if self.visual_near_count > 0:
@@ -236,6 +268,7 @@ class BallApproachController:
                     f"{self.visual_near_count}/{required}"),
                 pickup_in_range=True,
                 pickup_confirmations=self.visual_near_count,
+                target_kind=self._near_kind,
             )
 
         self._reset_near_confirmation()
@@ -253,9 +286,7 @@ class BallApproachController:
             if lost_for >= cfg.BALL_REACQUIRE_TIMEOUT_S:
                 self.active_started = None
                 self.wait_started = now
-                self.approach_history.clear()
-                self._crescent_token_until = None
-                self._crescent_token_center = None
+                self._clear_approach_history()
                 self.state = self.WAIT_TARGET
                 return MotionCommand(
                     self.state,
@@ -347,6 +378,7 @@ class BallApproachController:
         self._near_first_at = None
         self._near_hold_until = None
         self._near_misses = 0
+        self._near_kind = None
 
     def _locked_circle_near(
         self,
@@ -369,6 +401,7 @@ class BallApproachController:
             self._crescent_token_until is None
             or now > self._crescent_token_until
             or self._crescent_token_center is None
+            or self._crescent_token_kind != detection.kind
         ):
             return False
 
@@ -410,6 +443,12 @@ class BallApproachController:
         frame_width,
         now,
     ):
+        kind = detection.kind
+        if kind not in ("silver", "black"):
+            return
+        if self._history_kind is not None and kind != self._history_kind:
+            self._clear_approach_history()
+        self._history_kind = kind
         timestamp = float(detection.timestamp)
         if (
             self._last_history_timestamp is not None
@@ -435,6 +474,9 @@ class BallApproachController:
             > cfg.BALL_CRESCENT_HISTORY_S
         ):
             self.approach_history.popleft()
+        if not self.approach_history:
+            self._history_kind = None
+            self._last_history_timestamp = None
 
     def _refresh_crescent_token(self, now):
         self._prune_approach_history(now)
@@ -481,6 +523,7 @@ class BallApproachController:
         ) > cfg.BALL_CRESCENT_ASSOCIATION_X_RATIO:
             return
         self._crescent_token_center = center
+        self._crescent_token_kind = self._history_kind
         self._crescent_token_until = (
             samples[-1][0] + cfg.BALL_CRESCENT_TOKEN_TTL_S)
 
@@ -503,6 +546,7 @@ class BallApproachController:
             self._crescent_token_until is None
             or now > self._crescent_token_until
             or self._crescent_token_center is None
+            or self._crescent_token_kind is None
         ):
             return False
         if (
@@ -518,6 +562,8 @@ class BallApproachController:
         # baixo e grande. Uma bolinha distante jamais pode "emprestar" o token
         # para um arco de parede/piso.
         if detection is not None:
+            if detection.kind != self._crescent_token_kind:
+                return False
             center_ratio = (
                 float(detection.center_x) / max(frame_width, 1))
             radius_ratio = (
@@ -540,6 +586,14 @@ class BallApproachController:
             ):
                 return False
         return True
+
+    def _clear_approach_history(self):
+        self.approach_history.clear()
+        self._last_history_timestamp = None
+        self._history_kind = None
+        self._crescent_token_until = None
+        self._crescent_token_center = None
+        self._crescent_token_kind = None
 
     def _record_progress(self, now, radius, bottom_y):
         self.progress.append((

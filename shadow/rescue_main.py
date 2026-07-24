@@ -148,6 +148,12 @@ def _apply_pickup_actions(
         if link_changed():
             return abort(link_error())
 
+        if step.stop_futaba:
+            if arduino.parar_futaba() is False:
+                return "FUTABA PARAR nao foi enviado pela serial"
+            if link_changed():
+                return abort(link_error())
+
         if step.futaba_action is not None:
             potencia, tempo_ms = step.futaba_action
             if arduino.futaba(potencia, tempo_ms) is False:
@@ -155,15 +161,9 @@ def _apply_pickup_actions(
             if link_changed():
                 return abort(link_error())
 
-        if step.stop_futaba:
-            if arduino.parar_futaba() is False:
-                return "FUTABA PARAR nao foi enviado pela serial"
-            if link_changed():
-                return abort(link_error())
-
-        # A ordem fisica pedida e FUTABA PARAR -> avanco completo -> PARAR ->
-        # garras. O passo final traz PARAR e as duas garras; como motores sao
-        # aplicados acima, as rodas param antes do lote simultaneo das garras.
+        # Motores sao aplicados antes dos atuadores: isso garante PARAR antes
+        # de fechar. Nos passos do elevador, FUTABA PARAR vem antes do novo
+        # pulso; LADO 0 0 preserva o keepalive sem cortar o Futaba ativo.
         if step.motor_action == "forward":
             if steer_action(step.angle, step.speed) is False:
                 return "comando de avanco nao foi enviado pela serial"
@@ -614,14 +614,18 @@ def main():
                 and command.state == controller.NEAR
                 and not pickup.started
             ):
-                pickup.start()
+                if command.target_kind not in ("silver", "black"):
+                    raise RuntimeError(
+                        "coleta recusada: cor da esfera nao foi confirmada")
+                pickup.start(command.target_kind)
                 pickup_connection_epoch = (
                     arduino.connection_epoch
                     if arduino is not None else None
                 )
                 print(
-                    "[coleta] bolinha no ponto inferior: baixando Futaba, "
-                    "avancando por 2 s e fechando as garras")
+                    f"[coleta] esfera {command.target_kind} no ponto "
+                    "inferior: avancando 1,5 s, prendendo, elevando e "
+                    "liberando conforme a cor")
 
             log_now = time.monotonic()
             should_log = (

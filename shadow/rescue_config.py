@@ -276,11 +276,25 @@ BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
 BALL_PICKUP_LEFT_DELTA = -50
 BALL_PICKUP_RIGHT_DELTA = 50
-BALL_PICKUP_FORWARD_S = 2.00
+BALL_PICKUP_FORWARD_S = 1.50
 # As garras so fecham depois que a reta inteira termina. O alias e mantido
 # para o sequenciador representar o intervalo entre iniciar o avanco e fechar.
 BALL_PICKUP_FORWARD_LEAD_S = BALL_PICKUP_FORWARD_S
 BALL_PICKUP_FORWARD_SPEED = BALL_APPROACH_SPEED_NEAR
+BALL_PICKUP_GRIPPER_SETTLE_S = 0.50
+
+# Depois de prender a esfera, o elevador sobe, aplica um pulso curto para
+# descer e entao executa a liberacao correspondente a cor confirmada.
+BALL_PICKUP_LIFT_POWER = 20
+BALL_PICKUP_LIFT_MS = 2000
+BALL_PICKUP_LIFT_GUARD_S = 0.10
+BALL_PICKUP_LOWER_POWER = -20
+BALL_PICKUP_LOWER_MS = 25
+BALL_PICKUP_LOWER_GUARD_S = 0.05
+BALL_PICKUP_RELEASE_DELTA = 50
+BALL_PICKUP_WIGGLE_DELTA = 10
+BALL_PICKUP_WIGGLE_REPETITIONS = 2
+BALL_PICKUP_WIGGLE_STEP_S = 0.20
 
 # Hough + filtros medidos no Pi podem ultrapassar 0.20 s. O timestamp agora e
 # tirado depois da captura; 0.75 s ainda impede movimento com imagem congelada,
