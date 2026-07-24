@@ -260,6 +260,14 @@ class RescueOverlayTests(unittest.TestCase):
             cfg.BALL_CRESCENT_BOTTOM_RATIO,
         )
         sample_x, sample_y = upper[len(upper) // 2]
+        pickup_point = (
+            int(round(
+                cfg.BALL_LOCKED_CIRCLE_POINT_X_RATIO
+                * frame.shape[1])),
+            int(round(
+                cfg.BALL_LOCKED_CIRCLE_POINT_Y_RATIO
+                * frame.shape[0])),
+        )
 
         outside = annotate_rescue_frame(
             frame, detection, "APPROACH")
@@ -288,6 +296,14 @@ class RescueOverlayTests(unittest.TestCase):
         )
         self.assertTupleEqual(
             tuple(ready[sample_y, sample_x]),
+            (0, 255, 0),
+        )
+        self.assertTupleEqual(
+            tuple(outside[pickup_point[1], pickup_point[0]]),
+            (0, 255, 255),
+        )
+        self.assertTupleEqual(
+            tuple(ready[pickup_point[1], pickup_point[0]]),
             (0, 255, 0),
         )
 
@@ -858,6 +874,47 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertTrue(detector._track_match(moved)[0])
         self.assertTrue(detector._track_match(grown)[0])
 
+    def test_confirmed_track_does_not_jump_to_incompatible_reflection(self):
+        detector = BallDetector("any")
+        detector._pixel_scale = 1.0
+        detector._tracked = _Candidate(
+            "silver", 320, 300, 50, 0.90)
+        detector._hits = cfg.BALL_ACQUIRE_HITS
+        detector._track_locked = True
+
+        far_reflection = _Candidate(
+            "black", 520, 390, 18, 0.96)
+        huge_jump = _Candidate(
+            "silver", 322, 302, 128, 0.96)
+
+        self.assertIsNone(detector._select_candidate(
+            [far_reflection, huge_jump]))
+        self.assertIsNone(
+            detector._update_track(None, timestamp=0.1))
+        self.assertTrue(detector._track_locked)
+        self.assertEqual(detector._hits, cfg.BALL_ACQUIRE_HITS)
+
+    def test_any_target_lock_survives_silver_black_class_flip(self):
+        detector = BallDetector("any")
+        detector._pixel_scale = 1.0
+        detector._tracked = _Candidate(
+            "silver", 320, 300, 50, 0.90)
+        detector._hits = cfg.BALL_ACQUIRE_HITS
+        detector._track_locked = True
+        changed_appearance = _Candidate(
+            "black", 324, 303, 52, 0.88)
+
+        self.assertTrue(
+            detector._track_match(changed_appearance)[0])
+        selected = detector._select_candidate(
+            [changed_appearance])
+        result = detector._update_track(
+            selected, timestamp=0.1)
+
+        self.assertTrue(result.confirmed)
+        self.assertTrue(result.track_locked)
+        self.assertAlmostEqual(result.center_x, 321.6)
+
     def test_detector_thresholds_scale_at_960_pixels_wide(self):
         frame = cv2.resize(
             silver_ball_frame(), (960, 720), interpolation=cv2.INTER_LINEAR)
@@ -1009,7 +1066,7 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertFalse(first.confirmed)
         self.assertEqual(first.hits, 1)
 
-    def test_missing_frame_requires_full_reconfirmation(self):
+    def test_one_missing_frame_preserves_locked_confirmation(self):
         detector = BallDetector("black")
         frame = black_ball_frame()
         result = self._confirmed(detector, frame)
@@ -1017,7 +1074,27 @@ class RescueBallDetectorTests(unittest.TestCase):
         self.assertIsNone(detector.detect(base_frame(), timestamp=0.2))
         reacquired = detector.detect(frame, timestamp=0.23)
         self.assertIsNotNone(reacquired)
+        self.assertTrue(reacquired.confirmed)
+        self.assertTrue(reacquired.track_locked)
+
+    def test_two_missing_frames_require_full_reconfirmation(self):
+        detector = BallDetector("black")
+        frame = black_ball_frame()
+        result = self._confirmed(detector, frame)
+        self.assertTrue(result.confirmed)
+        self.assertIsNone(
+            detector.detect(base_frame(), timestamp=0.20))
+        self.assertIsNone(
+            detector.detect(base_frame(), timestamp=0.23))
+        self.assertFalse(detector._track_locked)
+        self.assertIsNone(detector._tracked)
+        self.assertIsNone(detector.last_locked_detection)
+
+        reacquired = detector.detect(frame, timestamp=0.26)
+
+        self.assertIsNotNone(reacquired)
         self.assertFalse(reacquired.confirmed)
+        self.assertFalse(reacquired.track_locked)
         self.assertEqual(reacquired.hits, 1)
 
     def test_target_filter_does_not_accept_other_class(self):

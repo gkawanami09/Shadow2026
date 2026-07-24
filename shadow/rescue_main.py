@@ -204,10 +204,26 @@ def _dataset_metadata(
             "confidence": float(detection.confidence),
             "confirmed": bool(detection.confirmed),
             "hits": int(detection.hits),
+            "track_locked": bool(detection.track_locked),
         }
 
     detector_data = None
     if result is not None:
+        locked_detection = result.locked_detection
+        locked_detection_data = None
+        if locked_detection is not None:
+            locked_detection_data = {
+                "kind": locked_detection.kind,
+                "center_x": float(locked_detection.center_x),
+                "center_y": float(locked_detection.center_y),
+                "radius": float(locked_detection.radius),
+                "confidence": float(locked_detection.confidence),
+                "confirmed": bool(locked_detection.confirmed),
+                "hits": int(locked_detection.hits),
+                "timestamp": float(locked_detection.timestamp),
+                "track_locked": bool(
+                    locked_detection.track_locked),
+            }
         crescent = result.crescent_evidence
         crescent_data = None
         if crescent is not None:
@@ -258,6 +274,7 @@ def _dataset_metadata(
             "crescent_evidence": crescent_data,
             "diagnostic": result.diagnostic,
             "detection": detection_data,
+            "locked_detection": locked_detection_data,
         }
 
     return {
@@ -388,7 +405,10 @@ def main():
             max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
             max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
         )
-        fresh_gate = FreshDetectionGate(cfg.BALL_ACQUIRE_HITS)
+        fresh_gate = FreshDetectionGate(
+            cfg.BALL_ACQUIRE_HITS,
+            max_misses=cfg.BALL_FRESH_GATE_MAX_MISSES,
+        )
 
         loop_started = time.monotonic()
         armed_at = (
@@ -627,7 +647,18 @@ def main():
                     and latest_detection is not None
                     and result_age <= cfg.BALL_FRAME_STALE_S
                 )
-                else None)
+                else (
+                    latest_result.locked_detection
+                    if (
+                        latest_result is not None
+                        and latest_result.locked_detection is not None
+                        and time.monotonic()
+                        - latest_result.locked_detection.timestamp
+                        <= cfg.BALL_FRAME_STALE_S
+                    )
+                    else None
+                )
+            )
             detector_fps = _rate(detection_times)
             processing_ms = (
                 last_metrics_result.processing_s * 1000.0

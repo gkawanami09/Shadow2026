@@ -26,6 +26,7 @@ class BallDetection:
     confirmed: bool
     hits: int
     timestamp: float
+    track_locked: bool = False
 
     @property
     def diameter(self):
@@ -955,6 +956,7 @@ class BallDetector:
         self._tracked = None
         self._hits = 0
         self._misses = 0
+        self._track_locked = False
         self._pixel_scale = 1.0
         self.last_candidates = []
         self.last_enhanced = None
@@ -964,18 +966,21 @@ class BallDetector:
         self.last_hough_proposals = 0
         self.last_diagnostic = "inicio"
         self.last_crescent_evidence = None
+        self.last_locked_detection = None
         self._frame_rejections = {}
 
     def reset(self):
         self._tracked = None
         self._hits = 0
         self._misses = 0
+        self._track_locked = False
         self.last_candidates = []
         self.last_hough_used = False
         self.last_contour_proposals = 0
         self.last_hough_proposals = 0
         self.last_diagnostic = "reset"
         self.last_crescent_evidence = None
+        self.last_locked_detection = None
         self._frame_rejections = {}
 
     def detect(self, frame, timestamp=None):
@@ -1487,6 +1492,11 @@ class BallDetector:
             return max(
                 matches,
                 key=lambda item: item[0].confidence - 0.25 * item[1])[0]
+        if self._track_locked or self._hits >= cfg.BALL_ACQUIRE_HITS:
+            # Depois de confirmar a vitima, um brilho incompatível nao pode
+            # roubar o circulo. A perda para o robo imediatamente; o lock fica
+            # vivo apenas pelo pequeno limite de misses.
+            return None
         candidates = self._prefer_outer_candidates(candidates)
         return max(
             candidates,
@@ -1495,12 +1505,20 @@ class BallDetector:
                 + min(item.radius / (160.0 * self._pixel_scale), 0.35)))
 
     def _track_match(self, candidate):
-        if self._tracked is None or candidate.kind != self._tracked.kind:
+        if self._tracked is None:
+            return False, float("inf"), 1.0
+        if (
+            candidate.kind != self._tracked.kind
+            and self.target_kind != "any"
+        ):
             return False, float("inf"), 1.0
         distance = math.hypot(
             candidate.center_x - self._tracked.center_x,
             candidate.center_y - self._tracked.center_y)
-        acquiring = self._hits < cfg.BALL_ACQUIRE_HITS
+        acquiring = not (
+            self._track_locked
+            or self._hits >= cfg.BALL_ACQUIRE_HITS
+        )
         if acquiring:
             association_min = cfg.BALL_ACQUIRE_ASSOCIATION_MIN_PX
             radius_factor = cfg.BALL_ACQUIRE_ASSOCIATION_RADIUS_FACTOR
@@ -1523,9 +1541,19 @@ class BallDetector:
     def _update_track(self, selected, timestamp):
         if selected is None:
             self._misses += 1
-            # Qualquer perda ja colocou o controle em PARAR. Para voltar a
-            # mover, a esfera precisa cumprir novamente todos os hits.
-            self._hits = 0
+            # O controle recebe None e manda PARAR. Uma falha isolada preserva
+            # a identidade/confirmacao visual. Na segunda, o lock e o circulo
+            # antigo sao liberados; qualquer alvo precisa de tres hits novos.
+            if (
+                self._track_locked
+                and self._misses > cfg.BALL_TRACK_COAST_MISSES
+            ):
+                self._tracked = None
+                self._hits = 0
+                self._track_locked = False
+                self.last_locked_detection = None
+            elif not self._track_locked:
+                self._hits = 0
             if self._misses > cfg.BALL_MAX_TRACK_MISSES:
                 frame_metrics = (
                     self.last_hough_used,
@@ -1551,7 +1579,7 @@ class BallDetector:
         if compatible:
             alpha = cfg.BALL_TRACK_EMA_ALPHA
             self._tracked = _Candidate(
-                selected.kind,
+                self._tracked.kind,
                 (1.0 - alpha) * self._tracked.center_x
                 + alpha * selected.center_x,
                 (1.0 - alpha) * self._tracked.center_y
@@ -1565,9 +1593,12 @@ class BallDetector:
         else:
             self._tracked = selected
             self._hits = 1
+            self._track_locked = False
 
         self._misses = 0
-        return BallDetection(
+        if self._hits >= cfg.BALL_ACQUIRE_HITS:
+            self._track_locked = True
+        detection = BallDetection(
             self._tracked.kind,
             self._tracked.center_x,
             self._tracked.center_y,
@@ -1576,7 +1607,11 @@ class BallDetector:
             self._hits >= cfg.BALL_ACQUIRE_HITS,
             self._hits,
             timestamp,
+            track_locked=self._track_locked,
         )
+        if detection.track_locked:
+            self.last_locked_detection = detection
+        return detection
 
 
 def _crescent_band_points(
@@ -1648,6 +1683,33 @@ def annotate_rescue_frame(
     else:
         gate_color = (0, 255, 255)
     gate_thickness = 2 if pickup_in_range else 1
+    pickup_point = (
+        int(round(
+            cfg.BALL_LOCKED_CIRCLE_POINT_X_RATIO * width)),
+        int(round(
+            cfg.BALL_LOCKED_CIRCLE_POINT_Y_RATIO * height)),
+    )
+    cv2.drawMarker(
+        annotated,
+        pickup_point,
+        gate_color,
+        cv2.MARKER_CROSS,
+        15,
+        gate_thickness,
+    )
+    cv2.putText(
+        annotated,
+        "PONTO GARRA",
+        (
+            min(pickup_point[0] + 9, max(width - 95, 0)),
+            max(pickup_point[1] - 8, 15),
+        ),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.40,
+        gate_color,
+        1,
+        cv2.LINE_AA,
+    )
     gate_center = (
         float(crescent_evidence.center_x_ratio)
         if crescent_evidence is not None else 0.5)
@@ -1755,7 +1817,8 @@ def annotate_rescue_frame(
         cv2.circle(annotated, center, 3, color, -1)
         label = (
             f"{detection.kind} {detection.confidence:.2f} "
-            f"r={detection.radius:.0f} hits={detection.hits}")
+            f"r={detection.radius:.0f} hits={detection.hits}"
+            f"{' LOCK' if detection.track_locked else ''}")
         cv2.putText(
             annotated, label,
             (max(center[0] - radius, 3), max(center[1] - radius - 7, 15)),

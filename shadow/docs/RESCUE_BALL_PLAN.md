@@ -14,10 +14,11 @@ NEAR -> PICKUP_BACKUP -> PICKUP_FUTABA -> PICKUP_FORWARD
 ```
 
 - `WAIT_TARGET`: motores parados até uma esfera aparecer de forma consistente.
-- `ALIGN`: pivô lento, sem avanço, para centralizar a esfera.
+- `ALIGN`: curva curta para a frente, proporcional ao erro e com histerese,
+  para centralizar sem ultrapassar a esfera de um lado para o outro.
 - `APPROACH`: avanço em arco; a velocidade diminui à medida que a esfera cresce.
-- `NEAR_CONFIRM`: para imediatamente e confirma por três frames que a esfera
-  formou a meia-lua larga na frente da garra.
+- `NEAR_CONFIRM`: para imediatamente e confirma o círculo rastreado por dois
+  frames novos; se ele já saiu do quadro, confirma a meia-lua por três frames.
 - `NEAR`: parada confirmada e transferência única para a coleta.
 - `LOST`: qualquer perda ou imagem antiga produz `PARAR` imediatamente.
 - `FAULT`: timeout ou falta de progresso produz `PARAR` travado.
@@ -76,12 +77,22 @@ aceitos/propostas Hough brutas, motivo principal de rejeição, até quatro raio
 aceitos e frames descartados. Por exemplo, `H1/5:ok r42` significa que cinco
 círculos foram propostos, um passou pelos filtros e seu raio no preview é 42 px.
 
-O preview desenha a `MEIA-LUA GARRA`: duas curvas delimitam a faixa onde deve
-aparecer a borda superior da esfera enorme. Ela fica amarela fora do gate,
-laranja em `1/3` e `2/3`, e verde em `3/3`. Os brutos de calibração mostraram
-que essa borda é um arco circular entre `0,62H` e `0,74H`, ocupando de 80% a
-92% da largura. O detector exige apoio no ombro esquerdo, centro e ombro
-direito, além de continuidade, contraste e preenchimento abaixo da borda.
+O preview desenha uma cruz `PONTO GARRA` em `(0,50W, 0,90H)`. O círculo
+suavizado da esfera recebe o rótulo `LOCK` depois de três associações
+consistentes. Quando esse mesmo círculo cobre o ponto, está centralizado, tem
+raio de pelo menos `0,085H` e possui histórico real de avanço, o robô para no
+primeiro indício e exige uma segunda medição nova em até 0,35 s. No máximo uma
+perda isolada pode preservar a confirmação por 0,18 s com as rodas paradas;
+duas perdas liberam o lock e reiniciam a confirmação. Uma perda nunca conta
+como nova medição nem aciona a garra por previsão.
+
+O preview também desenha a `MEIA-LUA GARRA`: duas curvas delimitam a faixa onde
+deve aparecer a borda superior da esfera enorme. Ela fica amarela fora do
+gate, laranja durante a confirmação e verde quando a coleta é autorizada. Os
+brutos de calibração mostraram que essa borda é um arco circular entre `0,62H`
+e `0,74H`, ocupando de 80% a 92% da largura. O detector exige apoio no ombro
+esquerdo, centro e ombro direito, além de continuidade, contraste e
+preenchimento abaixo da borda.
 
 A rota estrita exige a mesma componente de Canny, coerência de polaridade,
 ajuste circular e curvatura distribuída. Uma segunda rota é exclusiva para o
@@ -92,14 +103,15 @@ menos texturizado. O histórico de aproximação continua obrigatório nas duas
 rotas. No marcador, `p=` mostra a coerência de polaridade, `q=` a curvatura
 estrita e `f=4/5` ou `f=5/5` os setores metálicos da rota de foil.
 
-Assim, uma esfera pequena distante pode até estar centralizada, mas não
-consegue preencher a meia-lua e não arma a coleta. Essa etapa independe do
-Hough no frame final, pois o círculo real já está cortado pelo quadro e seria
-corretamente rejeitado pelo ROI normal. Porém, por segurança, a meia-lua só é
-autorizada por um token curto criado durante uma aproximação anterior: exige
-vários círculos centralizados, já baixos no quadro e crescendo enquanto o robô
-avança. Uma meia-lua presente desde a partida mantém o robô parado; ela nunca
-inicia a coleta a frio.
+Assim, uma esfera pequena distante pode até estar alinhada com o ponto, mas o
+raio e o histórico impedem que ela arme a coleta por perspectiva. O círculo
+rastreado é a rota primária enquanto o perímetro ainda cabe no quadro. Quando
+ele fica cortado, a meia-lua assume como fallback independente do Hough final.
+Por segurança, as duas rotas só são autorizadas por um token curto criado
+durante uma aproximação anterior: exigem vários círculos centralizados, já
+baixos no quadro e crescendo enquanto o robô avança. Um círculo grande ou uma
+meia-lua presentes desde a partida mantêm o robô parado; nunca iniciam a
+coleta a frio.
 O watchdog também considera a descida da esfera na imagem, além do aumento do
 raio, para não declarar falta de progresso durante essa aproximação final.
 
@@ -122,9 +134,12 @@ Todos os limites medidos em pixels usam uma escala isotrópica derivada de
     halo inválido não apagar o perímetro verdadeiro;
 12. preferência pelo envelope externo somente quando um círculo menor está
     realmente contido nele e as duas confianças são compatíveis;
-13. associação espacial mais rígida durante os três hits de aquisição,
-    suavização e confirmação em vários frames;
-14. gate final independente por arco circular largo em `320x240`, com rota
+13. associação espacial e de tamanho mais rígida, lock após três hits e
+    suavização temporal; uma falha curta preserva a identidade com o robô
+    parado, enquanto um brilho incompatível não pode roubar o track;
+14. gate primário pelo círculo travado cobrindo o ponto inferior, com duas
+    medições novas, centralização, raio mínimo e histórico obrigatório;
+15. fallback independente por arco circular largo em `320x240`, com rota
     estrita e fallback metálico, três resultados frescos, histórico de
     aproximação obrigatório e parada já no primeiro.
 
@@ -176,11 +191,13 @@ neural sendo treinada nesta etapa.
 
 ## Parada e segurança
 
-A chegada perto da bolinha é decidida exclusivamente pela câmera frontal:
-a meia-lua larga, centralizada, contrastada e apoiada nos três setores precisa
-ser confirmada em três frames. O primeiro indício já produz `PARAR`, antes de
-confirmar e armar a coleta. O resgate não consulta o HC-SR04, porque uma vítima
-esférica pode desviar o eco e uma parede pode gerar uma falsa proximidade.
+A chegada perto da bolinha é decidida exclusivamente pela câmera frontal. A
+rota primária exige que o círculo travado cubra o ponto inferior em duas
+medições frescas; a meia-lua larga, centralizada e contrastada é o fallback de
+três frames quando a esfera já foi cortada pelo quadro. O primeiro indício de
+qualquer rota já produz `PARAR`, antes de confirmar e armar a coleta. O resgate
+não consulta o HC-SR04, porque uma vítima esférica pode desviar o eco e uma
+parede pode gerar uma falsa proximidade.
 
 Outras travas:
 

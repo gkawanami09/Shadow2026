@@ -14,13 +14,14 @@ Mapeamento das câmeras no Pi 5: resgate no índice `0`; segue-linha no flat 2,
 índice `1`. Os dois programas abrem seus índices explicitamente.
 
 O executável de segue-linha continua **sem** IMU, TPU e sensores IR. O resgate
-fica isolado em `rescue_main.py`, usa somente a câmera frontal e confirma a
-proximidade pela borda larga em meia-lua da esfera já cortada pelo quadro. A
-meia-lua usa um arco circular e uma rota específica para a textura irregular
-do papel-alumínio, mas só vale depois de um histórico real de aproximação
-crescente. Depois aciona o Futaba, inicia o avanço e fecha as garras, sem
-alterar `main.py`. A câmera de linha e o HC-SR04 não participam de nenhuma
-decisão do resgate.
+fica isolado em `rescue_main.py` e usa somente a câmera frontal. Durante a
+aproximação, o detector mantém um círculo temporal preso à mesma esfera e
+confirma a distância quando ele cobre o `PONTO GARRA` perto da base da imagem.
+Se o círculo já estiver cortado pelo quadro, a borda larga em meia-lua continua
+como fallback. Os dois caminhos exigem histórico real de avanço e medições
+frescas. Depois o robô recua, baixa o Futaba, inicia o avanço e fecha as
+garras, sem alterar `main.py`. A câmera de linha e o HC-SR04 não participam de
+nenhuma decisão do resgate.
 
 ## O que ele faz
 
@@ -28,8 +29,9 @@ decisão do resgate.
 2. **Cruza gaps** — valida, alinha em até 7 ciclos e cruza às cegas
 3. **Marcadores verdes** — 90° esquerda/direita e 180° no verde duplo
 4. **Linha vermelha** — para 9 s
-5. **Resgate separado** — encontra a esfera, aproxima até a meia-lua, recua
-   1,5 s, baixa o Futaba, inicia o avanço e então fecha as duas garras
+5. **Resgate separado** — encontra e rastreia a esfera até o ponto da garra
+   (com meia-lua como fallback), recua 1,5 s, baixa o Futaba, inicia o avanço
+   e então fecha as duas garras
 
 ## Comece por aqui
 

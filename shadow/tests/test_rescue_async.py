@@ -34,7 +34,7 @@ def wait_result(worker, after_sequence=0, timeout=1.0):
 class ImmediateDetector:
     def detect(self, frame, timestamp):
         height, width = frame.shape[:2]
-        return BallDetection(
+        detection = BallDetection(
             "silver",
             width / 2,
             height / 2,
@@ -43,7 +43,10 @@ class ImmediateDetector:
             True,
             3,
             timestamp,
+            track_locked=True,
         )
+        self.last_locked_detection = detection
+        return detection
 
 
 class FreshDetectionGateTests(unittest.TestCase):
@@ -96,6 +99,29 @@ class FreshDetectionGateTests(unittest.TestCase):
         reacquired = gate.accept(self.detection(1, confirmed=False))
         self.assertEqual(reacquired.hits, 1)
 
+    def test_configured_single_miss_keeps_fresh_sequence(self):
+        gate = FreshDetectionGate(required_hits=3, max_misses=1)
+        first = gate.accept(self.detection(1, confirmed=False))
+        second = gate.accept(self.detection(2, confirmed=False))
+        self.assertIsNone(gate.accept(None))
+        third = gate.accept(self.detection(3, confirmed=True))
+
+        self.assertFalse(first.confirmed)
+        self.assertFalse(second.confirmed)
+        self.assertTrue(third.confirmed)
+        self.assertEqual(third.hits, 3)
+
+    def test_two_misses_reset_tolerant_gate(self):
+        gate = FreshDetectionGate(required_hits=3, max_misses=1)
+        gate.accept(self.detection(1, confirmed=False))
+        gate.accept(self.detection(2, confirmed=False))
+        self.assertIsNone(gate.accept(None))
+        self.assertIsNone(gate.accept(None))
+        reacquired = gate.accept(
+            self.detection(1, confirmed=False))
+
+        self.assertEqual(reacquired.hits, 1)
+
 
 class LatestFrameDetectorTests(unittest.TestCase):
     def test_fit_preserves_aspect_without_upscale(self):
@@ -111,13 +137,16 @@ class LatestFrameDetectorTests(unittest.TestCase):
 
     def test_detection_is_mapped_back_to_preview_resolution(self):
         detection = BallDetection(
-            "silver", 320, 240, 40, 0.9, True, 3, 1.0)
+            "silver", 320, 240, 40, 0.9, True, 3, 1.0,
+            track_locked=True,
+        )
         scaled = _scale_detection(
             detection, (480, 640, 3), (720, 960, 3))
         self.assertEqual(scaled.center_x, 480)
         self.assertEqual(scaled.center_y, 360)
         self.assertEqual(scaled.radius, 60)
         self.assertEqual(scaled.timestamp, 1.0)
+        self.assertTrue(scaled.track_locked)
 
     def test_worker_downscales_and_publishes_result(self):
         worker = LatestFrameBallDetector(
@@ -136,6 +165,9 @@ class LatestFrameDetectorTests(unittest.TestCase):
             self.assertEqual(result.frame_shape, (720, 960, 3))
             self.assertEqual(result.detection.center_x, 480)
             self.assertEqual(result.detection.center_y, 360)
+            self.assertEqual(
+                result.locked_detection.center_x, 480)
+            self.assertTrue(result.locked_detection.track_locked)
             self.assertFalse(result.hough_used)
             self.assertEqual(result.contour_proposals, 0)
             self.assertEqual(result.hough_proposals, 0)

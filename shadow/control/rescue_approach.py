@@ -43,7 +43,11 @@ class BallApproachController:
         self._crescent_token_until = None
         self._crescent_token_center = None
         self._last_history_timestamp = None
-        self._last_crescent_timestamp = None
+        self._last_near_timestamp = None
+        self._near_source = None
+        self._near_first_at = None
+        self._near_hold_until = None
+        self._near_misses = 0
         self._pixel_scale = 1.0
         self._terminal_detail = ""
 
@@ -76,7 +80,7 @@ class BallApproachController:
             detection_confirmed
             and now - detection.timestamp > cfg.BALL_FRAME_STALE_S
         ):
-            self.visual_near_count = 0
+            self._reset_near_confirmation()
             self.progress.clear()
             self.state = self.LOST
             return MotionCommand(
@@ -105,6 +109,12 @@ class BallApproachController:
 
         self._refresh_crescent_token(now)
 
+        locked_circle_near = self._locked_circle_near(
+            detection if detection_confirmed else None,
+            height,
+            width,
+            now,
+        )
         crescent_near = self._close_crescent_near(
             crescent_evidence,
             detection if detection_confirmed else None,
@@ -112,21 +122,57 @@ class BallApproachController:
             width,
             now,
         )
-        if crescent_near:
+        near_source = None
+        near_timestamp = None
+        near_required = cfg.BALL_STOP_CONFIRM_FRAMES
+        if locked_circle_near:
+            near_source = "circulo travado"
+            near_timestamp = float(detection.timestamp)
+            near_required = cfg.BALL_LOCKED_CIRCLE_CONFIRM_FRAMES
+        elif crescent_near:
+            near_source = "meia-lua"
+            near_timestamp = float(crescent_evidence.timestamp)
+
+        # A janela curta existe para uma unica falha visual, nao para unir
+        # confirmacoes de tracks diferentes depois de uma reacquisicao.
+        if (
+            self.visual_near_count > 0
+            and (
+                self._near_hold_until is None
+                or now > self._near_hold_until
+            )
+        ):
+            self._reset_near_confirmation()
+
+        if near_source is not None:
             if self.active_started is None:
                 self.active_started = now
             self.last_seen = now
-            crescent_timestamp = float(crescent_evidence.timestamp)
+            if self._near_source != near_source:
+                self._reset_near_confirmation()
+            self._near_source = near_source
             if (
-                self._last_crescent_timestamp is None
-                or crescent_timestamp
-                > self._last_crescent_timestamp + 1e-9
+                self._near_first_at is not None
+                and now - self._near_first_at
+                > cfg.BALL_NEAR_CONFIRM_WINDOW_S
             ):
+                self._reset_near_confirmation()
+                self._near_source = near_source
+            if (
+                self._last_near_timestamp is None
+                or near_timestamp
+                > self._last_near_timestamp + 1e-9
+            ):
+                if self._near_first_at is None:
+                    self._near_first_at = now
                 self.visual_near_count += 1
-                self._last_crescent_timestamp = crescent_timestamp
-            if self.visual_near_count >= cfg.BALL_STOP_CONFIRM_FRAMES:
+                self._last_near_timestamp = near_timestamp
+                self._near_misses = 0
+                self._near_hold_until = (
+                    now + cfg.BALL_NEAR_CONFIRM_GRACE_S)
+            if self.visual_near_count >= near_required:
                 reason = (
-                    "meia-lua da esfera confirmada; "
+                    f"{near_source} confirmado; "
                     "esfera na posicao de coleta")
                 self.state = self.NEAR
                 self._terminal_detail = reason
@@ -135,7 +181,7 @@ class BallApproachController:
                     detail=reason,
                     terminal=True,
                     pickup_in_range=True,
-                    pickup_confirmations=self.visual_near_count,
+                    pickup_confirmations=cfg.BALL_STOP_CONFIRM_FRAMES,
                 )
 
             self.state = self.NEAR_CONFIRM
@@ -143,14 +189,41 @@ class BallApproachController:
             return MotionCommand(
                 self.state,
                 detail=(
-                    "meia-lua proxima; confirmando "
+                    f"{near_source} proximo; confirmando "
                     f"{self.visual_near_count}/"
-                    f"{cfg.BALL_STOP_CONFIRM_FRAMES}"),
+                    f"{near_required}"),
                 pickup_in_range=True,
                 pickup_confirmations=self.visual_near_count,
             )
 
-        self.visual_near_count = 0
+        if self.visual_near_count > 0:
+            self._near_misses += 1
+        if (
+            self.visual_near_count > 0
+            and self._near_misses
+            <= cfg.BALL_NEAR_CONFIRM_MAX_MISSES
+            and self._near_hold_until is not None
+            and now <= self._near_hold_until
+            and self._crescent_token_until is not None
+            and now <= self._crescent_token_until
+        ):
+            self.state = self.NEAR_CONFIRM
+            self.progress.clear()
+            required = (
+                cfg.BALL_LOCKED_CIRCLE_CONFIRM_FRAMES
+                if self._near_source == "circulo travado"
+                else cfg.BALL_STOP_CONFIRM_FRAMES
+            )
+            return MotionCommand(
+                self.state,
+                detail=(
+                    f"{self._near_source}: mantendo trava visual "
+                    f"{self.visual_near_count}/{required}"),
+                pickup_in_range=True,
+                pickup_confirmations=self.visual_near_count,
+            )
+
+        self._reset_near_confirmation()
         if not detection_confirmed:
             self.progress.clear()
             if self.active_started is None:
@@ -178,14 +251,48 @@ class BallApproachController:
 
         error = detection.horizontal_error(width)
 
-        if abs(error) > cfg.BALL_ALIGN_THRESHOLD:
+        align_threshold = (
+            cfg.BALL_ALIGN_EXIT_THRESHOLD
+            if self.state == self.ALIGN
+            else cfg.BALL_ALIGN_THRESHOLD
+        )
+        if abs(error) > align_threshold:
             self.state = self.ALIGN
             self.progress.clear()
-            angle = cfg.BALL_ALIGN_ANGLE if error > 0 else -cfg.BALL_ALIGN_ANGLE
+            severity = float(np.clip(
+                (
+                    abs(error) - cfg.BALL_ALIGN_EXIT_THRESHOLD
+                ) / max(
+                    1.0 - cfg.BALL_ALIGN_EXIT_THRESHOLD,
+                    1e-6,
+                ),
+                0.0,
+                1.0,
+            ))
+            angle_magnitude = int(round(
+                cfg.BALL_ALIGN_ARC_MIN_ANGLE
+                + severity
+                * (
+                    cfg.BALL_ALIGN_ARC_MAX_ANGLE
+                    - cfg.BALL_ALIGN_ARC_MIN_ANGLE
+                )
+            ))
+            angle = (
+                angle_magnitude if error > 0
+                else -angle_magnitude
+            )
+            speed = (
+                cfg.BALL_ALIGN_SPEED_MIN
+                + severity
+                * (
+                    cfg.BALL_ALIGN_SPEED_MAX
+                    - cfg.BALL_ALIGN_SPEED_MIN
+                )
+            )
             return MotionCommand(
                 self.state,
                 angle=angle,
-                speed=cfg.BALL_ALIGN_SPEED,
+                speed=float(speed),
                 detail=f"centralizando; erro horizontal={error:+.3f}")
 
         self.state = self.APPROACH
@@ -217,6 +324,69 @@ class BallApproachController:
             detail=(
                 f"aproximando; erro={error:+.3f}, "
                 f"raio={detection.radius:.1f}px"))
+
+    def _reset_near_confirmation(self):
+        self.visual_near_count = 0
+        self._last_near_timestamp = None
+        self._near_source = None
+        self._near_first_at = None
+        self._near_hold_until = None
+        self._near_misses = 0
+
+    def _locked_circle_near(
+        self,
+        detection,
+        frame_height,
+        frame_width,
+        now,
+    ):
+        """Circulo rastreado cobrindo o ponto fisico de coleta."""
+        if (
+            detection is None
+            or not detection.confirmed
+            or not bool(getattr(detection, "track_locked", False))
+        ):
+            return False
+        age = now - float(detection.timestamp)
+        if not (-0.05 <= age <= cfg.BALL_FRAME_STALE_S):
+            return False
+        if (
+            self._crescent_token_until is None
+            or now > self._crescent_token_until
+            or self._crescent_token_center is None
+        ):
+            return False
+
+        center_ratio = (
+            float(detection.center_x) / max(frame_width, 1))
+        if (
+            abs(detection.horizontal_error(frame_width))
+            > cfg.BALL_LOCKED_CIRCLE_MAX_CENTER_ERROR
+            or abs(
+                center_ratio - self._crescent_token_center
+            ) > cfg.BALL_CRESCENT_ASSOCIATION_X_RATIO
+        ):
+            return False
+        radius = float(detection.radius)
+        if (
+            radius / max(frame_height, 1)
+            < cfg.BALL_LOCKED_CIRCLE_MIN_RADIUS_RATIO
+        ):
+            return False
+
+        point_x = (
+            cfg.BALL_LOCKED_CIRCLE_POINT_X_RATIO * frame_width)
+        point_y = (
+            cfg.BALL_LOCKED_CIRCLE_POINT_Y_RATIO * frame_height)
+        point_distance = float(np.hypot(
+            float(detection.center_x) - point_x,
+            float(detection.center_y) - point_y,
+        ))
+        margin = (
+            cfg.BALL_LOCKED_CIRCLE_POINT_SLACK_RATIO
+            * frame_height
+        )
+        return point_distance <= radius + margin
 
     def _record_approach_history(
         self,

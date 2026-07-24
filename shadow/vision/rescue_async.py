@@ -40,6 +40,7 @@ def _scale_detection(detection, from_shape, to_shape):
         detection.confirmed,
         detection.hits,
         detection.timestamp,
+        track_locked=detection.track_locked,
     )
 
 
@@ -63,6 +64,7 @@ class AsyncDetectionResult:
     diagnostic: str
     candidate_circles: tuple = ()
     crescent_evidence: object = None
+    locked_detection: object = None
 
 
 @dataclass(frozen=True)
@@ -75,19 +77,25 @@ class CapturedFrame:
 class FreshDetectionGate:
     """Exige resultados frescos e distintos, mesmo se o tracker veio de stale."""
 
-    def __init__(self, required_hits):
+    def __init__(self, required_hits, max_misses=0):
         self.required_hits = max(int(required_hits), 1)
+        self.max_misses = max(int(max_misses), 0)
         self._fresh_hits = 0
         self._last_tracker_hits = None
+        self._misses = 0
 
     def reset(self):
         self._fresh_hits = 0
         self._last_tracker_hits = None
+        self._misses = 0
 
     def accept(self, detection):
         if detection is None:
-            self.reset()
+            self._misses += 1
+            if self._misses > self.max_misses:
+                self.reset()
             return None
+        self._misses = 0
 
         tracker_hits = int(detection.hits)
         if (
@@ -366,8 +374,18 @@ class LatestFrameBallDetector:
                     "last_crescent_evidence",
                     None,
                 )
+                locked_detection = getattr(
+                    self.detector,
+                    "last_locked_detection",
+                    None,
+                )
                 detection = _scale_detection(
                     detection, detector_frame.shape, frame.shape)
+                locked_detection = _scale_detection(
+                    locked_detection,
+                    detector_frame.shape,
+                    frame.shape,
+                )
                 detector_height, detector_width = detector_frame.shape[:2]
                 frame_height, frame_width = frame.shape[:2]
                 radius_scale = min(
@@ -412,6 +430,7 @@ class LatestFrameBallDetector:
                     diagnostic=diagnostic,
                     candidate_circles=candidate_circles,
                     crescent_evidence=crescent_evidence,
+                    locked_detection=locked_detection,
                 )
             except Exception as err:
                 with self._condition:

@@ -105,10 +105,13 @@ BALL_MIN_CONFIDENCE = 0.56
 # Rastreamento e confirmacao temporal.
 BALL_ACQUIRE_HITS = 3
 BALL_MAX_TRACK_MISSES = 2
+# Uma falha isolada nao troca a identidade nem apaga a confirmacao do track.
+# O controle ainda manda PARAR naquele frame; somente a memoria visual sobrevive.
+BALL_TRACK_COAST_MISSES = 1
 BALL_ASSOCIATION_MIN_PX = 34
-BALL_ASSOCIATION_RADIUS_FACTOR = 1.7
-BALL_RADIUS_RATIO_MIN = 0.55
-BALL_RADIUS_RATIO_MAX = 1.80
+BALL_ASSOCIATION_RADIUS_FACTOR = 1.05
+BALL_RADIUS_RATIO_MIN = 0.62
+BALL_RADIUS_RATIO_MAX = 1.60
 # Antes dos 3 hits, reflexos internos nao podem ser associados como se fossem
 # o mesmo perimetro externo. Depois da confirmacao, os limites amplos acima
 # continuam cobrindo o movimento real do robo e pequenas perdas de quadro.
@@ -117,6 +120,9 @@ BALL_ACQUIRE_ASSOCIATION_RADIUS_FACTOR = 0.80
 BALL_ACQUIRE_RADIUS_RATIO_MIN = 0.72
 BALL_ACQUIRE_RADIUS_RATIO_MAX = 1.40
 BALL_TRACK_EMA_ALPHA = 0.40
+# O segundo gate temporal do worker tambem tolera somente uma falha entre
+# resultados novos do mesmo track bloqueado.
+BALL_FRESH_GATE_MAX_MISSES = 1
 
 # Propostas quase identicas sao redundantes; circulos concentricos com raios
 # diferentes precisam chegar a classificacao para um halo invalido nao apagar
@@ -135,15 +141,18 @@ BALL_OUTER_CONFIDENCE_TOLERANCE = 0.18
 
 # Controle de aproximacao. O comando usa a lei steer() ja existente:
 # positivo=direita, negativo=esquerda, |angulo|>110=pivo, 190=PARAR.
-BALL_CENTER_DEADBAND = 0.085
-BALL_ALIGN_THRESHOLD = 0.19
-BALL_ALIGN_ANGLE = 180
-# Os valores anteriores (0.20..0.38) geravam apenas pulsos de PWM 24..46,
-# intercalados por PARAR, e nao venceram a inercia no teste fisico. Estes
-# valores continuam abaixo dos 60 PWM usados pelo segue-linha, mas deixam uma
-# margem real para os quatro motores com a LiPo 2S.
-BALL_ALIGN_SPEED = 0.35
-BALL_STEER_MAX_ANGLE = 82
+BALL_CENTER_DEADBAND = 0.10
+# ALIGN entra somente acima de 0,24 e, depois de entrar, sai abaixo de 0,15.
+# Em vez do pivo brusco |angulo|>110, usa arco proporcional 65..82. Pela lei
+# steer, a roda interna preserva cerca de 26%..41% da externa, em vez de ficar
+# com apenas 1..5 PWM e se comportar como um pivo apoiado em uma roda.
+BALL_ALIGN_THRESHOLD = 0.24
+BALL_ALIGN_EXIT_THRESHOLD = 0.15
+BALL_ALIGN_ARC_MIN_ANGLE = 65
+BALL_ALIGN_ARC_MAX_ANGLE = 82
+BALL_ALIGN_SPEED_MIN = 0.30
+BALL_ALIGN_SPEED_MAX = 0.34
+BALL_STEER_MAX_ANGLE = 60
 BALL_APPROACH_SPEED_FAR = 0.45
 BALL_APPROACH_SPEED_NEAR = 0.35
 BALL_SLOW_RADIUS_PX = 48
@@ -154,6 +163,21 @@ BALL_SLOW_RADIUS_PX = 48
 # meia-lua larga descrita abaixo.
 BALL_STOP_RADIUS_PX = 76
 BALL_STOP_CONFIRM_FRAMES = 3
+# Gate primario pedido no teste fisico: o circulo temporal ja bloqueado na
+# vitima cobre um ponto perto da base. Tamanho, centro, crescimento anterior
+# e dois timestamps frescos impedem um reflexo pequeno de acionar a coleta.
+BALL_LOCKED_CIRCLE_POINT_X_RATIO = 0.50
+BALL_LOCKED_CIRCLE_POINT_Y_RATIO = 0.90
+BALL_LOCKED_CIRCLE_POINT_SLACK_RATIO = 0.02
+BALL_LOCKED_CIRCLE_MIN_RADIUS_RATIO = 0.085
+BALL_LOCKED_CIRCLE_MAX_CENTER_ERROR = 0.16
+BALL_LOCKED_CIRCLE_CONFIRM_FRAMES = 2
+# Somente uma medicao ausente pode separar as duas confirmacoes. A falha
+# preserva o contador por poucos milissegundos, mas sempre deixa as rodas em
+# PARAR e nunca incrementa sozinha.
+BALL_NEAR_CONFIRM_MAX_MISSES = 1
+BALL_NEAR_CONFIRM_GRACE_S = 0.18
+BALL_NEAR_CONFIRM_WINDOW_S = 0.35
 
 # Gate de proximidade pela borda superior da esfera enorme/cortada. Cada
 # template é o arco circular que passa pelo ápice e pelos dois ombros.
