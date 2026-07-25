@@ -79,7 +79,24 @@ Leia o motivo quando a fita for rejeitada:
 | `compacta` | forma quase quadrada: é uma esfera, não uma fita | nada — é o veto funcionando |
 | `saturada` | a região tem cor demais para ser metal | suba `S max` com cuidado |
 | `sem_assinatura_reflexiva` | neutro e claro, mas sem brilho nem faixa dinâmica: papel branco | desça `ENTRY_SILVER_MIN_DYNAMIC_RANGE` só se a fita real for fosca |
-| `sem_contraste` | a fita ficou idêntica ao piso | mude o ângulo do LED; ou desça `ENTRY_SILVER_MIN_SURROUND_CONTRAST` |
+| `sem_contraste` | a fita ficou idêntica ao piso, em brilho E em textura | mude o ângulo do LED; ou desça `ENTRY_SILVER_MIN_SURROUND_CONTRAST` |
+
+### Quando o piso cinza tem o mesmo brilho da fita
+
+Esse foi o caso medido na arena real: piso e fita chegando os dois a
+V≈216-226 e S≈20-24. Nessa situação **HSV sozinho não separa** — a máscara
+engole o piso inteiro e o candidato morre em `espessa`.
+
+O que continua diferente é a **textura da luz**: metal concentra brilho em
+pontos, piso fosco é uniforme por mais claro que seja. O slider
+**`Reflexo min`** (só no grupo 7) filtra por isso, antes da geometria.
+
+Como ajustar: suba `Reflexo min` até o piso sair da máscara e sobrar só a
+fita. Se a fita sumir junto, desça. Zero desliga o filtro.
+
+Esse mesmo sinal também vale como contraste: se a fita e o piso tiverem o
+mesmo brilho mas texturas diferentes, o detector aceita pela textura. Só é
+rejeitado o que for igual nas **duas** coisas.
 | `linha_continua` | a linha preta segue à frente | correto: não é a entrada |
 
 Depois de calibrar, valide **sem** transição, com o replay:

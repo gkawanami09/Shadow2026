@@ -91,14 +91,46 @@ def load_bounds(config_manager=None):
     return minimum, maximum
 
 
-def silver_mask(frame_bgr, hsv_min, hsv_max):
-    """Máscara neutra/clara da faixa. Função pura, reutilizada no calibrador."""
+def local_range_map(value_channel, window=None):
+    """Amplitude local (máx − mín) do brilho numa janela pequena.
+
+    É a medida barata de "textura de luz": metal reflexivo concentra brilho
+    em pontos e produz amplitude alta; piso fosco é uniforme e produz
+    amplitude baixa, por mais claro que seja.
+    """
+    window = (
+        config.ENTRY_SILVER_LOCAL_WINDOW_PX if window is None else window)
+    window = max(int(window), 1)
+    if window % 2 == 0:
+        window += 1
+    kernel = np.ones((window, window), np.uint8)
+    maximo = cv2.dilate(value_channel, kernel)
+    minimo = cv2.erode(value_channel, kernel)
+    return cv2.subtract(maximo, minimo)
+
+
+def silver_mask(frame_bgr, hsv_min, hsv_max, min_local_range=None):
+    """Máscara neutra/clara da faixa. Função pura, reutilizada no calibrador.
+
+    Além da faixa HSV, exige textura de luz mínima. Sem isso, um piso cinza
+    com o mesmo brilho e a mesma neutralidade da fita entra inteiro na
+    máscara e o candidato morre na geometria antes de qualquer teste de
+    aparência — foi exatamente o que aconteceu na arena real.
+    """
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
-    return cv2.inRange(
+    mask = cv2.inRange(
         hsv,
         np.asarray(hsv_min, dtype=np.uint8),
         np.asarray(hsv_max, dtype=np.uint8),
     )
+    limite = (
+        config.ENTRY_SILVER_MIN_LOCAL_RANGE
+        if min_local_range is None else min_local_range
+    )
+    if limite > 0:
+        amplitude = local_range_map(hsv[:, :, 2])
+        mask[amplitude < limite] = 0
+    return mask
 
 
 def _clip01(value):
@@ -108,12 +140,15 @@ def _clip01(value):
 class EntrySilverDetector:
     """Encontra a fita prata de entrada em um frame da câmera de linha."""
 
-    def __init__(self, hsv_min=None, hsv_max=None, geometry=None):
+    def __init__(self, hsv_min=None, hsv_max=None, geometry=None,
+                 min_local_range=None):
         self.hsv_min = list(
             config.ENTRY_SILVER_MIN_DEFAULT if hsv_min is None else hsv_min)
         self.hsv_max = list(
             config.ENTRY_SILVER_MAX_DEFAULT if hsv_max is None else hsv_max)
         self.geometry = default_geometry() if geometry is None else geometry
+        #: Amplitude local mínima; ``None`` usa o valor do config.
+        self.min_local_range = min_local_range
         self.last_reason = "inicio"
         self.last_mask = None
         self.last_band = None
@@ -137,7 +172,9 @@ class EntrySilverDetector:
         timestamp = 0.0 if timestamp is None else float(timestamp)
         self.last_band = None
 
-        mask = silver_mask(frame_bgr, self.hsv_min, self.hsv_max)
+        mask = silver_mask(
+            frame_bgr, self.hsv_min, self.hsv_max,
+            min_local_range=self.min_local_range)
         self.last_mask = mask
 
         band, reason = find_transversal_band(
@@ -191,7 +228,16 @@ class EntrySilverDetector:
             self.last_reason = "sem_assinatura_reflexiva"
             return None
 
-        surround_contrast = self._surround_contrast(value, band, mask)
+        # Contraste com a vizinhança, medido de DUAS formas independentes.
+        # Vale a maior: numa arena onde o piso tem o mesmo brilho da fita, o
+        # contraste de brilho é zero e quem denuncia a fita é a textura da
+        # luz. Exigir contraste de brilho ali rejeitaria a fita verdadeira.
+        surround_contrast = max(
+            self._surround_contrast(value, band, mask),
+            self._surround_contrast(
+                local_range_map(hsv[:, :, 2]).astype(np.float32),
+                band, mask),
+        )
         if surround_contrast < config.ENTRY_SILVER_MIN_SURROUND_CONTRAST:
             # Indistinguível do próprio piso: sem borda, não é uma fita.
             self.last_reason = "sem_contraste"

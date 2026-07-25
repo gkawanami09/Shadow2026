@@ -215,6 +215,23 @@ ENTRY_SILVER_MAX_THICKNESS_RATIO = .30
 ENTRY_SILVER_MIN_FILL_RATIO = .55
 ENTRY_SILVER_MIN_ASPECT = 3.5
 
+# Separação por REFLEXO, aplicada na máscara antes da geometria.
+#
+# Medido na arena real: o piso cinza e a fita prata chegam ao mesmo brilho
+# (V≈216-226) e à mesma neutralidade (S≈20-24). Nesse caso HSV sozinho não
+# separa os dois, a máscara engole o piso inteiro e o candidato morre em
+# "espessa" antes de qualquer teste de aparência.
+#
+# O que continua diferente é a TEXTURA da luz: metal amassado/refletivo
+# concentra brilho em pontos e tem variação local alta; piso fosco é
+# uniforme, por mais claro que seja. A faixa local (máx − mín numa janela
+# pequena) mede exatamente isso e custa duas operações de morfologia.
+#
+# Ajuste `ENTRY_SILVER_MIN_LOCAL_RANGE` no calibrador (grupo 7): suba até o
+# piso sair da máscara e só a fita continuar. Zero desliga o filtro.
+ENTRY_SILVER_LOCAL_WINDOW_PX = 7
+ENTRY_SILVER_MIN_LOCAL_RANGE = 18
+
 # Aparência. Neutralidade + assinatura reflexiva. O papel branco fosco é
 # neutro mas quase não tem faixa dinâmica nem brilho especular concentrado.
 ENTRY_SILVER_MAX_SATURATION = 70.

@@ -38,10 +38,11 @@ class EntrySilverDetectorTests(unittest.TestCase):
         self.assertIsNone(
             self.detector.detect(cs.piso_branco(), line_ahead=False,
                                  timestamp=1.0))
-        # O piso preenche a ROI inteira e encosta no topo dela: os dois
-        # motivos significam "região grande, não é uma fita".
+        # O piso é uniforme: o filtro de reflexo o remove já na máscara, e
+        # nem chega a existir região para a geometria julgar.
         self.assertIn(
-            self.detector.last_reason, ("cortada_no_topo", "espessa"))
+            self.detector.last_reason,
+            ("sem_linha_cheia", "cortada_no_topo", "espessa"))
 
     def test_reflexo_isolado_nao_aciona_entrada(self):
         self.assertIsNone(
@@ -71,8 +72,35 @@ class EntrySilverDetectorTests(unittest.TestCase):
             piso=120, base=200, brilho=200, densidade_brilho=0.0)
         self.assertIsNone(
             self.detector.detect(frame, line_ahead=False, timestamp=1.0))
-        self.assertEqual(
-            self.detector.last_reason, "sem_assinatura_reflexiva")
+        # Sem brilho especular, o filtro de reflexo esvazia a fita já na
+        # máscara; ela pode cair na geometria ou na aparência, mas cai.
+        self.assertIn(
+            self.detector.last_reason,
+            ("sem_assinatura_reflexiva", "sem_linha_cheia", "fina",
+             "vazada"))
+
+    def test_fita_reflexiva_vence_piso_de_mesmo_brilho(self):
+        """O caso medido na arena: cinza e branco com o MESMO brilho.
+
+        Piso e fita têm brilho e neutralidade praticamente idênticos — HSV
+        sozinho não separa os dois. O que difere é a textura da luz: a fita
+        concentra brilho em pontos, o piso é uniforme. Sem esse filtro, a
+        máscara engolia o piso inteiro e o candidato morria em "espessa"
+        antes de qualquer teste de aparência.
+        """
+        piso_liso = cs.faixa_prata(
+            piso=210, base=212, brilho=212, densidade_brilho=0.0)
+        self.assertIsNone(
+            self.detector.detect(piso_liso, line_ahead=False, timestamp=1.0),
+            "piso uniforme do mesmo brilho não pode virar faixa")
+
+        fita_reflexiva = cs.faixa_prata(
+            piso=210, base=212, brilho=255, densidade_brilho=0.18)
+        detection = self.detector.detect(
+            fita_reflexiva, line_ahead=False, timestamp=2.0)
+        self.assertIsNotNone(
+            detection,
+            "fita refletiva sobre piso de mesmo brilho deveria ser aceita")
 
     def test_linha_preta_continuando_veta_a_entrada(self):
         frame = cs.faixa_prata()
@@ -82,16 +110,20 @@ class EntrySilverDetectorTests(unittest.TestCase):
             self.detector.detect(frame, line_ahead=True, timestamp=2.0))
         self.assertEqual(self.detector.last_reason, "linha_continua")
 
-    def test_faixa_sem_contraste_com_o_piso_e_rejeitada(self):
-        frame = cs.faixa_prata(piso=200, base=200, densidade_brilho=0.12)
+    def test_faixa_realmente_identica_ao_piso_e_rejeitada(self):
+        """Idêntica de verdade: mesmo brilho E mesma textura.
+
+        Não basta ter o mesmo brilho — se a fita concentra reflexo e o piso
+        não, ela É distinguível e deve ser aceita (isso é coberto em
+        `test_fita_reflexiva_vence_piso_de_mesmo_brilho`). O caso rejeitado
+        aqui é a superfície uniforme, sem brilho nem textura própria.
+        """
+        frame = cs.faixa_prata(
+            piso=200, base=200, brilho=200, densidade_brilho=0.0)
         detection = self.detector.detect(
             frame, line_ahead=False, timestamp=1.0)
-        if detection is not None:
-            self.fail("faixa idêntica ao piso não pode ser aceita")
-        self.assertIn(
-            self.detector.last_reason,
-            ("sem_contraste", "espessa", "sem_assinatura_reflexiva",
-             "cortada_no_topo"))
+        self.assertIsNone(
+            detection, "superfície uniforme não pode virar faixa")
 
     def test_frame_invalido_gera_erro_explicito(self):
         with self.assertRaises(ValueError):

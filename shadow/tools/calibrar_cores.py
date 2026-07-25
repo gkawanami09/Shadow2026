@@ -90,6 +90,15 @@ def build_trackbars(group_name, mode):
         for label, val, top in (("H min", vmin[0], 180), ("S min", vmin[1], 255), ("V min", vmin[2], 255),
                                 ("H max", vmax[0], 180), ("S max", vmax[1], 255), ("V max", vmax[2], 255)):
             cv2.createTrackbar(label, WINDOW, int(val), top, lambda _v: None)
+        if group_name == "entry_silver":
+            # Separa fita refletiva de piso fosco quando os dois têm o mesmo
+            # brilho: metal concentra luz em pontos, piso é uniforme.
+            reflexo = read_ini(
+                "entry_silver_min_local_range",
+                [config.ENTRY_SILVER_MIN_LOCAL_RANGE])
+            cv2.createTrackbar(
+                "Reflexo min", WINDOW, int(reflexo[0]), 120,
+                lambda _v: None)
 
 
 def get_bgr_values():
@@ -108,6 +117,13 @@ def get_hsv_values():
     return vmin, vmax
 
 
+def get_reflexo():
+    try:
+        return cv2.getTrackbarPos("Reflexo min", WINDOW)
+    except cv2.error:
+        return config.ENTRY_SILVER_MIN_LOCAL_RANGE
+
+
 def annotate_entry_silver(frame, detector, vmin, vmax):
     """Mostra ROI, faixa aceita e o motivo exato da rejeição.
 
@@ -117,6 +133,7 @@ def annotate_entry_silver(frame, detector, vmin, vmax):
     """
     detector.hsv_min = list(vmin)
     detector.hsv_max = list(vmax)
+    detector.min_local_range = get_reflexo()
     height, width = frame.shape[:2]
 
     roi_top = int(round(height * config.ENTRY_SILVER_ROI_TOP))
@@ -175,11 +192,16 @@ def main():
                 mask = cv2.inRange(frame, np.array(config.BLACK_MIN_DEFAULT), np.array(ceiling))
             else:
                 vmin, vmax = get_hsv_values()
-                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                mask = cv2.inRange(hsv, np.array(vmin), np.array(vmax))
                 if group_name == "entry_silver":
+                    # A máscara mostrada é a MESMA que o detector usa,
+                    # incluindo o filtro de reflexo.
                     frame = annotate_entry_silver(
                         frame, entry_detector, vmin, vmax)
+                    mask = entry_detector.last_mask
+                else:
+                    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                    mask = cv2.inRange(
+                        hsv, np.array(vmin), np.array(vmax))
 
             mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
             stacked = np.vstack((frame, mask_bgr))
@@ -205,6 +227,12 @@ def main():
                     config_manager.write_variable('color_values_line', key_min, vmin)
                     config_manager.write_variable('color_values_line', key_max, vmax)
                     print(f"salvo: {key_min} = {vmin} | {key_max} = {vmax}")
+                    if group_name == "entry_silver":
+                        reflexo = get_reflexo()
+                        config_manager.write_variable(
+                            'color_values_line',
+                            'entry_silver_min_local_range', [reflexo])
+                        print(f"salvo: reflexo minimo = {reflexo}")
             elif key != 255 and chr(key) in GROUPS:
                 group_key = chr(key)
                 group_name, mode = GROUPS[group_key]
