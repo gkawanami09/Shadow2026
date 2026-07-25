@@ -30,9 +30,15 @@ from controle.aproximacao_resgate import (  # noqa: E402
     BallApproachController,
     MotionCommand,
 )
-from controle.busca_resgate import BallSearchController  # noqa: E402
+from controle.busca_pulsada import make_search_controller  # noqa: E402
 from controle.coleta_resgate import BallPickupSequencer  # noqa: E402
 from controle.deposito_resgate import DepositMarkerController  # noqa: E402
+from controle.missao import (  # noqa: E402
+    POLICY_NEAREST_VALID,
+    VALID_POLICIES,
+    MissionCoordinator,
+)
+from controle.saida_resgate import ExitPhaseController  # noqa: E402
 from visao.resgate_assincrono import (  # noqa: E402
     FreshDetectionGate,
     LatestFrameBallDetector,
@@ -40,7 +46,18 @@ from visao.resgate_assincrono import (  # noqa: E402
 )
 from visao.bola_resgate import (BallDetector, annotate_rescue_frame)  # noqa: E402
 from visao.dados_resgate import RescueDatasetWriter  # noqa: E402
+from visao.faixa_saida import BlackExitGate  # noqa: E402
 from visao.marcador_resgate import MarkerDetector  # noqa: E402
+from visao.triangulos_finais import (  # noqa: E402
+    FinalTriangleMapper,
+    annotate_final_triangles,
+)
+
+
+WINDOW_EXIT = "Shadow2026 - saida da sala de resgate"
+#: Códigos de saída lidos por ``mission.py``.
+EXIT_OK = 0
+EXIT_INCOMPLETE = 3
 
 
 WINDOW = "Shadow2026 - aproximacao da bolinha"
@@ -251,12 +268,78 @@ def _annotate_arena_guard(frame, result):
     return frame
 
 
-def _reset_for_next_search(detector_worker, fresh_gate, now):
-    """Invalida o alvo anterior e cria um ciclo independente de busca."""
+def mission_exit_code(inventory, exit_controller, no_exit_phase=False):
+    """Código de saída lido por ``mission.py``.
+
+    Sucesso exige as DUAS coisas: as três vítimas depositadas E ter deixado a
+    sala. Um resgate que resgatou tudo mas não achou a saída não é sucesso —
+    o supervisor precisa saber disso para não assumir que o robô já está de
+    volta na linha.
+
+    ``no_exit_phase`` é o modo de teste físico por etapas: nele a saída foi
+    desativada de propósito e não conta como falha.
+    """
+    saiu_da_sala = (
+        bool(no_exit_phase)
+        or (exit_controller is not None and exit_controller.succeeded)
+    )
+    if inventory.complete and saiu_da_sala:
+        return EXIT_OK
+    return EXIT_INCOMPLETE
+
+
+def _annotate_exit_stripe(frame, detection, state):
+    """Desenha a soleira preta em AZUL, distinta dos dois triangulos."""
+    color = (255, 170, 0)
+    cv2.putText(
+        frame,
+        f"SAIDA: {state}",
+        (8, 26),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.58,
+        color,
+        2,
+        cv2.LINE_AA,
+    )
+    if detection is None:
+        return frame
+    x, y, width, height = detection.bbox
+    cv2.rectangle(
+        frame,
+        (int(x), int(y)),
+        (int(x + width), int(y + height)),
+        color,
+        2,
+    )
+    cv2.putText(
+        frame,
+        (
+            f"faixa preta {detection.confidence:.2f} "
+            f"larg={detection.span_ratio:.2f} "
+            f"prop={detection.aspect:.1f}"
+        ),
+        (max(int(x), 4), max(int(y) - 8, 44)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.50,
+        color,
+        2,
+        cv2.LINE_AA,
+    )
+    return frame
+
+
+def _reset_for_next_search(detector_worker, fresh_gate, now, coordinator=None):
+    """Invalida o alvo anterior e cria um ciclo independente de busca.
+
+    ``coordinator`` fornece o filtro de cor da política ativa: em
+    ``silver_first`` a esfera preta não pode travar o alvo enquanto faltar
+    uma prata, e nenhuma cor já completa volta a ser aceita.
+    """
     detector_worker.reset_tracking()
     fresh_gate.reset()
+    accepts = coordinator.wants if coordinator is not None else None
     return (
-        BallSearchController(start_time=now),
+        make_search_controller(start_time=now, accepts_kind=accepts),
         BallPickupSequencer(),
     )
 
@@ -548,6 +631,16 @@ def parse_args():
     parser.add_argument(
         "--no-enhance", action="store_true",
         help="desativa CLAHE + gamma nas propostas visuais")
+    parser.add_argument(
+        "--policy", choices=VALID_POLICIES, default=POLICY_NEAREST_VALID,
+        help=(
+            "ordem de resgate: 'nearest_valid' aceita qualquer cor (padrao "
+            "OBR); 'silver_first' adia a preta ate as duas vivas sairem"))
+    parser.add_argument(
+        "--no-exit-phase", action="store_true",
+        help=(
+            "para apos as tres vitimas, sem procurar a faixa preta de saida "
+            "(usado nos testes fisicos por etapas)"))
     # Compatibilidade com comandos antigos. O sensor permanece desativado
     # independentemente desta flag.
     parser.add_argument(
@@ -578,6 +671,11 @@ def main():
     marker_detector = None
     deposit_controller = None
     hardware_session = args.video is None
+
+    exit_controller = None
+    exit_gate = None
+    triangle_mapper = None
+    coordinator = MissionCoordinator(policy=args.policy)
 
     last_state = None
     last_logged_detail = None
@@ -646,7 +744,8 @@ def main():
             else BallApproachController(start_time=armed_at)
         )
         search = (
-            BallSearchController(start_time=armed_at)
+            make_search_controller(
+                start_time=armed_at, accepts_kind=coordinator.wants)
             if args.drive
             else None
         )
@@ -669,6 +768,8 @@ def main():
         latest_result = None
         latest_detection = None
         last_metrics_result = None
+        latest_exit_detection = None
+        latest_triangle_detections = {"green": None, "red": None}
 
         if args.drive:
             print(
@@ -697,7 +798,12 @@ def main():
 
             now = time.monotonic()
             armed = now >= armed_at
-            if new_frame and armed and not pickup.started:
+            # Na fase de saida o detector de vitimas fica desligado: as tres
+            # ja foram resgatadas e um falso candidato so atrasaria a saida.
+            if (
+                new_frame and armed and not pickup.started
+                and exit_controller is None
+            ):
                 detector_worker.submit(
                     latest_frame,
                     captured_at=frame_packet.captured_at,
@@ -715,7 +821,75 @@ def main():
             now = time.monotonic()
             command_updated = False
             pickup_step = None
-            if pickup.ready_for_deposit:
+            if exit_controller is not None:
+                # Fase de saida. Somente aqui a faixa PRETA existe para o
+                # robo; durante toda a busca de vitimas ela foi ignorada.
+                if result is not None:
+                    last_result_sequence = result.sequence
+                    last_metrics_result = result
+                exit_frame_shape = (
+                    latest_frame.shape
+                    if latest_frame is not None
+                    else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                          cfg.RESCUE_CAMERA_MAX_WIDTH, 3)
+                )
+                if new_frame and latest_frame is not None:
+                    exit_detection = None
+                    if (
+                        exit_controller.state
+                        == ExitPhaseController.MAP_TRIANGLES
+                    ):
+                        # Os dois triangulos sao detectados juntos, apenas
+                        # para diagnostico: nenhum deles comanda o robo.
+                        latest_triangle_detections = triangle_mapper.update(
+                            latest_frame,
+                            timestamp=frame_packet.captured_at,
+                        )
+                    elif exit_controller.frame_allowed(
+                        frame_packet.captured_at
+                    ):
+                        exit_confirmed, exit_raw = exit_gate.update(
+                            latest_frame,
+                            timestamp=frame_packet.captured_at,
+                            now=now,
+                        )
+                        if (
+                            exit_controller.state
+                            == ExitPhaseController.CROSS
+                        ):
+                            # Na travessia interessa a presenca no frame
+                            # atual: e o desaparecimento que prova que a
+                            # faixa passou por baixo do robo. A confirmacao
+                            # temporal tem histerese e ficaria presa em True.
+                            exit_detection = exit_raw
+                        else:
+                            exit_detection = (
+                                exit_raw if exit_confirmed else None)
+                        latest_exit_detection = exit_detection
+                    command = exit_controller.update(
+                        exit_detection,
+                        exit_frame_shape,
+                        mapper=triangle_mapper,
+                        now=now,
+                    )
+                    if (
+                        command.state == ExitPhaseController.ALIGN
+                        and exit_controller.aligned(
+                            exit_detection, exit_frame_shape)
+                    ):
+                        command = exit_controller.begin_cross(now)
+                    command_updated = True
+                    last_idle_control = now
+                elif now - last_idle_control >= IDLE_CONTROL_INTERVAL_S:
+                    command = exit_controller.update(
+                        None,
+                        exit_frame_shape,
+                        mapper=triangle_mapper,
+                        now=now,
+                    )
+                    command_updated = True
+                    last_idle_control = now
+            elif pickup.ready_for_deposit:
                 # A cor fica congelada desde o fechamento das garras. Enquanto
                 # a esfera esta elevada, a visao de bolas permanece desligada
                 # e somente o triangulo correspondente pode comandar o robo.
@@ -1007,13 +1181,19 @@ def main():
                         pickup_step.state
                         == BallPickupSequencer.COMPLETE
                     ):
+                        # Somente aqui a vitima conta: garras ja restauradas,
+                        # esfera liberada no triangulo correto e sem falha
+                        # serial durante a sequencia.
                         completed_pickups += 1
-                        search, pickup = _reset_for_next_search(
-                            detector_worker,
-                            fresh_gate,
-                            action_completed_at,
-                        )
-                        search_connection_epoch = None
+                        deposited_kind = pickup.target_kind
+                        coordinator.inventory.record_deposit(deposited_kind)
+                        inventory = coordinator.inventory
+                        print(
+                            f"[resgate] deposito {completed_pickups} "
+                            f"concluido ({deposited_kind}); inventario: "
+                            f"prata {inventory.silver_deposited}/2, "
+                            f"preta {inventory.black_deposited}/1")
+
                         controller = None
                         marker_detector = None
                         deposit_controller = None
@@ -1024,13 +1204,58 @@ def main():
                         latest_marker_captured_at = None
                         detection_times.clear()
                         last_idle_control = 0.0
-                        command = search.update(
-                            None, now=action_completed_at)
-                        command_updated = True
                         pickup_step = None
-                        print(
-                            f"[resgate] deposito {completed_pickups} "
-                            "concluido; procurando a proxima esfera")
+
+                        if inventory.complete:
+                            # As tres vitimas sairam. O detector de vitimas
+                            # nao volta a rodar: a partir daqui a unica coisa
+                            # que interessa e a soleira preta de saida.
+                            search = None
+                            search_connection_epoch = None
+                            pickup = BallPickupSequencer()
+                            detector_worker.reset_tracking()
+                            fresh_gate.reset()
+                            if args.no_exit_phase:
+                                print(
+                                    "[resgate] tres vitimas resgatadas; "
+                                    "--no-exit-phase: parando aqui")
+                                command = MotionCommand(
+                                    "RESCUE_COMPLETE",
+                                    detail=(
+                                        "tres vitimas depositadas; "
+                                        "saida desativada por opcao"),
+                                    terminal=True)
+                            else:
+                                exit_controller = ExitPhaseController(
+                                    start_time=action_completed_at)
+                                exit_gate = BlackExitGate()
+                                triangle_mapper = FinalTriangleMapper()
+                                print(
+                                    "[resgate] tres vitimas resgatadas; "
+                                    "mapeando os triangulos e procurando "
+                                    "a faixa PRETA de saida")
+                                command = exit_controller.update(
+                                    None,
+                                    (cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                                     cfg.RESCUE_CAMERA_MAX_WIDTH, 3),
+                                    mapper=triangle_mapper,
+                                    now=action_completed_at,
+                                )
+                            command_updated = True
+                        else:
+                            search, pickup = _reset_for_next_search(
+                                detector_worker,
+                                fresh_gate,
+                                action_completed_at,
+                                coordinator,
+                            )
+                            search_connection_epoch = None
+                            command = search.update(
+                                None, now=action_completed_at)
+                            command_updated = True
+                            print(
+                                "[resgate] procurando a proxima esfera "
+                                f"({', '.join(coordinator.preferred_kinds())})")
                 elif command_updated:
                     motion_connection_epoch = arduino.connection_epoch
                     motor_result = steer(command.angle, command.speed)
@@ -1120,33 +1345,32 @@ def main():
                             fresh_gate.reset()
                             latest_result = None
                             latest_detection = None
-                        if (
-                            command.state
-                            == BallSearchController.START
-                        ):
-                            search.mark_rotation_started(
-                                action_completed_at)
+                        # A busca (continua ou pulsada) interpreta o proprio
+                        # estado e informa se o robo acabou de parar. Isso
+                        # evita repetir aqui a lista de estados de cada uma.
+                        if command.state == search.START:
                             search_connection_epoch = (
                                 arduino.connection_epoch)
-                        elif (
-                            command.state
-                            == BallSearchController.TARGET_STOP
+                        if search.notify_command_written(
+                            command.state, action_completed_at
                         ):
-                            search.mark_target_stopped(
-                                action_completed_at)
+                            # Acabou de parar: nenhuma memoria visual anterior
+                            # pode reconfirmar o alvo depois desta parada.
                             fresh_gate.reset()
                             latest_result = None
                             latest_detection = None
                             last_idle_control = action_completed_at
-                        elif (
-                            command.state
-                            == BallSearchController.TURN_STOP
+                    elif exit_controller is not None:
+                        action_completed_at = time.monotonic()
+                        if exit_controller.consume_tracking_reset():
+                            exit_gate.reset(now=action_completed_at)
+                            latest_exit_detection = None
+                        if exit_controller.notify_command_written(
+                            command.state, action_completed_at
                         ):
-                            search.mark_full_turn_stopped(
-                                action_completed_at)
-                            fresh_gate.reset()
-                            latest_result = None
-                            latest_detection = None
+                            # Parou: descarta a votacao feita durante o giro.
+                            exit_gate.reset(now=action_completed_at)
+                            latest_exit_detection = None
                             last_idle_control = action_completed_at
             if arduino is not None:
                 arduino.refresh(fail_closed=True)
@@ -1322,6 +1546,15 @@ def main():
                 )
                 annotated = _annotate_arena_guard(
                     annotated, latest_result)
+                if exit_controller is not None:
+                    # Fase final: os DOIS triangulos aparecem juntos, cada um
+                    # na sua cor correta, e a soleira preta em azul para nao
+                    # se confundir com nenhum deles.
+                    annotated = annotate_final_triangles(
+                        annotated, latest_triangle_detections, copy=False)
+                    annotated = _annotate_exit_stripe(
+                        annotated, latest_exit_detection,
+                        exit_controller.state)
                 if deposit_controller is not None:
                     marker_overlay = (
                         latest_marker_detection
@@ -1454,11 +1687,20 @@ def main():
         if motor_lock is not None:
             _best_effort("liberar a trava dos motores", motor_lock.release)
         _best_effort("fechar a janela", cv2.destroyAllWindows)
+        inventory = coordinator.inventory
+        print(
+            "[resgate] inventario final: "
+            f"prata {inventory.silver_deposited}/2, "
+            f"preta {inventory.black_deposited}/1, "
+            f"total {inventory.total_deposited}/3")
         if args.drive:
             print("[resgate] encerrado com PARAR")
         else:
             print("[resgate] encerrado; motores nunca foram habilitados")
 
+    return mission_exit_code(
+        coordinator.inventory, exit_controller, args.no_exit_phase)
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

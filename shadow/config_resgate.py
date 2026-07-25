@@ -98,11 +98,42 @@ BALL_RADIAL_SECTORS = 8
 # Hough frequentemente encaixa um reflexo interno com raio cerca de 25% menor
 # que o envelope real. A faixa larga permite encontrar o perimetro externo; a
 # dispersao radial abaixo impede que lados de triangulos/elipses se aproveitem.
-BALL_RADIAL_SEARCH_BAND_RATIO = 0.40
-BALL_RADIAL_MAX_STEPS = 25
+# A busca e ASSIMETRICA porque o erro do Hough e assimetrico: ele engancha em
+# um reflexo/faceta INTERNA e quase nunca em algo maior que a esfera. Medido
+# nas capturas reais da arena: com r proposto 38 e envelope real 67, a borda
+# verdadeira esta a +76% — muito alem dos 40% originais, entao a busca nem
+# alcancava o perimetro e so encontrava facetas internas do papel amassado.
+BALL_RADIAL_SEARCH_BAND_RATIO = 0.40          # para dentro
+BALL_RADIAL_SEARCH_OUTWARD_RATIO = 1.00       # para fora
+BALL_RADIAL_MAX_STEPS = 41
 BALL_RADIAL_MIN_GRADIENT = 20.0
+# Fracao dos votos do pico que um raio precisa ter para disputar como
+# envelope. Entre os que passam, vence o mais externo (ver a votacao em
+# bola_resgate). Perto de 1.0 o comportamento volta a ser "so o pico".
+BALL_RADIAL_VOTE_RATIO = 0.65
+# Fracao minima do perimetro que precisa estar DENTRO da imagem para o teste
+# valer alguma coisa. Uma esfera encostada na lateral do quadro continua
+# sendo vitima e e julgada pela parte visivel; abaixo deste limite sobra
+# pouco contorno observavel para decidir qualquer coisa.
+BALL_RADIAL_MIN_MEASURABLE_FRACTION = 0.45
 BALL_RADIAL_MIN_ALIGNMENT = 0.72
 BALL_MIN_EDGE_SUPPORT = 0.58
+
+# --- Rota de FOIL no teste de perimetro ------------------------------------
+# Papel-aluminio amassado nao e um circulo dentro de 10% de tolerancia: sua
+# silhueta e genuinamente irregular. Em vez de afrouxar a dispersao para todo
+# mundo (o que deixava sombras e roupas passarem), existe uma rota separada
+# que troca tolerancia de FORMA por evidencia de TEXTURA — a mesma filosofia
+# ja usada no gate de proximidade (BALL_CRESCENT_FOIL_*).
+#
+# Medido nas capturas reais da arena, densidade de borda no interior do
+# circulo: esferas amassadas 0.235 a 0.256; esferas lisas 0.000 a 0.063;
+# a regiao do falso positivo (pessoa) 0.034. A separacao e limpa.
+BALL_RADIAL_FOIL_MIN_SUPPORT = 0.65
+BALL_RADIAL_FOIL_MIN_SECTORS = 7
+BALL_RADIAL_FOIL_MAX_DISPERSION = 0.24
+BALL_RADIAL_FOIL_MIN_TEXTURE = 0.15
+BALL_RADIAL_FOIL_INNER_RATIO = 0.78
 BALL_RADIAL_MIN_SECTOR_SUPPORT = 0.25
 BALL_RADIAL_MIN_GOOD_SECTORS = 6
 BALL_RADIAL_MAX_DISPERSION_RATIO = 0.10
@@ -382,6 +413,32 @@ BALL_SEARCH_FULL_TURN_S = 8.93
 BALL_SEARCH_BRAKE_MIN_CONFIDENCE = BALL_MIN_CONFIDENCE
 BALL_SEARCH_VERIFY_TIMEOUT_S = 1.00
 
+# --- Busca PULSADA ---------------------------------------------------------
+# "Gira e observa" no lugar do giro continuo. O motivo e medido: girando sem
+# parar, a esfera atravessa o campo de visao antes de acumular os tres
+# resultados distintos exigidos para o lock, e os frames capturados em
+# movimento saem borrados e com o autoexposure ainda corrigindo.
+#
+# O ciclo e PULSE_ROTATE -> BRAKE -> SETTLE -> OBSERVE -> PULSE_ROTATE.
+# Somente frames capturados DEPOIS do fim do SETTLE podem confirmar.
+BALL_SEARCH_PULSED = True
+# Duracao ativa de cada pulso. Com BALL_SEARCH_FULL_TURN_S = 8.93 s para 360,
+# 0.30 s equivalem a aproximadamente 12 graus por pulso. MEDIR no robo: este
+# valor nao foi verificado fisicamente.
+BALL_SEARCH_PULSE_S = 0.30
+# Pausa mecanica antes de olhar: vibracao do chassi e autoexposure.
+BALL_SEARCH_SETTLE_S = 0.12
+# Frames novos e nitidos observados a cada parada (2 a 4).
+BALL_SEARCH_OBSERVE_FRAMES = 3
+# Teto de espera por esses frames; sem isso uma camera travada pararia a busca.
+BALL_SEARCH_OBSERVE_TIMEOUT_S = 0.60
+# Setores de cobertura do giro completo. Serve de referencia cruzada com
+# BALL_SEARCH_PULSE_S: setores * pulso deve ficar proximo do 360 temporizado.
+BALL_SEARCH_SECTORS = 30
+# Teto global da busca, contando pulsos e pausas. Protege contra laco infinito
+# quando o 360 temporizado nao fecha por escorregamento das rodas.
+BALL_SEARCH_TOTAL_TIMEOUT_S = 75.0
+
 # Transporte ate o ponto de evacuacao. O marcador correto e imutavel durante
 # o ciclo: esfera prata -> verde; esfera preta -> vermelho. A navegacao usa
 # apenas a camera frontal de resgate e sempre para antes de liberar a esfera.
@@ -437,6 +494,79 @@ BALL_PROGRESS_MIN_RADIUS_PX = 3.0
 BALL_PROGRESS_MIN_BOTTOM_Y_PX = 8.0
 
 # ---------------------------------------------------------------------------
+# Faixa PRETA de saida da sala — CAMERA DE RESGATE
+# ---------------------------------------------------------------------------
+# Este detector so pode ser consultado no estado FIND_BLACK_EXIT. Fora dele,
+# a faixa preta nao existe para o robo: durante a busca de vitimas ela nao
+# pode interromper nada, e a vitima preta nao pode ser lida como saida.
+#
+# A separacao entre faixa preta e vitima preta e GEOMETRICA, nao cromatica:
+# as duas sao escuras. A vitima e compacta (proporcao ~1) e a faixa e
+# alongada e transversal. O veto de proporcao abaixo e o que as distingue.
+EXIT_BLACK_ENABLED = True
+# HSV: qualquer matiz/saturacao, apenas escuro.
+EXIT_BLACK_HSV_MIN = (0, 0, 0)
+EXIT_BLACK_HSV_MAX = (180, 255, 70)
+
+EXIT_BLACK_ROI_TOP = 0.50
+EXIT_BLACK_ROI_BOTTOM = 1.00
+
+EXIT_BLACK_MIN_ROW_FILL = 0.45
+EXIT_BLACK_MIN_SPAN_RATIO = 0.60
+EXIT_BLACK_MAX_SPAN_RATIO = 1.00
+EXIT_BLACK_MIN_THICKNESS_RATIO = 0.03
+# Teto que exclui a esfera preta por construcao: para um disco de raio r, as
+# linhas com preenchimento >= 0.45 formam uma espessura 2*sqrt(r^2-(0.225W)^2),
+# e alcancar largura >= 0.60W exige r >= 0.30W, o que ja impoe espessura
+# >= 0.397W. Em 640x480 isso sao ~254 px (0.53 da altura), muito acima deste
+# teto. Nenhum raio de esfera satisfaz largura e espessura ao mesmo tempo.
+EXIT_BLACK_MAX_THICKNESS_RATIO = 0.30
+EXIT_BLACK_MIN_FILL_RATIO = 0.55
+# Mais exigente que a entrada: aqui existe uma esfera preta na mesma arena.
+EXIT_BLACK_MIN_ASPECT = 4.0
+
+EXIT_BLACK_MAX_INSIDE_VALUE = 80.0
+# Contraste COM SINAL: o piso ao redor precisa ser mais claro que a faixa.
+# Uma sombra grande sobre piso escuro nao satisfaz isso.
+EXIT_BLACK_SURROUND_MARGIN_RATIO = 0.06
+EXIT_BLACK_MIN_SURROUND_CONTRAST = 25.0
+EXIT_BLACK_MIN_CONFIDENCE = 0.55
+
+EXIT_BLACK_VOTES_NEEDED = 3
+EXIT_BLACK_VOTE_WINDOW = 5
+EXIT_BLACK_COOLDOWN_S = 0.0
+
+# Travessia da soleira de saida. Igual a entrada: o tempo e apenas o limite
+# de seguranca; o fim normal e a faixa deixar de ser vista.
+EXIT_ADVANCE_SPEED = 0.35
+EXIT_ADVANCE_MIN_S = 0.60
+EXIT_ADVANCE_TIMEOUT_S = 3.5
+# Giro pulsado de procura da saida quando nenhuma faixa esta no campo.
+EXIT_SEARCH_TIMEOUT_S = 60.0
+EXIT_SEARCH_PULSE_S = BALL_SEARCH_PULSE_S
+EXIT_SEARCH_SETTLE_S = BALL_SEARCH_SETTLE_S
+EXIT_SEARCH_OBSERVE_TIMEOUT_S = BALL_SEARCH_OBSERVE_TIMEOUT_S
+EXIT_SEARCH_TANK_ANGLE = BALL_SEARCH_TANK_ANGLE
+EXIT_SEARCH_TANK_SPEED = BALL_SEARCH_TANK_SPEED
+
+# Alinhamento com a soleira antes de atravessar. Arco suave, nunca pivo.
+EXIT_ALIGN_MAX_CENTER_ERROR = 0.12
+EXIT_ALIGN_ANGLE = 55
+EXIT_ALIGN_SPEED = 0.26
+
+# Mapeamento final dos DOIS triangulos, so para diagnostico e para provar que
+# a sala foi compreendida. Nenhum deles comanda o robo nesta fase.
+FINAL_TRIANGLE_MAP_FRAMES = 6
+FINAL_TRIANGLE_MAP_TIMEOUT_S = 4.0
+# Cores do overlay em BGR do OpenCV. Verde=(0,255,0), Vermelho=(0,0,255).
+# Trocar estas duas constantes inverte o diagnostico da equipe inteira; existe
+# um teste dedicado para elas em tests/test_triangulos_finais.py.
+FINAL_TRIANGLE_OVERLAY_BGR = {
+    "green": (0, 255, 0),
+    "red": (0, 0, 255),
+}
+
+# ---------------------------------------------------------------------------
 # Marcadores triangulares de deposito
 # ---------------------------------------------------------------------------
 # Esta calibracao pertence exclusivamente a camera frontal de resgate. Os
@@ -470,6 +600,42 @@ MARKER_MORPH_CLOSE_PX = 5
 MARKER_MIN_AREA_RATIO = 0.0015
 MARKER_MAX_AREA_RATIO = 0.55
 MARKER_MIN_SIDE_PX = 9
+
+# Um blob que encosta na borda LATERAL do quadro esta INCOMPLETO: parte dele
+# ficou fora da imagem e sua forma nao pode ser julgada. Medido nas capturas
+# reais: com a camera nao mirada no triangulo, so a ponta dele aparece e a
+# "triangularidade" desse pedaco (0.577) nao descreve triangulo nenhum.
+#
+# Duas situacoes bem diferentes produzem um blob encostado na borda:
+#
+#   fragmento  — pequeno, o robo ainda nao mirou. Rejeitar e o certo: o giro
+#                de procura continua ate o marcador entrar inteiro no quadro.
+#   chegada    — grande, o marcador ja ocupa o quadro porque o robo esta em
+#                cima dele. Aqui julgar forma nao faz sentido e rejeitar seria
+#                perder o alvo exatamente no momento de depositar.
+#
+# Medido: fragmento = 0.050 do quadro; chegada = 0.256. O corte separa os dois
+# com folga. Na rota de chegada, forma e ignorada mas a exigencia cromatica
+# (MARKER_MIN_INSIDE_CHROMA e o contraste com o anel) continua valendo.
+MARKER_EDGE_MARGIN_PX = 2
+MARKER_NEAR_AREA_RATIO = 0.15
+# NAO afrouxar estes limites sem resolver antes o problema abaixo.
+#
+# Medicao nas capturas reais da arena (visao/marcador_resgate no pipeline):
+#
+#   marcador a distancia de navegacao  triangularidade 0.577  proporcao 1.03
+#   marcador de perto                  triangularidade 0.623  proporcao 3.83
+#   cadeira vermelha do laboratorio    triangularidade 0.677  proporcao 3.80
+#   circulo perfeito                   triangularidade 0.605
+#   quadrado perfeito                  triangularidade 0.500
+#
+# Ou seja: nesta perspectiva quase rente ao piso, a cadeira e MAIS triangular
+# que o marcador, e o marcador cai entre quadrado e circulo. Nao existe
+# limiar de triangularidade que aceite o marcador e rejeite um circulo — os
+# testes test_colored_circles_are_not_triangles provaram isso na pratica.
+#
+# Quem separa de verdade e a CROMATICIDADE do blob: marcador 124-148 contra
+# cadeira 63-79. Ver MARKER_MIN_INSIDE_CHROMA acima.
 MARKER_MAX_ASPECT_RATIO = 3.0
 MARKER_MIN_SOLIDITY = 0.82
 MARKER_MIN_MASK_FILL = 0.78
@@ -482,7 +648,20 @@ MARKER_MIN_TRIANGULARITY = 0.78
 # neutro que o interior, rejeitando iluminacao colorida uniforme.
 MARKER_RING_WIDTH_PX = 12
 MARKER_RING_MIN_PIXELS = 24
-MARKER_MIN_INSIDE_CHROMA = 45.0
+# Dois limiares cromaticos distintos, que antes eram a mesma constante:
+#
+# MARKER_MASK_MIN_CHROMA age POR PIXEL, antes de achar contornos. Subi-lo
+# corroi a borda do blob (onde a cromaticidade cai naturalmente) e MUDA A
+# FORMA do candidato — foi assim que subir o limiar chegou a fazer o detector
+# PERDER o marcador real. Por isso ele fica baixo: serve so para tirar fundo.
+#
+# MARKER_MIN_INSIDE_CHROMA age no BLOB inteiro, pela mediana interna, depois
+# de a forma estar definida. Ele pode ser rigoroso sem deformar nada.
+# Medido nas capturas reais da arena: marcador 147 e 123 de cromaticidade
+# mediana, cadeira vermelha do laboratorio 62 e 65. A folga e enorme e e
+# ela que permite afrouxar a geometria com seguranca.
+MARKER_MASK_MIN_CHROMA = 45.0
+MARKER_MIN_INSIDE_CHROMA = 90.0
 MARKER_MIN_CHROMA_CONTRAST = 30.0
 MARKER_MIN_CONFIDENCE = 0.58
 

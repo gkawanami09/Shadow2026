@@ -177,6 +177,78 @@ VISION_MAX_FRAMES = 90                    # teto de processamento
 VISION_READY_TIMEOUT = 15                 # s que o controle espera a visao no boot
 
 # ----------------------------------------------------------------------------
+# Faixa PRATA de entrada da sala de resgate — CÂMERA DE LINHA
+# ----------------------------------------------------------------------------
+# Este perfil pertence exclusivamente à câmera de linha (índice 1). Ele NÃO
+# compartilha limites com a esfera prateada da vítima: aquela é vista pela
+# câmera de resgate, de outro ângulo, com outra iluminação e outro tamanho
+# aparente. Misturar os dois perfis foi explicitamente evitado.
+#
+# Os limiares abaixo são um ponto de partida conservador. Eles precisam ser
+# medidos na arena real com `tools/calibrar_cores.py` (grupo 7). Nenhum deles
+# foi validado com a fita de verdade sob a iluminação da competição.
+ENTRY_SILVER_ENABLED = True
+# HSV do OpenCV (H 0..180). Prata é definida por NEUTRALIDADE (S baixo) e
+# BRILHO (V alto), não por matiz — por isso H cobre a faixa inteira.
+ENTRY_SILVER_MIN_DEFAULT = [0, 0, 140]
+ENTRY_SILVER_MAX_DEFAULT = [180, 70, 255]
+
+# A fita só é procurada na parte inferior da imagem: acima disso aparecem
+# público, sapatos, cadeiras e o resto do ginásio.
+ENTRY_SILVER_ROI_TOP = .55
+ENTRY_SILVER_ROI_BOTTOM = 1.0
+
+# Forma. A fita tem ~250 mm e o campo inferior da câmera é ~80 mm: ela
+# atravessa a imagem inteira. Exigir isso elimina de uma vez parafuso, reflexo
+# de LED, fita brilhante pequena e a própria vítima prateada.
+ENTRY_SILVER_MIN_ROW_FILL = .45
+ENTRY_SILVER_MIN_SPAN_RATIO = .70
+ENTRY_SILVER_MAX_SPAN_RATIO = 1.0
+ENTRY_SILVER_MIN_THICKNESS_RATIO = .04
+# Teto de espessura: é ele que separa a fita de um PISO BRANCO inteiro, e
+# junto com o piso mínimo de largura elimina QUALQUER círculo. Para um disco
+# de raio r as linhas com preenchimento ≥ .45 têm espessura 2·√(r²−(.225·W)²);
+# atingir largura ≥ .60·W exige r ≥ .30·W, o que já força espessura ≥ .397·W.
+# Em 448×252 isso são ~178 px, muito acima do teto abaixo. Ou seja: nenhuma
+# esfera passa neste filtro, por maior que esteja no quadro.
+ENTRY_SILVER_MAX_THICKNESS_RATIO = .30
+ENTRY_SILVER_MIN_FILL_RATIO = .55
+ENTRY_SILVER_MIN_ASPECT = 3.5
+
+# Aparência. Neutralidade + assinatura reflexiva. O papel branco fosco é
+# neutro mas quase não tem faixa dinâmica nem brilho especular concentrado.
+ENTRY_SILVER_MAX_SATURATION = 70.
+ENTRY_SILVER_MIN_DYNAMIC_RANGE = 26.
+ENTRY_SILVER_HIGHLIGHT_V = 205
+ENTRY_SILVER_MIN_HIGHLIGHT_FRACTION = .02
+# Contraste contra a vizinhança imediata (acima e abaixo da faixa). O sinal
+# pode ser de qualquer polaridade: dependendo do ângulo, a fita reflexiva fica
+# mais clara OU mais escura que o piso. O que não pode é ser igual ao piso.
+ENTRY_SILVER_SURROUND_MARGIN_RATIO = .06
+ENTRY_SILVER_MIN_SURROUND_CONTRAST = 12.
+ENTRY_SILVER_MIN_CONFIDENCE = .55
+
+# Evidência de contexto: a linha preta termina antes da entrada. Exigir isso
+# impede que um brilho sobre a linha, com a linha continuando à frente, seja
+# lido como entrada da sala.
+ENTRY_SILVER_REQUIRE_LINE_END = True
+
+# Confirmação temporal: votação 3-de-5 em frames distintos e recentes.
+ENTRY_SILVER_VOTES_NEEDED = 3
+ENTRY_SILVER_VOTE_WINDOW = 5
+ENTRY_SILVER_MAX_AGE_S = .35
+# Depois de sair da sala o robô volta a ver prata; o cooldown impede
+# reentrada imediata na mesma faixa.
+ENTRY_SILVER_COOLDOWN_S = 8.
+
+# Entrada na sala depois da confirmação. O tempo NÃO é a única evidência: o
+# avanço termina quando a faixa deixa de ser vista (passou por baixo do robô)
+# e o timeout é apenas o limite de segurança.
+ENTRY_ADVANCE_SPEED = .40
+ENTRY_ADVANCE_MIN_S = .60
+ENTRY_ADVANCE_TIMEOUT_S = 3.5
+
+# ----------------------------------------------------------------------------
 # Cores usadas quando uma chave não existe no config.ini
 # ----------------------------------------------------------------------------
 BLACK_MIN_DEFAULT = [0, 0, 0]

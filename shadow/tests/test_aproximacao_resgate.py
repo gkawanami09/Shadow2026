@@ -1069,5 +1069,62 @@ class BallApproachControllerTests(unittest.TestCase):
         self.assertEqual(fake.calls[-1], ("parar",))
 
 
+class TruncatedVictimTests(unittest.TestCase):
+    """Esfera cortada pela borda lateral do quadro.
+
+    Decisão de projeto: ela CONTINUA sendo uma vítima e o robô deve girar na
+    direção dela, mas não pode disparar a coleta enquanto estiver cortada —
+    é preciso alinhar até a esfera inteira entrar no quadro. Sem isso o robô
+    fecharia a garra sobre uma esfera cuja posição real não consegue medir.
+    """
+
+    shape = (480, 640, 3)
+
+    def _confirmar_proximidade(self, truncated):
+        """Mesmo cenário que dispara a coleta, mudando só ``truncated``."""
+        controller = BallApproachController(start_time=0.0)
+        history_end = arm_crescent_history(controller, self.shape)
+        comando = None
+        for indice in range(cfg.BALL_LOCKED_CIRCLE_CONFIRM_FRAMES):
+            agora = history_end + 0.05 + indice * 0.05
+            alvo = BallDetection(
+                "silver",
+                320.0,
+                float(pickup_touch_center_y(self.shape, 52)),
+                52.0,
+                0.9,
+                True,
+                cfg.BALL_ACQUIRE_HITS,
+                agora,
+                track_locked=True,
+                truncated=truncated,
+            )
+            comando = controller.update(alvo, self.shape, now=agora)
+        return controller, comando
+
+    def test_esfera_cortada_nao_dispara_a_coleta(self):
+        controller, comando = self._confirmar_proximidade(truncated=True)
+        self.assertNotEqual(controller.state, BallApproachController.NEAR)
+        self.assertFalse(comando.pickup_in_range)
+        self.assertEqual(controller.visual_near_count, 0)
+
+    def test_deteccao_cortada_ainda_e_uma_vitima_valida(self):
+        """O robô precisa enxergá-la para poder girar na direção dela."""
+        alvo = BallDetection(
+            "silver", 620.0, 300.0, 40.0, 0.9, True,
+            cfg.BALL_ACQUIRE_HITS, 0.1,
+            track_locked=True, truncated=True)
+        comando = BallApproachController(start_time=0.0).update(
+            alvo, self.shape, now=0.1)
+        # Não é PARAR-por-perda: o controlador continua conduzindo o robô.
+        self.assertNotEqual(comando.state, BallApproachController.LOST)
+        self.assertEqual(alvo.kind, "silver")
+
+    def test_a_mesma_esfera_inteira_dispara_normalmente(self):
+        controller, comando = self._confirmar_proximidade(truncated=False)
+        self.assertEqual(controller.state, BallApproachController.NEAR)
+        self.assertTrue(comando.pickup_in_range)
+
+
 if __name__ == "__main__":
     unittest.main()

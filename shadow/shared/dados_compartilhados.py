@@ -38,6 +38,21 @@ line_status = manager.Value("i", "line_detected")  # "line_detected"; "gap_detec
 
 status = manager.Value("i", "Parado")
 
+# ----------------------------------------------------------------------------
+# Missão completa (shadow/mission.py)
+# ----------------------------------------------------------------------------
+# Estes valores existem sempre, mas só têm efeito quando `mission_mode` é
+# ligado pelo supervisor da missão. Rodando `shadow/main.py` sozinho eles
+# permanecem em falso e o segue-linha se comporta exatamente como antes.
+mission_mode = manager.Value("i", False)      # supervisor da missão no comando
+entry_armed = manager.Value("i", True)        # procurar a faixa prata agora?
+entry_silver_detected = manager.Value("i", False)   # candidato no frame atual
+entry_silver_confirmed = manager.Value("i", False)  # votação 3-de-5 fechada
+entry_silver_votes = manager.Value("i", 0)
+entry_silver_reason = manager.Value("i", "")  # motivo da última rejeição
+rescue_requested = manager.Value("i", False)  # controle pediu o handoff
+red_finished = manager.Value("i", False)      # faixa vermelha final cumprida
+
 timer = Timer()
 
 

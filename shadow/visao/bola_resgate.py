@@ -29,6 +29,12 @@ class BallDetection:
     hits: int
     timestamp: float
     track_locked: bool = False
+    #: A esfera encosta na borda lateral do quadro, entao parte dela esta
+    #: fora da imagem. Ela CONTINUA sendo uma vitima e o robo deve girar na
+    #: direcao dela, mas a coleta nao pode ser disparada nesse estado: o
+    #: alinhamento precisa trazer a esfera inteira para dentro do quadro
+    #: antes de confirmar. Quem impoe isso e BallApproachController.
+    truncated: bool = False
 
     @property
     def diameter(self):
@@ -987,6 +993,7 @@ class BallDetector:
         self._misses = 0
         self._track_locked = False
         self._pixel_scale = 1.0
+        self._frame_width = cfg.BALL_BASE_WIDTH
         self._arena_frame_index = 0
         self._arena_cached_model = None
         self._marker_guard_frame_index = 0
@@ -1043,6 +1050,7 @@ class BallDetector:
 
         height, width = frame.shape[:2]
         self._pixel_scale = cfg.ball_pixel_scale(width, height)
+        self._frame_width = width
         acquiring = not (
             self._track_locked
             or self._hits >= cfg.BALL_ACQUIRE_HITS
@@ -1320,20 +1328,42 @@ class BallDetector:
                 proposal.edge_sector_count,
                 proposal.radial_dispersion,
                 anchor_sectors_valid,
+                refined_radius,
             ) = self._radial_perimeter_metrics(
                 edge_dilated,
                 gradient_x,
                 gradient_y,
                 proposal,
             )
-            if (
-                proposal.edge_support < cfg.BALL_MIN_EDGE_SUPPORT
-                or proposal.edge_sector_count
-                < cfg.BALL_RADIAL_MIN_GOOD_SECTORS
-                or proposal.radial_dispersion
-                > cfg.BALL_RADIAL_MAX_DISPERSION_RATIO
-                or not anchor_sectors_valid
-            ):
+            # Adota o envelope realmente medido. A classificacao de cor logo
+            # abaixo passa a amostrar o circulo certo — sem isso, uma esfera
+            # PRATA com raio subestimado era lida como PRETA, porque a
+            # aparencia vinha de fora da esfera.
+            proposal.radius = refined_radius
+            strict_perimeter = (
+                proposal.edge_support >= cfg.BALL_MIN_EDGE_SUPPORT
+                and proposal.edge_sector_count
+                >= cfg.BALL_RADIAL_MIN_GOOD_SECTORS
+                and proposal.radial_dispersion
+                <= cfg.BALL_RADIAL_MAX_DISPERSION_RATIO
+                and anchor_sectors_valid
+            )
+            # Rota de FOIL: papel amassado tem silhueta irregular e nunca
+            # passa na tolerancia circular estrita. Ela troca forma por
+            # TEXTURA INTERNA, que uma sombra ou uma roupa nao possuem.
+            foil_perimeter = (
+                not strict_perimeter
+                and anchor_sectors_valid
+                and proposal.edge_support
+                >= cfg.BALL_RADIAL_FOIL_MIN_SUPPORT
+                and proposal.edge_sector_count
+                >= cfg.BALL_RADIAL_FOIL_MIN_SECTORS
+                and proposal.radial_dispersion
+                <= cfg.BALL_RADIAL_FOIL_MAX_DISPERSION
+                and self._interior_edge_density(edge_dilated, proposal)
+                >= cfg.BALL_RADIAL_FOIL_MIN_TEXTURE
+            )
+            if not strict_perimeter and not foil_perimeter:
                 self._reject("perimetro")
                 continue
             candidate = self._classify(frame, hsv, proposal)
@@ -1466,13 +1496,31 @@ class BallDetector:
         return proposals
 
     @staticmethod
+    def _horizontally_truncated(proposal, width):
+        """A esfera encosta na borda lateral do quadro?"""
+        margin = 2
+        return (
+            proposal.center_x - proposal.radius < margin
+            or proposal.center_x + proposal.radius >= width - margin
+        )
+
+    @staticmethod
     def _inside_roi(proposal, width, height, roi_top, roi_bottom):
+        """Filtro de regiao. NAO exige mais a esfera inteira no quadro.
+
+        Uma esfera cortada pela borda lateral continua sendo uma vitima: o
+        robo precisa enxerga-la para girar naquela direcao. O que ela nao
+        pode e disparar a coleta — isso fica bloqueado por ``truncated`` ate
+        o alinhamento trazer a esfera inteira para dentro do quadro.
+
+        O centro, porem, ainda precisa estar dentro da imagem: um circulo
+        cujo centro caiu fora do quadro nao tem geometria mensuravel.
+        """
         margin = 2
         bottom_overflow = (
             height * cfg.BALL_ROI_BOTTOM_OVERFLOW_RATIO)
         return (
-            proposal.center_x - proposal.radius >= margin
-            and proposal.center_x + proposal.radius < width - margin
+            margin <= proposal.center_x < width - margin
             and proposal.center_y
             >= height * cfg.BALL_TARGET_MIN_CENTER_Y_RATIO
             and proposal.center_y - proposal.radius >= roi_top
@@ -1510,15 +1558,15 @@ class BallDetector:
         cosines = np.cos(angles)
         sines = np.sin(angles)
 
-        band = max(
-            radius * cfg.BALL_RADIAL_SEARCH_BAND_RATIO,
-            1.0,
-        )
+        # Busca assimetrica: o Hough erra para MENOS (engancha num reflexo
+        # interno), quase nunca para mais. Ver config_resgate.
+        band_in = max(radius * cfg.BALL_RADIAL_SEARCH_BAND_RATIO, 1.0)
+        band_out = max(radius * cfg.BALL_RADIAL_SEARCH_OUTWARD_RATIO, 1.0)
         radial_steps = min(
-            max(int(math.ceil(2.0 * band)) + 1, 5),
+            max(int(math.ceil(band_in + band_out)) + 1, 5),
             max(int(cfg.BALL_RADIAL_MAX_STEPS), 5),
         )
-        offsets = np.linspace(-band, band, radial_steps)
+        offsets = np.linspace(-band_in, band_out, radial_steps)
         sampled_radii = np.maximum(radius + offsets, 1.0)
         xs = np.rint(
             proposal.center_x
@@ -1554,10 +1602,47 @@ class BallDetector:
             & (magnitude >= cfg.BALL_RADIAL_MIN_GRADIENT)
             & (alignment >= cfg.BALL_RADIAL_MIN_ALIGNMENT)
         )
-        scores = np.where(eligible, np.abs(radial_gradient), -1.0)
+        # VOTACAO DE RAIO. Antes, cada angulo escolhia sozinho o gradiente
+        # mais forte e a mediana decidia o raio. Isso e fragil: o gradiente
+        # mais forte de um angulo pode ser um reflexo interno do papel
+        # amassado ou uma borda do fundo, e a mediana herdava esses erros.
+        #
+        # O envelope verdadeiro e o raio em que a MAIOR PARTE das direcoes
+        # concorda. Entao cada passo radial recebe um voto por angulo que
+        # tenha borda ali, e o pico da votacao define o raio. Depois disso,
+        # cada angulo contribui com a borda mais proxima desse raio.
+        votes = np.count_nonzero(eligible, axis=0)
+        if np.any(votes > 0):
+            # Entre os raios com forte concordancia angular, vence o MAIS
+            # EXTERNO. A silhueta de um objeto e seu contorno externo; os
+            # aneis internos sao estrutura interna. Isso importa muito no
+            # papel-aluminio amassado: medido nas capturas reais, ele tem
+            # tantas bordas internas que um anel de facetas chegava a superar
+            # o envelope em votos, e o raio saia subestimado (54 contra 74
+            # reais), o que por sua vez inflava a dispersao e reprovava a
+            # esfera.
+            strong = votes >= cfg.BALL_RADIAL_VOTE_RATIO * int(votes.max())
+            peak_index = int(np.flatnonzero(strong)[-1])
+        else:
+            peak_index = int(len(offsets) // 2)
+
+        distance_to_peak = np.abs(
+            np.arange(len(offsets))[None, :] - peak_index)
+        scores = np.where(eligible, -distance_to_peak, -10**6)
         best_indices = np.argmax(scores, axis=1)
         hits = np.any(eligible, axis=1)
-        support = float(np.mean(hits))
+
+        # O apoio e medido SO na parte visivel do perimetro. Angulos cujos
+        # pontos caem todos fora da imagem nao sao "borda ausente", sao borda
+        # nao observavel — conta-los como falha reprovava qualquer esfera
+        # cortada pela borda do quadro, que continua sendo uma vitima valida
+        # (o alinhamento traz ela inteira para dentro antes da coleta).
+        measurable = np.any(valid, axis=1)
+        measurable_fraction = float(np.mean(measurable))
+        if measurable_fraction < cfg.BALL_RADIAL_MIN_MEASURABLE_FRACTION:
+            # Sobra pouco perimetro observavel para julgar qualquer coisa.
+            return 0.0, 0, 1.0, False, radius
+        support = float(np.mean(hits[measurable]))
 
         sector_count = max(int(cfg.BALL_RADIAL_SECTORS), 4)
         sector_width = 2.0 * math.pi / sector_count
@@ -1567,41 +1652,89 @@ class BallDetector:
             ((angles + sector_width / 2.0) % (2.0 * math.pi))
             / sector_width
         ).astype(np.int32)
-        sector_supports = np.asarray([
-            float(np.mean(hits[sector_indices == index]))
-            if np.any(sector_indices == index) else 0.0
-            for index in range(sector_count)
-        ])
+        # Cada setor tambem e avaliado so pelos angulos observaveis dele.
+        sector_supports = np.zeros(sector_count, dtype=np.float64)
+        sector_measurable = np.zeros(sector_count, dtype=bool)
+        for index in range(sector_count):
+            no_setor = (sector_indices == index) & measurable
+            if np.any(no_setor):
+                sector_measurable[index] = True
+                sector_supports[index] = float(np.mean(hits[no_setor]))
+        # Setores fora do quadro simplesmente nao contam — nem a favor nem
+        # contra. Credita-los seria generoso demais e deixaria candidatos
+        # parciais vencerem esferas inteiras na selecao.
         good_sectors = int(np.count_nonzero(
-            sector_supports >= cfg.BALL_RADIAL_MIN_SECTOR_SUPPORT))
+            sector_measurable
+            & (sector_supports >= cfg.BALL_RADIAL_MIN_SECTOR_SUPPORT)))
 
         cardinal_indices = (
             0,
             sector_count // 2,
             (3 * sector_count) // 4,
         )
+        # Uma ancora fora do quadro nao pode ser exigida — exigi-la
+        # reprovaria toda esfera encostada na lateral.
         anchor_sectors_valid = all(
-            sector_supports[index]
+            (not sector_measurable[index])
+            or sector_supports[index]
             >= cfg.BALL_RADIAL_MIN_SECTOR_SUPPORT
             for index in cardinal_indices
         )
 
         if np.any(hits):
             selected_offsets = offsets[best_indices[hits]]
-            centered_offsets = (
-                selected_offsets - np.median(selected_offsets))
+            median_offset = float(np.median(selected_offsets))
+            # Raio REFINADO: onde o perimetro realmente foi encontrado. Ele e
+            # devolvido ao chamador por dois motivos, ambos medidos em fotos
+            # reais da arena:
+            #   1. a dispersao precisa ser normalizada por ELE, nao pelo raio
+            #      proposto — normalizar por um raio pequeno demais inflava a
+            #      dispersao e reprovava esferas boas;
+            #   2. a classificacao de cor precisa amostrar o circulo certo.
+            #      Com o raio errado a aparencia era lida fora da esfera e uma
+            #      vitima PRATA chegava a ser classificada como PRETA.
+            refined_radius = max(radius + median_offset, 1.0)
+            centered_offsets = selected_offsets - median_offset
             radial_dispersion = float(
                 np.sqrt(np.mean(np.square(centered_offsets)))
-                / radius
+                / refined_radius
             )
         else:
+            refined_radius = radius
             radial_dispersion = 1.0
         return (
             support,
             good_sectors,
             radial_dispersion,
             anchor_sectors_valid,
+            refined_radius,
         )
+
+    @staticmethod
+    def _interior_edge_density(edges, proposal):
+        """Fracao de pixels de borda DENTRO do circulo proposto.
+
+        Serve de evidencia compensatoria na rota de foil: o papel-aluminio
+        amassado e cheio de facetas e vinca, e por isso tem interior muito
+        mais "quebrado" que uma sombra, uma roupa ou uma esfera lisa.
+        A amostragem usa um raio reduzido para nao capturar a propria borda
+        externa do candidato.
+        """
+        radius = max(
+            float(proposal.radius) * cfg.BALL_RADIAL_FOIL_INNER_RATIO, 1.0)
+        mask = np.zeros(edges.shape, dtype=np.uint8)
+        cv2.circle(
+            mask,
+            (int(round(proposal.center_x)), int(round(proposal.center_y))),
+            int(round(radius)),
+            255,
+            -1,
+        )
+        selector = mask > 0
+        area = int(np.count_nonzero(selector))
+        if area < 40:
+            return 0.0
+        return float(np.count_nonzero(edges[selector])) / float(area)
 
     @staticmethod
     def _radial_edge_support(edges, proposal):
@@ -2368,6 +2501,8 @@ class BallDetector:
             self._hits,
             timestamp,
             track_locked=self._track_locked,
+            truncated=self._horizontally_truncated(
+                self._tracked, self._frame_width),
         )
         if detection.track_locked:
             self.last_locked_detection = detection

@@ -187,7 +187,10 @@ class MarkerDetector:
         # Um banho ciano pode cair na banda HSV verde em toda a parede. Exigir
         # dominancia cromatica ja na proposta separa o triangulo saturado do
         # iluminante; o contraste com o anel ainda valida o candidato depois.
-        mask[chroma < cfg.MARKER_MIN_INSIDE_CHROMA] = 0
+        # Limiar POR PIXEL: baixo de proposito. Subi-lo corroeria a borda do
+        # blob e mudaria a forma do candidato. O rigor cromatico fica no gate
+        # por blob (MARKER_MIN_INSIDE_CHROMA), aplicado depois da geometria.
+        mask[chroma < cfg.MARKER_MASK_MIN_CHROMA] = 0
         roi_top = int(round(height * cfg.MARKER_ROI_TOP))
         mask[:roi_top, :] = 0
 
@@ -252,9 +255,24 @@ class MarkerDetector:
         min_side = cfg.MARKER_MIN_SIDE_PX * scale
         if min(box_width, box_height) < min_side:
             return None, "side"
+
+        # Blob encostado na borda lateral: parte dele ficou fora do quadro e
+        # sua forma nao descreve o objeto inteiro. Ver config_resgate.
+        margin = cfg.MARKER_EDGE_MARGIN_PX
+        touches_edge = (
+            x <= margin or x + box_width >= width - margin)
+        # "Chegada": grande e encostando — o robo esta em cima do marcador.
+        # Julgar forma aqui perderia o alvo justamente na hora de depositar.
+        arrival = (
+            touches_edge and area_ratio >= cfg.MARKER_NEAR_AREA_RATIO)
+        if touches_edge and not arrival:
+            # Fragmento: o giro de procura continua ate o marcador aparecer
+            # inteiro. Rejeitar aqui e o comportamento correto.
+            return None, "incompleto"
+
         aspect = max(box_width, box_height) / max(
             min(box_width, box_height), 1)
-        if aspect > cfg.MARKER_MAX_ASPECT_RATIO:
+        if not arrival and aspect > cfg.MARKER_MAX_ASPECT_RATIO:
             return None, "aspect"
 
         hull = cv2.convexHull(contour)
@@ -272,14 +290,17 @@ class MarkerDetector:
             True,
         )
         vertex_count = len(approximation)
-        if not 3 <= vertex_count <= cfg.MARKER_MAX_APPROX_VERTICES:
+        if (
+            not arrival
+            and not 3 <= vertex_count <= cfg.MARKER_MAX_APPROX_VERTICES
+        ):
             return None, "vertices"
 
         triangle_area, triangle = cv2.minEnclosingTriangle(hull)
         if triangle is None or triangle_area <= 0.0:
             return None, "triangle"
         triangularity = hull_area / float(triangle_area)
-        if triangularity < cfg.MARKER_MIN_TRIANGULARITY:
+        if not arrival and triangularity < cfg.MARKER_MIN_TRIANGULARITY:
             return None, "triangularity"
 
         contour_fill = np.zeros(mask.shape, dtype=np.uint8)
@@ -319,14 +340,27 @@ class MarkerDetector:
         if contrast < cfg.MARKER_MIN_CHROMA_CONTRAST:
             return None, "contrast"
 
-        triangle_score = _clip01(
-            (triangularity - cfg.MARKER_MIN_TRIANGULARITY)
-            / max(1.0 - cfg.MARKER_MIN_TRIANGULARITY, 1e-6)
+        # Na rota de chegada a forma nao foi julgada, entao ela nao pode nem
+        # somar nem subtrair: recebe um valor neutro. Sem isso o marcador
+        # correto seria aceito na geometria e reprovado logo depois em
+        # "confidence" — o alvo se perderia na hora de depositar.
+        NEUTRAL_SHAPE_SCORE = 0.60
+        triangle_score = (
+            NEUTRAL_SHAPE_SCORE
+            if arrival
+            else _clip01(
+                (triangularity - cfg.MARKER_MIN_TRIANGULARITY)
+                / max(1.0 - cfg.MARKER_MIN_TRIANGULARITY, 1e-6)
+            )
         )
         contrast_score = _clip01(
             (contrast - cfg.MARKER_MIN_CHROMA_CONTRAST) / 100.0)
+        # O zero da pontuacao e o limiar da MASCARA, nao o do gate. Se fosse o
+        # do gate, endurecer o gate baixaria a confianca do proprio marcador
+        # verdadeiro e ele cairia em "confidence" — foi exatamente o que
+        # aconteceu ao medir com as capturas reais da arena.
         chroma_score = _clip01(
-            (inside_chroma - cfg.MARKER_MIN_INSIDE_CHROMA) / 140.0)
+            (inside_chroma - cfg.MARKER_MASK_MIN_CHROMA) / 140.0)
         solidity_score = _clip01(
             (solidity - cfg.MARKER_MIN_SOLIDITY)
             / max(1.0 - cfg.MARKER_MIN_SOLIDITY, 1e-6)
@@ -335,7 +369,11 @@ class MarkerDetector:
             (mask_fill - cfg.MARKER_MIN_MASK_FILL)
             / max(1.0 - cfg.MARKER_MIN_MASK_FILL, 1e-6)
         )
-        vertex_score = 1.0 if vertex_count == 3 else 0.70
+        vertex_score = (
+            NEUTRAL_SHAPE_SCORE
+            if arrival
+            else (1.0 if vertex_count == 3 else 0.70)
+        )
         area_score = _clip01(
             area_ratio / max(cfg.MARKER_MIN_AREA_RATIO * 5.0, 1e-6))
         confidence = (

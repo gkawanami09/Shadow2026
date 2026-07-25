@@ -2,6 +2,7 @@
 
 import time
 
+import config
 from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SPEED,
                     GAP_ENABLED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
@@ -25,11 +26,47 @@ from controle.velocidade import get_speed
 from controle.direcao import init_steering, sleep_steering, steer
 from controle.retorno import turn_around
 from comunicacao_serial.arduino import Arduino
-from shared.dados_compartilhados import (add_time_value, empty_time_arr, last_bottom_point,
+from shared.dados_compartilhados import (add_time_value, empty_time_arr,
+                               entry_armed, entry_silver_confirmed,
+                               entry_silver_detected, last_bottom_point,
                                line_ahead, line_angle, line_detected,
-                               line_status, min_line_size,
-                               ramp_ahead, red_detected, status, terminate,
+                               line_status, min_line_size, mission_mode,
+                               ramp_ahead, red_detected, red_finished,
+                               rescue_requested, status, terminate,
                                timer, turn_dir, vision_ready)
+
+
+def _enter_rescue_zone(arduino):
+    """Atravessa a soleira prata e entrega o robô parado, com o LED apagado.
+
+    O tempo NÃO é a única evidência: o avanço termina assim que a faixa deixa
+    de ser vista (ela passou por baixo do robô). O timeout existe apenas como
+    limite de segurança para o caso de a faixa continuar visível por erro de
+    detecção — sem ele o robô atravessaria a sala inteira em linha reta.
+    """
+    started = time.monotonic()
+    steer(0, config.ENTRY_ADVANCE_SPEED)
+    motivo = "timeout"
+    while True:
+        elapsed = time.monotonic() - started
+        if elapsed >= config.ENTRY_ADVANCE_TIMEOUT_S:
+            break
+        if (
+            elapsed >= config.ENTRY_ADVANCE_MIN_S
+            and not entry_silver_detected.value
+        ):
+            motivo = "faixa passou para trás"
+            break
+        sleep_steering(.02)
+
+    steer()  # PARAR antes de qualquer outra coisa
+    # O LED só pode ser apagado enquanto esta serial ainda existe. O processo
+    # de resgate reafirma o comando assim que abre a serial dele.
+    arduino.led("APAGADO")
+    entry_armed.value = False
+    print(
+        f"[controle] entrada concluída ({motivo}, {elapsed:.2f} s); "
+        "PARAR enviado e LED APAGADO — liberando a serial para o resgate")
 
 
 def control_loop():
@@ -80,6 +117,16 @@ def control_loop():
 
     try:
         while not terminate.value:
+
+            # Faixa prata de entrada. Só existe no modo de missão completa;
+            # rodando `shadow/main.py` sozinho este bloco nunca é atingido.
+            if (mission_mode.value and entry_armed.value
+                    and entry_silver_confirmed.value):
+                status.value = 'Faixa prata confirmada — entrando na sala'
+                print("[controle] faixa PRATA confirmada; entrando na sala")
+                _enter_rescue_zone(arduino)
+                rescue_requested.value = True
+                break
 
             # Estado normal do segue-linha.
             if line_status.value == "line_detected":
@@ -275,6 +322,13 @@ def control_loop():
                 time_last_angles = add_time_value(time_last_angles, line_angle.value)
             elif line_status.value == "stop":
                 stop_for_red()
+                if mission_mode.value and not entry_armed.value:
+                    # A sala de resgate já ficou para trás: esta é a faixa
+                    # vermelha final da prova. O supervisor encerra a missão.
+                    red_finished.value = True
+                    status.value = 'Faixa vermelha final — missão concluída'
+                    print("[controle] faixa vermelha final; missão concluída")
+                    break
                 line_status.value = "line_detected"
                 continue
 

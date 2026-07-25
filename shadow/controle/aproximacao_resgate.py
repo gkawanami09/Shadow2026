@@ -161,6 +161,19 @@ class BallApproachController:
             near_kind = self._near_kind
             near_required = cfg.BALL_LOCKED_CIRCLE_CONFIRM_FRAMES
 
+        # Esfera cortada pela borda lateral do quadro NAO pode disparar a
+        # coleta. Ela continua sendo uma vitima e o alinhamento abaixo segue
+        # girando o robo na direcao dela; o que fica bloqueado e a confirmacao
+        # de proximidade, que so pode acontecer com a esfera inteira dentro do
+        # quadro. Sem isso, o robo fecharia a garra sobre uma esfera cuja
+        # posicao real ele nao consegue medir.
+        if (
+            detection is not None
+            and getattr(detection, "truncated", False)
+        ):
+            near_source = None
+            self._reset_near_confirmation()
+
         # Uma meia-lua nao possui cor propria. Se o mesmo frame ainda traz
         # uma deteccao confirmada de outra cor, ela nao pode confirmar o latch
         # anterior nem sobreviver pela tolerancia de um miss.

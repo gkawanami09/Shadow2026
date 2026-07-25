@@ -219,6 +219,25 @@ class BallSearchController:
         self.state = self.FINAL_VERIFY
         self._target_stopped_at = now
 
+    def notify_command_written(self, state, now=None):
+        """Interface unificada com a busca pulsada.
+
+        Devolve ``True`` quando o robo acabou de parar e a memoria visual
+        anterior precisa ser descartada. Existe para o chamador tratar os dois
+        controladores de busca da mesma forma, sem uma cadeia de ``if`` por
+        nome de estado.
+        """
+        if state == self.START:
+            self.mark_rotation_started(now)
+            return False
+        if state == self.TARGET_STOP:
+            self.mark_target_stopped(now)
+            return True
+        if state == self.TURN_STOP:
+            self.mark_full_turn_stopped(now)
+            return True
+        return False
+
     def frame_allowed(self, captured_at):
         """Rejeita durante a verificacao imagens feitas antes da parada."""
         if (

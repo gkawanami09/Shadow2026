@@ -39,7 +39,80 @@ Com o robô SOBRE a pista, na iluminação real da sala:
    vermelha da pista deve encher a máscara; um objeto vermelho pequeno pode
    aparecer — não é problema (o gatilho exige 15000 px²).
 
+6. **Grupo 7 — prata da faixa de ENTRADA** (câmera de linha). Ver a seção
+   2.1 abaixo: este grupo tem um procedimento próprio.
+
 Salve cada grupo com `s`. Valide com `python3 shadow/main.py --vision-only --debug`.
+
+## 2.1 Faixa PRATA de entrada (grupo 7)
+
+Este perfil é **independente** do prata da vítima. A vítima é vista pela
+câmera de resgate e seus limiares vivem em `config_resgate.py`; a faixa é
+vista pela câmera de linha e seus limiares vivem em `config.py` +
+`[color_values_line]`. Nunca copie um para o outro — são câmeras, alturas,
+distâncias e iluminações diferentes.
+
+Os valores em `config.py` (`ENTRY_SILVER_*`) são um ponto de partida
+conservador e **ainda não foram medidos com a fita real**. A calibração
+abaixo é obrigatória antes de confiar na entrada automática.
+
+Procedimento, com o robô sobre a pista e a fita prata colada no chão:
+
+1. abra `python3 -m shadow.tools.calibrar_cores` e tecle `7`;
+2. a janela mostra o frame em cima e a máscara embaixo. No frame aparecem
+   também a linha da ROI, a caixa do candidato e — o mais importante — o
+   **motivo da rejeição** quando ele não passa;
+3. ajuste `V min` até a fita ficar sólida na máscara e o piso não;
+4. ajuste `S max` para baixo até o piso colorido sair da máscara sem perder a
+   fita (prata é neutra: S baixo);
+5. aproxime e afaste o robô. A caixa deve ficar verde (`ACEITA`) na faixa de
+   distância em que o robô realmente chega à sala;
+6. salve com `s`.
+
+Leia o motivo quando a fita for rejeitada:
+
+| Motivo | Significado | O que ajustar |
+|---|---|---|
+| `sem_linha_cheia` | nenhuma linha horizontal atingiu o preenchimento mínimo | `V min`/`S max`, ou `ENTRY_SILVER_MIN_ROW_FILL` |
+| `estreita` | a fita não atravessa largura suficiente | aproxime; ou desça `ENTRY_SILVER_MIN_SPAN_RATIO` |
+| `espessa` | a máscara preencheu a ROI — normalmente o piso inteiro entrou | suba `V min` |
+| `compacta` | forma quase quadrada: é uma esfera, não uma fita | nada — é o veto funcionando |
+| `saturada` | a região tem cor demais para ser metal | suba `S max` com cuidado |
+| `sem_assinatura_reflexiva` | neutro e claro, mas sem brilho nem faixa dinâmica: papel branco | desça `ENTRY_SILVER_MIN_DYNAMIC_RANGE` só se a fita real for fosca |
+| `sem_contraste` | a fita ficou idêntica ao piso | mude o ângulo do LED; ou desça `ENTRY_SILVER_MIN_SURROUND_CONTRAST` |
+| `linha_continua` | a linha preta segue à frente | correto: não é a entrada |
+
+Depois de calibrar, valide **sem** transição, com o replay:
+
+```bash
+python3 shadow/tools/replay_visao.py --perfil entrada --frames <positivos> --esperado positivo
+```
+
+```bash
+python3 shadow/tools/replay_visao.py --perfil entrada --frames <negativos> --esperado negativo
+```
+
+O conjunto de negativos precisa incluir piso branco, reflexo de LED, a
+vítima prateada, a faixa preta e luz sobre a linha. **Zero falsos positivos
+nesse conjunto** é o critério para liberar a entrada automática.
+
+## 2.2 Faixa PRETA de saída e triângulos (câmera de resgate)
+
+Os limiares estão em `config_resgate.py` (`EXIT_BLACK_*`, `MARKER_*`). Eles
+não têm grupo no calibrador de linha de propósito: pertencem à outra câmera.
+Valide-os por replay, com PNGs brutos capturados por
+`python3 shadow/resgate.py --debug` (tecla `s`):
+
+```bash
+python3 shadow/tools/replay_visao.py --perfil saida --frames <fotos_da_soleira> --esperado positivo
+```
+
+```bash
+python3 shadow/tools/replay_visao.py --perfil saida --frames <fotos_da_vitima_preta> --esperado negativo
+```
+
+O segundo comando é o teste que importa: a vítima preta e a soleira preta
+têm a mesma cor, e é a geometria que as separa.
 
 ## 3. O que provavelmente precisa de retune (fish-eye 160°, 8 cm, 35°)
 

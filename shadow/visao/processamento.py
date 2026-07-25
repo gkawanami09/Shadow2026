@@ -19,6 +19,7 @@ from shared.dados_compartilhados import (add_time_value, black_average,
                                          turn_dir, vision_ready)
 from visao import linha as line_module
 from visao.captura import LineCamera
+from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.verde import check_green, latch_turn_direction
 from visao.linha import calculate_angle, determine_correct_line
@@ -78,6 +79,12 @@ def vision_loop(debug=False):
 
     update_color_values()
 
+    # Faixa prata de entrada. O detector vive aqui porque este é o único
+    # processo que possui a câmera de linha; publicar o resultado por memória
+    # compartilhada evita abrir a mesma câmera duas vezes. Sem `mission_mode`
+    # ele nunca é construído e o custo é zero.
+    entry_gate = build_entry_gate()
+
     # Matriz usada para reduzir ruídos das máscaras.
     kernal = np.ones((3, 3), np.uint8)
 
@@ -96,6 +103,7 @@ def vision_loop(debug=False):
     try:
         while not terminate.value:
             cv2_img = camera.get_frame()
+            frame_captured_at = time.perf_counter()
 
             if time.perf_counter() - fps_limit_time <= 1 / VISION_MAX_FRAMES:
                 continue
@@ -145,6 +153,13 @@ def vision_loop(debug=False):
                     >= config.GAP_AHEAD_ROW_PERSISTENCE)
             else:
                 line_ahead.value = False
+
+            # Faixa prata de entrada. Roda aqui porque precisa de `line_ahead`
+            # (a linha preta precisa estar terminando) e porque o frame ainda
+            # não recebeu nenhuma anotação dentro da ROI inferior.
+            update_entry_silver(
+                entry_gate, cv2_img, frame_captured_at,
+                line_ahead=bool(line_ahead.value))
 
             # Recorta partes que não devem participar da decisão.
             if line_status.value == "gap_avoid":

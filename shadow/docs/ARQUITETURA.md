@@ -3,6 +3,15 @@
 O percurso e o resgate são programas separados. Eles nunca devem rodar ao
 mesmo tempo porque compartilham a serial e os motores.
 
+Desde a missão completa existe um terceiro programa, `shadow/mission.py`, que
+alterna entre os dois automaticamente. Ele não substitui nenhum deles: o
+percurso e o resgate continuam funcionando isolados, exatamente como antes, e
+continuam sendo a forma recomendada de depurar cada metade.
+
+A ordem da troca (qual câmera fecha antes de qual abrir, quando a serial muda
+de dono, quando o LED apaga) é o contrato de segurança da missão e está
+documentada em **`MISSAO_COMPLETA.md`**.
+
 ## Segue-linha
 
 `shadow/main.py` inicia dois processos:
@@ -59,9 +68,31 @@ O resgate possui:
 - `visao/captura_resgate.py`: abre somente a câmera frontal;
 - `visao/bola_resgate.py`: encontra e acompanha as vítimas;
 - `visao/resgate_assincrono.py`: descarta imagens antigas;
+- `visao/faixa_saida.py`: soleira preta de saída (só na fase de saída);
+- `visao/triangulos_finais.py`: mapeia os dois triângulos no fim;
 - `controle/aproximacao_resgate.py`: alinha e aproxima;
 - `controle/coleta_resgate.py`: comanda garras e elevador;
+- `controle/busca_pulsada.py`: busca "gira e observa" em modo tanque;
+- `controle/saida_resgate.py`: encontra e atravessa a soleira de saída;
 - `controle/trava_motores.py`: impede dois programas de controlar os motores.
+
+## Missão completa
+
+`shadow/mission.py` coordena as duas metades:
+
+```text
+mission.py
+├── fase percurso: sobe visão (câmera 1) + controle (serial, LED aceso)
+├── handoff: encerra os filhos, confirma que morreram, libera a trava
+└── fase resgate: subprocesso resgate.py (câmera 0, serial, LED apagado)
+```
+
+- `controle/missao.py`: máquina de estados, inventário das três vítimas e a
+  ordem declarada do handoff;
+- `visao/faixa_entrada.py`: faixa prata de entrada, executada dentro do
+  processo de visão do percurso;
+- `visao/faixa_transversal.py`: geometria comum às duas faixas e a votação
+  temporal com histerese e cooldown.
 
 Sem `--drive`, o programa mantém os motores parados e serve apenas para
 conferir a visão.

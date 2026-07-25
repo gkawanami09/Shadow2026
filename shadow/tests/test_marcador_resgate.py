@@ -313,5 +313,54 @@ class MarkerDetectorTests(unittest.TestCase):
         self.assertIsNone(second_miss)
 
 
+class MarkerEdgeAndArrivalTests(unittest.TestCase):
+    """Blob encostado na borda lateral do quadro.
+
+    Regras medidas nas capturas reais da arena. Com a câmera não mirada, só a
+    ponta do triângulo aparece e a forma desse pedaço não descreve triângulo
+    nenhum; já quando o robô chega, o marcador ocupa o quadro inteiro e julgar
+    forma perderia o alvo justamente na hora de depositar.
+    """
+
+    def test_fragmento_na_borda_e_rejeitado_como_incompleto(self):
+        for kind in ("green", "red"):
+            frame = base_frame()
+            color = GREEN if kind == "green" else RED
+            # Pedaço pequeno cortado pela borda esquerda.
+            cv2.rectangle(frame, (0, 300), (110, 430), color, -1)
+            detector = MarkerDetector(kind)
+            self.assertIsNone(detector.detect(frame, timestamp=0.0))
+            self.assertIn("incompleto", detector.last_rejections)
+
+    def test_marcador_de_chegada_nao_e_perdido_por_forma(self):
+        """Ocupa o quadro e encosta nas duas bordas: é a chegada."""
+        for kind in ("green", "red"):
+            frame = base_frame()
+            color = GREEN if kind == "green" else RED
+            cv2.rectangle(frame, (0, 300), (WIDTH, 430), color, -1)
+            detection = MarkerDetector(kind).detect(frame, timestamp=0.0)
+            self.assertIsNotNone(
+                detection,
+                f"marcador {kind} de chegada foi perdido pela geometria")
+            self.assertEqual(detection.kind, kind)
+
+    def test_chegada_ainda_exige_cromaticidade(self):
+        """A rota de chegada dispensa forma, nunca a cor."""
+        frame = base_frame()
+        # Cinza levemente esverdeado: forma de chegada, cromaticidade baixa.
+        cv2.rectangle(frame, (0, 300), (WIDTH, 430), (150, 175, 150), -1)
+        detector = MarkerDetector("green")
+        self.assertIsNone(detector.detect(frame, timestamp=0.0))
+
+    def test_marcador_inteiro_no_quadro_ainda_passa_pela_forma(self):
+        """Sem tocar a borda, a triangularidade continua obrigatória."""
+        frame = base_frame()
+        # Retângulo inteiramente dentro do quadro: não é triângulo.
+        cv2.rectangle(frame, (200, 300), (440, 430), RED, -1)
+        detector = MarkerDetector("red")
+        self.assertIsNone(detector.detect(frame, timestamp=0.0))
+        self.assertNotIn("incompleto", detector.last_rejections)
+
+
 if __name__ == "__main__":
     unittest.main()
