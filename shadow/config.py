@@ -272,8 +272,12 @@ BLACK_MIN_DEFAULT = [0, 0, 0]
 BLACK_MAX_NORMAL_TOP_DEFAULT = [82, 83, 84]         # BGR
 BLACK_MAX_NORMAL_BOTTOM_DEFAULT = [133, 133, 135]   # BGR
 BLACK_MAX_RAMP_DOWN_TOP_DEFAULT = [27, 27, 26]      # BGR
-GREEN_MIN_DEFAULT = [58, 95, 39]                    # HSV
-GREEN_MAX_DEFAULT = [98, 255, 255]                  # HSV
+# Matizes MIGRADOS quando a troca R<->B da câmera de linha foi corrigida
+# (ver visao/captura.py). A conversão é exata: H_correto = 120 − H_trocado.
+# Antes: 58..98 na imagem trocada. Depois: 22..62 na imagem correta.
+# S e V não mudam — trocar dois canais não altera máximo nem mínimo.
+GREEN_MIN_DEFAULT = [22, 95, 39]                    # HSV (era H=58)
+GREEN_MAX_DEFAULT = [62, 255, 255]                  # HSV (era H=98)
 RED_MIN_1_DEFAULT = [0, 100, 90]                    # HSV
 RED_MAX_1_DEFAULT = [10, 255, 255]                  # HSV
 RED_MIN_2_DEFAULT = [170, 100, 100]                 # HSV

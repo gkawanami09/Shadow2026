@@ -54,12 +54,27 @@ class LineCamera:
         return self.picam2.sensor_modes
 
     def get_frame(self):
-        """Retorna uma imagem BGR 448×252 da câmera de linha."""
+        """Retorna uma imagem BGR 448×252 da câmera de linha.
+
+        O Picamera2 rotula este formato como "RGB888", mas entrega os bytes
+        na ordem B,G,R — que já é a ordem nativa do OpenCV. A conversão
+        RGB→BGR que existia aqui TROCAVA os canais R e B, e a câmera de
+        resgate (`captura_resgate.py`) nunca fez isso.
+
+        Consequência medida na arena: vermelho aparecia com matiz 120 (azul)
+        e nunca casava com as faixas 0–10 / 170–180 — a faixa vermelha final
+        simplesmente não era detectável. O verde sobrevivia porque foi
+        calibrado já em cima da imagem trocada.
+
+        Ao remover a troca, as faixas de matiz do verde precisaram ser
+        migradas por `H_correto = 120 − H_trocado` (S e V não mudam, pois
+        trocar dois canais não altera máximo nem mínimo). Isso foi feito em
+        `config.py` e em `config.ini`.
+        """
         raw = self.picam2.capture_array("main")
         if raw.ndim == 3 and raw.shape[2] == 4:
-            raw = cv2.cvtColor(raw, cv2.COLOR_RGBA2RGB)
-        raw = cv2.resize(raw, (camera_x, camera_y))
-        return cv2.cvtColor(raw, cv2.COLOR_RGB2BGR)
+            raw = cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
+        return cv2.resize(raw, (camera_x, camera_y))
 
     def close(self):
         try:
