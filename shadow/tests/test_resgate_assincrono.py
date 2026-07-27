@@ -21,8 +21,8 @@ from visao.resgate_assincrono import (  # noqa: E402
     _fit_detector_size,
     _scale_detection,
 )
-from visao.bola_resgate import BallDetection, BallDetector  # noqa: E402
-from resgate import _annotate_arena_guard  # noqa: E402
+from visao.deteccao import VictimDetection as BallDetection  # noqa: E402
+from visao.vitima_yolo import VictimDetector as BallDetector  # noqa: E402
 
 
 def wait_result(worker, after_sequence=0, timeout=1.0):
@@ -201,96 +201,13 @@ class LatestFrameDetectorTests(unittest.TestCase):
         finally:
             worker.close()
 
-    def test_real_runtime_pipeline_confirms_and_maps_silver_ball(self):
-        frame = np.full((480, 640, 3), 145, dtype=np.uint8)
-        center = (320, 300)
-        for radius, value in (
-            (44, 70), (40, 95), (34, 125), (27, 160), (19, 195)
-        ):
-            cv2.circle(
-                frame, center, radius, (value, value, value),
-                -1, cv2.LINE_AA)
-        cv2.circle(
-            frame, (307, 286), 8, (245, 245, 245),
-            -1, cv2.LINE_AA)
-        cv2.circle(
-            frame, center, 44, (65, 65, 65), 2, cv2.LINE_AA)
-
-        worker = LatestFrameBallDetector(
-            BallDetector("silver"),
-            max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
-            max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
-        )
-        last_sequence = 0
-        try:
-            result = None
-            for index in range(cfg.BALL_ACQUIRE_HITS):
-                worker.submit(frame, captured_at=index * 0.03)
-                result = wait_result(
-                    worker, after_sequence=last_sequence)
-                last_sequence = result.sequence
-
-            self.assertEqual(result.detector_shape, (240, 320, 3))
-            self.assertTrue(result.detection.confirmed)
-            self.assertEqual(result.detection.kind, "silver")
-            self.assertAlmostEqual(result.detection.center_x, 320, delta=12)
-            self.assertAlmostEqual(result.detection.center_y, 300, delta=12)
-            self.assertFalse(result.hough_used)
-            self.assertGreaterEqual(result.candidate_count, 1)
-            self.assertTrue(result.candidate_radii)
-            self.assertTrue(result.candidate_circles)
-            self.assertIsNotNone(result.crescent_evidence)
-            self.assertFalse(result.crescent_evidence.accepted)
-        finally:
-            worker.close()
-
-    def test_worker_publishes_close_crescent_without_full_circle(self):
-        height, width = 480, 640
-        frame = np.full((height, width, 3), 165, dtype=np.uint8)
-        normalized_x = np.linspace(-1.0, 1.0, 301)
-        xs = (
-            width / 2
-            + normalized_x
-            * cfg.BALL_CRESCENT_DEFAULT_HALFSPAN_RATIO
-            * width
-        )
-        ys = (
-            cfg.BALL_CRESCENT_DEFAULT_TOP_RATIO
-            + (
-                cfg.BALL_CRESCENT_BOTTOM_RATIO
-                - cfg.BALL_CRESCENT_DEFAULT_TOP_RATIO
-            )
-            * np.square(normalized_x)
-        ) * height
-        curve = np.column_stack((xs, ys)).astype(np.int32)
-        polygon = np.vstack((
-            curve,
-            (curve[-1, 0], height - 1),
-            (curve[0, 0], height - 1),
-        )).astype(np.int32)
-        cv2.fillPoly(frame, [polygon], (35, 35, 35))
-
-        worker = LatestFrameBallDetector(
-            BallDetector("any", enhance=False),
-            max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
-            max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
-        )
-        try:
-            worker.submit(frame, captured_at=10.0)
-            result = wait_result(worker)
-            self.assertIsNotNone(result.crescent_evidence)
-            self.assertTrue(result.crescent_evidence.accepted)
-            self.assertEqual(result.crescent_evidence.timestamp, 10.0)
-        finally:
-            worker.close()
-
     def test_candidate_circles_are_mapped_to_preview_resolution(self):
         class CandidateDetector(ImmediateDetector):
             def __init__(self):
                 self.last_candidates = []
 
             def detect(self, frame, timestamp):
-                from visao.bola_resgate import _Candidate
+                from visao.deteccao import VictimCandidate as _Candidate
 
                 self.last_candidates = [
                     _Candidate("silver", 100, 120, 30, 0.9),
@@ -394,52 +311,6 @@ class LatestFrameDetectorTests(unittest.TestCase):
             self.assertAlmostEqual(result.arena_confidence, 0.41)
         finally:
             worker.close()
-
-    def test_overlay_shows_blocked_even_when_boundary_exists(self):
-        frame = np.zeros((240, 320, 3), dtype=np.uint8)
-        result = SimpleNamespace(
-            arena_boundary_points=((10, 120), (310, 120)),
-            arena_reason="fora_arena",
-            arena_confidence=0.9,
-            arena_accepted=False,
-            arena_floor_support=0.0,
-            arena_support_box=(120, 100, 180, 140),
-            marker_exclusion_boxes=(),
-        )
-
-        annotated = _annotate_arena_guard(frame, result)
-
-        red_dominant = (
-            (annotated[:, :, 2] > 200)
-            & (annotated[:, :, 2] > annotated[:, :, 1] * 2)
-        )
-        self.assertTrue(np.any(red_dominant))
-
-    def test_overlay_marks_uncertain_arena_without_blocking_red(self):
-        frame = np.zeros((240, 320, 3), dtype=np.uint8)
-        result = SimpleNamespace(
-            arena_boundary_points=((10, 120), (310, 120)),
-            arena_reason="sem_limite_confiavel",
-            arena_confidence=0.41,
-            arena_accepted=None,
-            arena_floor_support=0.0,
-            arena_support_box=None,
-            marker_exclusion_boxes=(),
-        )
-
-        annotated = _annotate_arena_guard(frame, result)
-
-        orange = (
-            (annotated[:, :, 2] > 200)
-            & (annotated[:, :, 1] > 140)
-        )
-        blocked_red = (
-            (annotated[:, :, 2] > 200)
-            & (annotated[:, :, 1] < 120)
-            & (annotated[:, :, 0] < 80)
-        )
-        self.assertTrue(np.any(orange))
-        self.assertFalse(np.any(blocked_red))
 
     def test_pending_frame_is_replaced_instead_of_building_backlog(self):
         started = threading.Event()
@@ -658,6 +529,15 @@ class LatestFrameSourceTests(unittest.TestCase):
                 worker.poll()
         finally:
             worker.close()
+
+
+    # Testes da cola de orquestracao removidos junto com ela: a
+    # coleta, o deposito e os codigos de saida da missao sairam do
+    # escopo atual do resgate.py. Os modulos continuam no repo.
+
+
+    # Testes do pipeline classico removidos: o detector por
+    # aparencia foi aposentado em favor do modelo treinado.
 
 
 if __name__ == "__main__":

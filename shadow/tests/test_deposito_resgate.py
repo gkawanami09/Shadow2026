@@ -12,10 +12,6 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config_resgate as cfg  # noqa: E402
 from controle.coleta_resgate import BallPickupSequencer  # noqa: E402
 from controle.deposito_resgate import DepositMarkerController  # noqa: E402
-from resgate import (  # noqa: E402
-    _authorize_marker_deposit,
-    _new_deposit_navigation,
-)
 
 
 FRAME_SHAPE = (480, 640, 3)
@@ -312,40 +308,9 @@ class DepositMarkerControllerTests(unittest.TestCase):
         self.assertFalse(controller.arrived)
         self.assertIn("mantida", fault.detail)
 
-    def test_navigation_can_only_start_with_ball_held_and_uses_fixed_color(self):
-        with self.assertRaisesRegex(RuntimeError, "presa e elevada"):
-            _new_deposit_navigation(BallPickupSequencer(), now=0.0)
-
-        for ball_kind, marker_kind in (
-            ("silver", "green"),
-            ("black", "red"),
-        ):
-            with self.subTest(ball_kind=ball_kind):
-                detector, controller = _new_deposit_navigation(
-                    pickup_ready(ball_kind),
-                    now=12.0,
-                )
-                self.assertEqual(detector.target_kind, marker_kind)
-                self.assertEqual(controller.target_kind, marker_kind)
-
-    def test_release_requires_arrived_controller_of_the_frozen_color(self):
-        pickup = pickup_ready("silver")
-        correct = DepositMarkerController("green", start_time=0.0)
-        wrong = DepositMarkerController("red", start_time=0.0)
-
-        self.assertFalse(_authorize_marker_deposit(pickup, correct))
-        self.assertTrue(pickup.ready_for_deposit)
-
-        wrong.state = wrong.ARRIVAL_STOP
-        wrong.mark_arrival_stopped(now=1.0)
-        self.assertFalse(_authorize_marker_deposit(pickup, wrong))
-        self.assertTrue(pickup.ready_for_deposit)
-
-        correct.state = correct.ARRIVAL_STOP
-        correct.mark_arrival_stopped(now=1.0)
-        self.assertTrue(_authorize_marker_deposit(pickup, correct))
-        self.assertEqual(pickup.state, pickup.DEPOSIT_START)
-        self.assertFalse(_authorize_marker_deposit(pickup, correct))
+    # Testes da cola de orquestracao removidos junto com ela: a
+    # coleta, o deposito e os codigos de saida da missao sairam do
+    # escopo atual do resgate.py. Os modulos continuam no repo.
 
 
 if __name__ == "__main__":

@@ -283,6 +283,21 @@ class MarkerDetector:
         if solidity < cfg.MARKER_MIN_SOLIDITY:
             return None, "solidity"
 
+        # SANIDADE DE FORMA, nao classificacao de forma. A camera olha quase
+        # rente ao piso e o escorco faz o triangulo real medir 0.577 de
+        # triangularidade — entre um quadrado (0.500) e um circulo (0.605),
+        # e ABAIXO da cadeira vermelha do laboratorio (0.677). Julgar forma
+        # aqui rejeitava o marcador verdadeiro; quem discrimina e a
+        # cromaticidade, mais abaixo.
+        #
+        # Compacidade = area / area do retangulo envolvente. Serve so para
+        # excluir filamento, borda de parede e mancha difusa.
+        compactness = area / float(max(box_width * box_height, 1))
+        if not arrival and compactness < cfg.MARKER_MIN_COMPACTNESS:
+            return None, "compactness"
+
+        # Mantidos apenas como telemetria: aparecem no overlay e no dataset,
+        # mas nao reprovam mais nada.
         perimeter = float(cv2.arcLength(hull, True))
         approximation = cv2.approxPolyDP(
             hull,
@@ -290,18 +305,10 @@ class MarkerDetector:
             True,
         )
         vertex_count = len(approximation)
-        if (
-            not arrival
-            and not 3 <= vertex_count <= cfg.MARKER_MAX_APPROX_VERTICES
-        ):
-            return None, "vertices"
-
-        triangle_area, triangle = cv2.minEnclosingTriangle(hull)
-        if triangle is None or triangle_area <= 0.0:
-            return None, "triangle"
-        triangularity = hull_area / float(triangle_area)
-        if not arrival and triangularity < cfg.MARKER_MIN_TRIANGULARITY:
-            return None, "triangularity"
+        triangle_area, _triangle = cv2.minEnclosingTriangle(hull)
+        triangularity = (
+            hull_area / float(triangle_area)
+            if triangle_area and triangle_area > 0.0 else 0.0)
 
         contour_fill = np.zeros(mask.shape, dtype=np.uint8)
         cv2.drawContours(contour_fill, [contour], -1, 255, -1)
@@ -344,14 +351,14 @@ class MarkerDetector:
         # somar nem subtrair: recebe um valor neutro. Sem isso o marcador
         # correto seria aceito na geometria e reprovado logo depois em
         # "confidence" — o alvo se perderia na hora de depositar.
-        NEUTRAL_SHAPE_SCORE = 0.60
-        triangle_score = (
-            NEUTRAL_SHAPE_SCORE
-            if arrival
-            else _clip01(
-                (triangularity - cfg.MARKER_MIN_TRIANGULARITY)
-                / max(1.0 - cfg.MARKER_MIN_TRIANGULARITY, 1e-6)
-            )
+        # A forma NAO entra mais na confianca. Ela media triangularidade, e
+        # medi que triangularidade nao separa marcador de circulo nem de
+        # cadeira nesta camera. Manter esse termo faria a confianca variar
+        # com um sinal que e ruido. O peso foi para cromaticidade e
+        # contraste, que sao os termos com separacao medida.
+        compactness_score = _clip01(
+            (compactness - cfg.MARKER_MIN_COMPACTNESS)
+            / max(1.0 - cfg.MARKER_MIN_COMPACTNESS, 1e-6)
         )
         contrast_score = _clip01(
             (contrast - cfg.MARKER_MIN_CHROMA_CONTRAST) / 100.0)
@@ -369,20 +376,16 @@ class MarkerDetector:
             (mask_fill - cfg.MARKER_MIN_MASK_FILL)
             / max(1.0 - cfg.MARKER_MIN_MASK_FILL, 1e-6)
         )
-        vertex_score = (
-            NEUTRAL_SHAPE_SCORE
-            if arrival
-            else (1.0 if vertex_count == 3 else 0.70)
-        )
         area_score = _clip01(
             area_ratio / max(cfg.MARKER_MIN_AREA_RATIO * 5.0, 1e-6))
+        # Cromaticidade e contraste somam 62% do peso: sao os unicos termos
+        # com separacao medida (marcador 124-148 contra cadeira 63-79).
         confidence = (
-            0.30 * triangle_score
-            + 0.22 * contrast_score
-            + 0.15 * chroma_score
-            + 0.10 * solidity_score
-            + 0.08 * fill_score
-            + 0.10 * vertex_score
+            0.34 * contrast_score
+            + 0.28 * chroma_score
+            + 0.14 * solidity_score
+            + 0.10 * fill_score
+            + 0.09 * compactness_score
             + 0.05 * area_score
         )
         if confidence < cfg.MARKER_MIN_CONFIDENCE:

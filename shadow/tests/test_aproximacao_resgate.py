@@ -11,7 +11,10 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config_resgate as cfg
 from controle.aproximacao_resgate import BallApproachController
 from controle import direcao as steer_module
-from visao.bola_resgate import BallDetection, CloseCrescentEvidence
+from visao.deteccao import (  # noqa: E402
+    VictimDetection as BallDetection,
+    CloseCrescentEvidence,
+)
 
 
 def detection(

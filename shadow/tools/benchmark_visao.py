@@ -126,7 +126,7 @@ def medir(detector_fn, frames, aquecimento=3):
 
 
 def benchmark_offline(frames_linha, frames_resgate):
-    from visao.bola_resgate import BallDetector
+    from visao.vitima_yolo import VictimDetector as BallDetector
     from visao.faixa_entrada import EntrySilverDetector
     from visao.faixa_saida import BlackExitDetector
     from visao.marcador_resgate import MarkerDetector
@@ -163,22 +163,28 @@ def benchmark_offline(frames_linha, frames_resgate):
             (cfg.RESCUE_DETECTOR_MAX_WIDTH, cfg.RESCUE_DETECTOR_MAX_HEIGHT))
         for frame in frames_resgate
     ]
-    bola = BallDetector(
-        target_kind="any", enhance=True,
-        enforce_arena=True, exclude_markers=True)
+    # O modelo de vítimas só entra no benchmark quando existir. Antes disso
+    # não há o que medir, e inventar um número seria pior que omitir.
+    from visao.vitima_yolo import (ModeloAusenteError, VictimDetector,
+                                   VictimModel)
+    try:
+        modelo = VictimModel().carregar()
+    except ModeloAusenteError:
+        print(
+            "  (modelo de vitimas ausente — o custo da inferencia so pode "
+            "ser medido depois do treino)")
+        return resultados
+
+    vitima = VictimDetector(model=modelo)
     resultados[
-        f"esfera {cfg.RESCUE_DETECTOR_MAX_WIDTH}x"
+        f"vitima {cfg.RESCUE_DETECTOR_MAX_WIDTH}x"
         f"{cfg.RESCUE_DETECTOR_MAX_HEIGHT}"
     ] = _estatisticas(medir(
-        lambda frame, ts: bola.detect(frame, timestamp=ts), reduzidos))
+        lambda frame, ts: vitima.detect(frame, timestamp=ts), reduzidos))
 
-    # Comparação honesta com a resolução cheia: é este número que justifica
-    # NÃO subir a resolução do detector.
-    bola_cheia = BallDetector(
-        target_kind="any", enhance=True,
-        enforce_arena=True, exclude_markers=True)
-    resultados["esfera resolucao cheia"] = _estatisticas(medir(
-        lambda frame, ts: bola_cheia.detect(frame, timestamp=ts),
+    vitima_cheia = VictimDetector(model=modelo)
+    resultados["vitima resolucao cheia"] = _estatisticas(medir(
+        lambda frame, ts: vitima_cheia.detect(frame, timestamp=ts),
         frames_resgate))
 
     return resultados
@@ -187,7 +193,7 @@ def benchmark_offline(frames_linha, frames_resgate):
 def benchmark_camera(segundos):
     """Mede captura e visão separadamente, com o modelo latest-frame real."""
     from controle.trava_motores import MotorLockError, MotorOwnerLock
-    from visao.bola_resgate import BallDetector
+    from visao.vitima_yolo import VictimDetector as BallDetector
     from visao.captura_resgate import RescueCamera
     from visao.resgate_assincrono import (LatestFrameBallDetector,
                                           LatestFrameSource)
@@ -202,10 +208,9 @@ def benchmark_camera(segundos):
     detector = None
     try:
         captura = LatestFrameSource(RescueCamera(cfg.RESCUE_CAMERA_INDEX))
+        from visao.vitima_yolo import VictimModel
         detector = LatestFrameBallDetector(
-            BallDetector(
-                target_kind="any", enhance=True,
-                enforce_arena=True, exclude_markers=True),
+            BallDetector(model=VictimModel().carregar()),
             max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
             max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
         )

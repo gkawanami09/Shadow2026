@@ -163,19 +163,30 @@ class MarkerDetectorTests(unittest.TestCase):
                         detector.detect(frame, timestamp=index * 0.1))
                 self.assertFalse(detector.last_candidates)
 
-    def test_uniform_diffuse_colored_objects_are_rejected(self):
+    def test_banho_de_cor_uniforme_e_rejeitado(self):
+        """Quadro inteiro da cor: sem contraste com o entorno, não é marcador."""
         for target, color in (("green", GREEN), ("red", RED)):
-            frames = [base_frame(color)]
-            rectangle = base_frame()
-            cv2.rectangle(
-                rectangle, (180, 190), (460, 410), color, -1)
-            frames.append(rectangle)
-            for index, frame in enumerate(frames):
-                with self.subTest(target=target, shape=index):
-                    detector = MarkerDetector(target)
-                    self.assertIsNone(
-                        detector.detect(frame, timestamp=0.0))
-                    self.assertFalse(detector.last_candidates)
+            with self.subTest(target=target):
+                detector = MarkerDetector(target)
+                self.assertIsNone(
+                    detector.detect(base_frame(color), timestamp=0.0))
+                self.assertFalse(detector.last_candidates)
+
+    def test_retangulo_saturado_e_aceito_agora(self):
+        """É assim que o marcador REAL aparece nesta câmera.
+
+        Medido: o triângulo de depósito, visto quase rente ao piso, tem
+        silhueta retangular. Aceitar isto é o objetivo da mudança — antes
+        ele era rejeitado por triangularidade e o depósito era impossível.
+        """
+        for target, color in (("green", GREEN), ("red", RED)):
+            with self.subTest(target=target):
+                frame = base_frame()
+                cv2.rectangle(frame, (180, 260), (460, 410), color, -1)
+                detector = MarkerDetector(target)
+                self.assertIsNotNone(
+                    detector.detect(frame, timestamp=0.0),
+                    "o marcador real do robô tem esta silhueta")
 
     def test_uniform_cyan_wash_is_not_a_green_marker(self):
         # O fundo inteiro tem componente verde/ciano e saturacao suficiente
@@ -199,22 +210,50 @@ class MarkerDetectorTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result.confirmed)
 
-    def test_colored_circles_are_not_triangles(self):
+    def test_circulo_saturado_e_uma_limitacao_conhecida(self):
+        """LIMITAÇÃO ASSUMIDA: forma não separa marcador de círculo aqui.
+
+        Medido no pipeline, nesta câmera quase rente ao piso: o marcador
+        real dá triangularidade 0.577, um círculo dá 0.605 e a cadeira
+        vermelha do laboratório dá 0.677 — a cadeira é MAIS triangular que
+        o marcador. Nenhum limiar aceita o marcador e rejeita o círculo.
+
+        O gate de forma foi removido de propósito e o rigor passou para a
+        cromaticidade. A consequência é esta: um círculo MUITO saturado, no
+        chão, dentro da ROI, seria aceito como marcador.
+
+        Este teste existe para que a limitação fique registrada e visível —
+        se um dia a câmera subir e a forma voltar a discriminar, ele é o
+        lembrete de que dá para reapertar o gate.
+        """
         for target, color in (("green", GREEN), ("red", RED)):
             with self.subTest(target=target):
                 frame = base_frame()
                 cv2.circle(
                     frame, (320, 320), 90, color, -1, cv2.LINE_AA)
                 detector = MarkerDetector(target)
+                resultado = detector.detect(frame, timestamp=0.0)
+                self.assertIsNotNone(
+                    resultado,
+                    "se isto voltar a rejeitar, o gate de forma retornou e "
+                    "o marcador real do robô será perdido de novo")
 
-                result = detector.detect(frame, timestamp=0.0)
+    def test_cor_fraca_continua_sendo_rejeitada(self):
+        """O que AINDA protege: cromaticidade, não forma.
 
-                self.assertIsNone(result)
-                self.assertFalse(detector.last_candidates)
-                self.assertTrue(
-                    "triangularity" in detector.last_rejections
-                    or "vertices" in detector.last_rejections
-                )
+        Mesmo círculo, mas com cor lavada — como a cadeira vermelha do
+        laboratório (cromaticidade 63-79 contra 124-148 do marcador).
+        """
+        for target, color in (("green", (150, 178, 150)),
+                              ("red", (150, 150, 178))):
+            with self.subTest(target=target):
+                frame = base_frame()
+                cv2.circle(
+                    frame, (320, 320), 90, color, -1, cv2.LINE_AA)
+                detector = MarkerDetector(target)
+                self.assertIsNone(
+                    detector.detect(frame, timestamp=0.0),
+                    "objeto de cor fraca não pode virar marcador")
 
     def test_triangle_above_lower_roi_is_rejected(self):
         frame = triangle_frame(
@@ -352,14 +391,20 @@ class MarkerEdgeAndArrivalTests(unittest.TestCase):
         detector = MarkerDetector("green")
         self.assertIsNone(detector.detect(frame, timestamp=0.0))
 
-    def test_marcador_inteiro_no_quadro_ainda_passa_pela_forma(self):
-        """Sem tocar a borda, a triangularidade continua obrigatória."""
+    def test_marcador_inteiro_no_quadro_nao_e_fragmento(self):
+        """Sem tocar a borda, ele é julgado normalmente — e aceito."""
         frame = base_frame()
-        # Retângulo inteiramente dentro do quadro: não é triângulo.
         cv2.rectangle(frame, (200, 300), (440, 430), RED, -1)
         detector = MarkerDetector("red")
-        self.assertIsNone(detector.detect(frame, timestamp=0.0))
+        self.assertIsNotNone(detector.detect(frame, timestamp=0.0))
         self.assertNotIn("incompleto", detector.last_rejections)
+
+    def test_filamento_fino_e_rejeitado_por_compacidade(self):
+        """A sanidade de forma que SOBROU: exclui filamento e borda."""
+        frame = base_frame()
+        cv2.line(frame, (120, 380), (520, 300), RED, 6)
+        detector = MarkerDetector("red")
+        self.assertIsNone(detector.detect(frame, timestamp=0.0))
 
 
 if __name__ == "__main__":

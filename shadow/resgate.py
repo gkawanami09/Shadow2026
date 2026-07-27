@@ -1,17 +1,34 @@
 #!/usr/bin/env python3
-"""Resgate: procura, aproxima, coleta e deposita todas as esferas visiveis.
+"""Resgate — ESCOPO ATUAL: ver a vítima, chegar perto dela e ver os marcadores.
 
-Este executavel e independente do segue-linha. Nunca rode ``shadow/main.py`` e
-``shadow/resgate.py`` ao mesmo tempo: cada um precisa ser o unico dono de
-sua camera e da serial do Arduino.
+A coleta, o depósito e a saída da sala NÃO estão neste programa ainda. Os
+módulos deles continuam no repositório (``controle/coleta_resgate.py``,
+``controle/deposito_resgate.py``, ``controle/saida_resgate.py``) com a
+sequência de garra e Futaba já calibrada preservada — eles voltam quando a
+visão estiver confiável. Fazer o contrário seria empilhar lógica em cima de
+uma percepção que ainda erra.
 
-Captura e detector pesado possuem threads proprias e caixas de apenas um frame.
-O preview/controle sempre usa o dado mais recente, sem acumular imagens antigas.
+Arquitetura da visão
+--------------------
+    modelo treinado  -> aparência   (é vítima? prata ou preta?)
+    plausibilidade   -> geometria   (cabe fisicamente ali?)
+    rastreamento     -> tempo       (aparece de forma consistente?)
 
-Exemplos:
-    python3 shadow/resgate.py --debug
-    python3 shadow/resgate.py --camera-index 0 --drive --debug
-    python3 shadow/resgate.py --video shadow/captures/resgate.mp4 --debug
+O detector clássico anterior misturava as três coisas em dez portões
+encadeados de aparência. Medido: recall de 45% em imagens novas, e queda para
+20% com uma piora modesta em cada portão — porque dez portões em série
+multiplicam a fragilidade. A separação acima existe para que trocar de arena
+afete só o modelo, que é a única peça retreinável.
+
+Os marcadores continuam clássicos, de propósito: a cromaticidade separa
+marcador de cadeira vermelha com folga medida (124-148 contra 63-79), e isso
+não precisa de treino.
+
+Exemplos::
+
+    python3 shadow/resgate.py --debug                 # só visão, sem motores
+    python3 shadow/resgate.py --sem-vitimas --debug   # só marcadores
+    python3 shadow/resgate.py --drive --camera-index 0 --debug
 """
 
 import argparse
@@ -23,7 +40,6 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cv2  # noqa: E402
-import numpy as np  # noqa: E402
 
 import config_resgate as cfg  # noqa: E402
 from controle.aproximacao_resgate import (  # noqa: E402
@@ -31,42 +47,33 @@ from controle.aproximacao_resgate import (  # noqa: E402
     MotionCommand,
 )
 from controle.busca_pulsada import make_search_controller  # noqa: E402
-from controle.coleta_resgate import BallPickupSequencer  # noqa: E402
-from controle.deposito_resgate import DepositMarkerController  # noqa: E402
-from controle.missao import (  # noqa: E402
-    POLICY_NEAREST_VALID,
-    VALID_POLICIES,
-    MissionCoordinator,
-)
-from controle.saida_resgate import ExitPhaseController  # noqa: E402
+from visao import overlay_resgate  # noqa: E402
+from visao.marcador_resgate import MarkerDetector, color_masks  # noqa: E402
 from visao.resgate_assincrono import (  # noqa: E402
     FreshDetectionGate,
     LatestFrameBallDetector,
     LatestFrameSource,
 )
-from visao.bola_resgate import (BallDetector, annotate_rescue_frame)  # noqa: E402
-from visao.dados_resgate import RescueDatasetWriter  # noqa: E402
-from visao.faixa_saida import BlackExitGate  # noqa: E402
-from visao.marcador_resgate import MarkerDetector  # noqa: E402
-from visao.triangulos_finais import (  # noqa: E402
-    FinalTriangleMapper,
-    annotate_final_triangles,
+from visao.vitima_yolo import (  # noqa: E402
+    ModeloAusenteError,
+    VictimDetector,
+    VictimModel,
+    modelo_disponivel,
 )
 
 
-WINDOW_EXIT = "Shadow2026 - saida da sala de resgate"
-#: Códigos de saída lidos por ``mission.py``.
+JANELA = "Shadow2026 - resgate (visao)"
+INTERVALO_CONTROLE_OCIOSO_S = 0.25
+INTERVALO_LOG_S = 0.50
+TICK_S = 0.005
+
 EXIT_OK = 0
-EXIT_INCOMPLETE = 3
-
-
-WINDOW = "Shadow2026 - aproximacao da bolinha"
-IDLE_CONTROL_INTERVAL_S = 0.25
-LOG_INTERVAL_S = 0.50
-MAIN_TICK_S = 0.005
+EXIT_SEM_MODELO = 4
 
 
 class VideoSource:
+    """Reprodução de vídeo gravado. Nunca aciona motores."""
+
     def __init__(self, path):
         self.capture = cv2.VideoCapture(str(path))
         if not self.capture.isOpened():
@@ -76,626 +83,168 @@ class VideoSource:
         self.next_frame_at = time.monotonic()
 
     def get_frame(self):
-        remaining = self.next_frame_at - time.monotonic()
-        if remaining > 0:
-            time.sleep(remaining)
+        restante = self.next_frame_at - time.monotonic()
+        if restante > 0:
+            time.sleep(restante)
         ok, frame = self.capture.read()
         self.next_frame_at = max(
-            self.next_frame_at + self.frame_period,
-            time.monotonic(),
-        )
+            self.next_frame_at + self.frame_period, time.monotonic())
         return frame if ok else None
 
     def close(self):
         self.capture.release()
 
 
-def _rate(timestamps):
-    if len(timestamps) < 2:
+def _taxa(amostras):
+    if len(amostras) < 2:
         return 0.0
-    elapsed = timestamps[-1] - timestamps[0]
-    return (len(timestamps) - 1) / elapsed if elapsed > 0 else 0.0
-
-
-def _sequence_rate(samples):
-    """FPS da fonte mesmo quando o loop principal pula frames intermediarios."""
-    if len(samples) < 2:
-        return 0.0
-    elapsed = samples[-1][1] - samples[0][1]
+    decorrido = amostras[-1][1] - amostras[0][1]
     return (
-        (samples[-1][0] - samples[0][0]) / elapsed
-        if elapsed > 0 else 0.0
+        (amostras[-1][0] - amostras[0][0]) / decorrido
+        if decorrido > 0 else 0.0
     )
 
 
-def _best_effort(label, action):
+def _melhor_esforco(rotulo, acao):
     try:
-        return action()
-    except Exception as err:
-        print(f"[resgate] falha ao {label}: {err}")
+        return acao()
+    except Exception as err:                        # noqa: BLE001
+        print(f"[resgate] falha ao {rotulo}: {err}")
         return None
 
 
-def _annotate_marker(frame, detection, target_kind):
-    """Desenha somente a telemetria do triangulo usado no transporte."""
-    if target_kind not in ("green", "red"):
-        return frame
-    color = (0, 210, 0) if target_kind == "green" else (0, 0, 255)
-    cv2.putText(
-        frame,
-        f"DESTINO: {target_kind.upper()}",
-        (max(frame.shape[1] - 235, 8), 28),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.62,
-        color,
-        2,
-        cv2.LINE_AA,
-    )
-    if detection is None:
-        return frame
-    x, y, width, height = detection.bbox
-    x0 = int(round(x))
-    y0 = int(round(y))
-    x1 = int(round(x + width))
-    y1 = int(round(y + height))
-    cv2.rectangle(frame, (x0, y0), (x1, y1), color, 2)
-    cv2.circle(
-        frame,
-        (int(round(detection.center_x)),
-         int(round(detection.center_y))),
-        4,
-        color,
-        -1,
-    )
-    cv2.putText(
-        frame,
-        (
-            f"{detection.kind} {detection.confidence:.2f} "
-            f"hits={detection.hits}"
-            f"{' LOCK' if detection.track_locked else ''}"
-        ),
-        (max(x0, 4), max(y0 - 8, 18)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.52,
-        color,
-        2,
-        cv2.LINE_AA,
-    )
-    return frame
+class MarkerPair:
+    """Verde e vermelho detectados no mesmo frame, para identificação.
 
-
-def _annotate_arena_guard(frame, result):
-    """Mostra a soleira virtual e as exclusoes usadas na aquisicao."""
-    if result is None:
-        return frame
-    points = tuple(getattr(result, "arena_boundary_points", ()))
-    reason = str(getattr(result, "arena_reason", ""))
-    accepted = getattr(result, "arena_accepted", None)
-    blocked = accepted is False
-    uncertain = accepted is None and reason not in ("", "ok")
-    arena_color = (
-        (0, 80, 255)
-        if blocked
-        else ((0, 190, 255) if uncertain else (255, 210, 0))
-    )
-    if points:
-        cv2.polylines(
-            frame,
-            [np.asarray(points, dtype=np.int32)],
-            False,
-            arena_color,
-            2,
-            cv2.LINE_AA,
-        )
-        label_y = max(min(point[1] for point in points) - 8, 18)
-        if not blocked and not uncertain:
-            cv2.putText(
-                frame,
-                (
-                    "SOLEIRA ARENA "
-                    f"{getattr(result, 'arena_confidence', 0.0):.2f}"
-                ),
-                (8, label_y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.50,
-                arena_color,
-                2,
-                cv2.LINE_AA,
-            )
-    if blocked:
-        cv2.putText(
-            frame,
-            f"ARENA BLOQUEADA: {reason}",
-            (
-                8,
-                (
-                    max(min(point[1] for point in points) - 8, 18)
-                    if points
-                    else max(int(round(frame.shape[0] * 0.46)), 20)
-                ),
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.52,
-            arena_color,
-            2,
-            cv2.LINE_AA,
-        )
-    elif uncertain:
-        cv2.putText(
-            frame,
-            f"ARENA INCERTA: {reason} (nao veta)",
-            (
-                8,
-                (
-                    max(min(point[1] for point in points) - 8, 18)
-                    if points
-                    else max(int(round(frame.shape[0] * 0.46)), 20)
-                ),
-            ),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.48,
-            arena_color,
-            2,
-            cv2.LINE_AA,
-        )
-
-    support_box = getattr(result, "arena_support_box", None)
-    if support_box is not None:
-        x0, y0, x1, y1 = support_box
-        cv2.rectangle(
-            frame, (x0, y0), (x1, y1), arena_color, 1)
-    for x, y, width, height, kind in getattr(
-        result, "marker_exclusion_boxes", ()
-    ):
-        color = (0, 190, 0) if kind == "green" else (0, 0, 220)
-        cv2.rectangle(
-            frame,
-            (x, y),
-            (x + width, y + height),
-            color,
-            2,
-        )
-        cv2.putText(
-            frame,
-            f"{kind}: NAO E BOLA",
-            (x, max(y - 6, 18)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.45,
-            color,
-            1,
-            cv2.LINE_AA,
-        )
-    return frame
-
-
-def mission_exit_code(inventory, exit_controller, no_exit_phase=False):
-    """Código de saída lido por ``mission.py``.
-
-    Sucesso exige as DUAS coisas: as três vítimas depositadas E ter deixado a
-    sala. Um resgate que resgatou tudo mas não achou a saída não é sucesso —
-    o supervisor precisa saber disso para não assumir que o robô já está de
-    volta na linha.
-
-    ``no_exit_phase`` é o modo de teste físico por etapas: nele a saída foi
-    desativada de propósito e não conta como falha.
+    Nesta fase nenhum marcador comanda o robô — servem para você confirmar
+    que os dois são reconhecidos. Quando o depósito voltar ao escopo, só o
+    triângulo da cor da vítima presa poderá comandar.
     """
-    saiu_da_sala = (
-        bool(no_exit_phase)
-        or (exit_controller is not None and exit_controller.succeeded)
-    )
-    if inventory.complete and saiu_da_sala:
-        return EXIT_OK
-    return EXIT_INCOMPLETE
 
-
-def _annotate_exit_stripe(frame, detection, state):
-    """Desenha a soleira preta em AZUL, distinta dos dois triangulos."""
-    color = (255, 170, 0)
-    cv2.putText(
-        frame,
-        f"SAIDA: {state}",
-        (8, 26),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.58,
-        color,
-        2,
-        cv2.LINE_AA,
-    )
-    if detection is None:
-        return frame
-    x, y, width, height = detection.bbox
-    cv2.rectangle(
-        frame,
-        (int(x), int(y)),
-        (int(x + width), int(y + height)),
-        color,
-        2,
-    )
-    cv2.putText(
-        frame,
-        (
-            f"faixa preta {detection.confidence:.2f} "
-            f"larg={detection.span_ratio:.2f} "
-            f"prop={detection.aspect:.1f}"
-        ),
-        (max(int(x), 4), max(int(y) - 8, 44)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.50,
-        color,
-        2,
-        cv2.LINE_AA,
-    )
-    return frame
-
-
-def _reset_for_next_search(detector_worker, fresh_gate, now, coordinator=None):
-    """Invalida o alvo anterior e cria um ciclo independente de busca.
-
-    ``coordinator`` fornece o filtro de cor da política ativa: em
-    ``silver_first`` a esfera preta não pode travar o alvo enquanto faltar
-    uma prata, e nenhuma cor já completa volta a ser aceita.
-    """
-    detector_worker.reset_tracking()
-    fresh_gate.reset()
-    accepts = coordinator.wants if coordinator is not None else None
-    return (
-        make_search_controller(start_time=now, accepts_kind=accepts),
-        BallPickupSequencer(),
-    )
-
-
-def _new_deposit_navigation(pickup, now):
-    """Cria o destino imutavel somente com a esfera presa e elevada."""
-    if not pickup.ready_for_deposit:
-        raise RuntimeError(
-            "navegacao de deposito exige esfera presa e elevada")
-    try:
-        marker_kind = cfg.DEPOSIT_MARKER_BY_BALL_KIND[
-            pickup.target_kind]
-    except KeyError as err:
-        raise RuntimeError(
-            f"cor de esfera sem destino: {pickup.target_kind}") from err
-    return (
-        MarkerDetector(marker_kind),
-        DepositMarkerController(marker_kind, start_time=now),
-    )
-
-
-def _authorize_marker_deposit(pickup, deposit_controller):
-    """Impede liberar antes de PARAR no triangulo da cor congelada."""
-    expected_marker = cfg.DEPOSIT_MARKER_BY_BALL_KIND.get(
-        pickup.target_kind)
-    if (
-        not pickup.ready_for_deposit
-        or deposit_controller is None
-        or not deposit_controller.arrived
-        or deposit_controller.target_kind != expected_marker
-    ):
-        return False
-    return pickup.resume_deposit()
-
-
-def _apply_pickup_actions(
-    step,
-    arduino,
-    steer_action,
-    expected_connection_epoch=None,
-):
-    """Aplica somente os eventos one-shot emitidos pelo sequenciador."""
-    forward_started = False
-    motor_stopped = False
-
-    def link_changed():
-        return (
-            expected_connection_epoch is not None
-            and (
-                not arduino.connected
-                or arduino.connection_epoch != expected_connection_epoch
-            )
-        )
-
-    def link_error():
-        return "serial mudou durante a coleta; sequencia cancelada"
-
-    def abort(detail):
-        # No passo das garras o avanco ja foi iniciado no estado anterior.
-        # Qualquer falha precisa cortar as rodas aqui, sem esperar o proximo
-        # tick; o caller ainda repete PARAR ao entrar em PICKUP_FAULT.
-        if (
-            not motor_stopped
-            and (forward_started or step.gripper_action is not None)
-        ):
-            try:
-                steer_action()
-            except Exception:
-                pass
-        return detail
-
-    try:
-        if link_changed():
-            return abort(link_error())
-        if step.motor_action == "hold":
-            # PARAR tambem cortaria o Futaba no firmware. LADO 0 0 zera as
-            # quatro rodas e vira um keepalive que nao toca no canal CH3.
-            if arduino.lado(0, 0) is False:
-                return "LADO 0 0 nao foi enviado pela serial"
-        elif step.motor_action == "stop":
-            if steer_action() is False:
-                return "PARAR nao foi enviado pela serial"
-            motor_stopped = True
-        elif step.motor_action not in ("", "forward"):
-            return f"acao de motor desconhecida: {step.motor_action}"
-        if link_changed():
-            return abort(link_error())
-
-        if step.stop_futaba:
-            if arduino.parar_futaba() is False:
-                return "FUTABA PARAR nao foi enviado pela serial"
-            if link_changed():
-                return abort(link_error())
-
-        if step.futaba_action is not None:
-            potencia, tempo_ms = step.futaba_action
-            if arduino.futaba(potencia, tempo_ms) is False:
-                return "FUTABA nao foi enviado pela serial"
-            if link_changed():
-                return abort(link_error())
-
-        # Motores sao aplicados antes dos atuadores: isso garante PARAR antes
-        # de fechar. Nos passos do elevador, FUTABA PARAR vem antes do novo
-        # pulso; LADO 0 0 preserva o keepalive sem cortar o Futaba ativo.
-        if step.motor_action == "forward":
-            if steer_action(step.angle, step.speed) is False:
-                return "comando de avanco nao foi enviado pela serial"
-            forward_started = True
-            if link_changed():
-                return abort(link_error())
-
-        if step.gripper_action is not None:
-            esquerda, direita = step.gripper_action
-            if arduino.garras(esquerda, direita) is False:
-                return abort(
-                    "comando simultaneo das garras nao foi enviado")
-            if link_changed():
-                return abort(link_error())
-    except Exception as err:
-        return abort(f"falha ao comandar coleta: {err}")
-    return None
-
-
-def _dataset_metadata(
-    args,
-    command,
-    frame_sequence,
-    frame_captured_at,
-    result,
-    now,
-):
-    same_frame = bool(
-        result is not None
-        and result.source_sequence == frame_sequence
-    )
-    detection = result.detection if result is not None else None
-    detection_data = None
-    if detection is not None:
-        detection_data = {
-            "kind": detection.kind,
-            "center_x": float(detection.center_x),
-            "center_y": float(detection.center_y),
-            "radius": float(detection.radius),
-            "confidence": float(detection.confidence),
-            "confirmed": bool(detection.confirmed),
-            "hits": int(detection.hits),
-            "track_locked": bool(detection.track_locked),
+    def __init__(self):
+        self.detectors = {
+            "green": MarkerDetector("green"),
+            "red": MarkerDetector("red"),
         }
+        self.detections = {"green": None, "red": None}
+        self.confirmados = {"green": False, "red": False}
 
-    detector_data = None
-    if result is not None:
-        locked_detection = result.locked_detection
-        locked_detection_data = None
-        if locked_detection is not None:
-            locked_detection_data = {
-                "kind": locked_detection.kind,
-                "center_x": float(locked_detection.center_x),
-                "center_y": float(locked_detection.center_y),
-                "radius": float(locked_detection.radius),
-                "confidence": float(locked_detection.confidence),
-                "confirmed": bool(locked_detection.confirmed),
-                "hits": int(locked_detection.hits),
-                "timestamp": float(locked_detection.timestamp),
-                "track_locked": bool(
-                    locked_detection.track_locked),
-            }
-        crescent = result.crescent_evidence
-        crescent_data = None
-        if crescent is not None:
-            crescent_data = {
-                "accepted": bool(crescent.accepted),
-                "confidence": float(crescent.confidence),
-                "support": float(crescent.support),
-                "left_support": float(crescent.left_support),
-                "center_support": float(crescent.center_support),
-                "right_support": float(crescent.right_support),
-                "contrast": float(crescent.contrast),
-                "center_x_ratio": float(crescent.center_x_ratio),
-                "top_y_ratio": float(crescent.top_y_ratio),
-                "halfspan_ratio": float(crescent.halfspan_ratio),
-                "gradient_polarity": float(
-                    crescent.gradient_polarity),
-                "profile_support": float(crescent.profile_support),
-                "profile_polarity": float(crescent.profile_polarity),
-                "coherent_run": float(crescent.coherent_run),
-                "circle_rmse_ratio": float(
-                    crescent.circle_rmse_ratio),
-                "curvature_score": float(crescent.curvature_score),
-                "foil_fallback": bool(crescent.foil_fallback),
-                "foil_texture_bins": int(
-                    crescent.foil_texture_bins),
-                "foil_valid_bins": int(crescent.foil_valid_bins),
-                "interior_edge_density": float(
-                    crescent.interior_edge_density),
-                "background_edge_density": float(
-                    crescent.background_edge_density),
-            }
-        detector_data = {
-            # Candidatos/deteccao so descrevem este PNG quando esta flag e
-            # true. Caso contrario servem apenas como contexto do loop.
-            "same_frame": same_frame,
-            "source_capture_sequence": result.source_sequence,
-            "result_sequence": int(result.sequence),
-            "age_s": float(max(now - result.captured_at, 0.0)),
-            "processing_ms": float(result.processing_s * 1000.0),
-            "hough_used": bool(result.hough_used),
-            "contour_proposals": int(result.contour_proposals),
-            "hough_proposals": int(result.hough_proposals),
-            "candidate_count": int(result.candidate_count),
-            "candidate_radii": list(result.candidate_radii),
-            "candidate_circles": [
-                list(circle) for circle in result.candidate_circles
-            ],
-            "arena_guard": {
-                "reason": result.arena_reason,
-                "confidence": float(result.arena_confidence),
-                "accepted": result.arena_accepted,
-                "floor_support": float(result.arena_floor_support),
-                "boundary_points": [
-                    list(point)
-                    for point in result.arena_boundary_points
-                ],
-                "support_box": (
-                    list(result.arena_support_box)
-                    if result.arena_support_box is not None
-                    else None
-                ),
-            },
-            "marker_exclusion_boxes": [
-                list(box) for box in result.marker_exclusion_boxes
-            ],
-            "crescent_evidence": crescent_data,
-            "diagnostic": result.diagnostic,
-            "detection": detection_data,
-            "locked_detection": locked_detection_data,
-        }
+    def update(self, frame, timestamp):
+        # Uma conversão HSV só, reaproveitada pelos dois detectores.
+        mascaras = color_masks(frame)
+        for tipo, detector in self.detectors.items():
+            deteccao = detector.detect(
+                frame, timestamp=timestamp, masks=mascaras)
+            self.detections[tipo] = deteccao
+            if deteccao is not None and deteccao.confirmed:
+                self.confirmados[tipo] = True
+        return dict(self.detections)
 
-    return {
-        "purpose": "rescue_ball_calibration",
-        "raw_unannotated": True,
-        "frame": {
-            "capture_sequence": int(frame_sequence),
-            "captured_monotonic_s": float(frame_captured_at),
-        },
-        "run": {
-            "camera_index": int(args.camera_index),
-            "target": args.target,
-            "enhance": not args.no_enhance,
-            "motors_enabled": bool(args.drive),
-        },
-        "control": {
-            "state": command.state,
-            "detail": command.detail,
-            "angle": int(command.angle),
-            "speed": float(command.speed),
-            "terminal": bool(command.terminal),
-            "pickup_in_range": bool(command.pickup_in_range),
-            "pickup_confirmations": int(command.pickup_confirmations),
-        },
-        "latest_detector_result": detector_data,
-    }
+    def resumo(self):
+        partes = []
+        for tipo in ("green", "red"):
+            deteccao = self.detections[tipo]
+            if deteccao is None:
+                partes.append(f"{tipo}:-")
+            else:
+                partes.append(
+                    f"{tipo}:{deteccao.confidence:.2f}"
+                    f"{'*' if deteccao.confirmed else ''}")
+        return " ".join(partes)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "detecta uma esfera e, com --drive, aproxima e aciona a coleta"))
+            "Visao do resgate: encontra a vitima, aproxima e identifica os "
+            "marcadores verde e vermelho"))
     parser.add_argument(
         "--camera-index", type=int,
         help=(
-            "indice libcamera da camera de resgate; sem --drive usa "
-            f"{cfg.RESCUE_CAMERA_INDEX} como padrao"))
+            "indice da camera de resgate; sem --drive usa "
+            f"{cfg.RESCUE_CAMERA_INDEX}"))
     parser.add_argument(
         "--target", choices=("any", "black", "silver"), default="any",
-        help="tipo de esfera aceito (padrao: any)")
+        help="tipo de vitima aceito (padrao: any)")
     parser.add_argument(
         "--drive", action="store_true",
         help=(
-            "AUTORIZA movimento; sem esta opcao o Arduino permanece em PARAR "
+            "AUTORIZA movimento; sem isto o Arduino fica em PARAR "
             "(o LED ainda e apagado no uso da camera real)"))
     parser.add_argument(
         "--debug", action="store_true",
-        help=(
-            "mostra a camera anotada; s salva PNG bruto para calibracao; "
-            "q ou Esc encerra"))
+        help="mostra a camera anotada; q ou Esc encerra")
     parser.add_argument(
         "--video", type=Path,
-        help="processa um video gravado em vez da camera; sempre sem motores")
+        help="processa um video gravado; sempre sem motores")
     parser.add_argument(
-        "--no-enhance", action="store_true",
-        help="desativa CLAHE + gamma nas propostas visuais")
-    parser.add_argument(
-        "--policy", choices=VALID_POLICIES, default=POLICY_NEAREST_VALID,
+        "--sem-vitimas", action="store_true",
         help=(
-            "ordem de resgate: 'nearest_valid' aceita qualquer cor (padrao "
-            "OBR); 'silver_first' adia a preta ate as duas vivas sairem"))
+            "desliga o detector de vitimas e exercita so os marcadores; "
+            "util antes de o modelo existir"))
     parser.add_argument(
-        "--no-exit-phase", action="store_true",
-        help=(
-            "para apos as tres vitimas, sem procurar a faixa preta de saida "
-            "(usado nos testes fisicos por etapas)"))
-    # Compatibilidade com comandos antigos. O sensor permanece desativado
-    # independentemente desta flag.
-    parser.add_argument(
-        "--no-ultrasonic", action="store_true", help=argparse.SUPPRESS)
+        "--sem-marcadores", action="store_true",
+        help="desliga os marcadores e exercita so as vitimas")
     args = parser.parse_args()
     if args.video is not None and args.drive:
         parser.error("--drive nao pode ser usado junto com --video")
     if args.drive and args.camera_index is None:
         parser.error(
-            "--drive exige --camera-index explicito; valide antes qual imagem "
-            "e da camera frontal de resgate usando --debug")
+            "--drive exige --camera-index explicito; confirme antes com "
+            "--debug qual imagem e a da camera frontal de resgate")
     if args.camera_index is None:
         args.camera_index = cfg.RESCUE_CAMERA_INDEX
     return args
 
 
+def preparar_detector_de_vitimas(args):
+    """Carrega o modelo ou explica exatamente o que falta."""
+    if args.sem_vitimas:
+        print("[resgate] detector de vitimas DESLIGADO (--sem-vitimas)")
+        return None
+    if not modelo_disponivel():
+        modelo = VictimModel()
+        try:
+            modelo.carregar()
+        except ModeloAusenteError as err:
+            print(f"\n[resgate] {err}\n")
+            return False
+    modelo = VictimModel().carregar()
+    print(f"[resgate] modelo de vitimas carregado: {modelo.caminho}")
+    return VictimDetector(model=modelo, target_kind=args.target)
+
+
 def main():
     args = parse_args()
-    source = None
+    fonte = None
     arduino = None
-    motor_lock = None
-    capture_worker = None
-    detector_worker = None
-    dataset_worker = None
-    controller = None
-    search = None
-    pickup = None
-    marker_detector = None
-    deposit_controller = None
-    hardware_session = args.video is None
+    trava = None
+    captura = None
+    trabalhador = None
+    marcadores = None
+    controlador = None
+    busca = None
+    sessao_hardware = args.video is None
 
-    exit_controller = None
-    exit_gate = None
-    triangle_mapper = None
-    coordinator = MissionCoordinator(policy=args.policy)
+    ultimo_estado = None
+    ultimo_detalhe = None
+    ultimo_log = 0.0
+    ultimo_controle_ocioso = 0.0
+    epoca_busca = None
+    amostras_captura = deque(maxlen=60)
+    instantes_deteccao = deque(maxlen=30)
 
-    last_state = None
-    last_logged_detail = None
-    last_log_at = 0.0
-    last_idle_control = 0.0
-    pickup_connection_epoch = None
-    search_connection_epoch = None
-    completed_pickups = 0
-    latest_marker_detection = None
-    latest_marker_captured_at = None
-    capture_samples = deque(maxlen=60)
-    detection_times = deque(maxlen=30)
+    detector = preparar_detector_de_vitimas(args)
+    if detector is False:
+        return EXIT_SEM_MODELO
 
     try:
-        if hardware_session:
+        if sessao_hardware:
             from controle.trava_motores import MotorLockError, MotorOwnerLock
-            motor_lock = MotorOwnerLock(
+            trava = MotorOwnerLock(
                 "aproximacao-resgate" if args.drive else "visao-resgate")
             try:
-                motor_lock.acquire()
+                trava.acquire()
             except MotorLockError as err:
                 raise RuntimeError(
                     f"modo de resgate recusado: {err}") from err
@@ -708,998 +257,331 @@ def main():
             steer()
             arduino.led("APAGADO")
             print(
-                "[resgate] LED APAGADO antes de abrir a camera frontal; "
+                "[resgate] LED APAGADO antes de abrir a camera; "
                 "motores em PARAR")
 
         if args.video is not None:
-            source = VideoSource(args.video)
+            fonte = VideoSource(args.video)
             print(f"[resgate] replay sem motores: {args.video}")
         else:
             from visao.captura_resgate import RescueCamera
-            source = RescueCamera(args.camera_index)
+            fonte = RescueCamera(args.camera_index)
 
-        capture_worker = LatestFrameSource(source)
-        detector_worker = LatestFrameBallDetector(
-            BallDetector(
-                target_kind=args.target,
-                enhance=not args.no_enhance,
-                enforce_arena=True,
-                exclude_markers=True,
-            ),
-            max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
-            max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
-        )
-        fresh_gate = FreshDetectionGate(
-            cfg.BALL_ACQUIRE_HITS,
+        captura = LatestFrameSource(fonte)
+        if detector is not None:
+            trabalhador = LatestFrameBallDetector(
+                detector,
+                max_width=cfg.RESCUE_DETECTOR_MAX_WIDTH,
+                max_height=cfg.RESCUE_DETECTOR_MAX_HEIGHT,
+            )
+        portao = FreshDetectionGate(
+            cfg.VICTIM_ACQUIRE_HITS,
             max_misses=cfg.BALL_FRESH_GATE_MAX_MISSES,
         )
+        if not args.sem_marcadores:
+            marcadores = MarkerPair()
 
-        loop_started = time.monotonic()
-        armed_at = (
-            loop_started + cfg.RESCUE_ARM_DELAY_S
-            if args.drive else loop_started)
-        controller = (
-            None
-            if args.drive
-            else BallApproachController(start_time=armed_at)
-        )
-        search = (
-            make_search_controller(
-                start_time=armed_at, accepts_kind=coordinator.wants)
-            if args.drive
-            else None
-        )
-        pickup = BallPickupSequencer()
-        command = MotionCommand(
-            (
-                "ARMING"
-                if args.drive
-                else BallApproachController.WAIT_TARGET
-            ),
+        inicio = time.monotonic()
+        armado_em = (
+            inicio + cfg.RESCUE_ARM_DELAY_S if args.drive else inicio)
+        controlador = (
+            None if args.drive
+            else BallApproachController(start_time=armado_em))
+        busca = (
+            make_search_controller(start_time=armado_em)
+            if args.drive else None)
+        comando = MotionCommand(
+            "ARMING" if args.drive else BallApproachController.WAIT_TARGET,
             detail=(
                 "camera ativa; mantendo PARAR durante a contagem"
-                if args.drive else
-                "parado; aguardando confirmacao temporal"),
+                if args.drive
+                else "parado; aguardando confirmacao temporal"),
         )
-        last_frame_sequence = 0
-        last_result_sequence = 0
-        latest_frame = None
-        latest_frame_captured_at = None
-        latest_result = None
-        latest_detection = None
-        last_metrics_result = None
-        latest_exit_detection = None
-        latest_triangle_detections = {"green": None, "red": None}
+
+        sequencia_frame = 0
+        sequencia_resultado = 0
+        frame_atual = None
+        resultado_atual = None
+        deteccao_atual = None
+        marcadores_atuais = {}
+        metricas = None
 
         if args.drive:
             print(
-                "[resgate] MOVIMENTO AUTORIZADO. A camera ja esta ativa; "
-                f"mantendo PARAR por {cfg.RESCUE_ARM_DELAY_S:.0f} s.")
+                "[resgate] MOVIMENTO AUTORIZADO. Mantendo PARAR por "
+                f"{cfg.RESCUE_ARM_DELAY_S:.0f} s.")
         else:
             print(
                 "[resgate] modo de visao: motores desativados. "
-                "No --debug, pressione s para salvar um PNG bruto; "
-                "use --drive somente depois de validar a visao.")
+                "Use --drive so depois de validar a visao.")
 
         while True:
-            frame_packet = capture_worker.poll(last_frame_sequence)
-            new_frame = frame_packet is not None
-            if new_frame:
-                last_frame_sequence = frame_packet.sequence
-                latest_frame = frame_packet.frame
-                latest_frame_captured_at = frame_packet.captured_at
-                capture_samples.append((
-                    frame_packet.sequence,
-                    frame_packet.captured_at,
-                ))
-            elif capture_worker.ended:
+            pacote = captura.poll(sequencia_frame)
+            frame_novo = pacote is not None
+            if frame_novo:
+                sequencia_frame = pacote.sequence
+                frame_atual = pacote.frame
+                amostras_captura.append(
+                    (pacote.sequence, pacote.captured_at))
+            elif captura.ended:
                 print("[resgate] fim da fonte de imagem")
                 break
 
-            now = time.monotonic()
-            armed = now >= armed_at
-            # Na fase de saida o detector de vitimas fica desligado: as tres
-            # ja foram resgatadas e um falso candidato so atrasaria a saida.
-            if (
-                new_frame and armed and not pickup.started
-                and exit_controller is None
-            ):
-                detector_worker.submit(
-                    latest_frame,
-                    captured_at=frame_packet.captured_at,
-                    source_sequence=frame_packet.sequence,
+            agora = time.monotonic()
+            armado = agora >= armado_em
+
+            if trabalhador is not None and frame_novo and armado:
+                trabalhador.submit(
+                    frame_atual,
+                    captured_at=pacote.captured_at,
+                    source_sequence=pacote.sequence,
                 )
 
-            result = detector_worker.poll(last_result_sequence)
-            if not detector_worker.is_alive:
-                # poll() ja transforma uma excecao do worker em RuntimeError.
-                detector_worker.poll(last_result_sequence)
-                raise RuntimeError("detector assincrono encerrou inesperadamente")
+            if marcadores is not None and frame_novo:
+                marcadores_atuais = marcadores.update(
+                    frame_atual, pacote.captured_at)
 
-            # Uma unica referencia temporal decide frescor e alimenta o
-            # controlador; assim nao existe divergencia perto do limite stale.
-            now = time.monotonic()
-            command_updated = False
-            pickup_step = None
-            if exit_controller is not None:
-                # Fase de saida. Somente aqui a faixa PRETA existe para o
-                # robo; durante toda a busca de vitimas ela foi ignorada.
-                if result is not None:
-                    last_result_sequence = result.sequence
-                    last_metrics_result = result
-                exit_frame_shape = (
-                    latest_frame.shape
-                    if latest_frame is not None
-                    else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
-                          cfg.RESCUE_CAMERA_MAX_WIDTH, 3)
-                )
-                if new_frame and latest_frame is not None:
-                    exit_detection = None
-                    if (
-                        exit_controller.state
-                        == ExitPhaseController.MAP_TRIANGLES
-                    ):
-                        # Os dois triangulos sao detectados juntos, apenas
-                        # para diagnostico: nenhum deles comanda o robo.
-                        latest_triangle_detections = triangle_mapper.update(
-                            latest_frame,
-                            timestamp=frame_packet.captured_at,
-                        )
-                    elif exit_controller.frame_allowed(
-                        frame_packet.captured_at
-                    ):
-                        exit_confirmed, exit_raw = exit_gate.update(
-                            latest_frame,
-                            timestamp=frame_packet.captured_at,
-                            now=now,
-                        )
-                        if (
-                            exit_controller.state
-                            == ExitPhaseController.CROSS
-                        ):
-                            # Na travessia interessa a presenca no frame
-                            # atual: e o desaparecimento que prova que a
-                            # faixa passou por baixo do robo. A confirmacao
-                            # temporal tem histerese e ficaria presa em True.
-                            exit_detection = exit_raw
-                        else:
-                            exit_detection = (
-                                exit_raw if exit_confirmed else None)
-                        latest_exit_detection = exit_detection
-                    command = exit_controller.update(
-                        exit_detection,
-                        exit_frame_shape,
-                        mapper=triangle_mapper,
-                        now=now,
-                    )
-                    if (
-                        command.state == ExitPhaseController.ALIGN
-                        and exit_controller.aligned(
-                            exit_detection, exit_frame_shape)
-                    ):
-                        command = exit_controller.begin_cross(now)
-                    command_updated = True
-                    last_idle_control = now
-                elif now - last_idle_control >= IDLE_CONTROL_INTERVAL_S:
-                    command = exit_controller.update(
-                        None,
-                        exit_frame_shape,
-                        mapper=triangle_mapper,
-                        now=now,
-                    )
-                    command_updated = True
-                    last_idle_control = now
-            elif pickup.ready_for_deposit:
-                # A cor fica congelada desde o fechamento das garras. Enquanto
-                # a esfera esta elevada, a visao de bolas permanece desligada
-                # e somente o triangulo correspondente pode comandar o robo.
-                if result is not None:
-                    last_result_sequence = result.sequence
-                    last_metrics_result = result
-                    detection_times.append(result.completed_at)
-                if (
-                    arduino is not None
-                    and pickup_connection_epoch is not None
-                    and arduino.connection_epoch
-                    != pickup_connection_epoch
-                ):
-                    pickup_step = pickup.fail(
-                        "serial reconectou durante o transporte; "
-                        "esfera mantida e sequencia cancelada")
-                    command = pickup_step.motion_command()
-                    command_updated = True
-                else:
-                    if marker_detector is None:
-                        (
-                            marker_detector,
-                            deposit_controller,
-                        ) = _new_deposit_navigation(
-                            pickup,
-                            now,
-                        )
-                        marker_kind = deposit_controller.target_kind
-                        detector_worker.reset_tracking()
-                        fresh_gate.reset()
-                        latest_result = None
-                        latest_detection = None
-                        latest_marker_detection = None
-                        latest_marker_captured_at = None
-                        last_idle_control = 0.0
-                        print(
-                            f"[deposito] esfera {pickup.target_kind} presa; "
-                            f"procurando triangulo {marker_kind}")
+            resultado = None
+            if trabalhador is not None:
+                resultado = trabalhador.poll(sequencia_resultado)
+                if not trabalhador.is_alive:
+                    trabalhador.poll(sequencia_resultado)
+                    raise RuntimeError(
+                        "detector assincrono encerrou inesperadamente")
 
-                    marker_frame_shape = (
-                        latest_frame.shape
-                        if latest_frame is not None
-                        else (
-                            cfg.RESCUE_CAMERA_MAX_HEIGHT,
-                            cfg.RESCUE_CAMERA_MAX_WIDTH,
-                            3,
-                        )
-                    )
-                    marker_result = None
-                    if (
-                        new_frame
-                        and deposit_controller.frame_allowed(
-                            frame_packet.captured_at)
-                    ):
-                        marker_result = marker_detector.detect(
-                            latest_frame,
-                            timestamp=frame_packet.captured_at,
-                        )
-                        marker_now = time.monotonic()
-                        if (
-                            marker_now - frame_packet.captured_at
-                            > cfg.BALL_FRAME_STALE_S
-                        ):
-                            marker_result = None
-                        latest_marker_detection = marker_result
-                        latest_marker_captured_at = frame_packet.captured_at
-                        command = deposit_controller.update(
-                            marker_result,
-                            marker_frame_shape,
-                            now=marker_now,
-                        )
-                        command_updated = True
-                        last_idle_control = marker_now
-                    elif (
-                        latest_marker_captured_at is not None
-                        and now - latest_marker_captured_at
-                        > cfg.BALL_FRAME_STALE_S
-                    ):
-                        latest_marker_detection = None
-                        latest_marker_captured_at = None
-                        command = deposit_controller.update(
-                            None,
-                            marker_frame_shape,
-                            now=now,
-                        )
-                        command_updated = True
-                        last_idle_control = now
-                    elif (
-                        now - last_idle_control
-                        >= IDLE_CONTROL_INTERVAL_S
-                    ):
-                        command = deposit_controller.update(
-                            None,
-                            marker_frame_shape,
-                            now=now,
-                        )
-                        command_updated = True
-                        last_idle_control = now
-            elif pickup.started:
-                # Consumir um eventual resultado que ja estava em voo somente
-                # para telemetria. A visao nunca volta a comandar os motores
-                # depois que a coleta foi armada.
-                if result is not None:
-                    last_result_sequence = result.sequence
-                    last_metrics_result = result
-                    detection_times.append(result.completed_at)
-                if (
-                    arduino is not None
-                    and pickup_connection_epoch is not None
-                    and arduino.connection_epoch
-                    != pickup_connection_epoch
-                ):
-                    pickup_step = pickup.fail(
-                        "serial reconectou durante a coleta; "
-                        "sequencia cancelada")
-                else:
-                    pickup_step = pickup.update(now)
-                command = pickup_step.motion_command()
-                command_updated = True
-            elif not armed:
-                remaining = max(armed_at - now, 0.0)
-                command = MotionCommand(
+            agora = time.monotonic()
+            comando_atualizado = False
+
+            if not armado:
+                restante = max(armado_em - agora, 0.0)
+                comando = MotionCommand(
                     "ARMING",
+                    detail=f"camera fluida; PARAR por mais {restante:.1f} s")
+            elif detector is None:
+                comando = MotionCommand(
+                    "MARCADORES",
                     detail=(
-                        f"camera fluida; PARAR por mais {remaining:.1f} s"),
+                        "somente marcadores: "
+                        f"{marcadores.resumo() if marcadores else '-'}"),
                 )
-            elif result is not None:
-                last_result_sequence = result.sequence
-                last_metrics_result = result
-                detection_times.append(result.completed_at)
-                result_age = now - result.captured_at
+            elif resultado is not None:
+                sequencia_resultado = resultado.sequence
+                metricas = resultado
+                instantes_deteccao.append(resultado.completed_at)
+                idade = agora - resultado.captured_at
 
-                if result_age > cfg.BALL_FRAME_STALE_S:
-                    # Nunca mover com uma imagem que venceu durante o
-                    # processamento.
-                    if search is not None:
-                        command = search.update(None, now=now)
-                    else:
-                        command = controller.update(
-                            result.detection,
-                            result.frame_shape,
-                            crescent_evidence=result.crescent_evidence,
-                            now=now,
-                        )
-                    command_updated = True
-                    latest_result = None
-                    latest_detection = None
-                    fresh_gate.reset()
-                    last_idle_control = now
+                if idade > cfg.BALL_FRAME_STALE_S:
+                    # Nunca mover com imagem que venceu durante o processamento.
+                    comando = (
+                        busca.update(None, now=agora) if busca is not None
+                        else controlador.update(
+                            resultado.detection, resultado.frame_shape,
+                            now=agora))
+                    comando_atualizado = True
+                    resultado_atual = None
+                    deteccao_atual = None
+                    portao.reset()
+                    ultimo_controle_ocioso = agora
                 else:
-                    latest_result = result
+                    resultado_atual = resultado
                     if (
-                        search is not None
-                        and not search.frame_allowed(result.captured_at)
+                        busca is not None
+                        and not busca.frame_allowed(resultado.captured_at)
                     ):
-                        # Um frame capturado enquanto o chassi ainda girava
-                        # nao pode reconfirmar o alvo depois de PARAR.
-                        fresh_gate.reset()
-                        control_detection = None
+                        # Frame capturado com o chassi girando nao confirma.
+                        portao.reset()
+                        confirmada = None
                     else:
-                        control_detection = fresh_gate.accept(
-                            result.detection)
-                    latest_detection = control_detection
+                        confirmada = portao.accept(resultado.detection)
+                    deteccao_atual = confirmada
 
-                    if search is not None:
-                        command = search.update(
-                            control_detection,
-                            now=now,
-                        )
-                        if search.target_acquired:
-                            controller = BallApproachController(
-                                start_time=now)
-                            command = controller.update(
-                                control_detection,
-                                result.frame_shape,
-                                crescent_evidence=(
-                                    result.crescent_evidence),
-                                now=now,
-                            )
-                            search = None
-                            search_connection_epoch = None
+                    if busca is not None:
+                        comando = busca.update(confirmada, now=agora)
+                        if busca.target_acquired:
+                            controlador = BallApproachController(
+                                start_time=agora)
+                            comando = controlador.update(
+                                confirmada, resultado.frame_shape, now=agora)
+                            busca = None
+                            epoca_busca = None
                     else:
-                        command = controller.update(
-                            control_detection,
-                            result.frame_shape,
-                            crescent_evidence=result.crescent_evidence,
-                            now=now,
-                        )
-                    command_updated = True
+                        comando = controlador.update(
+                            confirmada, resultado.frame_shape, now=agora)
+                    comando_atualizado = True
             elif (
-                latest_result is not None
-                and now - latest_result.captured_at
-                > cfg.BALL_FRAME_STALE_S
+                agora - ultimo_controle_ocioso
+                >= INTERVALO_CONTROLE_OCIOSO_S
             ):
-                if search is not None:
-                    command = search.update(None, now=now)
-                else:
-                    command = controller.update(
-                        latest_result.detection,
-                        latest_result.frame_shape,
-                        crescent_evidence=(
-                            latest_result.crescent_evidence),
-                        now=now,
-                    )
-                command_updated = True
-                latest_result = None
-                latest_detection = None
-                fresh_gate.reset()
-                last_idle_control = now
-            elif (
-                latest_result is None
-                and now - last_idle_control >= IDLE_CONTROL_INTERVAL_S
-            ):
-                frame_shape = (
-                    latest_frame.shape
-                    if latest_frame is not None
+                forma = (
+                    frame_atual.shape if frame_atual is not None
                     else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
-                          cfg.RESCUE_CAMERA_MAX_WIDTH, 3)
-                )
-                if search is not None:
-                    command = search.update(None, now=now)
-                else:
-                    command = controller.update(
-                        None, frame_shape, now=now)
-                command_updated = True
-                last_idle_control = now
+                          cfg.RESCUE_CAMERA_MAX_WIDTH, 3))
+                comando = (
+                    busca.update(None, now=agora) if busca is not None
+                    else controlador.update(None, forma, now=agora))
+                comando_atualizado = True
+                ultimo_controle_ocioso = agora
 
+            # Alvo perdido durante a aproximacao: volta a procurar em vez de
+            # esperar parado ate o timeout longo.
             if (
                 args.drive
-                and search is None
-                and controller is not None
-                and not pickup.started
-                and command.state == BallApproachController.WAIT_TARGET
+                and busca is None
+                and controlador is not None
+                and comando.state == BallApproachController.WAIT_TARGET
             ):
-                # Se um alvo sumiu durante a aproximacao, nao espere parado
-                # por 30 s: descarte esse track e volte a procurar.
-                search, pickup = _reset_for_next_search(
-                    detector_worker,
-                    fresh_gate,
-                    now,
-                )
-                search_connection_epoch = None
-                controller = None
-                latest_result = None
-                latest_detection = None
-                last_idle_control = 0.0
-                command = search.update(None, now=now)
-                command_updated = True
+                if trabalhador is not None:
+                    trabalhador.reset_tracking()
+                portao.reset()
+                busca = make_search_controller(start_time=agora)
+                controlador = None
+                resultado_atual = None
+                deteccao_atual = None
+                epoca_busca = None
+                ultimo_controle_ocioso = 0.0
+                comando = busca.update(None, now=agora)
+                comando_atualizado = True
 
-            motor_result = None
-            motion_connection_epoch = None
-            if args.drive and arduino is not None:
+            epoca_movimento = None
+            if args.drive and arduino is not None and comando_atualizado:
                 from controle.direcao import steer
-                if pickup_step is not None:
-                    pickup_error = _apply_pickup_actions(
-                        pickup_step,
-                        arduino,
-                        steer,
-                        expected_connection_epoch=pickup_connection_epoch,
-                    )
-                    if (
-                        pickup_error is None
-                        and not pickup_step.terminal
-                        and pickup_connection_epoch is not None
-                        and arduino.connection_epoch
-                        != pickup_connection_epoch
+                epoca_movimento = arduino.connection_epoch
+                if steer(comando.angle, comando.speed) is False:
+                    raise RuntimeError(
+                        "comando de movimento nao foi enviado pela serial")
+                concluido_em = time.monotonic()
+                if busca is not None:
+                    if busca.consume_tracking_reset():
+                        if trabalhador is not None:
+                            trabalhador.reset_tracking()
+                        portao.reset()
+                        resultado_atual = None
+                        deteccao_atual = None
+                    if comando.state == busca.START:
+                        epoca_busca = arduino.connection_epoch
+                    if busca.notify_command_written(
+                        comando.state, concluido_em
                     ):
-                        pickup_error = (
-                            "serial reconectou durante a coleta; "
-                            "sequencia cancelada")
-                    if pickup_error is None:
-                        action_completed_at = time.monotonic()
-                        if pickup_step.futaba_action is not None:
-                            pickup.mark_futaba_started(action_completed_at)
-                        if pickup_step.motor_action == "forward":
-                            pickup.mark_forward_started(action_completed_at)
-                        if pickup_step.gripper_action is not None:
-                            pickup.mark_grippers_started(action_completed_at)
-                    if pickup_error is not None:
-                        pickup_step = pickup.fail(pickup_error)
-                        command = pickup_step.motion_command()
-                        _apply_pickup_actions(
-                            pickup_step,
-                            arduino,
-                            steer,
-                        )
-                        command_updated = True
-                    elif (
-                        pickup_step.state
-                        == BallPickupSequencer.COMPLETE
-                    ):
-                        # Somente aqui a vitima conta: garras ja restauradas,
-                        # esfera liberada no triangulo correto e sem falha
-                        # serial durante a sequencia.
-                        completed_pickups += 1
-                        deposited_kind = pickup.target_kind
-                        coordinator.inventory.record_deposit(deposited_kind)
-                        inventory = coordinator.inventory
-                        print(
-                            f"[resgate] deposito {completed_pickups} "
-                            f"concluido ({deposited_kind}); inventario: "
-                            f"prata {inventory.silver_deposited}/2, "
-                            f"preta {inventory.black_deposited}/1")
+                        portao.reset()
+                        resultado_atual = None
+                        deteccao_atual = None
+                        ultimo_controle_ocioso = concluido_em
 
-                        controller = None
-                        marker_detector = None
-                        deposit_controller = None
-                        pickup_connection_epoch = None
-                        latest_result = None
-                        latest_detection = None
-                        latest_marker_detection = None
-                        latest_marker_captured_at = None
-                        detection_times.clear()
-                        last_idle_control = 0.0
-                        pickup_step = None
-
-                        if inventory.complete:
-                            # As tres vitimas sairam. O detector de vitimas
-                            # nao volta a rodar: a partir daqui a unica coisa
-                            # que interessa e a soleira preta de saida.
-                            search = None
-                            search_connection_epoch = None
-                            pickup = BallPickupSequencer()
-                            detector_worker.reset_tracking()
-                            fresh_gate.reset()
-                            if args.no_exit_phase:
-                                print(
-                                    "[resgate] tres vitimas resgatadas; "
-                                    "--no-exit-phase: parando aqui")
-                                command = MotionCommand(
-                                    "RESCUE_COMPLETE",
-                                    detail=(
-                                        "tres vitimas depositadas; "
-                                        "saida desativada por opcao"),
-                                    terminal=True)
-                            else:
-                                exit_controller = ExitPhaseController(
-                                    start_time=action_completed_at)
-                                exit_gate = BlackExitGate()
-                                triangle_mapper = FinalTriangleMapper()
-                                print(
-                                    "[resgate] tres vitimas resgatadas; "
-                                    "mapeando os triangulos e procurando "
-                                    "a faixa PRETA de saida")
-                                command = exit_controller.update(
-                                    None,
-                                    (cfg.RESCUE_CAMERA_MAX_HEIGHT,
-                                     cfg.RESCUE_CAMERA_MAX_WIDTH, 3),
-                                    mapper=triangle_mapper,
-                                    now=action_completed_at,
-                                )
-                            command_updated = True
-                        else:
-                            search, pickup = _reset_for_next_search(
-                                detector_worker,
-                                fresh_gate,
-                                action_completed_at,
-                                coordinator,
-                            )
-                            search_connection_epoch = None
-                            command = search.update(
-                                None, now=action_completed_at)
-                            command_updated = True
-                            print(
-                                "[resgate] procurando a proxima esfera "
-                                f"({', '.join(coordinator.preferred_kinds())})")
-                elif command_updated:
-                    motion_connection_epoch = arduino.connection_epoch
-                    motor_result = steer(command.angle, command.speed)
-                    if motor_result is False:
-                        raise RuntimeError(
-                            "comando de movimento nao foi enviado "
-                            "pela serial")
-                    if deposit_controller is not None:
-                        if (
-                            pickup_connection_epoch is not None
-                            and (
-                                not arduino.connected
-                                or arduino.connection_epoch
-                                != pickup_connection_epoch
-                            )
-                        ):
-                            raise RuntimeError(
-                                "serial mudou durante o transporte; "
-                                "motores parados e deposito bloqueado")
-                        action_completed_at = time.monotonic()
-                        active_deposit = deposit_controller
-                        if active_deposit.consume_tracking_reset():
-                            marker_detector.reset()
-                            latest_marker_detection = None
-                            latest_marker_captured_at = None
-                        if (
-                            command.state
-                            == DepositMarkerController.START
-                        ):
-                            active_deposit.mark_rotation_started(
-                                action_completed_at)
-                        elif (
-                            command.state
-                            == DepositMarkerController.TARGET_STOP
-                        ):
-                            active_deposit.mark_target_stopped(
-                                action_completed_at)
-                            marker_detector.reset()
-                            latest_marker_detection = None
-                            latest_marker_captured_at = None
-                            last_idle_control = action_completed_at
-                        elif (
-                            command.state
-                            == DepositMarkerController.TURN_STOP
-                        ):
-                            active_deposit.mark_full_turn_stopped(
-                                action_completed_at)
-                            marker_detector.reset()
-                            latest_marker_detection = None
-                            latest_marker_captured_at = None
-                            last_idle_control = action_completed_at
-                        elif (
-                            command.state
-                            == DepositMarkerController.LOST_STOP
-                        ):
-                            active_deposit.mark_lost_stopped(
-                                action_completed_at)
-                            marker_detector.reset()
-                            latest_marker_detection = None
-                            latest_marker_captured_at = None
-                            last_idle_control = action_completed_at
-                        elif (
-                            command.state
-                            == DepositMarkerController.ARRIVAL_STOP
-                        ):
-                            active_deposit.mark_arrival_stopped(
-                                action_completed_at)
-                            if not _authorize_marker_deposit(
-                                pickup, active_deposit
-                            ):
-                                raise RuntimeError(
-                                    "deposito recusado: chegada/cor/estado "
-                                    "nao autorizados")
-                            print(
-                                f"[deposito] triangulo "
-                                f"{active_deposit.target_kind} alcancado; "
-                                "executando o movimento de garra preservado")
-                            marker_detector = None
-                            deposit_controller = None
-                            latest_marker_detection = None
-                            latest_marker_captured_at = None
-                            last_idle_control = action_completed_at
-                    elif search is not None:
-                        action_completed_at = time.monotonic()
-                        if search.consume_tracking_reset():
-                            detector_worker.reset_tracking()
-                            fresh_gate.reset()
-                            latest_result = None
-                            latest_detection = None
-                        # A busca (continua ou pulsada) interpreta o proprio
-                        # estado e informa se o robo acabou de parar. Isso
-                        # evita repetir aqui a lista de estados de cada uma.
-                        if command.state == search.START:
-                            search_connection_epoch = (
-                                arduino.connection_epoch)
-                        if search.notify_command_written(
-                            command.state, action_completed_at
-                        ):
-                            # Acabou de parar: nenhuma memoria visual anterior
-                            # pode reconfirmar o alvo depois desta parada.
-                            fresh_gate.reset()
-                            latest_result = None
-                            latest_detection = None
-                            last_idle_control = action_completed_at
-                    elif exit_controller is not None:
-                        action_completed_at = time.monotonic()
-                        if exit_controller.consume_tracking_reset():
-                            exit_gate.reset(now=action_completed_at)
-                            latest_exit_detection = None
-                        if exit_controller.notify_command_written(
-                            command.state, action_completed_at
-                        ):
-                            # Parou: descarta a votacao feita durante o giro.
-                            exit_gate.reset(now=action_completed_at)
-                            latest_exit_detection = None
-                            last_idle_control = action_completed_at
             if arduino is not None:
                 arduino.refresh(fail_closed=True)
                 if (
-                    motion_connection_epoch is not None
+                    epoca_movimento is not None
                     and (
                         not arduino.connected
-                        or arduino.connection_epoch
-                        != motion_connection_epoch
+                        or arduino.connection_epoch != epoca_movimento
                     )
                 ):
                     raise RuntimeError(
                         "serial mudou depois do comando visual; "
                         "alvo invalidado e motores parados")
                 if (
-                    search is not None
-                    and search_connection_epoch is not None
+                    busca is not None
+                    and epoca_busca is not None
                     and (
                         not arduino.connected
-                        or arduino.connection_epoch
-                        != search_connection_epoch
+                        or arduino.connection_epoch != epoca_busca
                     )
                 ):
                     raise RuntimeError(
                         "serial mudou durante o giro de busca; "
-                        "360 invalidado e motores parados")
+                        "cobertura invalidada e motores parados")
 
+            log_agora = time.monotonic()
             if (
-                args.drive
-                and command.state == BallApproachController.NEAR
-                and not pickup.started
-            ):
-                if (
-                    motor_result is not True
-                    or motion_connection_epoch is None
-                    or arduino is None
-                    or not arduino.connected
-                    or arduino.connection_epoch
-                    != motion_connection_epoch
-                ):
-                    raise RuntimeError(
-                        "coleta recusada: PARAR da aproximacao nao teve "
-                        "escrita serial estavel")
-                if command.target_kind not in ("silver", "black"):
-                    raise RuntimeError(
-                        "coleta recusada: cor da esfera nao foi confirmada")
-                pickup.start(command.target_kind)
-                pickup_connection_epoch = (
-                    arduino.connection_epoch
-                    if arduino is not None else None
-                )
-                print(
-                    f"[coleta] esfera {command.target_kind} no ponto "
-                    "inferior: avancando 1,5 s, prendendo e elevando; "
-                    "a liberacao so ocorrera no triangulo correto")
-
-            log_now = time.monotonic()
-            should_log = (
-                command.state != last_state
+                comando.state != ultimo_estado
                 or (
-                    command.detail != last_logged_detail
-                    and log_now - last_log_at >= LOG_INTERVAL_S
+                    comando.detail != ultimo_detalhe
+                    and log_agora - ultimo_log >= INTERVALO_LOG_S
                 )
-            )
-            if should_log:
-                print(f"[resgate] {command.state}: {command.detail}")
-                last_state = command.state
-                last_logged_detail = command.detail
-                last_log_at = log_now
+            ):
+                print(f"[resgate] {comando.state}: {comando.detail}")
+                ultimo_estado = comando.state
+                ultimo_detalhe = comando.detail
+                ultimo_log = log_agora
 
-            result_age = (
-                time.monotonic() - latest_result.captured_at
-                if latest_result is not None else None)
-            overlay_detection = (
-                latest_detection
-                if (
-                    latest_result is not None
-                    and latest_detection is not None
-                    and result_age <= cfg.BALL_FRAME_STALE_S
-                )
-                else (
-                    latest_result.locked_detection
+            if args.debug and frame_atual is not None:
+                idade_resultado = (
+                    time.monotonic() - resultado_atual.captured_at
+                    if resultado_atual is not None else None)
+                mostrar = (
+                    deteccao_atual
                     if (
-                        latest_result is not None
-                        and latest_result.locked_detection is not None
-                        and time.monotonic()
-                        - latest_result.locked_detection.timestamp
-                        <= cfg.BALL_FRAME_STALE_S
+                        resultado_atual is not None
+                        and deteccao_atual is not None
+                        and idade_resultado <= cfg.BALL_FRAME_STALE_S
                     )
                     else None
                 )
-            )
-            detector_fps = _rate(detection_times)
-            processing_ms = (
-                last_metrics_result.processing_s * 1000.0
-                if last_metrics_result is not None else 0.0)
-            dropped = (
-                last_metrics_result.dropped_frames
-                if last_metrics_result is not None else 0)
-            vision_mode = (
-                "H" if (
-                    last_metrics_result is not None
-                    and last_metrics_result.hough_used
-                ) else "C"
-            )
-            candidate_count = (
-                last_metrics_result.candidate_count
-                if last_metrics_result is not None else 0)
-            hough_proposals = (
-                last_metrics_result.hough_proposals
-                if last_metrics_result is not None else 0)
-            candidate_radii = (
-                last_metrics_result.candidate_radii
-                if last_metrics_result is not None else ())
-            diagnostic = (
-                last_metrics_result.diagnostic
-                if last_metrics_result is not None else "inicio")
-            crescent_metrics = (
-                last_metrics_result.crescent_evidence
-                if last_metrics_result is not None else None)
-            crescent_marker = (
-                "F" if (
-                    crescent_metrics is not None
-                    and crescent_metrics.foil_fallback
-                ) else (
-                    "*" if (
-                        crescent_metrics is not None
-                        and crescent_metrics.accepted
-                    ) else ""
+                desempenho = (
+                    f"cam {_taxa(amostras_captura):.1f} | "
+                    f"vis {len(instantes_deteccao)} | "
+                    f"{(metricas.processing_s * 1000.0) if metricas else 0:.0f}ms"
+                    f" | {marcadores.resumo() if marcadores else ''}"
                 )
-            )
-            crescent_text = (
-                (
-                    " lua"
-                    f"{crescent_metrics.support * 100:.0f}%"
-                    f"/{crescent_metrics.contrast:.0f}"
-                    f"{crescent_marker}"
+                anotado = overlay_resgate.anotar(
+                    frame_atual,
+                    detection=mostrar,
+                    marcadores=marcadores_atuais,
+                    estado=comando.state,
+                    detalhe=comando.detail,
+                    motores_ativos=args.drive,
+                    desempenho=desempenho,
+                    guard=getattr(detector, "guard", None),
                 )
-                if crescent_metrics is not None
-                else ""
-            )
-            radii_text = (
-                " r" + "/".join(
-                    f"{radius:.0f}" for radius in candidate_radii)
-                if candidate_radii else "")
-            performance_text = (
-                f"cam {_sequence_rate(capture_samples):.1f} | "
-                f"vis {detector_fps:.1f} | "
-                f"{processing_ms:.0f}ms | "
-                f"{vision_mode}{candidate_count}/{hough_proposals}:"
-                f"{diagnostic}{radii_text}{crescent_text} | "
-                f"d{dropped}")
-
-            if (
-                args.debug
-                and latest_frame is not None
-                and (new_frame or command_updated)
-            ):
-                annotated = annotate_rescue_frame(
-                    latest_frame,
-                    overlay_detection,
-                    command.state,
-                    command.detail,
-                    None,
-                    motors_enabled=args.drive,
-                    performance_text=performance_text,
-                    pickup_in_range=command.pickup_in_range,
-                    pickup_confirmations=command.pickup_confirmations,
-                    crescent_evidence=(
-                        latest_result.crescent_evidence
-                        if latest_result is not None else None
-                    ),
-                )
-                annotated = _annotate_arena_guard(
-                    annotated, latest_result)
-                if exit_controller is not None:
-                    # Fase final: os DOIS triangulos aparecem juntos, cada um
-                    # na sua cor correta, e a soleira preta em azul para nao
-                    # se confundir com nenhum deles.
-                    annotated = annotate_final_triangles(
-                        annotated, latest_triangle_detections, copy=False)
-                    annotated = _annotate_exit_stripe(
-                        annotated, latest_exit_detection,
-                        exit_controller.state)
-                if deposit_controller is not None:
-                    marker_overlay = (
-                        latest_marker_detection
-                        if (
-                            latest_marker_captured_at is not None
-                            and time.monotonic()
-                            - latest_marker_captured_at
-                            <= cfg.BALL_FRAME_STALE_S
-                        )
-                        else None
-                    )
-                    annotated = _annotate_marker(
-                        annotated,
-                        marker_overlay,
-                        deposit_controller.target_kind,
-                    )
-                cv2.imshow(WINDOW, annotated)
-
-            if args.debug:
-                key = cv2.waitKey(1) & 0xFF
-                if key in (ord("q"), 27):
-                    break
-                if key == ord("s"):
-                    if args.drive:
-                        print(
-                            "[dataset] captura recusada com --drive; "
-                            "colecione imagens com os motores desativados")
-                    elif (
-                        latest_frame is None
-                        or latest_frame_captured_at is None
-                    ):
-                        print("[dataset] nenhum frame disponivel para salvar")
-                    else:
-                        if dataset_worker is None:
-                            dataset_worker = RescueDatasetWriter()
-                            print(
-                                "[dataset] sessao criada em "
-                                f"{dataset_worker.session_dir}")
-                        submitted = dataset_worker.submit(
-                            latest_frame,
-                            _dataset_metadata(
-                                args,
-                                command,
-                                last_frame_sequence,
-                                latest_frame_captured_at,
-                                last_metrics_result,
-                                time.monotonic(),
-                            ),
-                        )
-                        if submitted.accepted:
-                            print(
-                                "[dataset] frame bruto aceito: "
-                                f"{submitted.capture_id}")
-                        elif submitted.status == "mailbox_full":
-                            print(
-                                "[dataset] gravacao ocupada; aguarde antes "
-                                "de pressionar s novamente")
-                        else:
-                            print(
-                                "[dataset] captura recusada: "
-                                f"{submitted.status}")
-
-            if command.terminal:
-                approach_handoff = (
-                    args.drive
-                    and command.state == BallApproachController.NEAR
-                    and pickup.started
-                )
-                if args.drive and not approach_handoff:
-                    print(
-                        f"[resgate] estado terminal {command.state}; "
-                        "motores parados")
-                if (
-                    not approach_handoff
-                    and (not args.debug or args.drive)
-                ):
+                cv2.imshow(JANELA, anotado)
+                tecla = cv2.waitKey(1) & 0xFF
+                if tecla in (ord("q"), 27):
                     break
 
-            time.sleep(MAIN_TICK_S)
+            if comando.terminal:
+                print(
+                    f"[resgate] estado terminal {comando.state}; "
+                    "motores parados")
+                if not args.debug or args.drive:
+                    break
+
+            time.sleep(TICK_S)
 
     except RuntimeError as err:
         print(f"[resgate] ERRO: {err}")
     except KeyboardInterrupt:
         print("\n[resgate] Ctrl-C")
     finally:
-        # PARAR vem antes de aguardar worker/camera, inclusive em excecoes.
+        # PARAR vem antes de encerrar worker e camera, inclusive em excecao.
         if arduino is not None:
             from controle.direcao import steer
-            _best_effort("parar os motores", steer)
-            _best_effort("cortar o Futaba", arduino.parar_futaba)
-        if dataset_worker is not None:
-            dataset_closed = _best_effort(
-                "encerrar a gravacao do dataset",
-                lambda: dataset_worker.close(
-                    timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S),
-            )
-            if dataset_closed is False:
-                print(
-                    "[dataset] AVISO: gravacao nao encerrou no prazo; "
-                    "motores ja estao em PARAR")
-            if dataset_worker.failed_count:
-                print(
-                    "[dataset] AVISO: "
-                    f"{dataset_worker.failed_count} captura(s) falharam; "
-                    f"ultimo erro: {dataset_worker.last_error}")
-        if detector_worker is not None:
-            detector_closed = _best_effort(
+            _melhor_esforco("parar os motores", steer)
+        if trabalhador is not None:
+            _melhor_esforco(
                 "encerrar o detector",
-                lambda: detector_worker.close(
-                    timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S),
-            )
-            if detector_closed is False:
-                print(
-                    "[resgate] AVISO: detector nao encerrou no prazo; "
-                    "processo permanecera com a thread daemon")
-        if capture_worker is not None:
-            capture_closed = _best_effort(
+                lambda: trabalhador.close(
+                    timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S))
+        if captura is not None:
+            _melhor_esforco(
                 "encerrar a captura",
-                lambda: capture_worker.close(
-                    timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S),
-            )
-            if capture_closed is False:
-                print(
-                    "[resgate] AVISO: captura nao encerrou no prazo; "
-                    "motores ja estao em PARAR")
-        elif source is not None:
-            _best_effort("fechar a fonte de imagem", source.close)
+                lambda: captura.close(
+                    timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S))
+        elif fonte is not None:
+            _melhor_esforco("fechar a fonte", fonte.close)
         if arduino is not None:
-            _best_effort("fechar o Arduino", arduino.close)
-        if motor_lock is not None:
-            _best_effort("liberar a trava dos motores", motor_lock.release)
-        _best_effort("fechar a janela", cv2.destroyAllWindows)
-        inventory = coordinator.inventory
+            _melhor_esforco("fechar o Arduino", arduino.close)
+        if trava is not None:
+            _melhor_esforco("liberar a trava", trava.release)
+        _melhor_esforco("fechar a janela", cv2.destroyAllWindows)
+        if marcadores is not None:
+            print(
+                "[resgate] marcadores confirmados: "
+                f"verde={marcadores.confirmados['green']} "
+                f"vermelho={marcadores.confirmados['red']}")
         print(
-            "[resgate] inventario final: "
-            f"prata {inventory.silver_deposited}/2, "
-            f"preta {inventory.black_deposited}/1, "
-            f"total {inventory.total_deposited}/3")
-        if args.drive:
-            print("[resgate] encerrado com PARAR")
-        else:
-            print("[resgate] encerrado; motores nunca foram habilitados")
-
-    return mission_exit_code(
-        coordinator.inventory, exit_controller, args.no_exit_phase)
+            "[resgate] encerrado com PARAR" if args.drive
+            else "[resgate] encerrado; motores nunca foram habilitados")
+    return EXIT_OK
 
 
 if __name__ == "__main__":

@@ -21,12 +21,7 @@ from visao.dados_resgate import (  # noqa: E402
     SCHEMA_VERSION,
 )
 from controle.aproximacao_resgate import MotionCommand  # noqa: E402
-from resgate import _dataset_metadata  # noqa: E402
 from visao.resgate_assincrono import AsyncDetectionResult  # noqa: E402
-from visao.bola_resgate import (  # noqa: E402
-    BallDetection,
-    CloseCrescentEvidence,
-)
 
 
 class RescueDatasetWriterTests(unittest.TestCase):
@@ -206,99 +201,9 @@ class RescueDatasetWriterTests(unittest.TestCase):
         finally:
             self.assertTrue(writer.close(timeout=1.0))
 
-    def test_metadata_only_marks_exact_capture_result_as_same_frame(self):
-        args = SimpleNamespace(
-            camera_index=0,
-            target="silver",
-            no_enhance=False,
-            drive=False,
-        )
-        detection = BallDetection(
-            "silver", 320, 300, 42, 0.86,
-            True, 3, 10.0,
-            track_locked=True,
-        )
-        result = AsyncDetectionResult(
-            sequence=9,
-            source_sequence=41,
-            detection=detection,
-            frame_shape=(480, 640, 3),
-            detector_shape=(240, 320, 3),
-            captured_at=10.0,
-            completed_at=10.012,
-            processing_s=0.012,
-            dropped_frames=0,
-            generation=0,
-            hough_used=True,
-            contour_proposals=2,
-            hough_proposals=5,
-            candidate_count=3,
-            candidate_radii=(42.0, 31.0, 24.0),
-            diagnostic="ok",
-            candidate_circles=(
-                (320.0, 300.0, 42.0, "silver", 0.90),
-                (315.0, 298.0, 31.0, "silver", 0.82),
-                (330.0, 302.0, 24.0, "silver", 0.76),
-            ),
-            crescent_evidence=CloseCrescentEvidence(
-                True, 0.90, 0.80, 0.75, 0.90, 0.76,
-                42.0, 0.50, 0.74, 0.46, 0.98, 10.0,
-                foil_fallback=True,
-                foil_texture_bins=4,
-                foil_valid_bins=5,
-                interior_edge_density=0.08,
-                background_edge_density=0.01,
-            ),
-            locked_detection=detection,
-        )
-        command = MotionCommand("ALIGN", angle=180, speed=0.35)
-
-        exact = _dataset_metadata(
-            args, command, 41, 10.0, result, 10.02)
-        newer_frame = _dataset_metadata(
-            args, command, 42, 10.03, result, 10.04)
-
-        self.assertTrue(
-            exact["latest_detector_result"]["same_frame"])
-        self.assertFalse(
-            newer_frame["latest_detector_result"]["same_frame"])
-        self.assertTrue(exact["raw_unannotated"])
-        self.assertEqual(
-            exact["latest_detector_result"]["candidate_radii"],
-            [42.0, 31.0, 24.0],
-        )
-        self.assertEqual(
-            exact["latest_detector_result"]["candidate_circles"][0],
-            [320.0, 300.0, 42.0, "silver", 0.90],
-        )
-        self.assertTrue(
-            exact["latest_detector_result"]["detection"][
-                "track_locked"
-            ]
-        )
-        self.assertEqual(
-            exact["latest_detector_result"]["locked_detection"][
-                "radius"
-            ],
-            42.0,
-        )
-        self.assertTrue(
-            exact["latest_detector_result"]["crescent_evidence"]["accepted"])
-        self.assertEqual(
-            exact["latest_detector_result"]["crescent_evidence"]["support"],
-            0.80,
-        )
-        self.assertTrue(
-            exact["latest_detector_result"]["crescent_evidence"][
-                "foil_fallback"
-            ]
-        )
-        self.assertEqual(
-            exact["latest_detector_result"]["crescent_evidence"][
-                "foil_texture_bins"
-            ],
-            4,
-        )
+    # O teste de _dataset_metadata foi removido junto com a funcao: a
+    # captura por tecla `s` dentro do resgate deu lugar a ferramenta
+    # dedicada tools/coletar_dataset.py, que grava em sessoes.
 
 
 if __name__ == "__main__":

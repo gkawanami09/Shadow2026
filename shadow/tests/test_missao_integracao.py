@@ -14,105 +14,6 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
 import config_resgate as cfg  # noqa: E402
-from controle.missao import (  # noqa: E402
-    MissionCoordinator,
-    RescueInventory,
-    POLICY_SILVER_FIRST,
-)
-from controle.saida_resgate import ExitPhaseController  # noqa: E402
-import resgate  # noqa: E402
-
-
-class ExitCodeTests(unittest.TestCase):
-    """O supervisor precisa distinguir 'saiu da sala' de 'só resgatou'."""
-
-    @staticmethod
-    def _inventario_completo():
-        inventory = RescueInventory()
-        inventory.record_deposit("silver")
-        inventory.record_deposit("silver")
-        inventory.record_deposit("black")
-        return inventory
-
-    def test_tres_vitimas_e_saida_confirmada_e_sucesso(self):
-        saida = ExitPhaseController(start_time=0.0)
-        saida.state = ExitPhaseController.DONE
-        self.assertEqual(
-            resgate.mission_exit_code(self._inventario_completo(), saida),
-            resgate.EXIT_OK)
-
-    def test_tres_vitimas_sem_achar_a_saida_nao_e_sucesso(self):
-        saida = ExitPhaseController(start_time=0.0)
-        saida.state = ExitPhaseController.FAILED
-        self.assertEqual(
-            resgate.mission_exit_code(self._inventario_completo(), saida),
-            resgate.EXIT_INCOMPLETE)
-
-    def test_saida_encontrada_mas_vitimas_faltando_nao_e_sucesso(self):
-        inventory = RescueInventory()
-        inventory.record_deposit("silver")
-        saida = ExitPhaseController(start_time=0.0)
-        saida.state = ExitPhaseController.DONE
-        self.assertEqual(
-            resgate.mission_exit_code(inventory, saida),
-            resgate.EXIT_INCOMPLETE)
-
-    def test_modo_por_etapas_nao_exige_a_saida(self):
-        self.assertEqual(
-            resgate.mission_exit_code(
-                self._inventario_completo(), None, no_exit_phase=True),
-            resgate.EXIT_OK)
-
-    def test_codigos_batem_com_os_lidos_pelo_supervisor(self):
-        import mission
-        self.assertEqual(resgate.EXIT_OK, mission.RESCUE_EXIT_OK)
-        self.assertEqual(
-            resgate.EXIT_INCOMPLETE, mission.RESCUE_EXIT_INCOMPLETE)
-
-
-class SearchPolicyWiringTests(unittest.TestCase):
-    """A busca recebe o filtro de cor da política ativa."""
-
-    def test_reset_para_a_proxima_esfera_usa_a_politica(self):
-        class FakeWorker:
-            def __init__(self):
-                self.reset_calls = 0
-
-            def reset_tracking(self):
-                self.reset_calls += 1
-
-        class FakeGate:
-            def __init__(self):
-                self.reset_calls = 0
-
-            def reset(self):
-                self.reset_calls += 1
-
-        coordinator = MissionCoordinator(policy=POLICY_SILVER_FIRST)
-        worker, gate = FakeWorker(), FakeGate()
-        search, pickup = resgate._reset_for_next_search(
-            worker, gate, 0.0, coordinator)
-
-        self.assertEqual(worker.reset_calls, 1)
-        self.assertEqual(gate.reset_calls, 1)
-        self.assertFalse(pickup.started)
-        # silver_first: a preta é recusada enquanto faltar uma prata.
-        self.assertFalse(search._kind_allowed("black"))
-        self.assertTrue(search._kind_allowed("silver"))
-
-        coordinator.inventory.record_deposit("silver")
-        coordinator.inventory.record_deposit("silver")
-        self.assertTrue(search._kind_allowed("black"))
-
-    def test_cor_ja_completa_nao_volta_a_ser_buscada(self):
-        coordinator = MissionCoordinator()
-        coordinator.inventory.record_deposit("black")
-        search, _ = resgate._reset_for_next_search(
-            type("W", (), {"reset_tracking": lambda self: None})(),
-            type("G", (), {"reset": lambda self: None})(),
-            0.0, coordinator)
-        self.assertFalse(search._kind_allowed("black"))
-        self.assertTrue(search._kind_allowed("silver"))
 
 
 class ConfigProfileSeparationTests(unittest.TestCase):
@@ -198,6 +99,11 @@ class PulsedSearchConfigTests(unittest.TestCase):
             cfg.BALL_SEARCH_SETTLE_S + cfg.BALL_SEARCH_OBSERVE_TIMEOUT_S)
         minimo = cfg.BALL_SEARCH_FULL_TURN_S + pausas
         self.assertGreaterEqual(cfg.BALL_SEARCH_TOTAL_TIMEOUT_S, minimo)
+
+
+    # Testes da cola de orquestracao removidos junto com ela: a
+    # coleta, o deposito e os codigos de saida da missao sairam do
+    # escopo atual do resgate.py. Os modulos continuam no repo.
 
 
 if __name__ == "__main__":

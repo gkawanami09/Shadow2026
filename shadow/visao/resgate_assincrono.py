@@ -6,7 +6,7 @@ import time
 
 import cv2
 
-from visao.bola_resgate import BallDetection
+from visao.deteccao import VictimDetection
 
 
 def _fit_detector_size(frame_shape, max_width, max_height):
@@ -31,7 +31,7 @@ def _scale_detection(detection, from_shape, to_shape):
     scale_x = float(to_width) / max(from_width, 1)
     scale_y = float(to_height) / max(from_height, 1)
     radius_scale = min(scale_x, scale_y)
-    return BallDetection(
+    return VictimDetection(
         detection.kind,
         detection.center_x * scale_x,
         detection.center_y * scale_y,
@@ -41,6 +41,9 @@ def _scale_detection(detection, from_shape, to_shape):
         detection.hits,
         detection.timestamp,
         track_locked=detection.track_locked,
+        # A marca de "cortada pela borda" e uma propriedade do enquadramento,
+        # nao da escala: ela sobrevive a mudanca de resolucao.
+        truncated=getattr(detection, "truncated", False),
     )
 
 

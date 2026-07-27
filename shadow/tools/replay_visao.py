@@ -133,16 +133,23 @@ class PerfilSaida:
 
 
 class PerfilVitima:
-    """Detector de esferas preservado, com arena e exclusão de triângulos."""
+    """Vítimas pelo modelo treinado + plausibilidade física.
+
+    Exige o modelo em ``config_resgate.VICTIM_MODEL_PATH``. Sem ele o perfil
+    falha na hora, com a instrução do que fazer — nunca produz detecção falsa.
+    """
 
     nome = "vitima"
     camera = "resgate"
 
     def __init__(self, alvo="any"):
-        from visao.bola_resgate import BallDetector
-        self.detector = BallDetector(
-            target_kind=alvo, enhance=True,
-            enforce_arena=True, exclude_markers=True)
+        from visao.vitima_yolo import (ModeloAusenteError, VictimDetector,
+                                       VictimModel)
+        try:
+            modelo = VictimModel().carregar()
+        except ModeloAusenteError as err:
+            raise SystemExit(f"\n[replay] {err}\n")
+        self.detector = VictimDetector(model=modelo, target_kind=alvo)
 
     def processar(self, frame, timestamp):
         deteccao = self.detector.detect(frame, timestamp=timestamp)

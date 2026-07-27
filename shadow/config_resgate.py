@@ -38,25 +38,55 @@ RESCUE_DETECTOR_MAX_HEIGHT = 240
 RESCUE_ARM_DELAY_S = 3.0
 RESCUE_WORKER_JOIN_TIMEOUT_S = 2.0
 
-# A soleira da arena e apenas um veto quando existe evidencia forte. Nas fotos
-# reais a lente larga curva a parede/piso e portas interrompem a linha; exigir
-# um modelo valido em todo frame deixava o detector completamente cego.
-# A analise roda reduzida e em frames alternados para nao derrubar o FPS.
-ARENA_GUARD_WORK_WIDTH = 160
-ARENA_GUARD_WORK_HEIGHT = 120
-ARENA_GUARD_INTERVAL_FRAMES = 2
-ARENA_VETO_MIN_CONFIDENCE = 0.64
-ARENA_VETO_MAX_FLOOR_SUPPORT = 0.12
 
-# Durante a busca de bolinhas, os dois filtros cromaticos de triangulo tambem
-# rodam em frames alternados. Como adquirir uma esfera exige tres resultados,
-# um triangulo ainda e interceptado antes de poder obter LOCK.
-MARKER_GUARD_INTERVAL_FRAMES = 2
+# ---------------------------------------------------------------------------
+# Camada de plausibilidade fisica (visao/plausibilidade.py)
+# ---------------------------------------------------------------------------
+# Estas sao as UNICAS regras que sobrevivem a troca de arena, porque descrevem
+# geometria de camera e nao aparencia. Elas dependem da ALTURA E DO ANGULO de
+# montagem da camera de resgate: se a camera mudar de posicao, recalibre.
+#
+# Medido nas 18 fotos reais deste robo: vitimas com centro entre 0.75 e 0.96
+# da altura, raio entre 0.060 e 0.115 da largura. Essas fotos cobrem apenas
+# vitimas PROXIMAS, entao a envoltoria abaixo e propositalmente larga — nao
+# tenho dado de vitima distante nesta camera e apertar cegamente rejeitaria
+# justamente o que nunca vi. Ajuste com tools/ajustar_plausibilidade.py assim
+# que houver dataset rotulado.
+PLAUSIBLE_ENABLED = True
+PLAUSIBLE_EDGE_MARGIN_PX = 2
+# Acima disto so existe parede, publico, cadeira e mesa. Generoso de
+# proposito: uma vitima distante aparece mais alta no quadro.
+PLAUSIBLE_MIN_CENTER_Y_RATIO = 0.45
+# Envoltoria tamanho x linha. Raio esperado, em fracao da LARGURA do quadro,
+# nas duas linhas de referencia (fracao da ALTURA).
+PLAUSIBLE_ROW_TOP = 0.45
+PLAUSIBLE_ROW_BOTTOM = 1.00
+PLAUSIBLE_RADIUS_AT_TOP = 0.020
+PLAUSIBLE_RADIUS_AT_BOTTOM = 0.120
+# Tolerancia larga ao redor do esperado enquanto o dataset nao existe.
+PLAUSIBLE_RADIUS_TOLERANCE_LOW = 0.40
+PLAUSIBLE_RADIUS_TOLERANCE_HIGH = 2.50
 
-# Melhoria de iluminação já experimentada no visualizador de câmeras.
-RESCUE_CLAHE_CLIP = 2.0
-RESCUE_CLAHE_GRID = (8, 8)
-RESCUE_GAMMA = 1.5
+# ---------------------------------------------------------------------------
+# Detector de vitimas por modelo treinado (visao/vitima_yolo.py)
+# ---------------------------------------------------------------------------
+# O modelo NAO acompanha o repositorio: ele depende de imagens da camera
+# deste robo. Enquanto o arquivo nao existir, o detector falha alto e
+# explica o que falta — nunca finge estar pronto.
+VICTIM_MODEL_PATH = "modelos/vitimas.onnx"
+VICTIM_MODEL_INPUT = 320
+VICTIM_MODEL_MIN_CONFIDENCE = 0.45
+VICTIM_MODEL_NMS_IOU = 0.45
+# Ordem das classes no modelo. Precisa bater com o data.yaml do treino.
+VICTIM_MODEL_CLASSES = ("black", "silver")
+
+# Confirmacao temporal e rastreamento do alvo unico.
+VICTIM_ACQUIRE_HITS = 3
+VICTIM_MAX_TRACK_MISSES = 2
+VICTIM_ASSOCIATION_MIN_PX = 34
+VICTIM_ASSOCIATION_RADIUS_FACTOR = 1.05
+VICTIM_RADIUS_RATIO_MIN = 0.55
+VICTIM_RADIUS_RATIO_MAX = 1.80
 
 # Regiao e propostas geometricas.
 # Limiares em pixels abaixo foram calibrados em 640x480 e sao escalados
@@ -73,182 +103,16 @@ def ball_pixel_scale(frame_width, frame_height):
     ), 0.25)
 
 
-BALL_ROI_TOP = 0.12
-# Pessoas, roupas e objetos externos aparecem acima da parede da arena. Uma
-# esfera so pode entrar no detector/tracker quando o centro estiver na metade
-# inferior; o raio ainda pode atravessar a linha quando a vitima estiver perto.
-BALL_TARGET_MIN_CENTER_Y_RATIO = 0.50
-# O circulo pode continuar valido ate a ultima linha. Uma tolerancia pequena
-# deixa o lock sobreviver quando a base acabou de ser cortada, sem mover para
-# cima o ponto fisico que dispara a coleta.
-BALL_ROI_BOTTOM = 1.00
-BALL_ROI_BOTTOM_OVERFLOW_RATIO = 0.10
-BALL_MIN_RADIUS_PX = 9
-BALL_MAX_RADIUS_PX = 135
-BALL_MIN_CIRCULARITY = 0.56
-BALL_MIN_FILL_RATIO = 0.50
-BALL_MAX_ASPECT_RATIO = 1.32
-# O perimetro precisa existir ao redor da proposta, e nao apenas em alguns
-# pontos que por acaso formam um arco de Hough. A busca radial usa gradiente
-# alinhado com a normal do circulo, divide a volta em oito setores e mede a
-# dispersao da borda encontrada. O setor inferior pode faltar quando a esfera
-# toca o piso ou comeca a sair do quadro; topo e laterais continuam obrigatorios.
-BALL_RADIAL_SAMPLES = 72
-BALL_RADIAL_SECTORS = 8
-# Hough frequentemente encaixa um reflexo interno com raio cerca de 25% menor
-# que o envelope real. A faixa larga permite encontrar o perimetro externo; a
-# dispersao radial abaixo impede que lados de triangulos/elipses se aproveitem.
-# A busca e ASSIMETRICA porque o erro do Hough e assimetrico: ele engancha em
-# um reflexo/faceta INTERNA e quase nunca em algo maior que a esfera. Medido
-# nas capturas reais da arena: com r proposto 38 e envelope real 67, a borda
-# verdadeira esta a +76% — muito alem dos 40% originais, entao a busca nem
-# alcancava o perimetro e so encontrava facetas internas do papel amassado.
-BALL_RADIAL_SEARCH_BAND_RATIO = 0.40          # para dentro
-BALL_RADIAL_SEARCH_OUTWARD_RATIO = 1.00       # para fora
-BALL_RADIAL_MAX_STEPS = 41
-BALL_RADIAL_MIN_GRADIENT = 20.0
-# Fracao dos votos do pico que um raio precisa ter para disputar como
-# envelope. Entre os que passam, vence o mais externo (ver a votacao em
-# bola_resgate). Perto de 1.0 o comportamento volta a ser "so o pico".
-BALL_RADIAL_VOTE_RATIO = 0.65
-# Fracao minima do perimetro que precisa estar DENTRO da imagem para o teste
-# valer alguma coisa. Uma esfera encostada na lateral do quadro continua
-# sendo vitima e e julgada pela parte visivel; abaixo deste limite sobra
-# pouco contorno observavel para decidir qualquer coisa.
-BALL_RADIAL_MIN_MEASURABLE_FRACTION = 0.45
-BALL_RADIAL_MIN_ALIGNMENT = 0.72
-BALL_MIN_EDGE_SUPPORT = 0.58
-
-# --- Rota de FOIL no teste de perimetro ------------------------------------
-# Papel-aluminio amassado nao e um circulo dentro de 10% de tolerancia: sua
-# silhueta e genuinamente irregular. Em vez de afrouxar a dispersao para todo
-# mundo (o que deixava sombras e roupas passarem), existe uma rota separada
-# que troca tolerancia de FORMA por evidencia de TEXTURA — a mesma filosofia
-# ja usada no gate de proximidade (BALL_CRESCENT_FOIL_*).
-#
-# Medido nas capturas reais da arena, densidade de borda no interior do
-# circulo: esferas amassadas 0.235 a 0.256; esferas lisas 0.000 a 0.063;
-# a regiao do falso positivo (pessoa) 0.034. A separacao e limpa.
-BALL_RADIAL_FOIL_MIN_SUPPORT = 0.65
-BALL_RADIAL_FOIL_MIN_SECTORS = 7
-BALL_RADIAL_FOIL_MAX_DISPERSION = 0.24
-BALL_RADIAL_FOIL_MIN_TEXTURE = 0.15
-BALL_RADIAL_FOIL_INNER_RATIO = 0.78
-BALL_RADIAL_MIN_SECTOR_SUPPORT = 0.25
-BALL_RADIAL_MIN_GOOD_SECTORS = 6
-BALL_RADIAL_MAX_DISPERSION_RATIO = 0.10
-
-# Hough + bordas. Os contornos de mascara cobrem a esfera preta; Hough e
-# contraste local cobrem a esfera prateada/reflexiva.
-BALL_MEDIAN_BLUR = 5
-BALL_CANNY_SIGMA = 0.33
-BALL_HOUGH_DP = 1.2
-BALL_HOUGH_MIN_DIST_PX = 28
-BALL_HOUGH_PARAM1 = 105
-BALL_HOUGH_PARAM2 = 18
-BALL_HOUGH_MIN_CONFIDENCE = 0.66
-# Sem candidato nem track, o Hough pesado roda em frames alternados. Assim o
-# fundo cheio de circulos falsos nao prende o Raspberry; ao primeiro candidato
-# Hough, o tracker existe e os frames seguintes voltam a ser consecutivos.
-BALL_HOUGH_IDLE_INTERVAL_FRAMES = 2
-# Um contorno forte ja passou por circularidade, borda e aparencia. Nessa
-# situacao, Hough redundante durante os 3 hits de aquisicao so adiciona atraso.
-BALL_CONTOUR_FAST_CONFIDENCE = 0.68
-
-# Aparencia no frame original (classificacao nunca usa o gamma).
-BALL_BLACK_V_MAX = 105
-BALL_BLACK_DARK_FRACTION_MIN = 0.52
-BALL_BLACK_LOCAL_CONTRAST_MIN = 8.0
-# Uma mancha escura uniforme nao vira esfera apenas por ser muito preta. O
-# exterior deve ser mais claro que o interior em varios trechos independentes
-# do perimetro.
-BALL_APPEARANCE_SECTORS = 8
-BALL_APPEARANCE_MIN_SECTOR_SAMPLES = 4
-BALL_BLACK_MIN_USABLE_CONTRAST_SECTORS = 6
-BALL_BLACK_MIN_CONTRAST_SECTORS = 5
 BALL_SILVER_S_MAX = 88
-# Referencia de bonus, nao gate: aluminio reflete a cor do iluminante e pode
-# ficar ciano/verde com saturacao alta mesmo continuando metalico.
-BALL_SILVER_LOW_SAT_FRACTION_MIN = 0.62
-BALL_SILVER_DYNAMIC_RANGE_MIN = 20.0
-BALL_SILVER_HIGHLIGHT_V = 195
-BALL_SILVER_HIGHLIGHT_FRACTION_MIN = 0.015
-# Madeira clara e sombras com uma linha podiam satisfazer um unico percentil
-# global. O aluminio precisa distribuir textura e reflexos por varios setores.
-BALL_SILVER_TEXTURE_SECTORS = 6
-BALL_SILVER_MIN_TEXTURE_SECTORS = 4
-BALL_SILVER_MIN_REFLECTIVE_SECTORS = 3
-BALL_SILVER_SECTOR_DYNAMIC_RANGE_MIN = 18.0
-BALL_SILVER_SECTOR_HIGHLIGHT_FRACTION_MIN = 0.01
-# Segunda assinatura para a esfera prata lisa vista nas novas fotos. Ela pode
-# ter pouco "amassado" por setor, mas conserva um contorno circular forte,
-# neutralidade, um reflexo compacto e escurecimento esferico ate a borda.
-BALL_SILVER_SMOOTH_LOW_SAT_FRACTION_MIN = 0.70
 BALL_SILVER_SMOOTH_INNER_V_MIN = 115
-BALL_SILVER_SMOOTH_DYNAMIC_RANGE_MIN = 7.0
-BALL_SILVER_SMOOTH_DYNAMIC_RANGE_MAX = 45.0
-BALL_SILVER_SMOOTH_HIGHLIGHT_MIN = 0.008
-BALL_SILVER_SMOOTH_HIGHLIGHT_MAX = 0.32
-BALL_SILVER_SMOOTH_CENTER_RIM_MIN = 5.0
-BALL_SILVER_SMOOTH_QUADRANT_CONTRAST_MIN = 4.0
-BALL_SILVER_SMOOTH_MIN_RADIAL_QUADRANTS = 3
-BALL_SILVER_SMOOTH_MIN_REFLECTIVE_SECTORS = 1
-BALL_SILVER_SMOOTH_GEOMETRY_MIN = 0.78
-BALL_SILVER_BRIGHT_INNER_V_MIN = 175
-BALL_SILVER_BRIGHT_DYNAMIC_RANGE_MIN = 4.0
-BALL_SILVER_BRIGHT_HIGHLIGHT_MIN = 0.25
-BALL_SILVER_BRIGHT_HIGHLIGHT_MAX = 0.92
-BALL_SILVER_BRIGHT_CENTER_RIM_MIN = 3.0
-BALL_SILVER_BRIGHT_MIN_REFLECTIVE_SECTORS = 4
-BALL_SILVER_BRIGHT_GEOMETRY_MIN = 0.80
-# Rota conservadora para aluminio refletindo luz ciano/verde. Ela dispensa a
-# neutralidade global somente quando textura, brilho quase neutro e borda sao
-# simultaneamente muito fortes.
-BALL_SILVER_TINTED_INNER_V_MIN = 110
-BALL_SILVER_TINTED_DYNAMIC_RANGE_MIN = 40.0
-BALL_SILVER_TINTED_HIGHLIGHT_FRACTION_MIN = 0.05
-BALL_SILVER_TINTED_NEUTRAL_S_MAX = 120
-BALL_SILVER_TINTED_NEUTRAL_HIGHLIGHT_MIN = 0.015
-BALL_SILVER_TINTED_EDGE_SUPPORT_MIN = 0.35
 BALL_MIN_CONFIDENCE = 0.56
 
 # Rastreamento e confirmacao temporal.
 BALL_ACQUIRE_HITS = 3
-BALL_MAX_TRACK_MISSES = 2
-# Uma falha isolada nao troca a identidade nem apaga a confirmacao do track.
-# O controle ainda manda PARAR naquele frame; somente a memoria visual sobrevive.
-BALL_TRACK_COAST_MISSES = 1
-BALL_ASSOCIATION_MIN_PX = 34
-BALL_ASSOCIATION_RADIUS_FACTOR = 1.05
-BALL_RADIUS_RATIO_MIN = 0.62
-BALL_RADIUS_RATIO_MAX = 1.60
-# Antes dos 3 hits, reflexos internos nao podem ser associados como se fossem
-# o mesmo perimetro externo. Depois da confirmacao, os limites amplos acima
-# continuam cobrindo o movimento real do robo e pequenas perdas de quadro.
-BALL_ACQUIRE_ASSOCIATION_MIN_PX = 16
-BALL_ACQUIRE_ASSOCIATION_RADIUS_FACTOR = 0.45
-BALL_ACQUIRE_ASSOCIATION_MAX_PX = 32
-BALL_ACQUIRE_RADIUS_RATIO_MIN = 0.72
-BALL_ACQUIRE_RADIUS_RATIO_MAX = 1.40
-BALL_TRACK_EMA_ALPHA = 0.40
 # O segundo gate temporal do worker tambem tolera somente uma falha entre
 # resultados novos do mesmo track bloqueado.
 BALL_FRESH_GATE_MAX_MISSES = 1
 
-# Propostas quase identicas sao redundantes; circulos concentricos com raios
-# diferentes precisam chegar a classificacao para um halo invalido nao apagar
-# o perimetro verdadeiro.
-BALL_DUPLICATE_CENTER_FACTOR = 0.25
-BALL_DUPLICATE_RADIUS_RATIO_MIN = 0.82
-
-# Entre candidatos ja validados, um circulo menor pode ser apenas um reflexo
-# dentro da esfera. A preferencia pelo envelope externo so vale quando existe
-# contencao geometrica e a confianca externa permanece proxima da interna.
-BALL_OUTER_MIN_RADIUS_RATIO = 1.15
-BALL_OUTER_MAX_RADIUS_RATIO = 1.80
-BALL_OUTER_CENTER_FACTOR = 0.45
-BALL_OUTER_CONTAINMENT_SLACK = 1.15
-BALL_OUTER_CONFIDENCE_TOLERANCE = 0.18
 
 # Controle de aproximacao. O comando usa a lei steer() ja existente:
 # positivo=direita, negativo=esquerda, |angulo|>110=pivo, 190=PARAR.
@@ -293,66 +157,6 @@ BALL_NEAR_CONFIRM_MAX_MISSES = 1
 BALL_NEAR_CONFIRM_GRACE_S = 0.18
 BALL_NEAR_CONFIRM_WINDOW_S = 0.35
 
-# Gate de proximidade pela borda superior da esfera enorme/cortada. Cada
-# template é o arco circular que passa pelo ápice e pelos dois ombros.
-# Os frames reais colocaram o ápice entre 0,62H e 0,74H. Uma esfera distante
-# não cobre simultaneamente os dois ombros e o centro.
-BALL_CRESCENT_TOP_RATIOS = (0.62, 0.66, 0.70, 0.74)
-# Os brutos reais ocupam aproximadamente 80–92% da largura. Exigir essa meia
-# lua larga impede que a perspectiva de uma bolinha distante arme a coleta.
-BALL_CRESCENT_HALFSPAN_RATIOS = (0.40, 0.46)
-BALL_CRESCENT_CENTER_RATIOS = (0.44, 0.48, 0.50, 0.52, 0.56)
-BALL_CRESCENT_BOTTOM_RATIO = 0.98
-BALL_CRESCENT_DEFAULT_TOP_RATIO = 0.70
-BALL_CRESCENT_DEFAULT_HALFSPAN_RATIO = 0.46
-BALL_CRESCENT_BAND_RATIO = 0.035
-BALL_CRESCENT_CONTRAST_OFFSET_RATIO = 0.025
-BALL_CRESCENT_OUTSIDE_CONTRAST_OFFSET_RATIO = 0.050
-BALL_CRESCENT_DEEP_CONTRAST_OFFSET_RATIO = 0.075
-BALL_CRESCENT_DEEP_INNER_X_RATIO = 0.70
-BALL_CRESCENT_SAMPLES = 73
-BALL_CRESCENT_MIN_SUPPORT = 0.55
-BALL_CRESCENT_MIN_SHOULDER_SUPPORT = 0.40
-BALL_CRESCENT_MIN_CENTER_SUPPORT = 0.55
-BALL_CRESCENT_MIN_CONTRAST = 10.0
-BALL_CRESCENT_MIN_GRADIENT = 12.0
-BALL_CRESCENT_MIN_GRADIENT_ALIGNMENT = 0.82
-BALL_CRESCENT_MIN_GRADIENT_POLARITY = 0.62
-BALL_CRESCENT_MIN_PROFILE_SUPPORT = 0.55
-BALL_CRESCENT_MIN_PROFILE_POLARITY = 0.62
-BALL_CRESCENT_MIN_COHERENT_RUN = 0.18
-# A silhueta da esfera de foil tem pequenos dentes. A suavização é aplicada
-# apenas aos pontos já validados da borda, antes dos testes de forma global.
-BALL_CRESCENT_SMOOTH_SAMPLES = 9
-BALL_CRESCENT_MAX_CIRCLE_RMSE_RATIO = 0.008
-BALL_CRESCENT_CURVATURE_BINS = 7
-BALL_CRESCENT_MIN_CURVATURE_SCORE = 0.95
-# Exige curvatura também nos ombros. Um V ligado a uma bolinha ainda pequena
-# pode parecer circular no miolo, mas seus incrementos externos ficam < 0.08.
-BALL_CRESCENT_MIN_SLOPE_STEP = 0.08
-BALL_CRESCENT_MIN_SLOPE_SPAN = 0.45
-BALL_CRESCENT_MAX_CENTER_ERROR = 0.12
-
-# Segunda rota exclusiva para o papel-alumínio amassado/desfocado. A forma
-# pode perder Canny e circularidade local, mas precisa ter reflexos distribuídos
-# dentro do domo e fundo muito mais limpo; sombras e rampas sólidas não passam.
-BALL_CRESCENT_FOIL_MIN_SUPPORT = 0.45
-BALL_CRESCENT_FOIL_MIN_SHOULDER_SUPPORT = 0.35
-BALL_CRESCENT_FOIL_MIN_CENTER_SUPPORT = 0.45
-BALL_CRESCENT_FOIL_MIN_COHERENT_RUN = 0.16
-BALL_CRESCENT_FOIL_MAX_CIRCLE_RMSE_RATIO = 0.025
-# Um candidato por par (altura, largura); evita gastar as tres vagas apenas
-# com pequenos deslocamentos horizontais da mesma forma.
-BALL_CRESCENT_FOIL_MAX_CANDIDATES = 3
-BALL_CRESCENT_FOIL_TEXTURE_BINS = 5
-BALL_CRESCENT_FOIL_MIN_TEXTURE_BINS = 4
-BALL_CRESCENT_FOIL_MIN_DYNAMIC_RANGE = 35.0
-BALL_CRESCENT_FOIL_INNER_X_RATIO = 0.75
-BALL_CRESCENT_FOIL_INSIDE_OFFSETS = (0.035, 0.070, 0.105, 0.140)
-BALL_CRESCENT_FOIL_OUTSIDE_OFFSETS = (0.060, 0.100, 0.140)
-BALL_CRESCENT_FOIL_MIN_INTERIOR_EDGE_DENSITY = 0.02
-BALL_CRESCENT_FOIL_MAX_BACKGROUND_EDGE_DENSITY = 0.04
-BALL_CRESCENT_FOIL_BACKGROUND_EDGE_RATIO = 0.60
 
 # A meia-lua so pode concluir uma aproximacao visual real. O token e armado
 # por uma serie temporal de circulos centralizados, crescentes e ja baixos no
@@ -619,9 +423,7 @@ MARKER_MIN_SIDE_PX = 9
 # (MARKER_MIN_INSIDE_CHROMA e o contraste com o anel) continua valendo.
 MARKER_EDGE_MARGIN_PX = 2
 MARKER_NEAR_AREA_RATIO = 0.15
-# NAO afrouxar estes limites sem resolver antes o problema abaixo.
-#
-# Medicao nas capturas reais da arena (visao/marcador_resgate no pipeline):
+# FORMA NAO DISCRIMINA MARCADOR NESTA CAMERA. Medido no pipeline real:
 #
 #   marcador a distancia de navegacao  triangularidade 0.577  proporcao 1.03
 #   marcador de perto                  triangularidade 0.623  proporcao 3.83
@@ -629,19 +431,25 @@ MARKER_NEAR_AREA_RATIO = 0.15
 #   circulo perfeito                   triangularidade 0.605
 #   quadrado perfeito                  triangularidade 0.500
 #
-# Ou seja: nesta perspectiva quase rente ao piso, a cadeira e MAIS triangular
-# que o marcador, e o marcador cai entre quadrado e circulo. Nao existe
-# limiar de triangularidade que aceite o marcador e rejeite um circulo — os
-# testes test_colored_circles_are_not_triangles provaram isso na pratica.
+# A cadeira e MAIS triangular que o marcador, e o marcador cai entre quadrado
+# e circulo. Nenhum limiar de triangularidade aceita o marcador e rejeita um
+# circulo — a camera olha quase rente ao piso e o escorco destroi a forma.
 #
-# Quem separa de verdade e a CROMATICIDADE do blob: marcador 124-148 contra
-# cadeira 63-79. Ver MARKER_MIN_INSIDE_CHROMA acima.
-MARKER_MAX_ASPECT_RATIO = 3.0
-MARKER_MIN_SOLIDITY = 0.82
-MARKER_MIN_MASK_FILL = 0.78
+# Por isso o gate de triangularidade FOI REMOVIDO e o rigor foi transferido
+# para a CROMATICIDADE do blob, onde a separacao medida e enorme:
+# marcador 124-148 contra cadeira 63-79 (ver MARKER_MIN_INSIDE_CHROMA).
+#
+# Consequencia honesta: um circulo verde ou vermelho MUITO saturado, no chao,
+# dentro da ROI, seria aceito. Nao existe objeto assim na arena, mas isso e
+# uma protecao que foi perdida de proposito porque ela era incompativel com
+# detectar o marcador real.
+MARKER_MAX_ASPECT_RATIO = 6.0
+MARKER_MIN_SOLIDITY = 0.70
+MARKER_MIN_MASK_FILL = 0.70
 MARKER_APPROX_EPSILON_RATIO = 0.055
-MARKER_MAX_APPROX_VERTICES = 5
-MARKER_MIN_TRIANGULARITY = 0.78
+# Sanidade de forma apenas: exclui filamento e mancha difusa, nao julga
+# triangulo contra retangulo contra circulo.
+MARKER_MIN_COMPACTNESS = 0.35
 
 # Aparencia local. Para verde mede G-max(R,B); para vermelho mede
 # R-max(G,B). O anel ao redor do contorno precisa ser cromaticamente mais

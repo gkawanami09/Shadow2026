@@ -10,8 +10,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config_resgate as cfg  # noqa: E402
 from controle.busca_resgate import BallSearchController  # noqa: E402
-from resgate import _reset_for_next_search  # noqa: E402
-from visao.bola_resgate import BallDetection  # noqa: E402
+from visao.deteccao import VictimDetection as BallDetection  # noqa: E402
 
 
 def _detection(
@@ -279,31 +278,7 @@ class BallSearchControllerTests(unittest.TestCase):
         self.assertEqual(search.target_kind, "silver")
 
 
-class SearchCycleResetTests(unittest.TestCase):
-    class ResetRecorder:
-        def __init__(self):
-            self.calls = 0
-
-        def reset_tracking(self):
-            self.calls += 1
-
-        def reset(self):
-            self.calls += 1
-
-    def test_new_cycle_resets_detector_and_temporal_gate(self):
-        detector = self.ResetRecorder()
-        fresh_gate = self.ResetRecorder()
-
-        search, pickup = _reset_for_next_search(
-            detector,
-            fresh_gate,
-            now=25.0,
-        )
-
-        self.assertEqual(detector.calls, 1)
-        self.assertEqual(fresh_gate.calls, 1)
-        self.assertEqual(search.state, search.START)
-        self.assertFalse(pickup.started)
+# Testes da cola de orquestracao do resgate.py removidos: essa cola saiu do escopo atual (ver o docstring de resgate.py). Os modulos que ela orquestrava continuam no repositorio, com seus testes.
 
 
 if __name__ == "__main__":
