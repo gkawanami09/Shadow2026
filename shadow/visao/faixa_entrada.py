@@ -109,7 +109,8 @@ def local_range_map(value_channel, window=None):
     return cv2.subtract(maximo, minimo)
 
 
-def silver_mask(frame_bgr, hsv_min, hsv_max, min_local_range=None):
+def silver_mask(frame_bgr, hsv_min, hsv_max, min_local_range=None,
+                hsv_image=None):
     """Máscara neutra/clara da faixa. Função pura, reutilizada no calibrador.
 
     Além da faixa HSV, exige textura de luz mínima. Sem isso, um piso cinza
@@ -117,7 +118,10 @@ def silver_mask(frame_bgr, hsv_min, hsv_max, min_local_range=None):
     máscara e o candidato morre na geometria antes de qualquer teste de
     aparência — foi exatamente o que aconteceu na arena real.
     """
-    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    hsv = (
+        cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+        if hsv_image is None else hsv_image
+    )
     mask = cv2.inRange(
         hsv,
         np.asarray(hsv_min, dtype=np.uint8),
@@ -153,7 +157,8 @@ class EntrySilverDetector:
         self.last_mask = None
         self.last_band = None
 
-    def detect(self, frame_bgr, line_ahead=None, timestamp=None):
+    def detect(self, frame_bgr, line_ahead=None, timestamp=None,
+               hsv_image=None):
         """Retorna ``EntryStripeDetection`` ou ``None`` com ``last_reason``.
 
         ``line_ahead`` é a evidência de que a linha preta continua à frente,
@@ -174,7 +179,8 @@ class EntrySilverDetector:
 
         mask = silver_mask(
             frame_bgr, self.hsv_min, self.hsv_max,
-            min_local_range=self.min_local_range)
+            min_local_range=self.min_local_range,
+            hsv_image=hsv_image)
         self.last_mask = mask
 
         band, reason = find_transversal_band(
@@ -194,7 +200,10 @@ class EntrySilverDetector:
             self.last_reason = "linha_continua"
             return None
 
-        hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+        hsv = (
+            cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+            if hsv_image is None else hsv_image
+        )
         saturation = hsv[:, :, 1].astype(np.float32)
         value = hsv[:, :, 2].astype(np.float32)
 
@@ -367,9 +376,23 @@ class EntrySilverGate:
         self.confirmer.reset(now=now)
         self.last_detection = None
 
-    def update(self, frame_bgr, line_ahead=None, timestamp=None, now=None):
-        detection = self.detector.detect(
-            frame_bgr, line_ahead=line_ahead, timestamp=timestamp)
+    def update(self, frame_bgr, line_ahead=None, timestamp=None, now=None,
+               hsv_image=None):
+        if hsv_image is None:
+            # Preserva compatibilidade com detectores de teste/terceiros que
+            # implementam a assinatura antiga.
+            detection = self.detector.detect(
+                frame_bgr,
+                line_ahead=line_ahead,
+                timestamp=timestamp,
+            )
+        else:
+            detection = self.detector.detect(
+                frame_bgr,
+                line_ahead=line_ahead,
+                timestamp=timestamp,
+                hsv_image=hsv_image,
+            )
         self.last_detection = detection
         confirmed = self.confirmer.update(
             detection is not None,

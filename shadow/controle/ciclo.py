@@ -28,19 +28,23 @@ from controle.parada_obstaculo import (
 )
 from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
+from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
 from controle.direcao import init_steering, sleep_steering, steer
 from controle.retorno import turn_around
 from comunicacao_serial.arduino import Arduino
 from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                entry_armed, entry_silver_confirmed,
-                               entry_silver_detected, last_bottom_point,
+                               entry_silver_detected, green_candidate,
+                               last_bottom_point,
                                last_bottom_point_y,
                                line_ahead, line_angle, line_detected,
-                               line_status, min_line_size, mission_mode,
+                               line_size, line_status, min_line_size,
+                               mission_mode,
                                preferencia_linha_esquerda, ramp_ahead,
-                               red_detected, red_finished,
+                               red_candidate, red_detected, red_finished,
                                rescue_requested, status, terminate,
-                               timer, turn_dir, vision_ready)
+                               ler_resultado_visao_rapida, timer, turn_dir,
+                               vision_ready)
 
 
 def _enter_rescue_zone(arduino):
@@ -122,6 +126,8 @@ def control_loop():
     green_armed = True
     green_rearm_after = 0.
     monitor_obstaculo = MonitorObstaculo()
+    velocidade_adaptativa = ControladorVelocidadeAdaptativa()
+    modo_rapido_anterior = False
     obstaculo_retry_after = 0.
     preferencia_linha_esquerda.value = False
     preferencia_esquerda_inicio = 0.
@@ -315,9 +321,12 @@ def control_loop():
 
             # Continua seguindo enquanto não muda de estado.
             if line_status.value == "line_detected":
+                # Uma leitura da direção por iteração mantém todas as decisões
+                # deste comando coerentes e evita várias consultas ao Manager.
+                direcao_visual = turn_dir.value
                 if (
                     not preferencia_linha_esquerda.value
-                    and turn_dir.value == "turn_around"
+                    and direcao_visual == "turn_around"
                 ):
                     status.value = f'Girando 180° para a {"direita" if last_turn_dir == "r" else "esquerda"}'
 
@@ -343,14 +352,14 @@ def control_loop():
 
                 if (time.monotonic() >= green_rearm_after
                         and not preferencia_linha_esquerda.value
-                        and turn_dir.value == "straight"
+                        and direcao_visual == "straight"
                         and green_direction is None):
                     green_armed = True
 
                 if (not preferencia_linha_esquerda.value
                         and green_armed and green_direction is None
-                        and turn_dir.value in ("left", "right")):
-                    green_direction = turn_dir.value
+                        and direcao_visual in ("left", "right")):
+                    green_direction = direcao_visual
                     green_approach_until = now + GREEN_APPROACH_TIME
                     green_turn_started = None
                     green_reverse_until = None
@@ -367,7 +376,7 @@ def control_loop():
                     last_follow_angle = line_angle.value
                     last_rear_pivot_enabled = (
                         preferencia_linha_esquerda.value
-                        or turn_dir.value == "straight"
+                        or direcao_visual == "straight"
                     )
 
                     if (last_rear_pivot_enabled
@@ -381,7 +390,49 @@ def control_loop():
                     pivot_last_direction = 0
                     pivot_line_lost_since = None
 
-                command_speed = get_speed(line_angle.value)
+                velocidade_base = get_speed(line_angle.value)
+                permitir_reta_rapida = (
+                    config.RETA_RAPIDA_HABILITADA
+                    and green_direction is None
+                    and not preferencia_linha_esquerda.value
+                    and line_detected.value
+                    and line_ahead.value
+                    and abs(line_angle.value)
+                    <= config.ANGULO_MAXIMO_RETA_RAPIDA
+                    and abs(last_bottom_point.value - camera_x / 2)
+                    <= config.ERRO_INFERIOR_RETA_RAPIDA_PX
+                    and last_bottom_point_y.value
+                    >= camera_y * config.ALTURA_MINIMA_PONTO_INFERIOR_RAPIDA
+                    and line_size.value >= config.AREA_MINIMA_LINHA_RAPIDA
+                    and not green_candidate.value
+                    and not red_candidate.value
+                    and not red_detected.value
+                    and not ramp_ahead.value
+                    and not entry_silver_detected.value
+                    and not entry_silver_confirmed.value
+                    and not monitor_obstaculo.bloqueia_velocidade_rapida
+                )
+                command_speed = velocidade_adaptativa.atualizar(
+                    ler_resultado_visao_rapida(),
+                    velocidade_base=velocidade_base,
+                    direcao=direcao_visual,
+                    permitir_rapido=permitir_reta_rapida,
+                )
+                if velocidade_adaptativa.modo_rapido != modo_rapido_anterior:
+                    modo_rapido_anterior = velocidade_adaptativa.modo_rapido
+                    if modo_rapido_anterior:
+                        print(
+                            "[controle] reta estável confirmada — "
+                            f"{velocidade_adaptativa.fps_visao:.0f} FPS, "
+                            "acelerando até PWM "
+                            f"{round(config.VELOCIDADE_RETA_RAPIDA * config.MAX_PWM)}"
+                        )
+                    else:
+                        print(
+                            "[controle] fim da reta rápida — "
+                            f"voltando imediatamente ao PWM "
+                            f"{round(LINE_FOLLOW_SPEED * config.MAX_PWM)}"
+                        )
 
                 if (green_direction is not None
                         and green_reverse_until is not None):
@@ -411,7 +462,7 @@ def control_loop():
                     status.value = f'Verde {green_direction} — girando tanque'
 
                     if (now - green_turn_started >= GREEN_TURN_MIN_TIME
-                            and turn_dir.value == "straight"
+                            and direcao_visual == "straight"
                             and line_detected.value
                             and abs(line_angle.value) <= GREEN_TURN_EXIT_ANGLE):
                         green_reverse_until = now + GREEN_REVERSE_TIME

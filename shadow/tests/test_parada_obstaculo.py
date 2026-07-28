@@ -77,6 +77,38 @@ def criar_monitor():
 
 
 class MonitorObstaculoTests(unittest.TestCase):
+    def test_uma_leitura_a_oito_cm_so_bloqueia_velocidade_rapida(self):
+        arduino = ArduinoFalso(((True, 80),))
+        monitor = criar_monitor()
+
+        self.assertFalse(monitor.atualizar(arduino, agora=0.00))
+        self.assertTrue(monitor.bloqueia_velocidade_rapida)
+        self.assertFalse(monitor.parada_confirmada)
+
+    def test_acima_de_dez_cm_nao_bloqueia_velocidade_rapida(self):
+        arduino = ArduinoFalso(((True, 101),))
+        monitor = criar_monitor()
+
+        self.assertFalse(monitor.atualizar(arduino, agora=0.00))
+        self.assertFalse(monitor.bloqueia_velocidade_rapida)
+
+    def test_primeira_leitura_a_quatro_cm_desacelera_sem_parar(self):
+        arduino = ArduinoFalso(((True, 40), (True, 40)))
+        monitor = criar_monitor()
+
+        self.assertFalse(monitor.atualizar(arduino, agora=0.00))
+        self.assertTrue(monitor.bloqueia_velocidade_rapida)
+        self.assertTrue(monitor.atualizar(arduino, agora=0.06))
+
+    def test_bloqueio_rapido_expira_com_a_janela(self):
+        arduino = ArduinoFalso(((True, 80),))
+        monitor = criar_monitor()
+
+        monitor.atualizar(arduino, agora=0.00)
+        self.assertTrue(monitor.bloqueia_velocidade_rapida)
+        monitor.atualizar(arduino, agora=0.21)
+        self.assertFalse(monitor.bloqueia_velocidade_rapida)
+
     def test_uma_leitura_proxima_isolada_nao_para(self):
         arduino = ArduinoFalso(((True, 40), (True, 300), (True, 250)))
         monitor = criar_monitor()
@@ -166,6 +198,7 @@ class MonitorObstaculoTests(unittest.TestCase):
 
         self.assertFalse(monitor.parada_confirmada)
         self.assertIsNone(monitor.distancia_confirmada_mm)
+        self.assertFalse(monitor.bloqueia_velocidade_rapida)
         self.assertFalse(monitor.atualizar(arduino, agora=1.00))
 
 

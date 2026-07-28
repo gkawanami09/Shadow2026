@@ -1,11 +1,41 @@
 """Abre a câmera de linha e entrega imagens no tamanho usado pelo detector."""
 
+import math
 import time
 
 import cv2
 
-from config import (CAPTURE_FPS, CAPTURE_HEIGHT, CAPTURE_WIDTH,
-                    LENS_POSITION, LINE_CAMERA_INDEX, camera_x, camera_y)
+from config import (CAPTURE_FPS, CAPTURE_FPS_FALLBACK, CAPTURE_HEIGHT,
+                    CAPTURE_WIDTH, LENS_POSITION, LINE_CAMERA_INDEX,
+                    RETA_RAPIDA_HABILITADA, camera_x, camera_y)
+
+
+def escolher_fps_captura(modos_sensor):
+    """Escolhe um FPS que o sensor realmente anunciou para pelo menos VGA."""
+    fps_compativeis = []
+    for modo in modos_sensor or ():
+        try:
+            largura, altura = modo["size"]
+            fps = float(modo["fps"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (
+            largura >= CAPTURE_WIDTH
+            and altura >= CAPTURE_HEIGHT
+            and math.isfinite(fps)
+            and fps > 0
+        ):
+            fps_compativeis.append(fps)
+
+    # Em Picamera2 antigo (ou num mock) a lista pode não existir. Nesse caso
+    # preservamos exatamente a configuração que já funcionava no robô.
+    if not fps_compativeis:
+        return float(CAPTURE_FPS_FALLBACK)
+
+    maior_fps = max(fps_compativeis)
+    if maior_fps < CAPTURE_FPS_FALLBACK:
+        return maior_fps
+    return min(float(CAPTURE_FPS), maior_fps)
 
 
 class LineCamera:
@@ -25,20 +55,32 @@ class LineCamera:
         )
         self.picam2 = Picamera2(camera_num=LINE_CAMERA_INDEX)
 
-        frame_us = int(1_000_000 / CAPTURE_FPS)
         try:
-            video_config = self.picam2.create_video_configuration(
-                main={"size": (CAPTURE_WIDTH, CAPTURE_HEIGHT), "format": "RGB888"},
-                controls={"FrameDurationLimits": (frame_us, frame_us)},
-                buffer_count=4,
+            modos_sensor = self.picam2.sensor_modes
+        except (AttributeError, RuntimeError, TypeError):
+            modos_sensor = ()
+        fps_escolhido = (
+            escolher_fps_captura(modos_sensor)
+            if RETA_RAPIDA_HABILITADA
+            else float(CAPTURE_FPS_FALLBACK)
+        )
+        try:
+            self._configurar_e_iniciar(fps_escolhido)
+        except Exception as erro_fps:
+            if fps_escolhido <= CAPTURE_FPS_FALLBACK:
+                raise
+            # Alguns drivers aceitam criar a configuração rápida, mas só
+            # recusam em configure/start. Reabrir a câmera limpa esse estado
+            # parcial antes de voltar para os 40 FPS já usados no robô.
+            print(
+                "[camera] modo rápido recusado pelo driver "
+                f"({erro_fps}); voltando para "
+                f"{CAPTURE_FPS_FALLBACK} FPS"
             )
-        except TypeError:
-            # compatibilidade com Picamera2 antigo (mesmo fallback do Shadow2026)
-            video_config = self.picam2.create_video_configuration(
-                main={"size": (CAPTURE_WIDTH, CAPTURE_HEIGHT), "format": "RGB888"})
-
-        self.picam2.configure(video_config)
-        self.picam2.start()
+            self.close()
+            time.sleep(.05)
+            self.picam2 = Picamera2(camera_num=LINE_CAMERA_INDEX)
+            self._configurar_e_iniciar(float(CAPTURE_FPS_FALLBACK))
 
         if LENS_POSITION is not None:
             try:
@@ -49,6 +91,53 @@ class LineCamera:
                 print(f"[camera] LensPosition ignorado (módulo sem AF?): {err}")
 
         time.sleep(0.1)
+
+    def _configurar_e_iniciar(self, fps):
+        self.capture_fps = float(fps)
+        frame_us = int(round(1_000_000 / self.capture_fps))
+        print(
+            "[camera] captura solicitada em "
+            f"{self.capture_fps:.1f} FPS "
+            f"({frame_us} us por frame)"
+        )
+        try:
+            video_config = self.picam2.create_video_configuration(
+                main={
+                    "size": (CAPTURE_WIDTH, CAPTURE_HEIGHT),
+                    "format": "RGB888",
+                },
+                controls={"FrameDurationLimits": (frame_us, frame_us)},
+                buffer_count=4,
+                # O frame devolvido precisa ser posterior ao pedido. Isso
+                # remove até um período de atraso escondido da fila interna.
+                queue=False,
+            )
+        except TypeError:
+            try:
+                # Versões intermediárias podem aceitar o controle de FPS, mas
+                # ainda não conhecer o argumento ``queue``.
+                video_config = self.picam2.create_video_configuration(
+                    main={
+                        "size": (CAPTURE_WIDTH, CAPTURE_HEIGHT),
+                        "format": "RGB888",
+                    },
+                    controls={
+                        "FrameDurationLimits": (frame_us, frame_us),
+                    },
+                    buffer_count=4,
+                )
+            except TypeError:
+                # Compatibilidade final com Picamera2 antigo. Sem controle
+                # explícito, o FPS medido impede a aceleração se ele ficar lento.
+                video_config = self.picam2.create_video_configuration(
+                    main={
+                        "size": (CAPTURE_WIDTH, CAPTURE_HEIGHT),
+                        "format": "RGB888",
+                    },
+                )
+
+        self.picam2.configure(video_config)
+        self.picam2.start()
 
     def sensor_modes(self):
         return self.picam2.sensor_modes

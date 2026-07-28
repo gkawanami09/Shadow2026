@@ -8,6 +8,7 @@ from config import (
     MAX_PWM,
     OBSTACLE_CONFIRM_READINGS,
     OBSTACLE_CONFIRM_WINDOW_S,
+    OBSTACLE_FAST_SPEED_BLOCK_MM,
     OBSTACLE_FORWARD_PWM,
     OBSTACLE_FORWARD_TIME_S,
     OBSTACLE_HISTORY_SIZE,
@@ -39,6 +40,7 @@ class MonitorObstaculo:
         janela_s=OBSTACLE_CONFIRM_WINDOW_S,
         distancia_minima_mm=OBSTACLE_MIN_VALID_MM,
         distancia_maxima_mm=OBSTACLE_MAX_VALID_MM,
+        distancia_bloqueio_rapido_mm=OBSTACLE_FAST_SPEED_BLOCK_MM,
     ):
         if not 1 <= confirmacoes <= tamanho_historico:
             raise ValueError(
@@ -51,11 +53,21 @@ class MonitorObstaculo:
         self.janela_s = float(janela_s)
         self.distancia_minima_mm = int(distancia_minima_mm)
         self.distancia_maxima_mm = int(distancia_maxima_mm)
+        self.distancia_bloqueio_rapido_mm = int(
+            distancia_bloqueio_rapido_mm)
 
         self._leituras = deque(maxlen=int(tamanho_historico))
         self._proxima_solicitacao = 0.0
         self.parada_confirmada = False
         self.distancia_confirmada_mm = None
+
+    @property
+    def bloqueia_velocidade_rapida(self):
+        """Uma leitura próxima já desacelera, mas não confirma o obstáculo."""
+        return any(
+            distancia <= self.distancia_bloqueio_rapido_mm
+            for _, distancia, _ in self._leituras
+        )
 
     def atualizar(self, arduino, agora=None):
         """Atualiza uma vez e retorna True quando a parada estiver travada."""

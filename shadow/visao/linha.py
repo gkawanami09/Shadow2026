@@ -167,6 +167,20 @@ def calculate_angle_numba(blackline, blackline_crop, last_bottom_point, average_
     return poi, poi_no_crop, is_crop, max_black_top, bottom_point
 
 
+def aquecer_numba():
+    """Compila a geometria com o robô parado, antes do primeiro comando."""
+    contorno = np.array(
+        [[180, 100], [268, 100], [268, 240], [180, 240]],
+        dtype=np.int32,
+    ).reshape((-1, 1, 2))
+    calculate_angle_numba(
+        contorno,
+        contorno,
+        camera_x / 2,
+        camera_x / 2,
+    )
+
+
 def calculate_angle(
     blackline,
     blackline_crop,

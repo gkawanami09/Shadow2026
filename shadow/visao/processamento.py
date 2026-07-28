@@ -11,21 +11,25 @@ from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
                     RAMP_SWAP_TRIGGER, VISION_MAX_FRAMES, camera_x, camera_y)
 from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
+                                         green_candidate,
                                          get_time_average, last_bottom_point,
                                          last_bottom_point_y,
                                          line_ahead, line_angle, line_angle_y,
                                          line_crop, line_detected, line_size,
                                          line_status, min_line_size, ramp_ahead,
+                                         publicar_resultado_visao_rapida,
                                          preferencia_linha_esquerda,
-                                         red_detected, status, terminate, timer,
-                                         turn_dir, vision_ready)
+                                         red_candidate, red_detected, status,
+                                         terminate, timer, turn_dir,
+                                         vision_ready)
 from visao import linha as line_module
+from visao import verde as green_module
 from visao.captura import LineCamera
 from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
-from visao.verde import check_green, latch_turn_direction
 from visao.linha import calculate_angle, determine_correct_line
-from visao.vermelho import check_contour_size
+from visao.verde import check_green, latch_turn_direction
+from visao.vermelho import ConfirmadorVermelho, check_contour_size
 
 # Cores carregadas do config.ini (fallback: valores do config.py)
 black_min = np.array(config.BLACK_MIN_DEFAULT)
@@ -63,6 +67,9 @@ def update_color_values():
 
 def vision_loop(debug=False):
     line_module.init_tracker()
+    print("[visão] preparando cálculos rápidos...")
+    line_module.aquecer_numba()
+    green_module.aquecer_numba()
 
     bottom_y = camera_y
 
@@ -89,6 +96,7 @@ def vision_loop(debug=False):
 
     # Matriz usada para reduzir ruídos das máscaras.
     kernal = np.ones((3, 3), np.uint8)
+    confirmador_vermelho = ConfirmadorVermelho()
 
     # Contador e limitador de imagens por segundo.
     fps_time = time.perf_counter()
@@ -110,35 +118,66 @@ def vision_loop(debug=False):
             if time.perf_counter() - fps_limit_time <= 1 / VISION_MAX_FRAMES:
                 continue
             fps_limit_time = time.perf_counter()
+            inicio_processamento = time.perf_counter()
+
+            # Valores locais do MESMO frame. Só são publicados juntos depois
+            # que toda a análise terminar.
+            linha_detectada_frame = False
+            linha_a_frente_frame = False
+            angulo_frame = 0.
+            ponto_inferior_x_frame = camera_x / 2
+            ponto_inferior_y_frame = 0.
+            area_linha_frame = 0.
+            candidato_verde_frame = False
+            candidato_vermelho_frame = False
 
             hsv_image = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2HSV)
             green_image = cv2.inRange(hsv_image, green_min, green_max)
-            red_image = cv2.inRange(hsv_image, red_min_1, red_max_1) + cv2.inRange(hsv_image, red_min_2, red_max_2)
+            red_image = cv2.bitwise_or(
+                cv2.inRange(hsv_image, red_min_1, red_max_1),
+                cv2.inRange(hsv_image, red_min_2, red_max_2),
+            )
 
             black_image = cv2.inRange(cv2_img, black_min, black_max_normal_bottom)
-            black_image[0:int(camera_y * .4), 0:camera_x] = cv2.inRange(cv2_img, black_min, black_max_normal_top)[0:int(camera_y * .4), 0:camera_x]
-
-            black_image -= green_image
-            black_image[black_image < 2] = 0
+            limite_topo = int(camera_y * .4)
+            black_image[:limite_topo] = cv2.inRange(
+                cv2_img[:limite_topo],
+                black_min,
+                black_max_normal_top,
+            )
+            black_image = cv2.bitwise_and(
+                black_image,
+                cv2.bitwise_not(green_image),
+            )
 
             # Usa outro limite de preto quando a parte superior está escura.
             dark_ahead = False
             black_mean = round(np.mean(black_image[0:int(camera_y * .25), 0:camera_x]), 2)
             if black_mean > RAMP_SWAP_TRIGGER:
-                black_image_2 = cv2.inRange(cv2_img, black_min, black_max_ramp_down_top)
-                black_image_2 -= green_image
-                black_image_2[black_image_2 < 2] = 0
+                black_image_2_top = cv2.inRange(
+                    cv2_img[:limite_topo],
+                    black_min,
+                    black_max_ramp_down_top,
+                )
+                black_image_2_top = cv2.bitwise_and(
+                    black_image_2_top,
+                    cv2.bitwise_not(green_image[:limite_topo]),
+                )
 
-                black_mean_2 = round(np.mean(black_image_2[0:int(camera_y * .25), 0:camera_x]), 2)
+                black_mean_2 = round(
+                    np.mean(black_image_2_top[:int(camera_y * .25)]),
+                    2,
+                )
 
                 if black_mean_2 + RAMP_SWAP_MARGIN < black_mean:
                     cv2.circle(cv2_img, (10, 10), 5, (0, 0, 0), -1, cv2.LINE_AA)
-                    black_image[0:int(camera_y * .4), 0:camera_x] = black_image_2[0:int(camera_y * .4), 0:camera_x]
+                    black_image[:limite_topo] = black_image_2_top
                     dark_ahead = True
 
             ramp_ahead.value = dark_ahead
 
-            black_average.value = np.mean(black_image[:])
+            media_preto = float(np.mean(black_image))
+            black_average.value = media_preto
 
             # Continuidade material na direcao de marcha. Em vez de olhar so
             # a area total, exige preto em muitas linhas horizontais do
@@ -150,24 +189,26 @@ def vision_loop(debug=False):
             ]
             if ahead.size:
                 row_fill = np.count_nonzero(ahead, axis=1) / ahead.shape[1]
-                line_ahead.value = bool(
+                linha_a_frente_frame = bool(
                     np.mean(row_fill >= config.GAP_AHEAD_ROW_FILL)
                     >= config.GAP_AHEAD_ROW_PERSISTENCE)
             else:
-                line_ahead.value = False
+                linha_a_frente_frame = False
+            line_ahead.value = linha_a_frente_frame
 
             # Faixa prata de entrada. Roda aqui porque precisa de `line_ahead`
             # (a linha preta precisa estar terminando) e porque o frame ainda
             # não recebeu nenhuma anotação dentro da ROI inferior.
             update_entry_silver(
                 entry_gate, cv2_img, frame_captured_at,
-                line_ahead=bool(line_ahead.value))
+                line_ahead=linha_a_frente_frame,
+                hsv_image=hsv_image)
 
             # Recorta partes que não devem participar da decisão.
             if line_status.value == "gap_avoid":
                 apply_gap_avoid_mask(black_image)
 
-            if bottom_y < camera_y * .95 and black_average.value < BLACK_AVG_SIDE_MASK and line_status.value == "line_detected":
+            if bottom_y < camera_y * .95 and media_preto < BLACK_AVG_SIDE_MASK and line_status.value == "line_detected":
                 cv2.rectangle(black_image, (0, 0), (int(camera_x * .25), camera_y), 0, -1)
                 cv2.rectangle(black_image, (int(camera_x * .75), 0), (camera_x, camera_y), 0, -1)
 
@@ -193,14 +234,29 @@ def vision_loop(debug=False):
             contours_red, _ = cv2.findContours(red_image, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
             contours_blk, _ = cv2.findContours(black_image, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
-            blk_contour_area = np.array([cv2.contourArea(i) for i in contours_blk])
-            blk_mask = blk_contour_area > min_line_size.value
-            contours_blk = [c for c, m in zip(contours_blk, blk_mask) if m]
+            area_minima_linha = min_line_size.value
+            contours_blk = [
+                contorno
+                for contorno in contours_blk
+                if cv2.contourArea(contorno) > area_minima_linha
+            ]
 
             # Procura a faixa vermelha.
-            red_detected.value = check_contour_size(contours_red, "red", debug_img=cv2_img if debug else None)
+            candidato_vermelho_frame = check_contour_size(
+                contours_red,
+                "red",
+                debug_img=cv2_img if debug else None,
+            )
+            red_candidate.value = candidato_vermelho_frame
+            red_detected.value = confirmador_vermelho.atualizar(
+                candidato_vermelho_frame)
 
             # Procura os marcadores verdes.
+            candidato_verde_frame = any(
+                cv2.contourArea(contorno) > config.GREEN_MIN_AREA
+                for contorno in contours_grn
+            )
+            green_candidate.value = candidato_verde_frame
             if len(contours_grn) > 0:
                 turn_direction = check_green(
                     contours_grn, black_image, debug_img=cv2_img if debug else None)
@@ -211,13 +267,15 @@ def vision_loop(debug=False):
 
             # Escolhe o contorno correto da linha.
             if len(contours_blk) > 0:
+                linha_detectada_frame = True
                 line_detected.value = True
                 preferir_esquerda = bool(preferencia_linha_esquerda.value)
                 blackline, black_line_crop = determine_correct_line(
                     contours_blk,
                     preferir_esquerda=preferir_esquerda,
                 )
-                line_size.value = cv2.contourArea(blackline)
+                area_linha_frame = float(cv2.contourArea(blackline))
+                line_size.value = area_linha_frame
 
                 # Calcula a geometria do gap.
                 if line_status.value == "gap_detected":
@@ -237,6 +295,7 @@ def vision_loop(debug=False):
                     last_average_line_point,
                     preferir_esquerda=preferir_esquerda,
                 )
+                angulo_frame = float(line_angle.value)
                 line_angle_y.value = int(poi[1])
 
 
@@ -254,6 +313,8 @@ def vision_loop(debug=False):
                 time_last_average_line_point = add_time_value(time_last_average_line_point, x)
 
                 bottom_y = bottom_point[1]
+                ponto_inferior_x_frame = float(bottom_point[0])
+                ponto_inferior_y_frame = float(bottom_point[1])
 
                 # Publica os valores usados pelo controle.
                 last_bottom_point.value = bottom_point[0]
@@ -267,12 +328,30 @@ def vision_loop(debug=False):
                                5, (255, 0, 0), -1, cv2.LINE_AA)
 
             else:
+                linha_detectada_frame = False
                 line_detected.value = False
                 line_angle.value = 0
                 line_size.value = 0
                 last_bottom_point_y.value = 0
                 line_angle_y.value = -1
                 reset_gap_values()
+
+            processamento_ms = (
+                time.perf_counter() - inicio_processamento
+            ) * 1000.
+            publicar_resultado_visao_rapida(
+                publicado_em=time.monotonic(),
+                processamento_ms=processamento_ms,
+                linha_detectada=linha_detectada_frame,
+                linha_a_frente=linha_a_frente_frame,
+                angulo=angulo_frame,
+                ponto_inferior_x=ponto_inferior_x_frame,
+                ponto_inferior_y=ponto_inferior_y_frame,
+                area_linha=area_linha_frame,
+                candidato_verde=candidato_verde_frame,
+                candidato_vermelho=candidato_vermelho_frame,
+                rampa=dark_ahead,
+            )
 
             if not vision_ready.value:
                 vision_ready.value = True
@@ -290,6 +369,16 @@ def vision_loop(debug=False):
                             (5, camera_y - 8), cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
                 cv2.putText(cv2_img, str(status.value), (5, 14),
                             cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
+                cv2.putText(
+                    cv2_img,
+                    f"proc={processamento_ms:.1f}ms  "
+                    f"captura={camera.capture_fps:.0f}fps",
+                    (5, 28),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    .35,
+                    (0, 255, 255),
+                    1,
+                )
                 shm_array[:] = cv2_img
 
     finally:

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import cv2  # noqa: E402
 
-from config import CAPTURE_FPS, camera_x, camera_y  # noqa: E402
+from config import camera_x, camera_y  # noqa: E402
 from visao.captura import LineCamera  # noqa: E402
 
 
@@ -34,7 +34,7 @@ def main():
             raise RuntimeError(f"não consegui salvar {args.out}")
         print(f"\nFrame {camera_x}×{camera_y} BGR salvo em: {args.out}")
 
-        print(f"Medindo FPS (~3 s; alvo {CAPTURE_FPS})…")
+        print(f"Medindo FPS (~3 s; alvo {camera.capture_fps:.1f})…")
         n = 0
         start = time.monotonic()
         while time.monotonic() - start < 3:

@@ -23,7 +23,10 @@ def check_green(contours_grn, black_image, debug_img=None):
         if debug_img is not None:
             draw_box = np.intp(green_box)
             cv2.drawContours(debug_img, [draw_box], -1, (0, 0, 255), 2)
-        black_around_sign = check_black(black_around_sign, i, green_box, black_image.copy())
+        # ``check_black`` apenas lê a máscara. Copiá-la para cada contorno
+        # verde gastava memória e tempo sem proteger nenhum dado.
+        black_around_sign = check_black(
+            black_around_sign, i, green_box, black_image)
 
     turn_left, turn_right, left_bottom, right_bottom = determine_turn_direction(black_around_sign)
 
@@ -72,6 +75,17 @@ def check_black(black_around_sign, i, green_box, black_image):
             black_around_sign[i, 3] = 1
 
     return black_around_sign
+
+
+def aquecer_numba():
+    """Compila a análise antes de o primeiro verde aparecer na pista."""
+    acumulador = np.zeros((1, 5), dtype=np.int16)
+    caixa = np.array(
+        [[180, 120], [220, 120], [180, 160], [220, 160]],
+        dtype=np.float32,
+    )
+    mascara = np.zeros((camera_y, camera_x), dtype=np.uint8)
+    check_black(acumulador, 0, caixa, mascara)
 
 
 def determine_turn_direction(black_around_sign):

@@ -36,7 +36,8 @@ def build_entry_gate():
         detector=EntrySilverDetector(hsv_min=hsv_min, hsv_max=hsv_max))
 
 
-def update_entry_silver(entry_gate, frame, captured_at, line_ahead=False):
+def update_entry_silver(entry_gate, frame, captured_at, line_ahead=False,
+                        hsv_image=None):
     """Publica o estado da faixa prata para o processo de controle."""
     if entry_gate is None:
         return
@@ -49,6 +50,7 @@ def update_entry_silver(entry_gate, frame, captured_at, line_ahead=False):
         line_ahead=bool(line_ahead),
         timestamp=captured_at,
         now=captured_at,
+        hsv_image=hsv_image,
     )
     entry_silver_detected.value = detection is not None
     entry_silver_votes.value = int(entry_gate.votes)

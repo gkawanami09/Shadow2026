@@ -29,6 +29,9 @@ MAX_PWM = 120                             # teto absoluto; firmware tambem trava
 # dentro de uma janela curta: um eco isolado não consegue parar o robô.
 OBSTACLE_STOP_ENABLED = True
 OBSTACLE_STOP_DISTANCE_MM = 50             # 5 cm, inclusive
+# Uma leitura isolada nesta faixa NÃO inicia o desvio; apenas retira o modo
+# rápido para que a confirmação 2-de-3 continue acontecendo em PWM 60.
+OBSTACLE_FAST_SPEED_BLOCK_MM = 100          # 10 cm
 OBSTACLE_SAMPLE_INTERVAL_S = .06           # respeita o intervalo do HC-SR04
 OBSTACLE_READ_TIMEOUT_S = .08              # firmware espera eco por até 30 ms
 OBSTACLE_CONFIRM_READINGS = 2
@@ -66,7 +69,12 @@ OBSTACLE_RETRY_COOLDOWN_S = 1.0
 LINE_CAMERA_INDEX = 1
 CAPTURE_WIDTH = 640
 CAPTURE_HEIGHT = 480
-CAPTURE_FPS = 40                          # FrameDurationLimits = 1e6/40 = 25000 µs
+# A OV5647 possui modo VGA mais rápido. A captura escolhe até este alvo usando
+# apenas modos realmente anunciados pelo driver e volta para 40 FPS quando não
+# consegue confirmar um modo mais rápido. O controle só libera PWM extra se a
+# visão MEDIDA permanecer acima de FPS_MINIMO_RETA_RAPIDA.
+CAPTURE_FPS = 60
+CAPTURE_FPS_FALLBACK = 40
 camera_x = 448                            # resolucao do algoritmo
 camera_y = 252
 LENS_POSITION = None                      # None = foco fixo; ajuste se o modulo tiver AF
@@ -89,6 +97,23 @@ RAMP_AHEAD_HOLD = 2                       # s segurando velocidade reduzida
 RAMP_AHEAD_SPEED_PIVOT = .65
 RAMP_AHEAD_SPEED_ARC = .4
 RAMP_AHEAD_SPEED_STRAIGHT = .3
+
+# Velocidade adaptativa. O modo rápido não substitui nenhuma manobra: ele só
+# atua no seguimento normal depois de vários frames novos confirmarem uma reta.
+# Qualquer dúvida devolve imediatamente LINE_FOLLOW_SPEED.
+RETA_RAPIDA_HABILITADA = True             # False volta a captura/PWM anteriores
+VELOCIDADE_RETA_RAPIDA = .60              # PWM 72, teto do segue-linha rápido
+FRAMES_PARA_RETA_RAPIDA = 6
+FPS_MINIMO_RETA_RAPIDA = 50.
+JANELA_FPS_RETA_RAPIDA = 6
+IDADE_MAXIMA_VISAO_RAPIDA_S = .05          # 2,5 períodos no mínimo de 50 FPS
+ANGULO_MAXIMO_RETA_RAPIDA = 10
+VARIACAO_ANGULO_RETA_RAPIDA = 6
+ERRO_INFERIOR_RETA_RAPIDA_PX = 18
+VARIACAO_INFERIOR_RETA_RAPIDA_PX = 8
+ALTURA_MINIMA_PONTO_INFERIOR_RAPIDA = .85
+AREA_MINIMA_LINHA_RAPIDA = 4500
+PASSO_VELOCIDADE_RETA_RAPIDA = .01
 
 # ----------------------------------------------------------------------------
 # Detecção de linha
@@ -154,7 +179,9 @@ GREEN_REVERSE_SPEED = .4                  # PWM 48
 # ----------------------------------------------------------------------------
 # Vermelho
 # ----------------------------------------------------------------------------
-RED_MIN_CONTOUR = 15000                   # gatilho de frame unico
+RED_MIN_CONTOUR = 15000                   # candidato vermelho em cada frame
+RED_CONFIRM_WINDOW_FRAMES = 3
+RED_CONFIRM_READINGS = 2                  # 2-de-3: rejeita um frame vermelho isolado
 wait_time_red = 9                         # s parado no vermelho
 
 # ----------------------------------------------------------------------------
