@@ -8,6 +8,8 @@ from config import (
     MAX_PWM,
     OBSTACLE_CONFIRM_READINGS,
     OBSTACLE_CONFIRM_WINDOW_S,
+    OBSTACLE_FORWARD_PWM,
+    OBSTACLE_FORWARD_TIME_S,
     OBSTACLE_HISTORY_SIZE,
     OBSTACLE_LATERAL_PWM,
     OBSTACLE_LATERAL_TIME_S,
@@ -103,36 +105,45 @@ class MonitorObstaculo:
             self._leituras.popleft()
 
 
-def deslizar_para_esquerda(
+def desviar_obstaculo(
     arduino,
-    pwm=OBSTACLE_LATERAL_PWM,
-    duracao_s=OBSTACLE_LATERAL_TIME_S,
+    pwm_lateral=OBSTACLE_LATERAL_PWM,
+    duracao_lateral_s=OBSTACLE_LATERAL_TIME_S,
+    pwm_avanco=OBSTACLE_FORWARD_PWM,
+    duracao_avanco_s=OBSTACLE_FORWARD_TIME_S,
     deve_encerrar=None,
     relogio=time.monotonic,
     dormir=time.sleep,
 ):
-    """Desliza para a esquerda com as quatro rodas e termina parado.
+    """Desliza à esquerda, avança reto e termina parado.
 
-    Este é um movimento lateral de rodas omnidirecionais em X, não um pivô:
-    FE e TD giram para trás enquanto TE e FD giram para frente.
+    A primeira etapa usa as rodas omnidirecionais em X, sem pivô. A segunda
+    movimenta as quatro rodas para frente.
     """
-    pwm = int(round(pwm))
-    duracao_s = float(duracao_s)
+    pwm_lateral = int(round(pwm_lateral))
+    pwm_avanco = int(round(pwm_avanco))
+    duracao_lateral_s = float(duracao_lateral_s)
+    duracao_avanco_s = float(duracao_avanco_s)
     deve_encerrar = deve_encerrar or (lambda: False)
 
-    if not 1 <= pwm <= MAX_PWM:
+    if not 1 <= pwm_lateral <= MAX_PWM:
         raise ValueError(f"PWM lateral deve ficar entre 1 e {MAX_PWM}")
-    if duracao_s <= 0:
+    if not 1 <= pwm_avanco <= MAX_PWM:
+        raise ValueError(f"PWM de avanço deve ficar entre 1 e {MAX_PWM}")
+    if duracao_lateral_s <= 0:
         raise ValueError("duracao lateral deve ser positiva")
+    if duracao_avanco_s <= 0:
+        raise ValueError("duracao de avanço deve ser positiva")
 
-    # Não deixa o último comando do segue-linha se misturar com o lateral.
+    # Não deixa o último comando do segue-linha se misturar com o desvio.
     if arduino.parar() is False:
-        raise RuntimeError("não foi possível parar antes do desvio lateral")
+        raise RuntimeError("não foi possível parar antes do desvio")
 
     epoca_serial = arduino.connection_epoch
-    try:
-        if arduino.rodas(-pwm, pwm, pwm, -pwm) is False:
-            raise RuntimeError("não foi possível iniciar o desvio lateral")
+
+    def movimentar(velocidades, duracao_s, etapa):
+        if arduino.rodas(*velocidades) is False:
+            raise RuntimeError(f"não foi possível iniciar {etapa}")
 
         fim = relogio() + duracao_s
         while not deve_encerrar():
@@ -146,8 +157,21 @@ def deslizar_para_esquerda(
                 or arduino.connection_epoch != epoca_serial
             ):
                 raise RuntimeError(
-                    "conexão serial mudou durante o desvio lateral")
+                    f"conexão serial mudou durante {etapa}")
             dormir(min(.05, restante))
+
+    try:
+        movimentar(
+            (-pwm_lateral, pwm_lateral, pwm_lateral, -pwm_lateral),
+            duracao_lateral_s,
+            "o desvio lateral",
+        )
+        if not deve_encerrar():
+            movimentar(
+                (pwm_avanco, pwm_avanco, pwm_avanco, pwm_avanco),
+                duracao_avanco_s,
+                "o avanço",
+            )
     finally:
         # Garante PARAR tanto no fim normal quanto em Ctrl+C ou falha serial.
         arduino.parar()

@@ -9,7 +9,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 from controle.parada_obstaculo import (  # noqa: E402
     MonitorObstaculo,
-    deslizar_para_esquerda,
+    desviar_obstaculo,
 )
 
 
@@ -150,26 +150,35 @@ class MonitorObstaculoTests(unittest.TestCase):
         self.assertEqual(len(arduino.solicitacoes), solicitacoes_antes)
 
 
-class DesvioLateralTests(unittest.TestCase):
-    def test_desliza_para_esquerda_por_dois_e_meio_segundos(self):
+class DesvioObstaculoTests(unittest.TestCase):
+    def test_desliza_dois_segundos_e_avanca_tres_segundos(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
-        deslizar_para_esquerda(
+        desviar_obstaculo(
             arduino,
-            pwm=60,
-            duracao_s=2.5,
+            pwm_lateral=60,
+            duracao_lateral_s=2.0,
+            pwm_avanco=60,
+            duracao_avanco_s=3.0,
             relogio=relogio.monotonic,
             dormir=relogio.sleep,
         )
 
         self.assertEqual(arduino.comandos[0], ("parar",))
         self.assertEqual(
-            arduino.comandos[1],
-            ("rodas", -60, 60, 60, -60),
+            [
+                comando
+                for comando in arduino.comandos
+                if comando[0] == "rodas"
+            ],
+            [
+                ("rodas", -60, 60, 60, -60),
+                ("rodas", 60, 60, 60, 60),
+            ],
         )
         self.assertEqual(arduino.comandos[-1], ("parar",))
-        self.assertAlmostEqual(relogio.tempo, 2.5)
+        self.assertAlmostEqual(relogio.tempo, 5.0)
         self.assertTrue(
             all(
                 comando[0] in ("parar", "rodas", "refresh")
@@ -181,7 +190,7 @@ class DesvioLateralTests(unittest.TestCase):
         arduino = ArduinoMovimentoFalso(rodas_enviadas=False)
 
         with self.assertRaises(RuntimeError):
-            deslizar_para_esquerda(arduino)
+            desviar_obstaculo(arduino)
 
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
@@ -189,7 +198,7 @@ class DesvioLateralTests(unittest.TestCase):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
-        deslizar_para_esquerda(
+        desviar_obstaculo(
             arduino,
             deve_encerrar=lambda: True,
             relogio=relogio.monotonic,
@@ -198,12 +207,20 @@ class DesvioLateralTests(unittest.TestCase):
 
         self.assertEqual(arduino.comandos[-1], ("parar",))
         self.assertEqual(relogio.tempo, 0.0)
+        self.assertEqual(
+            [
+                comando
+                for comando in arduino.comandos
+                if comando[0] == "rodas"
+            ],
+            [("rodas", -60, 60, 60, -60)],
+        )
 
     def test_pwm_acima_do_limite_e_rejeitado_sem_mover(self):
         arduino = ArduinoMovimentoFalso()
 
         with self.assertRaises(ValueError):
-            deslizar_para_esquerda(arduino, pwm=121)
+            desviar_obstaculo(arduino, pwm_lateral=121)
 
         self.assertEqual(arduino.comandos, [])
 

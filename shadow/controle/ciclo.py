@@ -23,7 +23,7 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
 from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
-    deslizar_para_esquerda,
+    desviar_obstaculo,
 )
 from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
@@ -135,23 +135,24 @@ def control_loop():
                     monitor_obstaculo.distancia_confirmada_mm / 10.0)
                 status.value = (
                     f'Obstáculo a {distancia_cm:.1f} cm — '
-                    'deslizando à esquerda')
+                    'executando desvio')
                 print(
                     "[controle] obstáculo confirmado a "
-                    f"{distancia_cm:.1f} cm; deslizando à esquerda por "
-                    f"{config.OBSTACLE_LATERAL_TIME_S:.1f} s")
+                    f"{distancia_cm:.1f} cm; esquerda por "
+                    f"{config.OBSTACLE_LATERAL_TIME_S:.1f} s e frente por "
+                    f"{config.OBSTACLE_FORWARD_TIME_S:.1f} s")
                 try:
-                    deslizar_para_esquerda(
+                    desviar_obstaculo(
                         arduino,
                         deve_encerrar=lambda: terminate.value,
                     )
-                    status.value = 'Desvio lateral concluído — PARADO'
+                    status.value = 'Desvio do obstáculo concluído — PARADO'
                     print(
-                        "[controle] desvio lateral concluído; "
+                        "[controle] desvio do obstáculo concluído; "
                         "parada de segurança travada")
                 except RuntimeError as erro:
-                    status.value = 'Falha no desvio lateral — PARADO'
-                    print(f"[controle] falha no desvio lateral: {erro}")
+                    status.value = 'Falha no desvio do obstáculo — PARADO'
+                    print(f"[controle] falha no desvio do obstáculo: {erro}")
 
                 while not terminate.value:
                     arduino.refresh(fail_closed=True)
