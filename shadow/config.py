@@ -37,9 +37,11 @@ OBSTACLE_CONFIRM_WINDOW_S = .20
 OBSTACLE_MIN_VALID_MM = 1
 OBSTACLE_MAX_VALID_MM = 4000
 OBSTACLE_LATERAL_PWM = 60                  # translação com rodas omnidirecionais
-OBSTACLE_LATERAL_TIME_S = 2.0              # s deslizando para a esquerda
+OBSTACLE_LATERAL_TIME_S = 1.5              # s deslizando para a esquerda
 OBSTACLE_FORWARD_PWM = 60
-OBSTACLE_FORWARD_TIME_S = 3.0              # s avançando depois do lateral
+OBSTACLE_FORWARD_TIME_S = 2.0              # s avançando depois do lateral
+OBSTACLE_TANK_RIGHT_PWM = 60
+OBSTACLE_TANK_RIGHT_TIME_S = 1.0            # s girando tanque à direita
 
 # ----------------------------------------------------------------------------
 # Câmera: captura 640×480 e processamento em 448×252

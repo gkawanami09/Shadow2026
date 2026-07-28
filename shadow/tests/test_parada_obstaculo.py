@@ -43,6 +43,10 @@ class ArduinoMovimentoFalso:
         self.comandos.append(("rodas", fe, te, fd, td))
         return self.rodas_enviadas
 
+    def lado(self, esq, dir_):
+        self.comandos.append(("lado", esq, dir_))
+        return True
+
     def refresh(self, fail_closed=False):
         self.comandos.append(("refresh", fail_closed))
 
@@ -151,16 +155,18 @@ class MonitorObstaculoTests(unittest.TestCase):
 
 
 class DesvioObstaculoTests(unittest.TestCase):
-    def test_desliza_dois_segundos_e_avanca_tres_segundos(self):
+    def test_lateral_avanco_e_giro_tanque_direita(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
         desviar_obstaculo(
             arduino,
             pwm_lateral=60,
-            duracao_lateral_s=2.0,
+            duracao_lateral_s=1.5,
             pwm_avanco=60,
-            duracao_avanco_s=3.0,
+            duracao_avanco_s=2.0,
+            pwm_giro=60,
+            duracao_giro_s=1.0,
             relogio=relogio.monotonic,
             dormir=relogio.sleep,
         )
@@ -177,11 +183,19 @@ class DesvioObstaculoTests(unittest.TestCase):
                 ("rodas", 60, 60, 60, 60),
             ],
         )
+        self.assertEqual(
+            [
+                comando
+                for comando in arduino.comandos
+                if comando[0] == "lado"
+            ],
+            [("lado", 60, -60)],
+        )
         self.assertEqual(arduino.comandos[-1], ("parar",))
-        self.assertAlmostEqual(relogio.tempo, 5.0)
+        self.assertAlmostEqual(relogio.tempo, 4.5)
         self.assertTrue(
             all(
-                comando[0] in ("parar", "rodas", "refresh")
+                comando[0] in ("parar", "rodas", "lado", "refresh")
                 for comando in arduino.comandos
             )
         )

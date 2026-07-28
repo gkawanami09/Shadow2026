@@ -140,7 +140,9 @@ def control_loop():
                     "[controle] obstáculo confirmado a "
                     f"{distancia_cm:.1f} cm; esquerda por "
                     f"{config.OBSTACLE_LATERAL_TIME_S:.1f} s e frente por "
-                    f"{config.OBSTACLE_FORWARD_TIME_S:.1f} s")
+                    f"{config.OBSTACLE_FORWARD_TIME_S:.1f} s; giro tanque "
+                    f"à direita por "
+                    f"{config.OBSTACLE_TANK_RIGHT_TIME_S:.1f} s")
                 try:
                     desviar_obstaculo(
                         arduino,
