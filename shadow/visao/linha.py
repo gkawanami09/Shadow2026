@@ -5,7 +5,9 @@ import numpy as np
 from numba import njit
 
 from config import (BOTTOM_CENTER_CONTROL, BOTTOM_CENTER_MIN_Y,
-                    BOTTOM_CENTER_WEIGHT, camera_x, camera_y)
+                    BOTTOM_CENTER_WEIGHT,
+                    OBSTACLE_LEFT_PREFERENCE_MIN_SPAN_RATIO,
+                    camera_x, camera_y)
 from shared.dados_compartilhados import line_crop, timer, turn_dir
 
 x_last = camera_x / 2
@@ -20,7 +22,7 @@ def init_tracker():
     multiple_bottom_side = camera_x / 2
 
 
-def determine_correct_line(contours_blk):
+def determine_correct_line(contours_blk, preferir_esquerda=False):
     global x_last, y_last
     candidates = np.zeros((len(contours_blk), 5), dtype=np.int32)
     off_bottom = 0
@@ -46,7 +48,12 @@ def determine_correct_line(contours_blk):
         off_bottom_candidates = candidates[np.where(candidates[:, 1] >= (camera_y * 0.75))]
         candidates = off_bottom_candidates[off_bottom_candidates[:, 2].argsort()]
 
-    if turn_dir.value == "left":
+    if preferir_esquerda:
+        # Peso para o próximo quadro sem transformar a preferência em uma
+        # ordem de giro: contornos mais à esquerda ficam mais próximos do
+        # histórico e vencem apenas quando houver ambiguidade.
+        x_last = np.clip(candidates[0][3] - 150, 0, camera_x)
+    elif turn_dir.value == "left":
         x_last = np.clip(candidates[0][3] - 150, 0, camera_x)
     elif turn_dir.value == "right":
         x_last = np.clip(candidates[0][3] + 150, 0, camera_x)
@@ -160,7 +167,15 @@ def calculate_angle_numba(blackline, blackline_crop, last_bottom_point, average_
     return poi, poi_no_crop, is_crop, max_black_top, bottom_point
 
 
-def calculate_angle(blackline, blackline_crop, average_line_angle, turn_direction, last_bottom_point, average_line_point):
+def calculate_angle(
+    blackline,
+    blackline_crop,
+    average_line_angle,
+    turn_direction,
+    last_bottom_point,
+    average_line_point,
+    preferir_esquerda=False,
+):
     global multiple_bottom_side
 
     poi, poi_no_crop, is_crop, max_black_top, bottom_point = calculate_angle_numba(blackline, blackline_crop, last_bottom_point, average_line_point)
@@ -204,7 +219,29 @@ def calculate_angle(blackline, blackline_crop, average_line_angle, turn_directio
         else:
             final_poi = poi[0] if is_crop else poi_no_crop[0]
 
-            if poi_no_crop[1][0] < camera_x * 0.02 and poi_no_crop[2][0] > camera_x * 0.98 and timer.get_timer("multiple_side_r") and timer.get_timer("multiple_side_l"):
+            atravessa_os_dois_lados = (
+                poi_no_crop[1][0] < camera_x * 0.02
+                and poi_no_crop[2][0] > camera_x * 0.98
+            )
+            largura_lateral = (
+                poi_no_crop[2][0] - poi_no_crop[1][0]
+            )
+            preferencia_transversal = (
+                preferir_esquerda
+                and largura_lateral
+                >= camera_x * OBSTACLE_LEFT_PREFERENCE_MIN_SPAN_RATIO
+            )
+            if preferencia_transversal:
+                index = 1
+                # Mantém a escolha por mais alguns quadros depois que a
+                # preferência temporária for retirada pelo controle.
+                timer.set_timer("multiple_side_r", 0)
+                timer.set_timer("multiple_side_l", .6)
+                final_poi = poi[index] if is_crop else poi_no_crop[index]
+
+            elif (atravessa_os_dois_lados
+                    and timer.get_timer("multiple_side_r")
+                    and timer.get_timer("multiple_side_l")):
                 if average_line_angle >= 0:
                     index = 2
                     timer.set_timer("multiple_side_r", .6)
@@ -226,7 +263,10 @@ def calculate_angle(blackline, blackline_crop, average_line_angle, turn_directio
                 final_poi = poi[2] if is_crop else poi_no_crop[2]
 
             elif multiple_bottom and timer.get_timer("multiple_bottom"):
-                if poi_no_crop[3][0] < bottom_point[0]:
+                if preferir_esquerda:
+                    final_poi = [0, camera_y]
+                    multiple_bottom_side = 0
+                elif poi_no_crop[3][0] < bottom_point[0]:
                     final_poi = [0, camera_y]
                     multiple_bottom_side = 0
                 else:

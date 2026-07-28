@@ -16,6 +16,7 @@ from shared.dados_compartilhados import (add_time_value, black_average,
                                          line_ahead, line_angle, line_angle_y,
                                          line_crop, line_detected, line_size,
                                          line_status, min_line_size, ramp_ahead,
+                                         preferencia_linha_esquerda,
                                          red_detected, status, terminate, timer,
                                          turn_dir, vision_ready)
 from visao import linha as line_module
@@ -211,7 +212,11 @@ def vision_loop(debug=False):
             # Escolhe o contorno correto da linha.
             if len(contours_blk) > 0:
                 line_detected.value = True
-                blackline, black_line_crop = determine_correct_line(contours_blk)
+                preferir_esquerda = bool(preferencia_linha_esquerda.value)
+                blackline, black_line_crop = determine_correct_line(
+                    contours_blk,
+                    preferir_esquerda=preferir_esquerda,
+                )
                 line_size.value = cv2.contourArea(blackline)
 
                 # Calcula a geometria do gap.
@@ -227,7 +232,11 @@ def vision_loop(debug=False):
                 line_angle.value, poi, bottom_point = calculate_angle(
                     blackline, black_line_crop,
                     float(get_time_average(time_line_angle, .3)),
-                    turn_dir.value, last_bottom_point_x, last_average_line_point)
+                    "straight" if preferir_esquerda else turn_dir.value,
+                    last_bottom_point_x,
+                    last_average_line_point,
+                    preferir_esquerda=preferir_esquerda,
+                )
                 line_angle_y.value = int(poi[1])
 
 

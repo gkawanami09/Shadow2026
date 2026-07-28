@@ -47,13 +47,15 @@ OBSTACLE_LINE_SEARCH_PWM = 60
 OBSTACLE_LINE_SEARCH_TIMEOUT_S = 4.0
 OBSTACLE_LINE_NEAR_BOTTOM_RATIO = .85
 OBSTACLE_LINE_CONFIRM_TIME_S = .10
-# Ao encontrar a linha, vira obrigatoriamente para a esquerda até alinhar com
-# a bolinha inferior central; depois libera o segue-linha normal.
-OBSTACLE_LEFT_ALIGN_PWM = 60
-OBSTACLE_LEFT_ALIGN_MIN_TIME_S = .20
-OBSTACLE_LEFT_ALIGN_TIMEOUT_S = 3.0
-OBSTACLE_LEFT_ALIGN_MAX_ANGLE = 35
-OBSTACLE_LEFT_ALIGN_BOTTOM_PX = 35
+# Ao encontrar uma linha transversal, o segue-linha recebe preferência
+# temporária pelo ramo esquerdo, sem executar um giro tanque separado.
+OBSTACLE_LEFT_PREFERENCE_MIN_TIME_S = .20
+OBSTACLE_LEFT_PREFERENCE_MAX_TIME_S = 3.0
+OBSTACLE_LEFT_PREFERENCE_MAX_ANGLE = 35
+OBSTACLE_LEFT_PREFERENCE_BOTTOM_PX = 35
+OBSTACLE_LEFT_PREFERENCE_MIN_SPAN_RATIO = .45
+OBSTACLE_LEFT_PREFERENCE_ARM_TIME_S = .08
+OBSTACLE_LEFT_PREFERENCE_CONFIRM_TIME_S = .12
 OBSTACLE_RETRY_COOLDOWN_S = 1.0
 
 # ----------------------------------------------------------------------------

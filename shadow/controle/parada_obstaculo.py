@@ -13,9 +13,6 @@ from config import (
     OBSTACLE_HISTORY_SIZE,
     OBSTACLE_LATERAL_PWM,
     OBSTACLE_LATERAL_TIME_S,
-    OBSTACLE_LEFT_ALIGN_MIN_TIME_S,
-    OBSTACLE_LEFT_ALIGN_PWM,
-    OBSTACLE_LEFT_ALIGN_TIMEOUT_S,
     OBSTACLE_LINE_CONFIRM_TIME_S,
     OBSTACLE_LINE_SEARCH_PWM,
     OBSTACLE_LINE_SEARCH_TIMEOUT_S,
@@ -295,46 +292,6 @@ def avancar_ate_linha(
         timeout_s,
         confirmacao_s,
         "a busca da linha",
-        deve_encerrar,
-        relogio,
-        dormir,
-    )
-
-
-def alinhar_linha_pela_esquerda(
-    arduino,
-    linha_alinhada,
-    pwm=OBSTACLE_LEFT_ALIGN_PWM,
-    tempo_minimo_s=OBSTACLE_LEFT_ALIGN_MIN_TIME_S,
-    timeout_s=OBSTACLE_LEFT_ALIGN_TIMEOUT_S,
-    confirmacao_s=OBSTACLE_LINE_CONFIRM_TIME_S,
-    deve_encerrar=None,
-    relogio=time.monotonic,
-    dormir=time.sleep,
-):
-    """Gira tanque somente para a esquerda até alinhar com a linha."""
-    pwm = int(round(pwm))
-    tempo_minimo_s = float(tempo_minimo_s)
-    if not 1 <= pwm <= MAX_PWM:
-        raise ValueError(f"PWM de alinhamento deve ficar entre 1 e {MAX_PWM}")
-    if tempo_minimo_s < 0:
-        raise ValueError("tempo mínimo de alinhamento não pode ser negativo")
-
-    inicio = relogio()
-
-    def alinhamento_confirmavel():
-        return (
-            relogio() - inicio >= tempo_minimo_s
-            and linha_alinhada()
-        )
-
-    return _movimentar_ate_confirmar(
-        arduino,
-        lambda: arduino.lado(-pwm, pwm),
-        alinhamento_confirmavel,
-        timeout_s,
-        confirmacao_s,
-        "o alinhamento obrigatório pela esquerda",
         deve_encerrar,
         relogio,
         dormir,

@@ -23,7 +23,6 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
 from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
-    alinhar_linha_pela_esquerda,
     avancar_ate_linha,
     desviar_obstaculo,
 )
@@ -38,7 +37,8 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                last_bottom_point_y,
                                line_ahead, line_angle, line_detected,
                                line_status, min_line_size, mission_mode,
-                               ramp_ahead, red_detected, red_finished,
+                               preferencia_linha_esquerda, ramp_ahead,
+                               red_detected, red_finished,
                                rescue_requested, status, terminate,
                                timer, turn_dir, vision_ready)
 
@@ -123,9 +123,58 @@ def control_loop():
     green_rearm_after = 0.
     monitor_obstaculo = MonitorObstaculo()
     obstaculo_retry_after = 0.
+    preferencia_linha_esquerda.value = False
+    preferencia_esquerda_inicio = 0.
+    preferencia_esquerda_alinhada_desde = None
 
     try:
         while not terminate.value:
+
+            # A preferência pós-obstáculo não gira o robô sozinha. A visão
+            # apenas desempata contornos transversais para a esquerda e o
+            # segue-linha proporcional executa a correção normal.
+            if preferencia_linha_esquerda.value:
+                agora_preferencia = time.monotonic()
+                alinhada = (
+                    agora_preferencia - preferencia_esquerda_inicio
+                    >= config.OBSTACLE_LEFT_PREFERENCE_MIN_TIME_S
+                    and line_detected.value
+                    and abs(line_angle.value)
+                    <= config.OBSTACLE_LEFT_PREFERENCE_MAX_ANGLE
+                    and abs(last_bottom_point.value - camera_x / 2)
+                    <= config.OBSTACLE_LEFT_PREFERENCE_BOTTOM_PX
+                )
+                if alinhada:
+                    if preferencia_esquerda_alinhada_desde is None:
+                        preferencia_esquerda_alinhada_desde = agora_preferencia
+                    elif (
+                        agora_preferencia
+                        - preferencia_esquerda_alinhada_desde
+                        >= config.OBSTACLE_LEFT_PREFERENCE_CONFIRM_TIME_S
+                    ):
+                        preferencia_linha_esquerda.value = False
+                else:
+                    preferencia_esquerda_alinhada_desde = None
+
+                if (
+                    agora_preferencia - preferencia_esquerda_inicio
+                    >= config.OBSTACLE_LEFT_PREFERENCE_MAX_TIME_S
+                ):
+                    preferencia_linha_esquerda.value = False
+
+                if not preferencia_linha_esquerda.value:
+                    obstaculo_retry_after = max(
+                        obstaculo_retry_after,
+                        agora_preferencia + config.OBSTACLE_RETRY_COOLDOWN_S,
+                    )
+                    green_rearm_after = max(
+                        green_rearm_after,
+                        agora_preferencia + config.OBSTACLE_RETRY_COOLDOWN_S,
+                    )
+                    status.value = 'Preferência esquerda concluída'
+                    print(
+                        "[controle] preferência esquerda concluída; "
+                        "segue-linha normal")
 
             # Segurança frontal independente da visão. Duas de três leituras
             # ultrassônicas precisam confirmar até 5 cm. Depois disso a
@@ -133,6 +182,7 @@ def control_loop():
             # a primeira retomada para a esquerda.
             if (
                 config.OBSTACLE_STOP_ENABLED
+                and not preferencia_linha_esquerda.value
                 and time.monotonic() >= obstaculo_retry_after
                 and monitor_obstaculo.atualizar(arduino)
             ):
@@ -176,31 +226,29 @@ def control_loop():
                         raise RuntimeError(
                             "linha não encontrada dentro do limite seguro")
 
-                    status.value = 'Linha encontrada — entrando à esquerda'
+                    status.value = (
+                        'Linha encontrada — preferência para a esquerda')
                     print(
-                        "[controle] linha encontrada; iniciando giro "
-                        "obrigatório pela esquerda")
-                    alinhou_linha = alinhar_linha_pela_esquerda(
-                        arduino,
-                        linha_alinhada=lambda: (
-                            line_detected.value
-                            and last_bottom_point_y.value
-                            >= camera_y
-                            * config.OBSTACLE_LINE_NEAR_BOTTOM_RATIO
-                            and abs(
-                                last_bottom_point.value - camera_x / 2
-                            )
-                            <= config.OBSTACLE_LEFT_ALIGN_BOTTOM_PX
-                            and abs(line_angle.value)
-                            <= config.OBSTACLE_LEFT_ALIGN_MAX_ANGLE
-                        ),
-                        deve_encerrar=lambda: terminate.value,
+                        "[controle] linha encontrada; ativando peso visual "
+                        "para o ramo esquerdo")
+                    preferencia_linha_esquerda.value = True
+                    preferencia_esquerda_inicio = time.monotonic()
+                    preferencia_esquerda_alinhada_desde = None
+
+                    # Permanece parado por poucos frames para a visão publicar
+                    # o primeiro ângulo já calculado com o novo desempate.
+                    fim_armar_preferencia = (
+                        preferencia_esquerda_inicio
+                        + config.OBSTACLE_LEFT_PREFERENCE_ARM_TIME_S
                     )
+                    while (
+                        not terminate.value
+                        and time.monotonic() < fim_armar_preferencia
+                    ):
+                        arduino.refresh(fail_closed=True)
+                        time.sleep(.01)
                     if terminate.value:
                         break
-                    if not alinhou_linha:
-                        raise RuntimeError(
-                            "linha não alinhou pela esquerda no tempo seguro")
                 except RuntimeError as erro:
                     status.value = 'Falha no desvio do obstáculo — PARADO'
                     print(f"[controle] falha no desvio do obstáculo: {erro}")
@@ -209,8 +257,9 @@ def control_loop():
                         time.sleep(.05)
                     break
 
-                # Descarta o eco antigo e libera o controle normal somente
-                # depois que o caminho da esquerda estiver alinhado.
+                # Descarta o eco antigo e devolve o movimento ao segue-linha.
+                # A preferência compartilhada muda apenas o desempate visual;
+                # quem vira o robô continua sendo o controle proporcional.
                 arduino.cancelar_ultrassom()
                 monitor_obstaculo.reiniciar()
                 obstaculo_retry_after = (
@@ -232,10 +281,9 @@ def control_loop():
                 green_reverse_until = None
                 green_armed = False
                 green_rearm_after = obstaculo_retry_after
-                status.value = 'Linha retomada pela esquerda'
+                status.value = 'Seguindo linha com preferência à esquerda'
                 print(
-                    "[controle] linha alinhada pela esquerda; "
-                    "retomando segue-linha")
+                    "[controle] retomando segue-linha com peso à esquerda")
                 continue
 
             # Faixa prata de entrada. Só existe no modo de missão completa;
@@ -267,7 +315,10 @@ def control_loop():
 
             # Continua seguindo enquanto não muda de estado.
             if line_status.value == "line_detected":
-                if turn_dir.value == "turn_around":
+                if (
+                    not preferencia_linha_esquerda.value
+                    and turn_dir.value == "turn_around"
+                ):
                     status.value = f'Girando 180° para a {"direita" if last_turn_dir == "r" else "esquerda"}'
 
                     last_turn_dir = turn_around(last_turn_dir)
@@ -282,16 +333,22 @@ def control_loop():
                         time.monotonic() + TURN_AROUND_GREEN_COOLDOWN)
                     continue
 
-                status.value = 'Seguindo Linha'
+                status.value = (
+                    'Seguindo Linha — preferência esquerda'
+                    if preferencia_linha_esquerda.value
+                    else 'Seguindo Linha'
+                )
 
                 now = time.monotonic()
 
                 if (time.monotonic() >= green_rearm_after
+                        and not preferencia_linha_esquerda.value
                         and turn_dir.value == "straight"
                         and green_direction is None):
                     green_armed = True
 
-                if (green_armed and green_direction is None
+                if (not preferencia_linha_esquerda.value
+                        and green_armed and green_direction is None
                         and turn_dir.value in ("left", "right")):
                     green_direction = turn_dir.value
                     green_approach_until = now + GREEN_APPROACH_TIME
@@ -308,7 +365,10 @@ def control_loop():
                 if line_detected.value:
                     last_line_seen = now
                     last_follow_angle = line_angle.value
-                    last_rear_pivot_enabled = turn_dir.value == "straight"
+                    last_rear_pivot_enabled = (
+                        preferencia_linha_esquerda.value
+                        or turn_dir.value == "straight"
+                    )
 
                     if (last_rear_pivot_enabled
                             and abs(line_angle.value) > FRONT_ANCHOR_START_ANGLE):
@@ -494,6 +554,7 @@ def control_loop():
             iteration_limit_time = time.perf_counter()
 
     finally:
+        preferencia_linha_esquerda.value = False
         status.value = "Parado"
         try:
             steer()  # PARAR

@@ -34,6 +34,7 @@ black_average = manager.Value("i", 0.)
 
 last_bottom_point = manager.Value("i", config.camera_x / 2)
 last_bottom_point_y = manager.Value("i", 0)
+preferencia_linha_esquerda = manager.Value("i", False)
 
 line_status = manager.Value("i", "line_detected")  # "line_detected"; "gap_detected"; "gap_avoid"; "stop"
 

@@ -9,7 +9,6 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 from controle.parada_obstaculo import (  # noqa: E402
     MonitorObstaculo,
-    alinhar_linha_pela_esquerda,
     avancar_ate_linha,
     desviar_obstaculo,
 )
@@ -298,25 +297,6 @@ class DesvioObstaculoTests(unittest.TestCase):
 
         self.assertFalse(encontrou)
         self.assertEqual(arduino.comandos[-1], ("parar",))
-
-    def test_alinhamento_gira_obrigatoriamente_para_esquerda(self):
-        arduino = ArduinoMovimentoFalso()
-        relogio = RelogioFalso()
-
-        alinhou = alinhar_linha_pela_esquerda(
-            arduino,
-            linha_alinhada=lambda: relogio.tempo >= .25,
-            tempo_minimo_s=.20,
-            timeout_s=1.0,
-            confirmacao_s=.10,
-            relogio=relogio.monotonic,
-            dormir=relogio.sleep,
-        )
-
-        self.assertTrue(alinhou)
-        self.assertEqual(arduino.comandos[1], ("lado", -60, 60))
-        self.assertEqual(arduino.comandos[-1], ("parar",))
-
 
 if __name__ == "__main__":
     unittest.main()
