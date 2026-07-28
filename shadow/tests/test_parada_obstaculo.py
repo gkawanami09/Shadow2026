@@ -9,6 +9,8 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 from controle.parada_obstaculo import (  # noqa: E402
     MonitorObstaculo,
+    alinhar_linha_pela_esquerda,
+    avancar_ate_linha,
     desviar_obstaculo,
 )
 
@@ -153,6 +155,20 @@ class MonitorObstaculoTests(unittest.TestCase):
         self.assertTrue(monitor.atualizar(arduino, agora=2.00))
         self.assertEqual(len(arduino.solicitacoes), solicitacoes_antes)
 
+    def test_reiniciar_libera_nova_deteccao(self):
+        arduino = ArduinoFalso(
+            ((True, 30), (True, 35), (True, 200)))
+        monitor = criar_monitor()
+
+        monitor.atualizar(arduino, agora=0.00)
+        self.assertTrue(monitor.atualizar(arduino, agora=0.06))
+
+        monitor.reiniciar()
+
+        self.assertFalse(monitor.parada_confirmada)
+        self.assertIsNone(monitor.distancia_confirmada_mm)
+        self.assertFalse(monitor.atualizar(arduino, agora=1.00))
+
 
 class DesvioObstaculoTests(unittest.TestCase):
     def test_lateral_avanco_e_giro_tanque_direita(self):
@@ -161,12 +177,6 @@ class DesvioObstaculoTests(unittest.TestCase):
 
         desviar_obstaculo(
             arduino,
-            pwm_lateral=60,
-            duracao_lateral_s=1.5,
-            pwm_avanco=60,
-            duracao_avanco_s=2.0,
-            pwm_giro=60,
-            duracao_giro_s=1.0,
             relogio=relogio.monotonic,
             dormir=relogio.sleep,
         )
@@ -192,7 +202,7 @@ class DesvioObstaculoTests(unittest.TestCase):
             [("lado", 60, -60)],
         )
         self.assertEqual(arduino.comandos[-1], ("parar",))
-        self.assertAlmostEqual(relogio.tempo, 4.5)
+        self.assertAlmostEqual(relogio.tempo, 4.8)
         self.assertTrue(
             all(
                 comando[0] in ("parar", "rodas", "lado", "refresh")
@@ -237,6 +247,75 @@ class DesvioObstaculoTests(unittest.TestCase):
             desviar_obstaculo(arduino, pwm_lateral=121)
 
         self.assertEqual(arduino.comandos, [])
+
+    def test_avanca_ate_confirmar_linha(self):
+        arduino = ArduinoMovimentoFalso()
+        relogio = RelogioFalso()
+
+        encontrou = avancar_ate_linha(
+            arduino,
+            linha_proxima=lambda: relogio.tempo >= .20,
+            timeout_s=1.0,
+            confirmacao_s=.10,
+            relogio=relogio.monotonic,
+            dormir=relogio.sleep,
+        )
+
+        self.assertTrue(encontrou)
+        self.assertEqual(arduino.comandos[0], ("parar",))
+        self.assertEqual(arduino.comandos[1], ("lado", 60, 60))
+        self.assertEqual(arduino.comandos[-1], ("parar",))
+        self.assertGreaterEqual(relogio.tempo, .30)
+
+    def test_busca_para_no_timeout_sem_linha(self):
+        arduino = ArduinoMovimentoFalso()
+        relogio = RelogioFalso()
+
+        encontrou = avancar_ate_linha(
+            arduino,
+            linha_proxima=lambda: False,
+            timeout_s=.20,
+            relogio=relogio.monotonic,
+            dormir=relogio.sleep,
+        )
+
+        self.assertFalse(encontrou)
+        self.assertEqual(arduino.comandos[-1], ("parar",))
+        self.assertAlmostEqual(relogio.tempo, .20)
+
+    def test_um_pulso_visual_nao_confirma_a_linha(self):
+        arduino = ArduinoMovimentoFalso()
+        relogio = RelogioFalso()
+
+        encontrou = avancar_ate_linha(
+            arduino,
+            linha_proxima=lambda: .10 <= relogio.tempo < .15,
+            timeout_s=.30,
+            confirmacao_s=.10,
+            relogio=relogio.monotonic,
+            dormir=relogio.sleep,
+        )
+
+        self.assertFalse(encontrou)
+        self.assertEqual(arduino.comandos[-1], ("parar",))
+
+    def test_alinhamento_gira_obrigatoriamente_para_esquerda(self):
+        arduino = ArduinoMovimentoFalso()
+        relogio = RelogioFalso()
+
+        alinhou = alinhar_linha_pela_esquerda(
+            arduino,
+            linha_alinhada=lambda: relogio.tempo >= .25,
+            tempo_minimo_s=.20,
+            timeout_s=1.0,
+            confirmacao_s=.10,
+            relogio=relogio.monotonic,
+            dormir=relogio.sleep,
+        )
+
+        self.assertTrue(alinhou)
+        self.assertEqual(arduino.comandos[1], ("lado", -60, 60))
+        self.assertEqual(arduino.comandos[-1], ("parar",))
 
 
 if __name__ == "__main__":

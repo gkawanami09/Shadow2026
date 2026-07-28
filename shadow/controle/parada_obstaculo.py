@@ -13,6 +13,12 @@ from config import (
     OBSTACLE_HISTORY_SIZE,
     OBSTACLE_LATERAL_PWM,
     OBSTACLE_LATERAL_TIME_S,
+    OBSTACLE_LEFT_ALIGN_MIN_TIME_S,
+    OBSTACLE_LEFT_ALIGN_PWM,
+    OBSTACLE_LEFT_ALIGN_TIMEOUT_S,
+    OBSTACLE_LINE_CONFIRM_TIME_S,
+    OBSTACLE_LINE_SEARCH_PWM,
+    OBSTACLE_LINE_SEARCH_TIMEOUT_S,
     OBSTACLE_MAX_VALID_MM,
     OBSTACLE_MIN_VALID_MM,
     OBSTACLE_READ_TIMEOUT_S,
@@ -105,6 +111,13 @@ class MonitorObstaculo:
         limite = agora - self.janela_s
         while self._leituras and self._leituras[0][0] < limite:
             self._leituras.popleft()
+
+    def reiniciar(self):
+        """Libera o monitor para detectar outro obstáculo futuramente."""
+        self._leituras.clear()
+        self._proxima_solicitacao = 0.0
+        self.parada_confirmada = False
+        self.distancia_confirmada_mm = None
 
 
 def desviar_obstaculo(
@@ -201,3 +214,128 @@ def desviar_obstaculo(
     finally:
         # Garante PARAR tanto no fim normal quanto em Ctrl+C ou falha serial.
         arduino.parar()
+
+
+def _movimentar_ate_confirmar(
+    arduino,
+    enviar_comando,
+    condicao,
+    timeout_s,
+    confirmacao_s,
+    etapa,
+    deve_encerrar=None,
+    relogio=time.monotonic,
+    dormir=time.sleep,
+):
+    """Mantém um movimento até uma condição visual permanecer confirmada."""
+    timeout_s = float(timeout_s)
+    confirmacao_s = float(confirmacao_s)
+    deve_encerrar = deve_encerrar or (lambda: False)
+
+    if timeout_s <= 0:
+        raise ValueError("timeout do movimento deve ser positivo")
+    if confirmacao_s < 0:
+        raise ValueError("tempo de confirmação não pode ser negativo")
+    if arduino.parar() is False:
+        raise RuntimeError(f"não foi possível parar antes de {etapa}")
+
+    epoca_serial = arduino.connection_epoch
+    inicio = relogio()
+    confirmada_desde = None
+    try:
+        if enviar_comando() is False:
+            raise RuntimeError(f"não foi possível iniciar {etapa}")
+
+        while not deve_encerrar():
+            agora = relogio()
+            if condicao():
+                if confirmada_desde is None:
+                    confirmada_desde = agora
+                if agora - confirmada_desde >= confirmacao_s:
+                    return True
+            else:
+                confirmada_desde = None
+
+            restante = timeout_s - (agora - inicio)
+            if restante <= 0:
+                return False
+
+            arduino.refresh(fail_closed=True)
+            if (
+                not arduino.connected
+                or arduino.connection_epoch != epoca_serial
+            ):
+                raise RuntimeError(
+                    f"conexão serial mudou durante {etapa}")
+            dormir(min(.05, restante))
+        return False
+    finally:
+        arduino.parar()
+
+
+def avancar_ate_linha(
+    arduino,
+    linha_proxima,
+    pwm=OBSTACLE_LINE_SEARCH_PWM,
+    timeout_s=OBSTACLE_LINE_SEARCH_TIMEOUT_S,
+    confirmacao_s=OBSTACLE_LINE_CONFIRM_TIME_S,
+    deve_encerrar=None,
+    relogio=time.monotonic,
+    dormir=time.sleep,
+):
+    """Avança até a linha chegar perto da parte inferior da câmera."""
+    pwm = int(round(pwm))
+    if not 1 <= pwm <= MAX_PWM:
+        raise ValueError(f"PWM de busca deve ficar entre 1 e {MAX_PWM}")
+
+    return _movimentar_ate_confirmar(
+        arduino,
+        lambda: arduino.lado(pwm, pwm),
+        linha_proxima,
+        timeout_s,
+        confirmacao_s,
+        "a busca da linha",
+        deve_encerrar,
+        relogio,
+        dormir,
+    )
+
+
+def alinhar_linha_pela_esquerda(
+    arduino,
+    linha_alinhada,
+    pwm=OBSTACLE_LEFT_ALIGN_PWM,
+    tempo_minimo_s=OBSTACLE_LEFT_ALIGN_MIN_TIME_S,
+    timeout_s=OBSTACLE_LEFT_ALIGN_TIMEOUT_S,
+    confirmacao_s=OBSTACLE_LINE_CONFIRM_TIME_S,
+    deve_encerrar=None,
+    relogio=time.monotonic,
+    dormir=time.sleep,
+):
+    """Gira tanque somente para a esquerda até alinhar com a linha."""
+    pwm = int(round(pwm))
+    tempo_minimo_s = float(tempo_minimo_s)
+    if not 1 <= pwm <= MAX_PWM:
+        raise ValueError(f"PWM de alinhamento deve ficar entre 1 e {MAX_PWM}")
+    if tempo_minimo_s < 0:
+        raise ValueError("tempo mínimo de alinhamento não pode ser negativo")
+
+    inicio = relogio()
+
+    def alinhamento_confirmavel():
+        return (
+            relogio() - inicio >= tempo_minimo_s
+            and linha_alinhada()
+        )
+
+    return _movimentar_ate_confirmar(
+        arduino,
+        lambda: arduino.lado(-pwm, pwm),
+        alinhamento_confirmavel,
+        timeout_s,
+        confirmacao_s,
+        "o alinhamento obrigatório pela esquerda",
+        deve_encerrar,
+        relogio,
+        dormir,
+    )

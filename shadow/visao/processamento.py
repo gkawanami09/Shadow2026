@@ -12,6 +12,7 @@ from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
 from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
                                          get_time_average, last_bottom_point,
+                                         last_bottom_point_y,
                                          line_ahead, line_angle, line_angle_y,
                                          line_crop, line_detected, line_size,
                                          line_status, min_line_size, ramp_ahead,
@@ -247,6 +248,7 @@ def vision_loop(debug=False):
 
                 # Publica os valores usados pelo controle.
                 last_bottom_point.value = bottom_point[0]
+                last_bottom_point_y.value = bottom_point[1]
                 if debug:
                     cv2.drawContours(cv2_img, [blackline], -1, (255, 0, 0), 2)
                     cv2.circle(cv2_img, (int(last_average_line_point), 0), 5, (0, 255, 255), 1, cv2.LINE_AA)
@@ -259,6 +261,7 @@ def vision_loop(debug=False):
                 line_detected.value = False
                 line_angle.value = 0
                 line_size.value = 0
+                last_bottom_point_y.value = 0
                 line_angle_y.value = -1
                 reset_gap_values()
 

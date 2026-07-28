@@ -33,6 +33,7 @@ turn_dir = manager.Value("i", "straight")  # "straight"; "left"; "right"; "turn_
 black_average = manager.Value("i", 0.)
 
 last_bottom_point = manager.Value("i", config.camera_x / 2)
+last_bottom_point_y = manager.Value("i", 0)
 
 line_status = manager.Value("i", "line_detected")  # "line_detected"; "gap_detected"; "gap_avoid"; "stop"
 

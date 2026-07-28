@@ -19,10 +19,12 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     PIVOT_STALL_RAMP_TIME, PIVOT_STALL_TIME,
                     TURN_AROUND_GREEN_COOLDOWN, VISION_READY_TIMEOUT,
                     FRONT_ANCHOR_FULL_ANGLE,
-                    FRONT_ANCHOR_START_ANGLE, camera_x)
+                    FRONT_ANCHOR_START_ANGLE, camera_x, camera_y)
 from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
+    alinhar_linha_pela_esquerda,
+    avancar_ate_linha,
     desviar_obstaculo,
 )
 from controle.parada_vermelho import stop_for_red
@@ -33,6 +35,7 @@ from comunicacao_serial.arduino import Arduino
 from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                entry_armed, entry_silver_confirmed,
                                entry_silver_detected, last_bottom_point,
+                               last_bottom_point_y,
                                line_ahead, line_angle, line_detected,
                                line_status, min_line_size, mission_mode,
                                ramp_ahead, red_detected, red_finished,
@@ -119,16 +122,18 @@ def control_loop():
     green_armed = True
     green_rearm_after = 0.
     monitor_obstaculo = MonitorObstaculo()
+    obstaculo_retry_after = 0.
 
     try:
         while not terminate.value:
 
             # Segurança frontal independente da visão. Duas de três leituras
             # ultrassônicas precisam confirmar até 5 cm. Depois disso a
-            # confirmação executa um único desvio lateral para a esquerda e
-            # depois a parada fica travada até o programa ser encerrado.
+            # confirmação executa o desvio, procura novamente a linha e força
+            # a primeira retomada para a esquerda.
             if (
                 config.OBSTACLE_STOP_ENABLED
+                and time.monotonic() >= obstaculo_retry_after
                 and monitor_obstaculo.atualizar(arduino)
             ):
                 distancia_cm = (
@@ -148,18 +153,90 @@ def control_loop():
                         arduino,
                         deve_encerrar=lambda: terminate.value,
                     )
-                    status.value = 'Desvio do obstáculo concluído — PARADO'
+                    if terminate.value:
+                        break
+
+                    status.value = 'Procurando linha — avançando'
                     print(
-                        "[controle] desvio do obstáculo concluído; "
-                        "parada de segurança travada")
+                        "[controle] giro à direita concluído; "
+                        "avançando até a linha chegar perto")
+                    encontrou_linha = avancar_ate_linha(
+                        arduino,
+                        linha_proxima=lambda: (
+                            line_detected.value
+                            and last_bottom_point_y.value
+                            >= camera_y
+                            * config.OBSTACLE_LINE_NEAR_BOTTOM_RATIO
+                        ),
+                        deve_encerrar=lambda: terminate.value,
+                    )
+                    if terminate.value:
+                        break
+                    if not encontrou_linha:
+                        raise RuntimeError(
+                            "linha não encontrada dentro do limite seguro")
+
+                    status.value = 'Linha encontrada — entrando à esquerda'
+                    print(
+                        "[controle] linha encontrada; iniciando giro "
+                        "obrigatório pela esquerda")
+                    alinhou_linha = alinhar_linha_pela_esquerda(
+                        arduino,
+                        linha_alinhada=lambda: (
+                            line_detected.value
+                            and last_bottom_point_y.value
+                            >= camera_y
+                            * config.OBSTACLE_LINE_NEAR_BOTTOM_RATIO
+                            and abs(
+                                last_bottom_point.value - camera_x / 2
+                            )
+                            <= config.OBSTACLE_LEFT_ALIGN_BOTTOM_PX
+                            and abs(line_angle.value)
+                            <= config.OBSTACLE_LEFT_ALIGN_MAX_ANGLE
+                        ),
+                        deve_encerrar=lambda: terminate.value,
+                    )
+                    if terminate.value:
+                        break
+                    if not alinhou_linha:
+                        raise RuntimeError(
+                            "linha não alinhou pela esquerda no tempo seguro")
                 except RuntimeError as erro:
                     status.value = 'Falha no desvio do obstáculo — PARADO'
                     print(f"[controle] falha no desvio do obstáculo: {erro}")
+                    while not terminate.value:
+                        arduino.refresh(fail_closed=True)
+                        time.sleep(.05)
+                    break
 
-                while not terminate.value:
-                    arduino.refresh(fail_closed=True)
-                    time.sleep(.05)
-                break
+                # Descarta o eco antigo e libera o controle normal somente
+                # depois que o caminho da esquerda estiver alinhado.
+                arduino.cancelar_ultrassom()
+                monitor_obstaculo.reiniciar()
+                obstaculo_retry_after = (
+                    time.monotonic()
+                    + config.OBSTACLE_RETRY_COOLDOWN_S
+                )
+                line_status.value = "line_detected"
+                line_missing_since = None
+                pivot_sign = 0
+                pivot_best_error = camera_x
+                pivot_last_progress = time.monotonic()
+                pivot_last_direction = 0
+                pivot_line_lost_since = None
+                last_follow_angle = line_angle.value
+                last_line_seen = time.monotonic()
+                last_rear_pivot_enabled = True
+                green_direction = None
+                green_turn_started = None
+                green_reverse_until = None
+                green_armed = False
+                green_rearm_after = obstaculo_retry_after
+                status.value = 'Linha retomada pela esquerda'
+                print(
+                    "[controle] linha alinhada pela esquerda; "
+                    "retomando segue-linha")
+                continue
 
             # Faixa prata de entrada. Só existe no modo de missão completa;
             # rodando `shadow/main.py` sozinho este bloco nunca é atingido.

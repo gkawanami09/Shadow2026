@@ -41,7 +41,20 @@ OBSTACLE_LATERAL_TIME_S = 1.5              # s deslizando para a esquerda
 OBSTACLE_FORWARD_PWM = 60
 OBSTACLE_FORWARD_TIME_S = 2.0              # s avançando depois do lateral
 OBSTACLE_TANK_RIGHT_PWM = 60
-OBSTACLE_TANK_RIGHT_TIME_S = 1.0            # s girando tanque à direita
+OBSTACLE_TANK_RIGHT_TIME_S = 1.3            # s girando tanque à direita
+# Depois do desvio, aproxima até a linha realmente chegar perto da câmera.
+OBSTACLE_LINE_SEARCH_PWM = 60
+OBSTACLE_LINE_SEARCH_TIMEOUT_S = 4.0
+OBSTACLE_LINE_NEAR_BOTTOM_RATIO = .85
+OBSTACLE_LINE_CONFIRM_TIME_S = .10
+# Ao encontrar a linha, vira obrigatoriamente para a esquerda até alinhar com
+# a bolinha inferior central; depois libera o segue-linha normal.
+OBSTACLE_LEFT_ALIGN_PWM = 60
+OBSTACLE_LEFT_ALIGN_MIN_TIME_S = .20
+OBSTACLE_LEFT_ALIGN_TIMEOUT_S = 3.0
+OBSTACLE_LEFT_ALIGN_MAX_ANGLE = 35
+OBSTACLE_LEFT_ALIGN_BOTTOM_PX = 35
+OBSTACLE_RETRY_COOLDOWN_S = 1.0
 
 # ----------------------------------------------------------------------------
 # Câmera: captura 640×480 e processamento em 448×252
