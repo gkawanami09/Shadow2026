@@ -28,7 +28,7 @@ MAX_PWM = 120                             # teto absoluto; firmware tambem trava
 # O ultrassônico devolve milímetros. A parada exige duas leituras próximas
 # dentro de uma janela curta: um eco isolado não consegue parar o robô.
 OBSTACLE_STOP_ENABLED = True
-OBSTACLE_STOP_DISTANCE_MM = 100            # 10 cm, inclusive
+OBSTACLE_STOP_DISTANCE_MM = 50             # 5 cm, inclusive
 OBSTACLE_SAMPLE_INTERVAL_S = .06           # respeita o intervalo do HC-SR04
 OBSTACLE_READ_TIMEOUT_S = .08              # firmware espera eco por até 30 ms
 OBSTACLE_CONFIRM_READINGS = 2
@@ -36,6 +36,8 @@ OBSTACLE_HISTORY_SIZE = 3
 OBSTACLE_CONFIRM_WINDOW_S = .20
 OBSTACLE_MIN_VALID_MM = 1
 OBSTACLE_MAX_VALID_MM = 4000
+OBSTACLE_LATERAL_PWM = 60                  # translação com rodas omnidirecionais
+OBSTACLE_LATERAL_TIME_S = 2.5              # s deslizando para a esquerda
 
 # ----------------------------------------------------------------------------
 # Câmera: captura 640×480 e processamento em 448×252

@@ -21,7 +21,10 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     FRONT_ANCHOR_FULL_ANGLE,
                     FRONT_ANCHOR_START_ANGLE, camera_x)
 from controle.orientacao_gap import drive_back_until_line, orientate_gap
-from controle.parada_obstaculo import MonitorObstaculo
+from controle.parada_obstaculo import (
+    MonitorObstaculo,
+    deslizar_para_esquerda,
+)
 from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
 from controle.direcao import init_steering, sleep_steering, steer
@@ -121,22 +124,37 @@ def control_loop():
         while not terminate.value:
 
             # Segurança frontal independente da visão. Duas de três leituras
-            # ultrassônicas precisam confirmar até 10 cm. Depois disso a
-            # parada fica travada até o programa ser encerrado.
+            # ultrassônicas precisam confirmar até 5 cm. Depois disso a
+            # confirmação executa um único desvio lateral para a esquerda e
+            # depois a parada fica travada até o programa ser encerrado.
             if (
                 config.OBSTACLE_STOP_ENABLED
                 and monitor_obstaculo.atualizar(arduino)
             ):
-                steer()
                 distancia_cm = (
                     monitor_obstaculo.distancia_confirmada_mm / 10.0)
                 status.value = (
-                    f'Obstáculo confirmado a {distancia_cm:.1f} cm — PARADO')
+                    f'Obstáculo a {distancia_cm:.1f} cm — '
+                    'deslizando à esquerda')
                 print(
                     "[controle] obstáculo confirmado a "
-                    f"{distancia_cm:.1f} cm; parada de segurança travada")
+                    f"{distancia_cm:.1f} cm; deslizando à esquerda por "
+                    f"{config.OBSTACLE_LATERAL_TIME_S:.1f} s")
+                try:
+                    deslizar_para_esquerda(
+                        arduino,
+                        deve_encerrar=lambda: terminate.value,
+                    )
+                    status.value = 'Desvio lateral concluído — PARADO'
+                    print(
+                        "[controle] desvio lateral concluído; "
+                        "parada de segurança travada")
+                except RuntimeError as erro:
+                    status.value = 'Falha no desvio lateral — PARADO'
+                    print(f"[controle] falha no desvio lateral: {erro}")
+
                 while not terminate.value:
-                    arduino.refresh()
+                    arduino.refresh(fail_closed=True)
                     time.sleep(.05)
                 break
 

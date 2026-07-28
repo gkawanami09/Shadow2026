@@ -5,9 +5,12 @@ import statistics
 import time
 
 from config import (
+    MAX_PWM,
     OBSTACLE_CONFIRM_READINGS,
     OBSTACLE_CONFIRM_WINDOW_S,
     OBSTACLE_HISTORY_SIZE,
+    OBSTACLE_LATERAL_PWM,
+    OBSTACLE_LATERAL_TIME_S,
     OBSTACLE_MAX_VALID_MM,
     OBSTACLE_MIN_VALID_MM,
     OBSTACLE_READ_TIMEOUT_S,
@@ -98,3 +101,53 @@ class MonitorObstaculo:
         limite = agora - self.janela_s
         while self._leituras and self._leituras[0][0] < limite:
             self._leituras.popleft()
+
+
+def deslizar_para_esquerda(
+    arduino,
+    pwm=OBSTACLE_LATERAL_PWM,
+    duracao_s=OBSTACLE_LATERAL_TIME_S,
+    deve_encerrar=None,
+    relogio=time.monotonic,
+    dormir=time.sleep,
+):
+    """Desliza para a esquerda com as quatro rodas e termina parado.
+
+    Este é um movimento lateral de rodas omnidirecionais em X, não um pivô:
+    FE e TD giram para trás enquanto TE e FD giram para frente.
+    """
+    pwm = int(round(pwm))
+    duracao_s = float(duracao_s)
+    deve_encerrar = deve_encerrar or (lambda: False)
+
+    if not 1 <= pwm <= MAX_PWM:
+        raise ValueError(f"PWM lateral deve ficar entre 1 e {MAX_PWM}")
+    if duracao_s <= 0:
+        raise ValueError("duracao lateral deve ser positiva")
+
+    # Não deixa o último comando do segue-linha se misturar com o lateral.
+    if arduino.parar() is False:
+        raise RuntimeError("não foi possível parar antes do desvio lateral")
+
+    epoca_serial = arduino.connection_epoch
+    try:
+        if arduino.rodas(-pwm, pwm, pwm, -pwm) is False:
+            raise RuntimeError("não foi possível iniciar o desvio lateral")
+
+        fim = relogio() + duracao_s
+        while not deve_encerrar():
+            restante = fim - relogio()
+            if restante <= 0:
+                break
+
+            arduino.refresh(fail_closed=True)
+            if (
+                not arduino.connected
+                or arduino.connection_epoch != epoca_serial
+            ):
+                raise RuntimeError(
+                    "conexão serial mudou durante o desvio lateral")
+            dormir(min(.05, restante))
+    finally:
+        # Garante PARAR tanto no fim normal quanto em Ctrl+C ou falha serial.
+        arduino.parar()
