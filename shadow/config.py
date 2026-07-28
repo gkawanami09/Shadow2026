@@ -29,8 +29,8 @@ MAX_PWM = 120                             # teto absoluto; firmware tambem trava
 # dentro de uma janela curta: um eco isolado não consegue parar o robô.
 OBSTACLE_STOP_ENABLED = True
 OBSTACLE_STOP_DISTANCE_MM = 50             # 5 cm, inclusive
-# Uma leitura isolada nesta faixa NÃO inicia o desvio; apenas retira o modo
-# rápido para que a confirmação 2-de-3 continue acontecendo em PWM 60.
+# Uma leitura isolada nesta faixa NÃO inicia o desvio; ela apenas bloqueia uma
+# eventual aceleração adaptativa enquanto a confirmação 2-de-3 continua.
 OBSTACLE_FAST_SPEED_BLOCK_MM = 100          # 10 cm
 OBSTACLE_SAMPLE_INTERVAL_S = .06           # respeita o intervalo do HC-SR04
 OBSTACLE_READ_TIMEOUT_S = .08              # firmware espera eco por até 30 ms
@@ -71,8 +71,8 @@ CAPTURE_WIDTH = 640
 CAPTURE_HEIGHT = 480
 # A OV5647 possui modo VGA mais rápido. A captura escolhe até este alvo usando
 # apenas modos realmente anunciados pelo driver e volta para 40 FPS quando não
-# consegue confirmar um modo mais rápido. O controle só libera PWM extra se a
-# visão MEDIDA permanecer acima de FPS_MINIMO_RETA_RAPIDA.
+# consegue confirmar um modo mais rápido. A captura rápida continua ativa
+# mesmo quando o PWM do segue-linha fica fixo.
 CAPTURE_FPS = 60
 CAPTURE_FPS_FALLBACK = 40
 camera_x = 448                            # resolucao do algoritmo
@@ -91,18 +91,18 @@ right_correction = 1
 # ----------------------------------------------------------------------------
 # Velocidades
 # ----------------------------------------------------------------------------
-LINE_FOLLOW_SPEED = .5                    # PWM 60: .5 * MAX_PWM (120)
+LINE_FOLLOW_PWM = 80
+LINE_FOLLOW_SPEED = LINE_FOLLOW_PWM / MAX_PWM
 LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair brevemente da imagem
 RAMP_AHEAD_HOLD = 2                       # s segurando velocidade reduzida
 RAMP_AHEAD_SPEED_PIVOT = .65
 RAMP_AHEAD_SPEED_ARC = .4
 RAMP_AHEAD_SPEED_STRAIGHT = .3
 
-# Velocidade adaptativa. O modo rápido não substitui nenhuma manobra: ele só
-# atua no seguimento normal depois de vários frames novos confirmarem uma reta.
-# Qualquer dúvida devolve imediatamente LINE_FOLLOW_SPEED.
-RETA_RAPIDA_HABILITADA = True             # False volta a captura/PWM anteriores
-VELOCIDADE_RETA_RAPIDA = .60              # PWM 72, teto do segue-linha rápido
+# O segue-linha usa PWM 80 diretamente. O controlador adaptativo permanece no
+# projeto para uma calibração futura, mas não participa dos comandos atuais.
+RETA_RAPIDA_HABILITADA = False
+VELOCIDADE_RETA_RAPIDA = LINE_FOLLOW_SPEED
 FRAMES_PARA_RETA_RAPIDA = 6
 FPS_MINIMO_RETA_RAPIDA = 50.
 JANELA_FPS_RETA_RAPIDA = 6
@@ -170,8 +170,10 @@ GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)
 GREEN_APPROACH_TIME = .7                  # s — avanca reto antes do giro verde
+GREEN_APPROACH_SPEED = .5                 # base PWM 60, preserva a manobra
 GREEN_TURN_MIN_TIME = .2                  # s — evita encerrar o tanque no primeiro frame
 GREEN_TURN_EXIT_ANGLE = 35                # graus — linha realinhada apos o giro
+GREEN_TURN_SPEED = .5                     # base PWM 60, preserva o giro
 GREEN_REVERSE_TIME = .5
 GREEN_REVERSE_SPEED = .4                  # PWM 48
 

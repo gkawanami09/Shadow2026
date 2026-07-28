@@ -7,9 +7,10 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GAP_ENABLED,
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
-                    GREEN_APPROACH_TIME, GREEN_TURN_EXIT_ANGLE,
+                    GREEN_APPROACH_SPEED, GREEN_APPROACH_TIME,
+                    GREEN_TURN_EXIT_ANGLE,
                     GREEN_REVERSE_SPEED, GREEN_REVERSE_TIME,
-                    GREEN_TURN_MIN_TIME, LINE_FOLLOW_SPEED,
+                    GREEN_TURN_MIN_TIME, GREEN_TURN_SPEED, LINE_FOLLOW_SPEED,
                     LINE_LOSS_STEER_HOLD, MIN_LINE_SIZE_DEFAULT,
                     PIVOT_BOTTOM_MIN_ERROR_PX,
                     PIVOT_RECOVERY_ASSIST_RAMP,
@@ -126,7 +127,11 @@ def control_loop():
     green_armed = True
     green_rearm_after = 0.
     monitor_obstaculo = MonitorObstaculo()
-    velocidade_adaptativa = ControladorVelocidadeAdaptativa()
+    velocidade_adaptativa = (
+        ControladorVelocidadeAdaptativa()
+        if config.RETA_RAPIDA_HABILITADA
+        else None
+    )
     modo_rapido_anterior = False
     obstaculo_retry_after = 0.
     preferencia_linha_esquerda.value = False
@@ -391,48 +396,53 @@ def control_loop():
                     pivot_line_lost_since = None
 
                 velocidade_base = get_speed(line_angle.value)
-                permitir_reta_rapida = (
-                    config.RETA_RAPIDA_HABILITADA
-                    and green_direction is None
-                    and not preferencia_linha_esquerda.value
-                    and line_detected.value
-                    and line_ahead.value
-                    and abs(line_angle.value)
-                    <= config.ANGULO_MAXIMO_RETA_RAPIDA
-                    and abs(last_bottom_point.value - camera_x / 2)
-                    <= config.ERRO_INFERIOR_RETA_RAPIDA_PX
-                    and last_bottom_point_y.value
-                    >= camera_y * config.ALTURA_MINIMA_PONTO_INFERIOR_RAPIDA
-                    and line_size.value >= config.AREA_MINIMA_LINHA_RAPIDA
-                    and not green_candidate.value
-                    and not red_candidate.value
-                    and not red_detected.value
-                    and not ramp_ahead.value
-                    and not entry_silver_detected.value
-                    and not entry_silver_confirmed.value
-                    and not monitor_obstaculo.bloqueia_velocidade_rapida
-                )
-                command_speed = velocidade_adaptativa.atualizar(
-                    ler_resultado_visao_rapida(),
-                    velocidade_base=velocidade_base,
-                    direcao=direcao_visual,
-                    permitir_rapido=permitir_reta_rapida,
-                )
-                if velocidade_adaptativa.modo_rapido != modo_rapido_anterior:
-                    modo_rapido_anterior = velocidade_adaptativa.modo_rapido
-                    if modo_rapido_anterior:
-                        print(
-                            "[controle] reta estável confirmada — "
-                            f"{velocidade_adaptativa.fps_visao:.0f} FPS, "
-                            "acelerando até PWM "
-                            f"{round(config.VELOCIDADE_RETA_RAPIDA * config.MAX_PWM)}"
-                        )
-                    else:
-                        print(
-                            "[controle] fim da reta rápida — "
-                            f"voltando imediatamente ao PWM "
-                            f"{round(LINE_FOLLOW_SPEED * config.MAX_PWM)}"
-                        )
+                command_speed = velocidade_base
+                if config.RETA_RAPIDA_HABILITADA:
+                    permitir_reta_rapida = (
+                        green_direction is None
+                        and not preferencia_linha_esquerda.value
+                        and line_detected.value
+                        and line_ahead.value
+                        and abs(line_angle.value)
+                        <= config.ANGULO_MAXIMO_RETA_RAPIDA
+                        and abs(last_bottom_point.value - camera_x / 2)
+                        <= config.ERRO_INFERIOR_RETA_RAPIDA_PX
+                        and last_bottom_point_y.value
+                        >= camera_y * config.ALTURA_MINIMA_PONTO_INFERIOR_RAPIDA
+                        and line_size.value >= config.AREA_MINIMA_LINHA_RAPIDA
+                        and not green_candidate.value
+                        and not red_candidate.value
+                        and not red_detected.value
+                        and not ramp_ahead.value
+                        and not entry_silver_detected.value
+                        and not entry_silver_confirmed.value
+                        and not monitor_obstaculo.bloqueia_velocidade_rapida
+                    )
+                    command_speed = velocidade_adaptativa.atualizar(
+                        ler_resultado_visao_rapida(),
+                        velocidade_base=velocidade_base,
+                        direcao=direcao_visual,
+                        permitir_rapido=permitir_reta_rapida,
+                    )
+                    if (
+                        velocidade_adaptativa.modo_rapido
+                        != modo_rapido_anterior
+                    ):
+                        modo_rapido_anterior = (
+                            velocidade_adaptativa.modo_rapido)
+                        if modo_rapido_anterior:
+                            print(
+                                "[controle] reta estável confirmada — "
+                                f"{velocidade_adaptativa.fps_visao:.0f} FPS, "
+                                "acelerando até PWM "
+                                f"{round(config.VELOCIDADE_RETA_RAPIDA * config.MAX_PWM)}"
+                            )
+                        else:
+                            print(
+                                "[controle] fim da reta rápida — "
+                                f"voltando imediatamente ao PWM "
+                                f"{round(LINE_FOLLOW_SPEED * config.MAX_PWM)}"
+                            )
 
                 if (green_direction is not None
                         and green_reverse_until is not None):
@@ -451,13 +461,14 @@ def control_loop():
                     # A direcao ja foi memorizada: atravessa o marcador reto
                     # antes de iniciar qualquer rotacao.
                     angle = 0
-                    command_speed = LINE_FOLLOW_SPEED
+                    command_speed = GREEN_APPROACH_SPEED
                     last_rear_pivot_enabled = False
                     status.value = f'Verde {green_direction} — avancando antes do giro'
                 elif green_direction is not None:
                     if green_turn_started is None:
                         green_turn_started = now
                     angle = -180 if green_direction == "left" else 180
+                    command_speed = GREEN_TURN_SPEED
                     last_rear_pivot_enabled = False
                     status.value = f'Verde {green_direction} — girando tanque'
 

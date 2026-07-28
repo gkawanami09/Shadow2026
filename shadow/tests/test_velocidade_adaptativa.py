@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +57,35 @@ def alimentar_reta(controlador, relogio, quantidade, fps=60, inicio=1):
 
 
 class VelocidadeAdaptativaTests(unittest.TestCase):
+    def setUp(self):
+        # O robô usa PWM 80 fixo. Para continuar testando o controlador
+        # opcional isoladamente, simulamos aqui um teto maior que a base.
+        self.teto_teste = .75
+        patcher = mock.patch(
+            "controle.velocidade_adaptativa.VELOCIDADE_RETA_RAPIDA",
+            self.teto_teste,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_configuracao_principal_usa_pwm_80_sem_modo_adaptativo(self):
+        self.assertEqual(config.LINE_FOLLOW_PWM, 80)
+        self.assertAlmostEqual(
+            config.LINE_FOLLOW_SPEED * config.MAX_PWM,
+            80.,
+        )
+        self.assertFalse(config.RETA_RAPIDA_HABILITADA)
+
+    def test_verde_mantem_as_velocidades_ja_calibradas(self):
+        self.assertEqual(
+            round(config.GREEN_APPROACH_SPEED * config.MAX_PWM),
+            60,
+        )
+        self.assertEqual(
+            round(config.GREEN_TURN_SPEED * config.MAX_PWM),
+            60,
+        )
+
     def test_seis_frames_a_sessenta_fps_liberam_primeiro_passo(self):
         relogio = RelogioFalso()
         controlador = ControladorVelocidadeAdaptativa(relogio)
@@ -66,7 +96,11 @@ class VelocidadeAdaptativaTests(unittest.TestCase):
             velocidades[:5],
             [config.LINE_FOLLOW_SPEED] * 5,
         )
-        self.assertAlmostEqual(velocidades[5], .51)
+        self.assertAlmostEqual(
+            velocidades[5],
+            config.LINE_FOLLOW_SPEED
+            + config.PASSO_VELOCIDADE_RETA_RAPIDA,
+        )
         self.assertTrue(controlador.modo_rapido)
         self.assertAlmostEqual(controlador.fps_visao, 60., delta=.01)
 
@@ -76,13 +110,17 @@ class VelocidadeAdaptativaTests(unittest.TestCase):
 
         velocidades = alimentar_reta(controlador, relogio, 25)
 
-        self.assertAlmostEqual(velocidades[5], .51)
+        self.assertAlmostEqual(
+            velocidades[5],
+            config.LINE_FOLLOW_SPEED
+            + config.PASSO_VELOCIDADE_RETA_RAPIDA,
+        )
         self.assertAlmostEqual(velocidades[14],
-                               config.VELOCIDADE_RETA_RAPIDA)
+                               self.teto_teste)
         self.assertAlmostEqual(velocidades[-1],
-                               config.VELOCIDADE_RETA_RAPIDA)
+                               self.teto_teste)
         self.assertLessEqual(max(velocidades),
-                             config.VELOCIDADE_RETA_RAPIDA)
+                             self.teto_teste)
 
     def test_quadro_repetido_nao_confirma_nem_aumenta_velocidade(self):
         relogio = RelogioFalso()

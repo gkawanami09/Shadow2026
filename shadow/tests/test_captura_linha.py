@@ -169,7 +169,7 @@ class LineCameraSelectionTests(unittest.TestCase):
             (16667, 16667),
         )
 
-    def test_reta_rapida_desabilitada_preserva_quarenta_fps(self):
+    def test_pwm_fixo_mantem_captura_em_sessenta_fps(self):
         configuracoes = []
 
         class FakePicamera2:
@@ -196,14 +196,13 @@ class LineCameraSelectionTests(unittest.TestCase):
         with (
             mock.patch.dict(sys.modules, {"picamera2": fake_module}),
             mock.patch("visao.captura.time.sleep"),
-            mock.patch("visao.captura.RETA_RAPIDA_HABILITADA", False),
         ):
             camera = LineCamera()
 
-        self.assertEqual(camera.capture_fps, 40.)
+        self.assertEqual(camera.capture_fps, 60.)
         self.assertEqual(
             configuracoes[0]["controls"]["FrameDurationLimits"],
-            (25000, 25000),
+            (16667, 16667),
         )
 
     def test_line_and_rescue_use_different_fixed_indices(self):

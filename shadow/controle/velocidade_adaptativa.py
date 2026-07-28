@@ -33,7 +33,7 @@ from config import (
 
 
 class ControladorVelocidadeAdaptativa:
-    """Libera PWM 72 apenas em frames novos de uma reta confirmada."""
+    """Libera o teto opcional apenas em frames novos de uma reta confirmada."""
 
     def __init__(self, relogio=None):
         self._relogio = time.monotonic if relogio is None else relogio
@@ -111,6 +111,7 @@ class ControladorVelocidadeAdaptativa:
         idade = agora - resultado.publicado_em
         return (
             permitir_rapido
+            and VELOCIDADE_RETA_RAPIDA > velocidade_base
             and velocidade_base == LINE_FOLLOW_SPEED
             and direcao == "straight"
             and resultado.linha_detectada
@@ -171,4 +172,3 @@ class ControladorVelocidadeAdaptativa:
                 + PASSO_VELOCIDADE_RETA_RAPIDA,
             )
         return self._velocidade
-

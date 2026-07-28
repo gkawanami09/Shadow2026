@@ -7,7 +7,7 @@ import cv2
 
 from config import (CAPTURE_FPS, CAPTURE_FPS_FALLBACK, CAPTURE_HEIGHT,
                     CAPTURE_WIDTH, LENS_POSITION, LINE_CAMERA_INDEX,
-                    RETA_RAPIDA_HABILITADA, camera_x, camera_y)
+                    camera_x, camera_y)
 
 
 def escolher_fps_captura(modos_sensor):
@@ -59,11 +59,7 @@ class LineCamera:
             modos_sensor = self.picam2.sensor_modes
         except (AttributeError, RuntimeError, TypeError):
             modos_sensor = ()
-        fps_escolhido = (
-            escolher_fps_captura(modos_sensor)
-            if RETA_RAPIDA_HABILITADA
-            else float(CAPTURE_FPS_FALLBACK)
-        )
+        fps_escolhido = escolher_fps_captura(modos_sensor)
         try:
             self._configurar_e_iniciar(fps_escolhido)
         except Exception as erro_fps:
