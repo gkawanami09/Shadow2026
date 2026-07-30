@@ -64,6 +64,11 @@ robô usa o marcador verde para se alinhar e se aproximar do retângulo. Perto
 dele, passa a medir diretamente a cobertura verde e só termina depois de três
 frames distintos com pelo menos 88% do campo útil verde.
 
+Se houver vítima prata armazenada no lado esquerdo, a confirmação inicia o
+depósito final: giro tanque de aproximadamente 180° (1,77 s no PWM calibrado
+de 80), ré de 3 s, `CACAMBA +90` para ir de 90° a 180°, duas sacudidas curtas
+para frente e para trás e `CACAMBA -90` para restaurar a posição de 90°.
+
 O transporte de cada vítima até um depósito e a saída da sala **não** estão
 no fluxo atual. A navegação visual de `deposito_resgate.py` é reaproveitada
 somente para chegar ao retângulo verde no final:

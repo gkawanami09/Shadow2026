@@ -419,8 +419,8 @@ MARKER_ROI_TOP = 0.45
 # HSV do OpenCV (H em 0..180). Vermelho cruza a origem e, por isso, usa duas
 # bandas. O contraste cromatico local abaixo continua obrigatorio: o HSV
 # sozinho nao aceita um banho uniforme de luz ciano/verde.
-MARKER_GREEN_HSV_MIN = (45, 80, 40)
-MARKER_GREEN_HSV_MAX = (95, 255, 255)
+MARKER_GREEN_HSV_MIN = (45, 60, 30)
+MARKER_GREEN_HSV_MAX = (105, 255, 255)
 MARKER_RED_HSV_MIN_1 = (0, 90, 50)
 MARKER_RED_HSV_MAX_1 = (12, 255, 255)
 MARKER_RED_HSV_MIN_2 = (168, 90, 50)
@@ -513,3 +513,35 @@ MARKER_ASSOCIATION_MIN_PX = 28
 MARKER_ASSOCIATION_SIZE_FACTOR = 0.85
 MARKER_AREA_RATIO_MIN = 0.30
 MARKER_AREA_RATIO_MAX = 3.50
+
+# Detector complementar do RETANGULO verde. O detector acima continua sendo
+# usado e o vermelho nao muda. Este perfil aceita o verde mais lavado da arena
+# pela area solida e por tres frames consecutivos, sem exigir o contraste local
+# alto que foi medido nos antigos marcadores triangulares.
+GREEN_RECTANGLE_ROI_TOP = 0.25
+GREEN_RECTANGLE_MIN_AREA_RATIO = 0.0025
+GREEN_RECTANGLE_MIN_SIDE_PX = 10
+GREEN_RECTANGLE_MIN_CHROMA = 30.0
+GREEN_RECTANGLE_MIN_SOLIDITY = 0.60
+GREEN_RECTANGLE_MIN_COMPACTNESS = 0.25
+GREEN_RECTANGLE_ACQUIRE_HITS = 3
+GREEN_RECTANGLE_MAX_MISSES = 2
+GREEN_RECTANGLE_ASSOCIATION_MIN_PX = 40
+GREEN_RECTANGLE_ASSOCIATION_SIZE_FACTOR = 1.25
+
+# Deposito final das vitimas prata/cinza guardadas no lado esquerdo.
+# O giro completo medido leva 3,54 s a PWM 80; metade dele fornece o primeiro
+# valor calibrado para 180 graus. Todos os prazos comecam somente depois que o
+# comando correspondente e aceito pela serial.
+SILVER_DEPOSIT_TURN_SPEED = BALL_SEARCH_TANK_SPEED
+SILVER_DEPOSIT_TURN_S = BALL_SEARCH_FULL_TURN_S / 2.0
+SILVER_DEPOSIT_REVERSE_SPEED = 0.35
+SILVER_DEPOSIT_REVERSE_S = 3.0
+SILVER_DEPOSIT_BUCKET_OPEN_DELTA = 90
+SILVER_DEPOSIT_BUCKET_SETTLE_S = 0.60
+SILVER_DEPOSIT_SHAKE_SPEED = 0.65
+SILVER_DEPOSIT_SHAKE_MOVE_S = 0.18
+SILVER_DEPOSIT_SHAKE_STOP_S = 0.08
+SILVER_DEPOSIT_SHAKE_REPETITIONS = 2
+SILVER_DEPOSIT_BUCKET_RESTORE_DELTA = -90
+SILVER_DEPOSIT_BUCKET_RESTORE_S = 0.60

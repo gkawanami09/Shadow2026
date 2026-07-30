@@ -5,6 +5,8 @@ Depois de cada coleta, a vítima prata é selecionada pela garra esquerda e a
 preta pela direita. O robô volta à busca pulsada. Duas passagens separadas
 pelo marcador verde sem uma coleta no meio encerram a procura. Então o robô
 procura o retângulo verde e avança até o campo útil da câmera ficar verde.
+Se houver vítima prata armazenada, gira 180 graus, alinha de ré e esvazia o
+lado esquerdo da caçamba antes de encerrar.
 
 Arquitetura da visão
 --------------------
@@ -52,11 +54,18 @@ from controle.contador_verde_resgate import (  # noqa: E402
     ContadorVerdeBusca,
     decidir_apos_varredura,
 )
+from controle.deposito_cinza_resgate import (  # noqa: E402
+    SequenciadorDepositoCinza,
+)
 from controle.retangulo_verde_resgate import (  # noqa: E402
     ControladorRetanguloVerde,
 )
 from visao import overlay_resgate  # noqa: E402
-from visao.marcador_resgate import MarkerDetector, color_masks  # noqa: E402
+from visao.marcador_resgate import (  # noqa: E402
+    GreenRectangleDetector,
+    MarkerDetector,
+    color_masks,
+)
 from visao.resgate_assincrono import (  # noqa: E402
     FreshDetectionGate,
     LatestFrameBallDetector,
@@ -204,6 +213,52 @@ def _aplicar_acoes_coleta(
     return None
 
 
+def _aplicar_acoes_deposito_cinza(
+    passo,
+    arduino,
+    acao_direcao,
+    epoca_serial_esperada=None,
+):
+    """Aplica motor antes da caçamba e bloqueia reconexão no meio da etapa."""
+
+    def serial_mudou():
+        return (
+            epoca_serial_esperada is not None
+            and (
+                not arduino.connected
+                or arduino.connection_epoch != epoca_serial_esperada
+            )
+        )
+
+    def abortar(detalhe):
+        try:
+            acao_direcao()
+        except Exception:
+            pass
+        return detalhe
+
+    try:
+        if serial_mudou():
+            return "serial mudou durante o deposito da vitima prata"
+        if acao_direcao(passo.angle, passo.speed) is False:
+            return abortar(
+                "comando dos motores do deposito nao foi enviado")
+        if serial_mudou():
+            return abortar(
+                "serial mudou durante o deposito da vitima prata")
+
+        if passo.bucket_delta is not None:
+            if arduino.servo("CACAMBA", passo.bucket_delta) is False:
+                return abortar(
+                    "comando do servo da cacamba nao foi enviado")
+            if serial_mudou():
+                return abortar(
+                    "serial mudou durante o deposito da vitima prata")
+    except Exception as err:                         # noqa: BLE001
+        return abortar(f"falha ao comandar deposito: {err}")
+    return None
+
+
 def _armar_coleta_confirmada(
     comando,
     coleta,
@@ -254,6 +309,7 @@ class MarkerPair:
             "green": MarkerDetector("green"),
             "red": MarkerDetector("red"),
         }
+        self.detector_retangulo_verde = GreenRectangleDetector()
         self.detections = {"green": None, "red": None}
         self.confirmados = {"green": False, "red": False}
         self.mascaras = {"green": None, "red": None}
@@ -262,10 +318,31 @@ class MarkerPair:
         # Uma conversão HSV só, reaproveitada pelos dois detectores.
         mascaras = color_masks(frame)
         self.mascaras = mascaras
-        for tipo, detector in self.detectors.items():
-            deteccao = detector.detect(
-                frame, timestamp=timestamp, masks=mascaras)
-            self.detections[tipo] = deteccao
+        verde_padrao = self.detectors["green"].detect(
+            frame, timestamp=timestamp, masks=mascaras)
+        verde_retangulo = self.detector_retangulo_verde.detect(
+            frame, timestamp=timestamp, masks=mascaras)
+        verdes = tuple(
+            deteccao
+            for deteccao in (verde_padrao, verde_retangulo)
+            if deteccao is not None
+        )
+        self.detections["green"] = (
+            max(
+                verdes,
+                key=lambda item: (
+                    bool(item.confirmed),
+                    bool(item.track_locked),
+                    item.confidence,
+                    item.area,
+                ),
+            )
+            if verdes else None
+        )
+        self.detections["red"] = self.detectors["red"].detect(
+            frame, timestamp=timestamp, masks=mascaras)
+
+        for tipo, deteccao in self.detections.items():
             if deteccao is not None and deteccao.confirmed:
                 self.confirmados[tipo] = True
         return dict(self.detections)
@@ -275,7 +352,13 @@ class MarkerPair:
         for tipo in ("green", "red"):
             deteccao = self.detections[tipo]
             if deteccao is None:
-                partes.append(f"{tipo}:-")
+                if tipo == "green":
+                    partes.append(
+                        "green:- "
+                        f"mask={self.detector_retangulo_verde.last_mask_ratio:.1%}"
+                    )
+                else:
+                    partes.append(f"{tipo}:-")
             else:
                 partes.append(
                     f"{tipo}:{deteccao.confidence:.2f}"
@@ -285,6 +368,7 @@ class MarkerPair:
     def reset(self):
         for detector in self.detectors.values():
             detector.reset()
+        self.detector_retangulo_verde.reset()
         self.detections = {"green": None, "red": None}
         self.mascaras = {"green": None, "red": None}
 
@@ -360,6 +444,7 @@ def main():
     marcadores = None
     controlador = None
     controlador_verde = None
+    deposito_cinza = None
     busca = None
     coleta = None
     contador_verde = ContadorVerdeBusca()
@@ -372,8 +457,10 @@ def main():
     epoca_busca = None
     epoca_coleta = None
     epoca_verde = None
+    epoca_deposito_cinza = None
     varreduras_sem_vitima = 0
     vitimas_resgatadas = 0
+    vitimas_prata_resgatadas = 0
     amostras_captura = deque(maxlen=60)
     instantes_deteccao = deque(maxlen=30)
 
@@ -480,6 +567,7 @@ def main():
                 and armado
                 and not coleta.started
                 and controlador_verde is None
+                and deposito_cinza is None
             ):
                 trabalhador.submit(
                     frame_atual,
@@ -491,6 +579,7 @@ def main():
                 marcadores is not None
                 and frame_novo
                 and not coleta.started
+                and deposito_cinza is None
             ):
                 marcadores_atuais = marcadores.update(
                     frame_atual, pacote.captured_at)
@@ -516,6 +605,7 @@ def main():
             agora = time.monotonic()
             comando_atualizado = False
             passo_coleta = None
+            passo_deposito_cinza = None
             coleta_concluida = None
 
             if not armado:
@@ -548,6 +638,16 @@ def main():
                     passo_coleta = coleta.update(now=agora)
 
                 comando = passo_coleta.motion_command()
+                comando_atualizado = True
+            elif deposito_cinza is not None:
+                if resultado is not None:
+                    sequencia_resultado = resultado.sequence
+                    metricas = resultado
+                    instantes_deteccao.append(resultado.completed_at)
+                resultado_atual = None
+                deteccao_atual = None
+                passo_deposito_cinza = deposito_cinza.update(now=agora)
+                comando = passo_deposito_cinza.motion_command()
                 comando_atualizado = True
             elif controlador_verde is not None:
                 # O detector de vitimas para nesta etapa. O marcador verde e
@@ -710,6 +810,26 @@ def main():
                             arduino,
                             steer,
                         )
+                elif passo_deposito_cinza is not None:
+                    epoca_movimento = arduino.connection_epoch
+                    erro_deposito = _aplicar_acoes_deposito_cinza(
+                        passo_deposito_cinza,
+                        arduino,
+                        steer,
+                        epoca_serial_esperada=epoca_deposito_cinza,
+                    )
+                    movimento_enviado = erro_deposito is None
+
+                    if erro_deposito is not None:
+                        passo_deposito_cinza = deposito_cinza.fail(
+                            erro_deposito)
+                        comando = passo_deposito_cinza.motion_command()
+                        steer()
+                    else:
+                        deposito_cinza.notify_command_written(
+                            passo_deposito_cinza.state,
+                            now=time.monotonic(),
+                        )
                 else:
                     epoca_movimento = arduino.connection_epoch
                     movimento_enviado = steer(
@@ -787,9 +907,46 @@ def main():
                     raise RuntimeError(
                         "serial mudou durante a ida ao retangulo verde; "
                         "motores parados")
+                if (
+                    deposito_cinza is not None
+                    and epoca_deposito_cinza is not None
+                    and (
+                        not arduino.connected
+                        or arduino.connection_epoch
+                        != epoca_deposito_cinza
+                    )
+                ):
+                    raise RuntimeError(
+                        "serial mudou durante o deposito da vitima prata; "
+                        "motores parados e cacamba nao comandada")
+
+            if (
+                args.drive
+                and controlador_verde is not None
+                and comando.state == ControladorRetanguloVerde.CONCLUIDO
+                and comando.terminal
+                and vitimas_prata_resgatadas > 0
+            ):
+                controlador_verde = None
+                deposito_cinza = SequenciadorDepositoCinza()
+                epoca_verde = None
+                epoca_deposito_cinza = (
+                    arduino.connection_epoch
+                    if arduino is not None else None
+                )
+                ultimo_controle_ocioso = 0.0
+                comando = MotionCommand(
+                    SequenciadorDepositoCinza.INICIO,
+                    detail=(
+                        f"{vitimas_prata_resgatadas} vitima(s) prata "
+                        "armazenada(s); iniciando deposito esquerdo"),
+                )
+                comando_atualizado = False
 
             if coleta_concluida is not None:
                 vitimas_resgatadas += 1
+                if coleta_concluida == "silver":
+                    vitimas_prata_resgatadas += 1
                 contador_verde.reset()
                 varreduras_sem_vitima = 0
                 epoca_coleta = None

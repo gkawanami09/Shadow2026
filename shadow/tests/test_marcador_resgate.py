@@ -13,6 +13,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config_resgate as cfg  # noqa: E402
 from visao.marcador_resgate import (  # noqa: E402
+    GreenRectangleDetector,
     MarkerDetector,
     color_masks,
 )
@@ -199,6 +200,80 @@ class MarkerDetectorTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertFalse(detector.last_candidates)
 
+
+class GreenRectangleDetectorTests(unittest.TestCase):
+    def test_verde_lavado_rejeitado_pelo_antigo_e_confirmado_pelo_retangulo(self):
+        hsv = np.uint8([[[65, 70, 180]]])
+        cor_lavada = tuple(
+            int(valor)
+            for valor in cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
+        )
+        frame = base_frame()
+        cv2.rectangle(frame, (170, 250), (470, 420), cor_lavada, -1)
+
+        antigo = MarkerDetector("green")
+        self.assertIsNone(antigo.detect(frame, timestamp=0.0))
+
+        novo = GreenRectangleDetector()
+        resultado = None
+        for indice in range(cfg.GREEN_RECTANGLE_ACQUIRE_HITS):
+            resultado = novo.detect(frame, timestamp=indice * 0.1)
+
+        self.assertIsNotNone(resultado)
+        self.assertTrue(resultado.confirmed)
+        self.assertTrue(resultado.track_locked)
+        self.assertEqual(resultado.kind, "green")
+
+    def test_um_frame_verde_nao_confirma_retangulo(self):
+        frame = base_frame()
+        cv2.rectangle(frame, (180, 260), (460, 410), GREEN, -1)
+
+        resultado = GreenRectangleDetector().detect(
+            frame, timestamp=0.0)
+
+        self.assertIsNotNone(resultado)
+        self.assertFalse(resultado.confirmed)
+        self.assertFalse(resultado.track_locked)
+
+    def test_timestamp_repetido_nao_aumenta_hits(self):
+        frame = base_frame()
+        cv2.rectangle(frame, (180, 260), (460, 410), GREEN, -1)
+        detector = GreenRectangleDetector()
+
+        primeiro = detector.detect(frame, timestamp=1.0)
+        repetido = detector.detect(frame, timestamp=1.0)
+
+        self.assertEqual(primeiro.hits, 1)
+        self.assertEqual(repetido.hits, 1)
+
+    def test_vermelho_nao_passa_no_detector_verde(self):
+        frame = base_frame()
+        cv2.rectangle(frame, (180, 260), (460, 410), RED, -1)
+        detector = GreenRectangleDetector()
+
+        for indice in range(4):
+            self.assertIsNone(
+                detector.detect(frame, timestamp=indice * 0.1))
+
+    def test_banho_ciano_uniforme_nao_vira_retangulo_verde(self):
+        frame = base_frame((190, 215, 135))
+        detector = GreenRectangleDetector()
+
+        for indice in range(4):
+            self.assertIsNone(
+                detector.detect(frame, timestamp=indice * 0.1))
+
+    def test_objeto_verde_acima_da_roi_nao_comanda(self):
+        frame = base_frame()
+        cv2.rectangle(frame, (180, 10), (460, 100), GREEN, -1)
+
+        resultado = GreenRectangleDetector().detect(
+            frame, timestamp=0.0)
+
+        self.assertIsNone(resultado)
+
+
+class MarkerDetectorRegressionTests(unittest.TestCase):
     def test_green_triangle_survives_cyan_illumination_wash(self):
         frame = triangle_frame(
             "green",

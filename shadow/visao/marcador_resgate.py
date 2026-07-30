@@ -135,6 +135,197 @@ def _clip01(value):
     return float(np.clip(value, 0.0, 1.0))
 
 
+class GreenRectangleDetector:
+    """Detector complementar para o retangulo verde grande da arena.
+
+    Ele nao substitui o detector de marcadores. Serve como segunda chance
+    apenas para o verde, cuja tinta pode ter menos contraste cromatico que o
+    marcador vermelho. Area solida e tres frames distintos continuam
+    obrigatorios.
+    """
+
+    def __init__(self):
+        self._tracked = None
+        self._hits = 0
+        self._misses = 0
+        self._last_hit_timestamp = None
+        self.last_mask = None
+        self.last_mask_ratio = 0.0
+        self.last_rejections = {}
+
+    def reset(self):
+        self._tracked = None
+        self._hits = 0
+        self._misses = 0
+        self._last_hit_timestamp = None
+        self.last_mask = None
+        self.last_mask_ratio = 0.0
+        self.last_rejections = {}
+
+    def detect(self, frame_bgr, timestamp=None, masks=None):
+        timestamp = (
+            time.monotonic() if timestamp is None else float(timestamp))
+        altura, largura = frame_bgr.shape[:2]
+        if masks is None:
+            masks = color_masks(frame_bgr)
+        mascara = np.asarray(masks["green"], dtype=np.uint8).copy()
+        if mascara.shape != (altura, largura):
+            raise ValueError(
+                "mascara verde possui resolucao diferente do frame")
+
+        canais = frame_bgr.astype(np.float32)
+        cromaticidade = (
+            canais[:, :, 1]
+            - np.maximum(canais[:, :, 0], canais[:, :, 2])
+        )
+        mascara[cromaticidade < cfg.GREEN_RECTANGLE_MIN_CHROMA] = 0
+        topo = int(round(altura * cfg.GREEN_RECTANGLE_ROI_TOP))
+        mascara[:topo, :] = 0
+
+        escala = _pixel_scale(largura, altura)
+        tamanho = _odd_kernel_size(cfg.MARKER_MORPH_CLOSE_PX, escala)
+        if tamanho > 1:
+            kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (tamanho, tamanho))
+            mascara = cv2.morphologyEx(
+                mascara, cv2.MORPH_CLOSE, kernel)
+        self.last_mask = mascara
+        self.last_mask_ratio = (
+            np.count_nonzero(mascara)
+            / float(max(altura * largura, 1))
+        )
+
+        contornos, _ = cv2.findContours(
+            mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        candidatos = []
+        rejeicoes = {}
+        for contorno in contornos:
+            candidato, motivo = self._candidato(
+                contorno, frame_bgr.shape, escala)
+            if candidato is None:
+                rejeicoes[motivo] = rejeicoes.get(motivo, 0) + 1
+            else:
+                candidatos.append(candidato)
+        self.last_rejections = rejeicoes
+
+        selecionado = (
+            max(candidatos, key=lambda item: item.area)
+            if candidatos else None
+        )
+        return self._atualizar_rastro(selecionado, timestamp, escala)
+
+    def _candidato(self, contorno, formato_frame, escala):
+        altura, largura = formato_frame[:2]
+        area = float(cv2.contourArea(contorno))
+        proporcao = area / float(max(altura * largura, 1))
+        if proporcao < cfg.GREEN_RECTANGLE_MIN_AREA_RATIO:
+            return None, "area_small"
+
+        x, y, largura_caixa, altura_caixa = cv2.boundingRect(contorno)
+        lado_minimo = cfg.GREEN_RECTANGLE_MIN_SIDE_PX * escala
+        if min(largura_caixa, altura_caixa) < lado_minimo:
+            return None, "side"
+
+        hull = cv2.convexHull(contorno)
+        area_hull = float(cv2.contourArea(hull))
+        if area_hull <= 0.0:
+            return None, "hull"
+        solidez = area / area_hull
+        if solidez < cfg.GREEN_RECTANGLE_MIN_SOLIDITY:
+            return None, "solidity"
+
+        compacidade = area / float(max(
+            largura_caixa * altura_caixa, 1))
+        if compacidade < cfg.GREEN_RECTANGLE_MIN_COMPACTNESS:
+            return None, "compactness"
+
+        momentos = cv2.moments(contorno)
+        if abs(momentos["m00"]) > 1e-6:
+            centro_x = momentos["m10"] / momentos["m00"]
+            centro_y = momentos["m01"] / momentos["m00"]
+        else:
+            centro_x = x + largura_caixa / 2.0
+            centro_y = y + altura_caixa / 2.0
+
+        confianca = float(np.clip(
+            0.60
+            + min(proporcao / 0.10, 1.0) * 0.20
+            + min(solidez, 1.0) * 0.10
+            + min(compacidade, 1.0) * 0.10,
+            0.0,
+            0.99,
+        ))
+        return _MarkerCandidate(
+            "green",
+            float(centro_x),
+            float(centro_y),
+            (int(x), int(y), int(largura_caixa), int(altura_caixa)),
+            float(y + altura_caixa - 1),
+            area,
+            confianca,
+        ), None
+
+    def _compativel(self, candidato, escala):
+        if self._tracked is None:
+            return False
+        distancia = math.hypot(
+            candidato.center_x - self._tracked.center_x,
+            candidato.center_y - self._tracked.center_y,
+        )
+        limite = max(
+            cfg.GREEN_RECTANGLE_ASSOCIATION_MIN_PX * escala,
+            cfg.GREEN_RECTANGLE_ASSOCIATION_SIZE_FACTOR
+            * max(candidato.size, self._tracked.size),
+        )
+        proporcao_area = candidato.area / max(self._tracked.area, 1.0)
+        return (
+            distancia <= limite
+            and 0.15 <= proporcao_area <= 6.0
+        )
+
+    def _atualizar_rastro(self, selecionado, timestamp, escala):
+        if selecionado is None:
+            self._misses += 1
+            if self._misses > cfg.GREEN_RECTANGLE_MAX_MISSES:
+                self._tracked = None
+                self._hits = 0
+                self._last_hit_timestamp = None
+            return None
+
+        compativel = self._compativel(selecionado, escala)
+        novo_frame = (
+            self._last_hit_timestamp is None
+            or timestamp > self._last_hit_timestamp + 1e-9
+        )
+        if compativel:
+            if novo_frame:
+                self._hits += 1
+        else:
+            self._hits = 1
+        self._tracked = selecionado
+        self._misses = 0
+        if novo_frame:
+            self._last_hit_timestamp = timestamp
+
+        confirmado = self._hits >= cfg.GREEN_RECTANGLE_ACQUIRE_HITS
+        x, y, largura, altura = selecionado.bbox
+        return MarkerDetection(
+            kind="green",
+            center_x=selecionado.center_x,
+            center_y=selecionado.center_y,
+            width=float(largura),
+            height=float(altura),
+            bottom_y=selecionado.bottom_y,
+            area=selecionado.area,
+            confidence=selecionado.confidence,
+            confirmed=confirmado,
+            hits=self._hits,
+            timestamp=timestamp,
+            track_locked=confirmado,
+            bbox=selecionado.bbox,
+        )
+
+
 class MarkerDetector:
     """Seleciona um unico triangulo verde ou vermelho e preserva seu lock."""
 
