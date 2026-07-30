@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Resgate — encontra uma vítima, aproxima, coleta e para com ela elevada.
+"""Resgate — encontra, coleta, seleciona e procura todas as vítimas.
 
-O depósito, a busca da próxima vítima e a saída da sala ainda não entram neste
-programa. Esta etapa termina de forma segura logo depois de baixar o Futaba,
-avançar, fechar as duas garras e elevar a vítima.
+Depois de cada coleta, a vítima prata é selecionada pela garra esquerda e a
+preta pela direita. O robô volta à busca pulsada. Duas passagens separadas
+pelo marcador verde sem uma coleta no meio encerram a procura.
 
 Arquitetura da visão
 --------------------
@@ -45,6 +45,12 @@ from controle.aproximacao_resgate import (  # noqa: E402
 )
 from controle.busca_pulsada import make_search_controller  # noqa: E402
 from controle.coleta_resgate import BallPickupSequencer  # noqa: E402
+from controle.contador_verde_resgate import (  # noqa: E402
+    BUSCA_CONCLUIR,
+    BUSCA_REINICIAR,
+    ContadorVerdeBusca,
+    decidir_apos_varredura,
+)
 from visao import overlay_resgate  # noqa: E402
 from visao.marcador_resgate import MarkerDetector, color_masks  # noqa: E402
 from visao.resgate_assincrono import (  # noqa: E402
@@ -271,12 +277,17 @@ class MarkerPair:
                     f"{'*' if deteccao.confirmed else ''}")
         return " ".join(partes)
 
+    def reset(self):
+        for detector in self.detectors.values():
+            detector.reset()
+        self.detections = {"green": None, "red": None}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Resgate: encontra uma vitima, aproxima, coleta e para com ela "
-            "elevada"))
+            "Resgate: procura, coleta, seleciona por cor e busca a proxima "
+            "vitima"))
     parser.add_argument(
         "--camera-index", type=int,
         help=(
@@ -344,6 +355,7 @@ def main():
     controlador = None
     busca = None
     coleta = None
+    contador_verde = ContadorVerdeBusca()
     sessao_hardware = args.video is None
 
     ultimo_estado = None
@@ -352,6 +364,8 @@ def main():
     ultimo_controle_ocioso = 0.0
     epoca_busca = None
     epoca_coleta = None
+    varreduras_sem_vitima = 0
+    vitimas_resgatadas = 0
     amostras_captura = deque(maxlen=60)
     instantes_deteccao = deque(maxlen=30)
 
@@ -471,6 +485,16 @@ def main():
             ):
                 marcadores_atuais = marcadores.update(
                     frame_atual, pacote.captured_at)
+                if busca is not None:
+                    somou_verde = contador_verde.observar(
+                        marcadores_atuais.get("green"),
+                        permitido=busca.frame_allowed(pacote.captured_at),
+                    )
+                    if somou_verde:
+                        print(
+                            "[resgate] passagem verde "
+                            f"{contador_verde.quantidade}/"
+                            f"{contador_verde.necessario}")
 
             resultado = None
             if trabalhador is not None:
@@ -483,6 +507,7 @@ def main():
             agora = time.monotonic()
             comando_atualizado = False
             passo_coleta = None
+            coleta_concluida = None
 
             if not armado:
                 restante = max(armado_em - agora, 0.0)
@@ -514,14 +539,6 @@ def main():
                     passo_coleta = coleta.update(now=agora)
 
                 comando = passo_coleta.motion_command()
-                if passo_coleta.state == BallPickupSequencer.CARRY_READY:
-                    comando = MotionCommand(
-                        "PICKUP_SECURED",
-                        detail=(
-                            f"vitima {coleta.target_kind} presa e elevada; "
-                            "deposito ainda desativado"),
-                        terminal=True,
-                    )
                 comando_atualizado = True
             elif detector is None:
                 comando = MotionCommand(
@@ -628,6 +645,19 @@ def main():
                             coleta.mark_forward_started(now=concluido_em)
                         if passo_coleta.gripper_action is not None:
                             coleta.mark_grippers_started(now=concluido_em)
+                        if (
+                            passo_coleta.state
+                            == BallPickupSequencer.CARRY_READY
+                        ):
+                            if not coleta.resume_selection():
+                                raise RuntimeError(
+                                    "nao foi possivel iniciar a selecao "
+                                    "da vitima")
+                        elif (
+                            passo_coleta.state
+                            == BallPickupSequencer.COMPLETE
+                        ):
+                            coleta_concluida = coleta.target_kind
                     else:
                         passo_coleta = coleta.fail(erro_coleta)
                         comando = passo_coleta.motion_command()
@@ -696,6 +726,71 @@ def main():
                         "serial mudou durante a coleta; "
                         "motores e Futaba parados")
 
+            if coleta_concluida is not None:
+                vitimas_resgatadas += 1
+                contador_verde.reset()
+                varreduras_sem_vitima = 0
+                epoca_coleta = None
+                coleta = BallPickupSequencer()
+                if trabalhador is not None:
+                    trabalhador.reset_tracking()
+                portao.reset()
+                if marcadores is not None:
+                    marcadores.reset()
+                    marcadores_atuais = {}
+                busca = make_search_controller(start_time=agora)
+                controlador = None
+                resultado_atual = None
+                deteccao_atual = None
+                epoca_busca = None
+                ultimo_controle_ocioso = 0.0
+                comando = MotionCommand(
+                    "RESCUE_SELECTED",
+                    detail=(
+                        f"vitima {coleta_concluida} selecionada; "
+                        f"total {vitimas_resgatadas}; iniciando nova busca"),
+                )
+                comando_atualizado = False
+
+            if (
+                args.drive
+                and busca is not None
+                and comando.state == busca.COMPLETE
+                and comando.terminal
+            ):
+                varreduras_sem_vitima += 1
+                decisao_busca = decidir_apos_varredura(
+                    contador_verde, varreduras_sem_vitima)
+                if decisao_busca == BUSCA_CONCLUIR:
+                    comando = MotionCommand(
+                        "RESCUE_COMPLETE",
+                        detail=(
+                            "verde visto em duas passagens separadas e "
+                            "nenhuma vitima encontrada entre elas"),
+                        terminal=True,
+                    )
+                elif decisao_busca == BUSCA_REINICIAR:
+                    busca = make_search_controller(start_time=agora)
+                    epoca_busca = None
+                    ultimo_controle_ocioso = 0.0
+                    comando = MotionCommand(
+                        "SEARCH_RESTART",
+                        detail=(
+                            f"volta {varreduras_sem_vitima} sem vitima; "
+                            f"verde {contador_verde.quantidade}/"
+                            f"{contador_verde.necessario}; "
+                            "iniciando outra busca pulsada"),
+                    )
+                    comando_atualizado = False
+                else:
+                    comando = MotionCommand(
+                        "RESCUE_SEARCH_FAULT",
+                        detail=(
+                            "limite seguro de varreduras atingido sem duas "
+                            "passagens verdes; robo parado"),
+                        terminal=True,
+                    )
+
             if (
                 args.drive
                 and not coleta.started
@@ -718,7 +813,7 @@ def main():
                 ultimo_controle_ocioso = 0.0
                 print(
                     f"[coleta] vitima {coleta.target_kind} confirmada; "
-                    "baixando, avancando, fechando e elevando")
+                    "avancando, baixando, avancando, fechando e selecionando")
 
             log_agora = time.monotonic()
             if (

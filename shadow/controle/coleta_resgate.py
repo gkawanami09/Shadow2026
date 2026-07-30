@@ -35,6 +35,9 @@ class BallPickupSequencer:
     """Prende, eleva e libera a esfera conforme a cor confirmada."""
 
     IDLE = "PICKUP_IDLE"
+    PRE_FORWARD_START = "PICKUP_PRE_FORWARD_START"
+    PRE_FORWARD_PENDING = "PICKUP_PRE_FORWARD_PENDING"
+    PRE_FORWARD_LEAD = "PICKUP_PRE_FORWARD"
     FUTABA_START = "PICKUP_FUTABA_START"
     FUTABA_PENDING = "PICKUP_FUTABA_PENDING"
     FUTABA_WAIT = "PICKUP_FUTABA"
@@ -64,6 +67,7 @@ class BallPickupSequencer:
         self._wiggle_actions = ()
         self._wiggle_index = 0
         self._terminal_detail = ""
+        self._release_mode = "deposit"
 
     @property
     def started(self):
@@ -91,7 +95,7 @@ class BallPickupSequencer:
                 "a coleta exige cor confirmada silver ou black")
         self._kind = target_kind
         self._wiggle_actions = self._build_wiggle_actions(target_kind)
-        self.state = self.FUTABA_START
+        self.state = self.PRE_FORWARD_START
         return True
 
     def update(self, now=None):
@@ -101,6 +105,40 @@ class BallPickupSequencer:
             return PickupStep(
                 self.IDLE,
                 "coleta ainda nao iniciada",
+            )
+
+        if self.state == self.PRE_FORWARD_START:
+            self.state = self.PRE_FORWARD_PENDING
+            return PickupStep(
+                self.PRE_FORWARD_PENDING,
+                "iniciando primeiro avanco de 1 s antes de baixar a garra",
+                angle=0,
+                speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+                motor_action="forward",
+            )
+
+        if self.state == self.PRE_FORWARD_PENDING:
+            return PickupStep(
+                self.PRE_FORWARD_PENDING,
+                "aguardando confirmacao do primeiro avanco",
+                angle=0,
+                speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+            )
+
+        if self.state == self.PRE_FORWARD_LEAD:
+            if now < self._deadline:
+                return PickupStep(
+                    self.PRE_FORWARD_LEAD,
+                    "avancando por 1 s com o elevador levantado",
+                    angle=0,
+                    speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+                )
+            self.state = self.FUTABA_START
+            self._deadline = None
+            return PickupStep(
+                self.FUTABA_START,
+                "primeiro avanco concluido; parando antes de baixar",
+                motor_action="stop",
             )
 
         if self.state == self.FUTABA_START:
@@ -131,7 +169,7 @@ class BallPickupSequencer:
             self._deadline = None
             return PickupStep(
                 self.FORWARD_START,
-                "Futaba embaixo; iniciando avanco de 1,5 s",
+                "Futaba embaixo; iniciando segundo avanco de 1 s",
                 angle=0,
                 speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 motor_action="forward",
@@ -150,7 +188,7 @@ class BallPickupSequencer:
             if now < self._deadline:
                 return PickupStep(
                     self.FORWARD_LEAD,
-                    "avancando por 1,5 s com as garras abertas",
+                    "avancando por mais 1 s com as garras abertas",
                     angle=0,
                     speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 )
@@ -220,7 +258,12 @@ class BallPickupSequencer:
             self.state = self.LOWER_PENDING
             return PickupStep(
                 self.LOWER_PENDING,
-                "marcador correto alcancado; descendo o Futaba por 25 ms",
+                (
+                    "vitima elevada; preparando a selecao por lado"
+                    if self._release_mode == "selection"
+                    else "marcador correto alcancado; descendo o Futaba "
+                    "por 25 ms"
+                ),
                 futaba_action=(
                     cfg.BALL_PICKUP_LOWER_POWER,
                     cfg.BALL_PICKUP_LOWER_MS,
@@ -315,7 +358,13 @@ class BallPickupSequencer:
             self.state = self.COMPLETE
             self._deadline = None
             self._terminal_detail = (
-                f"coleta e liberacao da esfera {self._kind} concluidas")
+                (
+                    f"coleta e selecao da esfera {self._kind} concluidas"
+                    if self._release_mode == "selection"
+                    else
+                    f"coleta e liberacao da esfera {self._kind} concluidas"
+                )
+            )
             return PickupStep(
                 self.COMPLETE,
                 self._terminal_detail,
@@ -332,6 +381,15 @@ class BallPickupSequencer:
         """Libera uma unica vez o sufixo de deposito no marcador correto."""
         if self.state != self.CARRY_READY:
             return False
+        self._release_mode = "deposit"
+        self.state = self.DEPOSIT_START
+        return True
+
+    def resume_selection(self):
+        """Seleciona prata para a esquerda e preta para a direita."""
+        if self.state != self.CARRY_READY:
+            return False
+        self._release_mode = "selection"
         self.state = self.DEPOSIT_START
         return True
 
@@ -366,11 +424,15 @@ class BallPickupSequencer:
             "confirmacao do Futaba fora de um estado de partida")
 
     def mark_forward_started(self, now=None):
-        """Inicia os 1,5 s completos de reta antes das garras."""
+        """Inicia o prazo do primeiro ou do segundo avanco."""
+        now = time.monotonic() if now is None else float(now)
+        if self.state == self.PRE_FORWARD_PENDING:
+            self.state = self.PRE_FORWARD_LEAD
+            self._deadline = now + cfg.BALL_PICKUP_PRE_FORWARD_S
+            return
         if self.state != self.FORWARD_START:
             raise RuntimeError(
                 "confirmacao do avanco fora do estado de partida")
-        now = time.monotonic() if now is None else float(now)
         self.state = self.FORWARD_LEAD
         self._deadline = now + cfg.BALL_PICKUP_FORWARD_S
 

@@ -52,18 +52,23 @@ aceito. Está registrada em `tests/test_marcador_resgate.py`.
 
 ## Escopo atual
 
-`shadow/resgate.py` faz hoje: **ver uma vítima, aproximar, baixar o Futaba,
-avançar, fechar as duas garras, elevar a vítima e parar**.
+`shadow/resgate.py` faz hoje: **procurar uma vítima em giros pulsados,
+aproximar, avançar 1 s, baixar o Futaba, avançar mais 1 s, fechar, elevar e
+selecionar a vítima pelo lado**.
 
-A coleta termina no estado `PICKUP_SECURED`, com a vítima presa e elevada.
-Depósito, busca da próxima vítima e saída **não** estão no fluxo ainda:
+Prata abre a garra esquerda; preta abre a direita. Depois de restaurar as duas
+garras, a busca pulsada recomeça. O mesmo verde em vários frames vale uma
+aparição. Duas passagens separadas pelo verde sem uma coleta no meio encerram
+a procura; uma coleta concluída zera essa contagem.
+
+O transporte até o depósito e a saída da sala **não** estão no fluxo atual:
 
 - `controle/deposito_resgate.py`
 - `controle/saida_resgate.py`
 - `controle/missao.py`, `shadow/mission.py`
 
-O prefixo ativo da coleta reaproveita `controle/coleta_resgate.py`. A parte de
-liberação continua bloqueada até o depósito voltar ao fluxo.
+O ciclo ativo reaproveita `controle/coleta_resgate.py`, inclusive a abertura
+por lado e a restauração das garras.
 
 ## O que falta: o modelo
 

@@ -178,18 +178,18 @@ BALL_CRESCENT_INNER_BOTTOM_RATIO = 0.82
 BALL_CRESCENT_TOKEN_TTL_S = 0.80
 
 # Coleta depois que a aproximacao visual termina. Nao existe etapa de re.
-# O avanco usa a velocidade conservadora ja validada perto da esfera. O Futaba
-# e continuo:
-# -20 e potencia de descida por 1500 ms, nao um angulo. A margem garante que
-# CH3 ja foi desligado pelo firmware antes do avanco com as duas garras.
+# Primeiro o robo avanca por 1 s com o elevador levantado. Depois para, baixa
+# o Futaba e avanca por mais 1 s antes de fechar as duas garras. Separar os
+# dois avancos impede que a garra desca longe demais da esfera.
 BALL_PICKUP_FUTABA_POWER = -20
 BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
 BALL_PICKUP_LEFT_DELTA = -50
 BALL_PICKUP_RIGHT_DELTA = 50
-BALL_PICKUP_FORWARD_S = 1.50
-# As garras so fecham depois que a reta inteira termina. O alias e mantido
-# para o sequenciador representar o intervalo entre iniciar o avanco e fechar.
+BALL_PICKUP_PRE_FORWARD_S = 1.00
+BALL_PICKUP_FORWARD_S = 1.00
+# As garras so fecham depois do segundo avanco. O alias e mantido para os
+# modulos que usam o nome antigo deste intervalo.
 BALL_PICKUP_FORWARD_LEAD_S = BALL_PICKUP_FORWARD_S
 BALL_PICKUP_FORWARD_SPEED = BALL_APPROACH_SPEED_NEAR
 BALL_PICKUP_GRIPPER_SETTLE_S = 0.50
@@ -242,6 +242,17 @@ BALL_SEARCH_SECTORS = 30
 # Teto global da busca, contando pulsos e pausas. Protege contra laco infinito
 # quando o 360 temporizado nao fecha por escorregamento das rodas.
 BALL_SEARCH_TOTAL_TIMEOUT_S = 75.0
+
+# Fim da busca de vitimas. O verde so conta durante uma observacao parada da
+# busca pulsada. Varios frames seguidos do mesmo marcador valem uma aparicao;
+# ele precisa sumir por tres frames validos antes de poder contar novamente.
+# Uma coleta e selecao concluidas zeram toda esta contagem.
+RESCUE_GREEN_SIGHTINGS_REQUIRED = 2
+RESCUE_GREEN_REARM_FRAMES = 3
+# Se o verde nao puder ser confirmado, o robo nao pode girar para sempre.
+# Depois de tres voltas completas ele para em estado de falha, sem declarar
+# falsamente que terminou o resgate.
+RESCUE_SEARCH_MAX_EMPTY_SWEEPS = 3
 
 # Transporte ate o ponto de evacuacao. O marcador correto e imutavel durante
 # o ciclo: esfera prata -> verde; esfera preta -> vermelho. A navegacao usa

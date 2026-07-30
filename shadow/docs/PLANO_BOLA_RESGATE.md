@@ -11,10 +11,8 @@ SEARCH -> SEARCH_TARGET_STOP -> SEARCH_VERIFY -> ALIGN
        -> SEARCH_TURN_STOP -> SEARCH_FINAL_VERIFY -> SEARCH_COMPLETE
 ALIGN -> APPROACH -> NEAR_CONFIRM -> NEAR
       \-> LOST/FAULT (PARAR)
-NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
+NEAR -> PICKUP_PRE_FORWARD -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
      -> PICKUP_LIFT -> PICKUP_CARRY_READY
-     -> DEPOSIT_SEARCH -> DEPOSIT_VERIFY -> DEPOSIT_ALIGN
-     -> DEPOSIT_APPROACH -> DEPOSIT_ARRIVED
      -> PICKUP_LOWER -> PICKUP_RELEASE
      -> PICKUP_WIGGLE -> PICKUP_RESTORE -> PICKUP_COMPLETE -> SEARCH
 ```
@@ -25,8 +23,8 @@ NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
   novas confirmações capturadas com o chassi já parado.
 - `SEARCH_TURN_STOP`/`SEARCH_FINAL_VERIFY`: depois do tempo calibrado para
   360°, para e verifica os últimos frames antes de declarar a busca vazia.
-- `SEARCH_COMPLETE`: encerra com `PARAR` somente quando o 360° e a verificação
-  final não encontraram outra esfera.
+- `SEARCH_COMPLETE`: termina uma volta com `PARAR`. A busca recomeça enquanto
+  não houver duas passagens verdes separadas nem o limite seguro de voltas.
 - `ALIGN`: curva curta para a frente, proporcional ao erro e com histerese,
   para centralizar sem ultrapassar a esfera de um lado para o outro.
 - `APPROACH`: avanço em arco; a velocidade diminui à medida que a esfera cresce.
@@ -36,14 +34,15 @@ NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
 - `NEAR`: parada confirmada e transferência única para a coleta.
 - `LOST`: qualquer perda ou imagem antiga produz `PARAR` imediatamente.
 - `FAULT`: timeout ou falta de progresso produz `PARAR` travado.
+- `PICKUP_PRE_FORWARD`: avança 1,00 s com o elevador levantado e para.
 - `PICKUP_FUTABA`: rodas zeradas e `FUTABA -20 1500`; aguarda 1,50 s
   mais 0,10 s de margem.
-- `PICKUP_FORWARD`: mantém as garras abertas durante os 1,50 s de avanço reto.
+- `PICKUP_FORWARD`: mantém as garras abertas durante mais 1,00 s de avanço.
 - `PICKUP_GRIPPERS`: ao final da reta, envia `PARAR` e só então esquerda `-50`
   e direita `+50` no mesmo pacote USB.
 - `PICKUP_LIFT`: depois de as garras fecharem, envia `FUTABA 20 2500`.
-- `PICKUP_CARRY_READY`: corta o Futaba ao fim da subida, mantém a esfera presa
-  e bloqueia todos os comandos de liberação.
+- `PICKUP_CARRY_READY`: corta o Futaba ao fim da subida e inicia a seleção
+  automática pelo lado.
 - `DEPOSIT_SEARCH`/`DEPOSIT_VERIFY`: prata procura exclusivamente o triângulo
   verde; preta procura exclusivamente o vermelho. O giro é tanque lento e
   cada candidato precisa ser reconfirmado com o chassi parado.
@@ -58,7 +57,7 @@ NEAR -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
   esquerda `-40/+40` duas vezes.
 - `PICKUP_RESTORE`: prata aplica direita `-50`; preta aplica esquerda `+50`,
   restaurando exatamente as posições iniciais `(180°, 0°)`.
-- `PICKUP_COMPLETE`: confirma o depósito, reinicia o rastreador e volta a
+- `PICKUP_COMPLETE`: confirma a seleção, zera o contador verde e volta a
   `SEARCH`.
 
 O giro de 360° é temporizado porque o robô não possui IMU. Com o giro tanque
@@ -212,19 +211,14 @@ proximidade confirmada ele arma um sequenciador monotônico separado. Cada açã
 do Futaba e das garras possui latch one-shot, pois os comandos das garras são
 deslocamentos relativos e não podem ser repetidos.
 
-`PARAR` também corta o Futaba no firmware. Por isso, depois do `PARAR` que
-finaliza a aproximação, o primeiro passo da coleta usa `LADO 0 0` para manter
-as quatro rodas zeradas. O keepalive repete esse comando enquanto CH3 desce,
-sem interromper os 1500 ms. Depois do prazo, o programa envia `FUTABA PARAR`
-por segurança e inicia o avanço reto. O cronômetro de 1,50 s começa quando o
-avanço é entregue. Durante toda a reta as garras permanecem abertas; no fim do
-prazo o programa envia `PARAR` e depois fecha as duas garras em uma única
-escrita serial. Após 0,50 s para o fechamento físico, `LADO 0 0` mantém as
-rodas paradas sem cortar o `FUTABA 20 2500`. Terminada a subida, o programa
-envia `FUTABA PARAR` e entra em `PICKUP_CARRY_READY`. A esfera continua fechada
-e elevada enquanto o robô procura o destino. Somente depois de o controlador
-confirmar e parar no triângulo correto o programa envia `FUTABA -20 25` e
-espera o pulso acabar.
+Depois do `PARAR` que finaliza a aproximação, o robô avança 1,00 s com o
+elevador levantado e para novamente. Só então usa `LADO 0 0` para manter as
+quatro rodas zeradas enquanto CH3 desce, sem interromper os 1500 ms. Depois do
+prazo, envia `FUTABA PARAR` e inicia o segundo avanço de 1,00 s. As garras
+permanecem abertas; no fim do prazo o programa envia `PARAR` e fecha as duas em
+uma única escrita serial. Após 0,50 s, `LADO 0 0` mantém as rodas paradas sem
+cortar o `FUTABA 20 2500`. Terminada a subida, envia `FUTABA PARAR`, aplica o
+pulso curto de seleção e abre somente o lado correspondente à classe.
 
 A cor é congelada no primeiro círculo travado que toca o ponto inferior. Para
 prata, a esquerda abre com `+50` e a direita alterna `+40/-40` duas vezes.
