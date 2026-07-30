@@ -59,11 +59,15 @@ aproximar, avançar 1 s, baixar o Futaba, avançar mais 1 s + 200 ms, fechar com
 Prata abre a garra esquerda; preta abre a direita. Depois de restaurar as duas
 garras, a busca pulsada recomeça. O mesmo verde em vários frames vale uma
 aparição. Duas passagens separadas pelo verde sem uma coleta no meio encerram
-a procura; uma coleta concluída zera essa contagem.
+a procura; uma coleta concluída zera essa contagem. Ao encerrar a procura, o
+robô usa o marcador verde para se alinhar e se aproximar do retângulo. Perto
+dele, passa a medir diretamente a cobertura verde e só termina depois de três
+frames distintos com pelo menos 88% do campo útil verde.
 
-O transporte até o depósito e a saída da sala **não** estão no fluxo atual:
+O transporte de cada vítima até um depósito e a saída da sala **não** estão
+no fluxo atual. A navegação visual de `deposito_resgate.py` é reaproveitada
+somente para chegar ao retângulo verde no final:
 
-- `controle/deposito_resgate.py`
 - `controle/saida_resgate.py`
 - `controle/missao.py`, `shadow/mission.py`
 

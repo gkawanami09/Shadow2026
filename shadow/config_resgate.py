@@ -303,6 +303,22 @@ DEPOSIT_NEAR_MAX_CENTER_ERROR = 0.16
 DEPOSIT_NEAR_CONFIRM_FRAMES = 3
 DEPOSIT_NEAR_CONFIRM_WINDOW_S = 0.45
 
+# Fim do resgate: depois que a busca confirma que nao restaram vitimas, o
+# robo procura o retangulo verde com o controlador de deposito acima. Quando
+# chega perto, a geometria deixa de ser confiavel porque o verde ocupa quase
+# todo o quadro. A ultima aproximacao usa diretamente a porcentagem de pixels
+# verdes no centro da imagem e confirma em varios frames diferentes.
+RESCUE_GREEN_FULL_FRAME_MIN_RATIO = 0.88
+RESCUE_GREEN_FULL_FRAME_MARGIN_RATIO = 0.03
+RESCUE_GREEN_FULL_FRAME_CONFIRM_FRAMES = 3
+RESCUE_GREEN_FULL_FRAME_CONFIRM_WINDOW_S = 0.50
+RESCUE_GREEN_FINAL_FORWARD_SPEED = 0.23
+RESCUE_GREEN_FINAL_CENTER_DEADBAND = 0.06
+RESCUE_GREEN_FINAL_STEER_MAX_ANGLE = 30
+RESCUE_GREEN_FINAL_MIN_VISIBLE_RATIO = 0.03
+RESCUE_GREEN_FINAL_LOST_TIMEOUT_S = 0.75
+RESCUE_GREEN_FINAL_MAX_ACTIVE_S = 6.0
+
 # Hough + filtros medidos no Pi podem ultrapassar 0.20 s. O timestamp agora e
 # tirado depois da captura; 0.75 s ainda impede movimento com imagem congelada,
 # mas nao rejeita todo frame valido como ocorreu no primeiro teste fisico.

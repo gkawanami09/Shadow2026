@@ -3,7 +3,8 @@
 
 Depois de cada coleta, a vítima prata é selecionada pela garra esquerda e a
 preta pela direita. O robô volta à busca pulsada. Duas passagens separadas
-pelo marcador verde sem uma coleta no meio encerram a procura.
+pelo marcador verde sem uma coleta no meio encerram a procura. Então o robô
+procura o retângulo verde e avança até o campo útil da câmera ficar verde.
 
 Arquitetura da visão
 --------------------
@@ -50,6 +51,9 @@ from controle.contador_verde_resgate import (  # noqa: E402
     BUSCA_REINICIAR,
     ContadorVerdeBusca,
     decidir_apos_varredura,
+)
+from controle.retangulo_verde_resgate import (  # noqa: E402
+    ControladorRetanguloVerde,
 )
 from visao import overlay_resgate  # noqa: E402
 from visao.marcador_resgate import MarkerDetector, color_masks  # noqa: E402
@@ -241,9 +245,8 @@ def _armar_coleta_confirmada(
 class MarkerPair:
     """Verde e vermelho detectados no mesmo frame, para identificação.
 
-    Nesta fase nenhum marcador comanda o robô — servem para você confirmar
-    que os dois são reconhecidos. Quando o depósito voltar ao escopo, só o
-    triângulo da cor da vítima presa poderá comandar.
+    Durante a busca eles apenas contam passagens. Depois que a busca confirma
+    que não há mais vítimas, somente o verde pode comandar a rota final.
     """
 
     def __init__(self):
@@ -253,10 +256,12 @@ class MarkerPair:
         }
         self.detections = {"green": None, "red": None}
         self.confirmados = {"green": False, "red": False}
+        self.mascaras = {"green": None, "red": None}
 
     def update(self, frame, timestamp):
         # Uma conversão HSV só, reaproveitada pelos dois detectores.
         mascaras = color_masks(frame)
+        self.mascaras = mascaras
         for tipo, detector in self.detectors.items():
             deteccao = detector.detect(
                 frame, timestamp=timestamp, masks=mascaras)
@@ -281,6 +286,7 @@ class MarkerPair:
         for detector in self.detectors.values():
             detector.reset()
         self.detections = {"green": None, "red": None}
+        self.mascaras = {"green": None, "red": None}
 
 
 def parse_args():
@@ -353,6 +359,7 @@ def main():
     trabalhador = None
     marcadores = None
     controlador = None
+    controlador_verde = None
     busca = None
     coleta = None
     contador_verde = ContadorVerdeBusca()
@@ -364,6 +371,7 @@ def main():
     ultimo_controle_ocioso = 0.0
     epoca_busca = None
     epoca_coleta = None
+    epoca_verde = None
     varreduras_sem_vitima = 0
     vitimas_resgatadas = 0
     amostras_captura = deque(maxlen=60)
@@ -471,6 +479,7 @@ def main():
                 and frame_novo
                 and armado
                 and not coleta.started
+                and controlador_verde is None
             ):
                 trabalhador.submit(
                     frame_atual,
@@ -540,6 +549,41 @@ def main():
 
                 comando = passo_coleta.motion_command()
                 comando_atualizado = True
+            elif controlador_verde is not None:
+                # O detector de vitimas para nesta etapa. O marcador verde e
+                # a mascara HSV passam a ser a unica fonte de movimento.
+                if resultado is not None:
+                    sequencia_resultado = resultado.sequence
+                    metricas = resultado
+                    instantes_deteccao.append(resultado.completed_at)
+                resultado_atual = None
+                deteccao_atual = None
+
+                forma = (
+                    frame_atual.shape if frame_atual is not None
+                    else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                          cfg.RESCUE_CAMERA_MAX_WIDTH, 3))
+                if frame_novo:
+                    comando = controlador_verde.update(
+                        marcadores_atuais.get("green"),
+                        forma,
+                        mascara_verde=(
+                            marcadores.mascaras.get("green")
+                            if marcadores is not None else None
+                        ),
+                        timestamp_frame=pacote.captured_at,
+                        now=agora,
+                    )
+                    comando_atualizado = True
+                    ultimo_controle_ocioso = agora
+                elif (
+                    agora - ultimo_controle_ocioso
+                    >= INTERVALO_CONTROLE_OCIOSO_S
+                ):
+                    comando = controlador_verde.update(
+                        None, forma, now=agora)
+                    comando_atualizado = True
+                    ultimo_controle_ocioso = agora
             elif detector is None:
                 comando = MotionCommand(
                     "MARCADORES",
@@ -690,6 +734,13 @@ def main():
                             resultado_atual = None
                             deteccao_atual = None
                             ultimo_controle_ocioso = concluido_em
+                    elif controlador_verde is not None:
+                        if controlador_verde.consume_tracking_reset():
+                            if marcadores is not None:
+                                marcadores.reset()
+                            marcadores_atuais = {}
+                        controlador_verde.notify_command_written(
+                            comando.state, concluido_em)
 
             if arduino is not None:
                 arduino.refresh(fail_closed=True)
@@ -725,6 +776,17 @@ def main():
                     raise RuntimeError(
                         "serial mudou durante a coleta; "
                         "motores e Futaba parados")
+                if (
+                    controlador_verde is not None
+                    and epoca_verde is not None
+                    and (
+                        not arduino.connected
+                        or arduino.connection_epoch != epoca_verde
+                    )
+                ):
+                    raise RuntimeError(
+                        "serial mudou durante a ida ao retangulo verde; "
+                        "motores parados")
 
             if coleta_concluida is not None:
                 vitimas_resgatadas += 1
@@ -762,13 +824,38 @@ def main():
                 decisao_busca = decidir_apos_varredura(
                     contador_verde, varreduras_sem_vitima)
                 if decisao_busca == BUSCA_CONCLUIR:
-                    comando = MotionCommand(
-                        "RESCUE_COMPLETE",
-                        detail=(
-                            "verde visto em duas passagens separadas e "
-                            "nenhuma vitima encontrada entre elas"),
-                        terminal=True,
-                    )
+                    if marcadores is None:
+                        comando = MotionCommand(
+                            "GREEN_FINAL_FAULT",
+                            detail=(
+                                "busca terminou, mas os marcadores foram "
+                                "desativados; robo parado"),
+                            terminal=True,
+                        )
+                    else:
+                        if trabalhador is not None:
+                            trabalhador.reset_tracking()
+                        portao.reset()
+                        busca = None
+                        controlador = None
+                        controlador_verde = ControladorRetanguloVerde(
+                            start_time=agora)
+                        epoca_busca = None
+                        epoca_verde = (
+                            arduino.connection_epoch
+                            if arduino is not None else None
+                        )
+                        resultado_atual = None
+                        deteccao_atual = None
+                        ultimo_controle_ocioso = 0.0
+                        comando = MotionCommand(
+                            "GREEN_ROUTE_START",
+                            detail=(
+                                "verde visto em duas passagens separadas e "
+                                "nenhuma vitima encontrada; "
+                                "indo ao retangulo verde"),
+                        )
+                        comando_atualizado = False
                 elif decisao_busca == BUSCA_REINICIAR:
                     busca = make_search_controller(start_time=agora)
                     epoca_busca = None
