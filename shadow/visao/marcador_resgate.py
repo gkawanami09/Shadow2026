@@ -174,10 +174,26 @@ class GreenRectangleDetector:
                 "mascara verde possui resolucao diferente do frame")
 
         canais = frame_bgr.astype(np.float32)
-        cromaticidade = (
-            canais[:, :, 1]
-            - np.maximum(canais[:, :, 0], canais[:, :, 2])
+        azul = canais[:, :, 0]
+        verde = canais[:, :, 1]
+        vermelho = canais[:, :, 2]
+        maior_canal = np.maximum(np.maximum(azul, verde), vermelho)
+        menor_canal = np.minimum(np.minimum(azul, verde), vermelho)
+        saturacao = np.divide(
+            (maior_canal - menor_canal) * 255.0,
+            maior_canal,
+            out=np.zeros_like(maior_canal),
+            where=maior_canal > 0.0,
         )
+        verde_natural = verde - np.maximum(azul, vermelho)
+        # A OV5647 frontal desloca o painel verde para ciano: nas capturas
+        # reais B=131, G=110, R=31. Exigir G > B apagava justamente o painel.
+        # min(B, G) - R mede essa cor sem aceitar azul puro, enquanto o maximo
+        # com a medida antiga preserva o verde normal.
+        verde_deslocado_ciano = np.minimum(azul, verde) - vermelho
+        cromaticidade = np.maximum(
+            verde_natural, verde_deslocado_ciano)
+        mascara[saturacao < cfg.GREEN_RECTANGLE_MIN_SATURATION] = 0
         mascara[cromaticidade < cfg.GREEN_RECTANGLE_MIN_CHROMA] = 0
         topo = int(round(altura * cfg.GREEN_RECTANGLE_ROI_TOP))
         mascara[:topo, :] = 0
@@ -220,11 +236,21 @@ class GreenRectangleDetector:
         proporcao = area / float(max(altura * largura, 1))
         if proporcao < cfg.GREEN_RECTANGLE_MIN_AREA_RATIO:
             return None, "area_small"
+        if proporcao > cfg.GREEN_RECTANGLE_MAX_AREA_RATIO:
+            return None, "area_large"
 
         x, y, largura_caixa, altura_caixa = cv2.boundingRect(contorno)
         lado_minimo = cfg.GREEN_RECTANGLE_MIN_SIDE_PX * escala
         if min(largura_caixa, altura_caixa) < lado_minimo:
             return None, "side"
+        proporcao_horizontal = (
+            float(largura_caixa) / max(float(altura_caixa), 1.0)
+        )
+        if (
+            proporcao_horizontal
+            < cfg.GREEN_RECTANGLE_MIN_HORIZONTAL_ASPECT
+        ):
+            return None, "horizontal_aspect"
 
         hull = cv2.convexHull(contorno)
         area_hull = float(cv2.contourArea(hull))

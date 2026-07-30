@@ -515,13 +515,18 @@ MARKER_AREA_RATIO_MIN = 0.30
 MARKER_AREA_RATIO_MAX = 3.50
 
 # Detector complementar do RETANGULO verde. O detector acima continua sendo
-# usado e o vermelho nao muda. Este perfil aceita o verde mais lavado da arena
-# pela area solida e por tres frames consecutivos, sem exigir o contraste local
-# alto que foi medido nos antigos marcadores triangulares.
-GREEN_RECTANGLE_ROI_TOP = 0.25
+# usado e o vermelho nao muda. Na camera real, o painel verde apareceu como
+# B=131, G=110, R=31: o azul fica um pouco acima do verde por causa do balanco
+# de branco, mas ambos continuam muito acima do vermelho. O detector aceita
+# essa mudanca para ciano e o verde normal, sempre com area solida e tres
+# frames consecutivos.
+GREEN_RECTANGLE_ROI_TOP = 0.45
 GREEN_RECTANGLE_MIN_AREA_RATIO = 0.0025
+GREEN_RECTANGLE_MAX_AREA_RATIO = 0.45
 GREEN_RECTANGLE_MIN_SIDE_PX = 10
-GREEN_RECTANGLE_MIN_CHROMA = 30.0
+GREEN_RECTANGLE_MIN_HORIZONTAL_ASPECT = 1.80
+GREEN_RECTANGLE_MIN_SATURATION = 120.0
+GREEN_RECTANGLE_MIN_CHROMA = 40.0
 GREEN_RECTANGLE_MIN_SOLIDITY = 0.60
 GREEN_RECTANGLE_MIN_COMPACTNESS = 0.25
 GREEN_RECTANGLE_ACQUIRE_HITS = 3

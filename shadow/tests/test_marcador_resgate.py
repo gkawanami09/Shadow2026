@@ -202,14 +202,48 @@ class MarkerDetectorTests(unittest.TestCase):
 
 
 class GreenRectangleDetectorTests(unittest.TestCase):
-    def test_verde_lavado_rejeitado_pelo_antigo_e_confirmado_pelo_retangulo(self):
-        hsv = np.uint8([[[65, 70, 180]]])
+    def test_verde_ciano_medido_na_camera_real_e_confirmado(self):
+        # Mediana medida no painel verde das capturas da camera de resgate.
+        # O azul fica acima do verde, portanto G-max(B,R) seria negativo.
+        frame = base_frame()
+        cv2.rectangle(frame, (80, 300), (560, 430), (131, 110, 31), -1)
+        detector = GreenRectangleDetector()
+
+        resultado = None
+        for indice in range(cfg.GREEN_RECTANGLE_ACQUIRE_HITS):
+            resultado = detector.detect(frame, timestamp=indice * 0.1)
+
+        self.assertIsNotNone(resultado)
+        self.assertTrue(resultado.confirmed)
+        self.assertTrue(resultado.track_locked)
+
+    def test_parede_com_banho_verde_fraco_nao_vira_retangulo(self):
+        # Mediana do falso componente que aparecia na parede: B=98, G=139,
+        # R=109. A cor e verde, mas fraca demais para ser o painel.
+        frame = base_frame((98, 139, 109))
+        detector = GreenRectangleDetector()
+
+        for indice in range(cfg.GREEN_RECTANGLE_ACQUIRE_HITS + 1):
+            self.assertIsNone(
+                detector.detect(frame, timestamp=indice * 0.1))
+
+    def test_objeto_ciano_vertical_nao_vira_retangulo(self):
+        frame = base_frame()
+        cv2.rectangle(frame, (290, 250), (340, 450), (131, 110, 31), -1)
+        detector = GreenRectangleDetector()
+
+        for indice in range(cfg.GREEN_RECTANGLE_ACQUIRE_HITS + 1):
+            self.assertIsNone(
+                detector.detect(frame, timestamp=indice * 0.1))
+
+    def test_verde_ciano_moderado_e_confirmado_pelo_retangulo(self):
+        hsv = np.uint8([[[85, 130, 180]]])
         cor_lavada = tuple(
             int(valor)
             for valor in cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
         )
         frame = base_frame()
-        cv2.rectangle(frame, (170, 250), (470, 420), cor_lavada, -1)
+        cv2.rectangle(frame, (120, 250), (520, 420), cor_lavada, -1)
 
         antigo = MarkerDetector("green")
         self.assertIsNone(antigo.detect(frame, timestamp=0.0))
@@ -223,6 +257,16 @@ class GreenRectangleDetectorTests(unittest.TestCase):
         self.assertTrue(resultado.confirmed)
         self.assertTrue(resultado.track_locked)
         self.assertEqual(resultado.kind, "green")
+
+    def test_placa_clara_azulada_da_captura_nao_vira_verde(self):
+        frame = base_frame()
+        cv2.rectangle(
+            frame, (150, 250), (520, 430), (192, 198, 143), -1)
+        detector = GreenRectangleDetector()
+
+        for indice in range(cfg.GREEN_RECTANGLE_ACQUIRE_HITS + 1):
+            self.assertIsNone(
+                detector.detect(frame, timestamp=indice * 0.1))
 
     def test_um_frame_verde_nao_confirma_retangulo(self):
         frame = base_frame()
@@ -265,7 +309,7 @@ class GreenRectangleDetectorTests(unittest.TestCase):
 
     def test_objeto_verde_acima_da_roi_nao_comanda(self):
         frame = base_frame()
-        cv2.rectangle(frame, (180, 10), (460, 100), GREEN, -1)
+        cv2.rectangle(frame, (180, 130), (460, 200), GREEN, -1)
 
         resultado = GreenRectangleDetector().detect(
             frame, timestamp=0.0)
