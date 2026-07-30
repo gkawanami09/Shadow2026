@@ -179,15 +179,16 @@ BALL_CRESCENT_TOKEN_TTL_S = 0.80
 
 # Coleta depois que a aproximacao visual termina. Nao existe etapa de re.
 # Primeiro o robo avanca por 1 s com o elevador levantado. Depois para, baixa
-# o Futaba e avanca por mais 1 s antes de fechar as duas garras. Separar os
-# dois avancos impede que a garra desca longe demais da esfera.
+# o Futaba, avanca por mais 1 s e completa 200 ms antes de fechar as garras.
+# Separar os avancos impede que a garra desca longe demais da esfera.
 BALL_PICKUP_FUTABA_POWER = -20
 BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
-BALL_PICKUP_LEFT_DELTA = -50
-BALL_PICKUP_RIGHT_DELTA = 50
+BALL_PICKUP_LEFT_DELTA = -70
+BALL_PICKUP_RIGHT_DELTA = 70
 BALL_PICKUP_PRE_FORWARD_S = 1.00
 BALL_PICKUP_FORWARD_S = 1.00
+BALL_PICKUP_FINAL_FORWARD_S = 0.20
 # As garras so fecham depois do segundo avanco. O alias e mantido para os
 # modulos que usam o nome antigo deste intervalo.
 BALL_PICKUP_FORWARD_LEAD_S = BALL_PICKUP_FORWARD_S
@@ -202,7 +203,9 @@ BALL_PICKUP_LIFT_GUARD_S = 0.10
 BALL_PICKUP_LOWER_POWER = -20
 BALL_PICKUP_LOWER_MS = 25
 BALL_PICKUP_LOWER_GUARD_S = 0.05
-BALL_PICKUP_RELEASE_DELTA = 50
+# A abertura compensa todo o fechamento de 70 graus para a vitima nao ficar
+# presa durante a selecao esquerda/direita.
+BALL_PICKUP_RELEASE_DELTA = 70
 BALL_PICKUP_WIGGLE_DELTA = 40
 BALL_PICKUP_WIGGLE_REPETITIONS = 2
 BALL_PICKUP_WIGGLE_STEP_S = 0.20

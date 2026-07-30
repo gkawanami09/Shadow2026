@@ -53,8 +53,8 @@ aceito. Está registrada em `tests/test_marcador_resgate.py`.
 ## Escopo atual
 
 `shadow/resgate.py` faz hoje: **procurar uma vítima em giros pulsados,
-aproximar, avançar 1 s, baixar o Futaba, avançar mais 1 s, fechar, elevar e
-selecionar a vítima pelo lado**.
+aproximar, avançar 1 s, baixar o Futaba, avançar mais 1 s + 200 ms, fechar com
+70 de deslocamento, elevar e selecionar a vítima pelo lado**.
 
 Prata abre a garra esquerda; preta abre a direita. Depois de restaurar as duas
 garras, a busca pulsada recomeça. O mesmo verde em vários frames vale uma

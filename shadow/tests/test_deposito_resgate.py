@@ -37,6 +37,8 @@ def pickup_ready(target_kind):
     pickup.mark_forward_started(now=now)
     now += cfg.BALL_PICKUP_FORWARD_S
     pickup.update(now=now)
+    now += cfg.BALL_PICKUP_FINAL_FORWARD_S
+    pickup.update(now=now)
     pickup.mark_grippers_started(now=now)
     now += cfg.BALL_PICKUP_GRIPPER_SETTLE_S
     pickup.update(now=now)

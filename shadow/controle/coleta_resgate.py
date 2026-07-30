@@ -43,6 +43,7 @@ class BallPickupSequencer:
     FUTABA_WAIT = "PICKUP_FUTABA"
     FORWARD_START = "PICKUP_FORWARD_START"
     FORWARD_LEAD = "PICKUP_FORWARD_LEAD"
+    FINAL_FORWARD = "PICKUP_FINAL_FORWARD"
     GRIPPERS_START = "PICKUP_GRIPPERS_START"
     GRIPPERS_WAIT = "PICKUP_GRIPPERS"
     LIFT_PENDING = "PICKUP_LIFT_PENDING"
@@ -189,6 +190,23 @@ class BallPickupSequencer:
                 return PickupStep(
                     self.FORWARD_LEAD,
                     "avancando por mais 1 s com as garras abertas",
+                    angle=0,
+                    speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+                )
+            self.state = self.FINAL_FORWARD
+            self._deadline = now + cfg.BALL_PICKUP_FINAL_FORWARD_S
+            return PickupStep(
+                self.FINAL_FORWARD,
+                "avanco final de 200 ms com o elevador baixo",
+                angle=0,
+                speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+            )
+
+        if self.state == self.FINAL_FORWARD:
+            if now < self._deadline:
+                return PickupStep(
+                    self.FINAL_FORWARD,
+                    "completando os 200 ms finais antes de fechar",
                     angle=0,
                     speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 )

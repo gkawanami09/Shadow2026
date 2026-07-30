@@ -38,8 +38,9 @@ NEAR -> PICKUP_PRE_FORWARD -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
 - `PICKUP_FUTABA`: rodas zeradas e `FUTABA -20 1500`; aguarda 1,50 s
   mais 0,10 s de margem.
 - `PICKUP_FORWARD`: mantém as garras abertas durante mais 1,00 s de avanço.
-- `PICKUP_GRIPPERS`: ao final da reta, envia `PARAR` e só então esquerda `-50`
-  e direita `+50` no mesmo pacote USB.
+- `PICKUP_FINAL_FORWARD`: completa mais 0,20 s com o elevador baixo.
+- `PICKUP_GRIPPERS`: ao final da reta, envia `PARAR` e só então esquerda `-70`
+  e direita `+70` no mesmo pacote USB.
 - `PICKUP_LIFT`: depois de as garras fecharem, envia `FUTABA 20 2500`.
 - `PICKUP_CARRY_READY`: corta o Futaba ao fim da subida e inicia a seleção
   automática pelo lado.
@@ -51,11 +52,11 @@ NEAR -> PICKUP_PRE_FORWARD -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
 - `DEPOSIT_ARRIVED`: exige simultaneamente centro, largura, base baixa e três
   timestamps novos; depois envia `PARAR` antes de autorizar a garra.
 - `PICKUP_LOWER`: somente no marcador correto, envia `FUTABA -20 25`.
-- `PICKUP_RELEASE`: prata abre primeiro a esquerda com `+50`; preta abre
-  primeiro a direita com `-50`.
+- `PICKUP_RELEASE`: prata abre primeiro a esquerda com `+70`; preta abre
+  primeiro a direita com `-70`.
 - `PICKUP_WIGGLE`: prata move a direita `+40/-40` duas vezes; preta move a
   esquerda `-40/+40` duas vezes.
-- `PICKUP_RESTORE`: prata aplica direita `-50`; preta aplica esquerda `+50`,
+- `PICKUP_RESTORE`: prata aplica direita `-70`; preta aplica esquerda `+70`,
   restaurando exatamente as posições iniciais `(180°, 0°)`.
 - `PICKUP_COMPLETE`: confirma a seleção, zera o contador verde e volta a
   `SEARCH`.
@@ -214,15 +215,16 @@ deslocamentos relativos e não podem ser repetidos.
 Depois do `PARAR` que finaliza a aproximação, o robô avança 1,00 s com o
 elevador levantado e para novamente. Só então usa `LADO 0 0` para manter as
 quatro rodas zeradas enquanto CH3 desce, sem interromper os 1500 ms. Depois do
-prazo, envia `FUTABA PARAR` e inicia o segundo avanço de 1,00 s. As garras
-permanecem abertas; no fim do prazo o programa envia `PARAR` e fecha as duas em
-uma única escrita serial. Após 0,50 s, `LADO 0 0` mantém as rodas paradas sem
+prazo, envia `FUTABA PARAR` e inicia o segundo avanço de 1,00 s. Depois mantém
+o mesmo avanço por mais 0,20 s com o elevador baixo. As garras permanecem
+abertas; no fim o programa envia `PARAR` e fecha as duas em uma única escrita
+serial. Após 0,50 s, `LADO 0 0` mantém as rodas paradas sem
 cortar o `FUTABA 20 2500`. Terminada a subida, envia `FUTABA PARAR`, aplica o
 pulso curto de seleção e abre somente o lado correspondente à classe.
 
 A cor é congelada no primeiro círculo travado que toca o ponto inferior. Para
-prata, a esquerda abre com `+50` e a direita alterna `+40/-40` duas vezes.
-Para preta, a direita abre com `-50` e a esquerda alterna `-40/+40` duas
+prata, a esquerda abre com `+70` e a direita alterna `+40/-40` duas vezes.
+Para preta, a direita abre com `-70` e a esquerda alterna `-40/+40` duas
 vezes. Há 0,20 s entre cada delta da oscilação para o servo se mover
 fisicamente. Não existe comando de ré nessa sequência. Qualquer falha mantém
 rodas e Futaba parados e entra em `PICKUP_FAULT`.
