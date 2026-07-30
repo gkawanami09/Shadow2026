@@ -184,8 +184,8 @@ BALL_CRESCENT_TOKEN_TTL_S = 0.80
 BALL_PICKUP_FUTABA_POWER = -20
 BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
-BALL_PICKUP_LEFT_DELTA = -75
-BALL_PICKUP_RIGHT_DELTA = 75
+BALL_PICKUP_LEFT_DELTA = -70
+BALL_PICKUP_RIGHT_DELTA = 70
 BALL_PICKUP_PRE_FORWARD_S = 1.00
 BALL_PICKUP_FORWARD_S = 1.00
 BALL_PICKUP_FINAL_FORWARD_S = 0.20
@@ -210,13 +210,16 @@ BALL_PICKUP_WIGGLE_DELTA = 40
 BALL_PICKUP_WIGGLE_REPETITIONS = 2
 BALL_PICKUP_WIGGLE_STEP_S = 0.20
 
-# Busca das proximas vitimas. O Shadow nao possui IMU: o 360 e temporizado a
-# partir da calibracao existente de 0,70 s ~= 90 graus em velocidade 0,70.
-# O giro tanque foi reduzido novamente para 0,22: nas imagens novas, a esfera
-# atravessava o campo de visao antes de obter os tres resultados distintos.
+# Busca das proximas vitimas. O Shadow nao possui IMU: o 360 e temporizado.
+# steer() multiplica o pivot por 1,2, por isso 80 / (120 * 1,2) produz PWM 80
+# real em cada lado, igual ao PWM normal do segue-linha.
 BALL_SEARCH_TANK_ANGLE = 180
-BALL_SEARCH_TANK_SPEED = 0.22
-BALL_SEARCH_FULL_TURN_S = 8.93
+BALL_SEARCH_TANK_PWM = 80
+BALL_SEARCH_TANK_SPEED = BALL_SEARCH_TANK_PWM / (120 * 1.2)
+# A volta antiga media 8,93 s com speed 0,22. A proporcao entre as velocidades
+# estima 3,54 s ativos com PWM 80. Conferir no piso real e ajustar so este
+# valor caso a volta termine antes ou depois de 360 graus.
+BALL_SEARCH_FULL_TURN_S = 3.54
 BALL_SEARCH_BRAKE_MIN_CONFIDENCE = BALL_MIN_CONFIDENCE
 BALL_SEARCH_VERIFY_TIMEOUT_S = 1.00
 
@@ -229,10 +232,10 @@ BALL_SEARCH_VERIFY_TIMEOUT_S = 1.00
 # O ciclo e PULSE_ROTATE -> BRAKE -> SETTLE -> OBSERVE -> PULSE_ROTATE.
 # Somente frames capturados DEPOIS do fim do SETTLE podem confirmar.
 BALL_SEARCH_PULSED = True
-# Duracao ativa de cada pulso. Com BALL_SEARCH_FULL_TURN_S = 8.93 s para 360,
-# 0.30 s equivalem a aproximadamente 12 graus por pulso. MEDIR no robo: este
-# valor nao foi verificado fisicamente.
-BALL_SEARCH_PULSE_S = 0.30
+# Duracao ativa de cada pulso. Com 3,54 s para 360 graus, 0,40 s equivalem a
+# aproximadamente 41 graus: gira com forca, para e ainda deixa sobreposicao
+# suficiente entre os campos observados da camera.
+BALL_SEARCH_PULSE_S = 0.40
 # Pausa mecanica antes de olhar: vibracao do chassi e autoexposure.
 BALL_SEARCH_SETTLE_S = 0.12
 # Frames novos e nitidos observados a cada parada (2 a 4).
@@ -241,7 +244,7 @@ BALL_SEARCH_OBSERVE_FRAMES = 3
 BALL_SEARCH_OBSERVE_TIMEOUT_S = 0.60
 # Setores de cobertura do giro completo. Serve de referencia cruzada com
 # BALL_SEARCH_PULSE_S: setores * pulso deve ficar proximo do 360 temporizado.
-BALL_SEARCH_SECTORS = 30
+BALL_SEARCH_SECTORS = 9
 # Teto global da busca, contando pulsos e pausas. Protege contra laco infinito
 # quando o 360 temporizado nao fecha por escorregamento das rodas.
 BALL_SEARCH_TOTAL_TIMEOUT_S = 75.0

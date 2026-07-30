@@ -161,8 +161,8 @@ imediatamente, mas não confirma — a confirmação usa apenas frames posterior
 à parada.
 
 Sem IMU, o ângulo continua estimado por **tempo ativo de giro**; as pausas não
-contam. `BALL_SEARCH_SECTORS × BALL_SEARCH_PULSE_S` = 30 × 0,30 s = 9,0 s,
-compatível com os 8,93 s calibrados para 360°.
+contam. `BALL_SEARCH_SECTORS × BALL_SEARCH_PULSE_S` = 9 × 0,40 s = 3,60 s,
+compatível com os 3,54 s estimados para 360° em PWM 80.
 
 O controlador contínuo `BallSearchController` **não foi removido**: continua
 existindo com seus testes e volta a ser usado se
@@ -194,11 +194,11 @@ existindo com seus testes e volta a ser usado se
 | Parâmetro | Padrão | Papel |
 |---|---|---|
 | `BALL_SEARCH_PULSED` | `True` | liga a busca pulsada |
-| `BALL_SEARCH_PULSE_S` | `0.30` | duração ativa de cada pulso (~12°) |
+| `BALL_SEARCH_PULSE_S` | `0.40` | duração ativa de cada pulso (~41°) |
 | `BALL_SEARCH_SETTLE_S` | `0.12` | pausa mecânica antes de observar |
 | `BALL_SEARCH_OBSERVE_FRAMES` | `3` | frames novos observados por parada |
 | `BALL_SEARCH_OBSERVE_TIMEOUT_S` | `0.60` | teto da observação |
-| `BALL_SEARCH_SECTORS` | `30` | setores de cobertura |
+| `BALL_SEARCH_SECTORS` | `9` | setores de cobertura |
 | `BALL_SEARCH_TOTAL_TIMEOUT_S` | `75.0` | teto global da busca |
 | `EXIT_BLACK_*` | — | faixa preta de saída (ver `GUIA_CALIBRACAO.md`) |
 | `EXIT_BLACK_MIN_ASPECT` | `4.0` | separa soleira de vítima preta |
@@ -271,7 +271,7 @@ Declaradas para não serem descobertas em competição:
    físico foi verificada.
 2. **Os limiares da faixa prata não foram medidos com a fita real.** São um
    ponto de partida conservador. `GUIA_CALIBRACAO.md` §2.1 é obrigatório.
-3. **`BALL_SEARCH_PULSE_S = 0,30 s ≈ 12°` é uma conta, não uma medição.**
+3. **`BALL_SEARCH_PULSE_S = 0,40 s ≈ 41°` é uma conta, não uma medição.**
    Depende de atrito, bateria e piso. Precisa ser cronometrado.
 4. **Não há modelo de aprendizado de máquina.** Não existe dataset rotulado
    do Shadow suficiente para treinar e validar um. A infraestrutura de coleta
@@ -343,7 +343,7 @@ seguinte. Em toda fase, mantenha parada de emergência ao alcance.
 | 4 | benchmark no Pi | `benchmark_visao.py --camera --segundos 20` | atraso p95 < `BALL_FRAME_STALE_S` |
 | 5 | faixa prata sem transição | `main.py --vision-only --debug` andando sobre a fita | confirma na fita, nunca no piso/reflexo |
 | 6 | handoff de câmeras e LED | `mission.py`, **rodas suspensas** | LED apaga na entrada, câmera 1 fecha antes da 0, sem erro de trava |
-| 7 | busca pulsada | rodas suspensas | gira ~12°, PARA, observa, repete; 360° fecha e não repete |
+| 7 | busca pulsada | rodas suspensas | gira ~41°, PARA, observa, repete; 360° fecha e não repete |
 | 8 | aproximação sem garra | motores ligados, garra desconectada | para na vítima sem tocar |
 | 9 | coleta de uma prata | `resgate.py --drive --target silver` | sequência de garra/Futaba idêntica à calibrada |
 | 10 | coleta de uma preta | `resgate.py --drive --target black` | idem |

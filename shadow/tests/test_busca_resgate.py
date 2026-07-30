@@ -42,8 +42,12 @@ class BallSearchControllerTests(unittest.TestCase):
 
         self.assertEqual(command.state, search.START)
         self.assertEqual(command.angle, 180)
-        self.assertEqual(command.speed, 0.22)
-        self.assertEqual(cfg.BALL_SEARCH_FULL_TURN_S, 8.93)
+        self.assertEqual(
+            round(command.speed * 120 * 1.2),
+            cfg.BALL_SEARCH_TANK_PWM,
+        )
+        self.assertEqual(cfg.BALL_SEARCH_TANK_PWM, 80)
+        self.assertEqual(cfg.BALL_SEARCH_FULL_TURN_S, 3.54)
         self.assertFalse(command.terminal)
 
     def test_full_turn_timer_only_starts_after_serial_ack(self):

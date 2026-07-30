@@ -61,9 +61,10 @@ NEAR -> PICKUP_PRE_FORWARD -> PICKUP_FUTABA -> PICKUP_FORWARD -> PICKUP_GRIPPERS
 - `PICKUP_COMPLETE`: confirma a seleção, zera o contador verde e volta a
   `SEARCH`.
 
-O giro de 360° é temporizado porque o robô não possui IMU. Com o giro tanque
-reduzido para `0,22`, o valor inicial passou a `8,93 s`; ambos devem ser
-conferidos no piso real com a bateria usada na competição. Durante o giro, o
+O giro de 360° é temporizado porque o robô não possui IMU. A busca usa PWM 80
+real, pulsos de `0,40 s` e uma estimativa inicial de `3,54 s` ativos por volta;
+o tempo da volta deve ser conferido no piso real com a bateria usada na
+competição. Durante o giro, o
 primeiro candidato visual válido já produz `PARAR`, mas a aproximação só começa
 depois das confirmações fortes feitas com o chassi parado.
 
