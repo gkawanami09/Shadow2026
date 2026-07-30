@@ -52,19 +52,18 @@ aceito. Está registrada em `tests/test_marcador_resgate.py`.
 
 ## Escopo atual
 
-`shadow/resgate.py` faz hoje: **ver a vítima, aproximar e identificar os dois
-marcadores**. Só isso.
+`shadow/resgate.py` faz hoje: **ver uma vítima, aproximar, baixar o Futaba,
+avançar, fechar as duas garras, elevar a vítima e parar**.
 
-Coleta, depósito e saída **não** estão no fluxo — mas seus módulos continuam
-no repositório, com a sequência de garra e Futaba calibrada preservada:
+A coleta termina no estado `PICKUP_SECURED`, com a vítima presa e elevada.
+Depósito, busca da próxima vítima e saída **não** estão no fluxo ainda:
 
-- `controle/coleta_resgate.py`
 - `controle/deposito_resgate.py`
 - `controle/saida_resgate.py`
 - `controle/missao.py`, `shadow/mission.py`
 
-Eles voltam quando a visão estiver confiável. Empilhar lógica sobre uma
-percepção que erra só esconde o erro mais fundo.
+O prefixo ativo da coleta reaproveita `controle/coleta_resgate.py`. A parte de
+liberação continua bloqueada até o depósito voltar ao fluxo.
 
 ## O que falta: o modelo
 

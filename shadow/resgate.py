@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Resgate — ESCOPO ATUAL: ver a vítima, chegar perto dela e ver os marcadores.
+"""Resgate — encontra uma vítima, aproxima, coleta e para com ela elevada.
 
-A coleta, o depósito e a saída da sala NÃO estão neste programa ainda. Os
-módulos deles continuam no repositório (``controle/coleta_resgate.py``,
-``controle/deposito_resgate.py``, ``controle/saida_resgate.py``) com a
-sequência de garra e Futaba já calibrada preservada — eles voltam quando a
-visão estiver confiável. Fazer o contrário seria empilhar lógica em cima de
-uma percepção que ainda erra.
+O depósito, a busca da próxima vítima e a saída da sala ainda não entram neste
+programa. Esta etapa termina de forma segura logo depois de baixar o Futaba,
+avançar, fechar as duas garras e elevar a vítima.
 
 Arquitetura da visão
 --------------------
@@ -47,6 +44,7 @@ from controle.aproximacao_resgate import (  # noqa: E402
     MotionCommand,
 )
 from controle.busca_pulsada import make_search_controller  # noqa: E402
+from controle.coleta_resgate import BallPickupSequencer  # noqa: E402
 from visao import overlay_resgate  # noqa: E402
 from visao.marcador_resgate import MarkerDetector, color_masks  # noqa: E402
 from visao.resgate_assincrono import (  # noqa: E402
@@ -113,6 +111,127 @@ def _melhor_esforco(rotulo, acao):
         return None
 
 
+def _aplicar_acoes_coleta(
+    passo,
+    arduino,
+    acao_direcao,
+    epoca_serial_esperada=None,
+):
+    """Aplica uma única vez os eventos físicos emitidos pelo sequenciador."""
+    avanco_iniciado = False
+    motor_parado = False
+
+    def serial_mudou():
+        return (
+            epoca_serial_esperada is not None
+            and (
+                not arduino.connected
+                or arduino.connection_epoch != epoca_serial_esperada
+            )
+        )
+
+    def abortar(detalhe):
+        # Se o avanço começou ou as garras seriam acionadas, uma falha precisa
+        # parar as rodas neste mesmo tick.
+        if (
+            not motor_parado
+            and (avanco_iniciado or passo.gripper_action is not None)
+        ):
+            try:
+                acao_direcao()
+            except Exception:
+                pass
+        return detalhe
+
+    try:
+        if serial_mudou():
+            return abortar("serial mudou durante a coleta")
+
+        if passo.motor_action == "hold":
+            # PARAR também corta o Futaba no firmware. LADO 0 0 mantém as
+            # rodas zeradas sem interromper o pulso temporizado do elevador.
+            if arduino.lado(0, 0) is False:
+                return "LADO 0 0 nao foi enviado pela serial"
+        elif passo.motor_action == "stop":
+            if acao_direcao() is False:
+                return "PARAR nao foi enviado pela serial"
+            motor_parado = True
+        elif passo.motor_action not in ("", "forward"):
+            return f"acao de motor desconhecida: {passo.motor_action}"
+
+        if serial_mudou():
+            return abortar("serial mudou durante a coleta")
+
+        if passo.stop_futaba:
+            if arduino.parar_futaba() is False:
+                return "FUTABA PARAR nao foi enviado pela serial"
+            if serial_mudou():
+                return abortar("serial mudou durante a coleta")
+
+        if passo.futaba_action is not None:
+            potencia, tempo_ms = passo.futaba_action
+            if arduino.futaba(potencia, tempo_ms) is False:
+                return "FUTABA nao foi enviado pela serial"
+            if serial_mudou():
+                return abortar("serial mudou durante a coleta")
+
+        if passo.motor_action == "forward":
+            if acao_direcao(passo.angle, passo.speed) is False:
+                return "comando de avanco nao foi enviado pela serial"
+            avanco_iniciado = True
+            if serial_mudou():
+                return abortar("serial mudou durante a coleta")
+
+        if passo.gripper_action is not None:
+            esquerda, direita = passo.gripper_action
+            if arduino.garras(esquerda, direita) is False:
+                return abortar(
+                    "comando simultaneo das garras nao foi enviado")
+            if serial_mudou():
+                return abortar("serial mudou durante a coleta")
+    except Exception as err:                         # noqa: BLE001
+        return abortar(f"falha ao comandar coleta: {err}")
+    return None
+
+
+def _armar_coleta_confirmada(
+    comando,
+    coleta,
+    arduino,
+    parada_enviada,
+    epoca_movimento,
+):
+    """Só arma a coleta após confirmação visual e PARAR serial estável."""
+    if (
+        comando.state != BallApproachController.NEAR
+        or coleta.started
+    ):
+        return False
+    if (
+        not comando.terminal
+        or not comando.pickup_in_range
+        or comando.pickup_confirmations < cfg.BALL_STOP_CONFIRM_FRAMES
+    ):
+        raise RuntimeError(
+            "coleta recusada: proximidade visual nao foi confirmada")
+    if (
+        parada_enviada is not True
+        or epoca_movimento is None
+        or arduino is None
+        or not arduino.connected
+        or arduino.connection_epoch != epoca_movimento
+    ):
+        raise RuntimeError(
+            "coleta recusada: PARAR da aproximacao nao teve "
+            "escrita serial estavel")
+    if comando.target_kind not in ("silver", "black"):
+        raise RuntimeError(
+            "coleta recusada: cor da vitima nao foi confirmada")
+    if not coleta.start(comando.target_kind):
+        raise RuntimeError("coleta recusada: sequencia ja iniciada")
+    return True
+
+
 class MarkerPair:
     """Verde e vermelho detectados no mesmo frame, para identificação.
 
@@ -156,8 +275,8 @@ class MarkerPair:
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Visao do resgate: encontra a vitima, aproxima e identifica os "
-            "marcadores verde e vermelho"))
+            "Resgate: encontra uma vitima, aproxima, coleta e para com ela "
+            "elevada"))
     parser.add_argument(
         "--camera-index", type=int,
         help=(
@@ -224,6 +343,7 @@ def main():
     marcadores = None
     controlador = None
     busca = None
+    coleta = None
     sessao_hardware = args.video is None
 
     ultimo_estado = None
@@ -231,6 +351,7 @@ def main():
     ultimo_log = 0.0
     ultimo_controle_ocioso = 0.0
     epoca_busca = None
+    epoca_coleta = None
     amostras_captura = deque(maxlen=60)
     instantes_deteccao = deque(maxlen=30)
 
@@ -290,6 +411,7 @@ def main():
         busca = (
             make_search_controller(start_time=armado_em)
             if args.drive else None)
+        coleta = BallPickupSequencer()
         comando = MotionCommand(
             "ARMING" if args.drive else BallApproachController.WAIT_TARGET,
             detail=(
@@ -330,14 +452,23 @@ def main():
             agora = time.monotonic()
             armado = agora >= armado_em
 
-            if trabalhador is not None and frame_novo and armado:
+            if (
+                trabalhador is not None
+                and frame_novo
+                and armado
+                and not coleta.started
+            ):
                 trabalhador.submit(
                     frame_atual,
                     captured_at=pacote.captured_at,
                     source_sequence=pacote.sequence,
                 )
 
-            if marcadores is not None and frame_novo:
+            if (
+                marcadores is not None
+                and frame_novo
+                and not coleta.started
+            ):
                 marcadores_atuais = marcadores.update(
                     frame_atual, pacote.captured_at)
 
@@ -351,12 +482,47 @@ def main():
 
             agora = time.monotonic()
             comando_atualizado = False
+            passo_coleta = None
 
             if not armado:
                 restante = max(armado_em - agora, 0.0)
                 comando = MotionCommand(
                     "ARMING",
                     detail=f"camera fluida; PARAR por mais {restante:.1f} s")
+            elif coleta.started:
+                # Um resultado que já estava em processamento pode chegar
+                # depois do início da coleta. Ele serve apenas para telemetria:
+                # a visão nunca volta a comandar as rodas nesta sequência.
+                if resultado is not None:
+                    sequencia_resultado = resultado.sequence
+                    metricas = resultado
+                    instantes_deteccao.append(resultado.completed_at)
+                resultado_atual = None
+                deteccao_atual = None
+
+                if (
+                    arduino is not None
+                    and epoca_coleta is not None
+                    and (
+                        not arduino.connected
+                        or arduino.connection_epoch != epoca_coleta
+                    )
+                ):
+                    passo_coleta = coleta.fail(
+                        "serial mudou durante a coleta; sequencia cancelada")
+                else:
+                    passo_coleta = coleta.update(now=agora)
+
+                comando = passo_coleta.motion_command()
+                if passo_coleta.state == BallPickupSequencer.CARRY_READY:
+                    comando = MotionCommand(
+                        "PICKUP_SECURED",
+                        detail=(
+                            f"vitima {coleta.target_kind} presa e elevada; "
+                            "deposito ainda desativado"),
+                        terminal=True,
+                    )
+                comando_atualizado = True
             elif detector is None:
                 comando = MotionCommand(
                     "MARCADORES",
@@ -428,6 +594,7 @@ def main():
                 args.drive
                 and busca is None
                 and controlador is not None
+                and not coleta.started
                 and comando.state == BallApproachController.WAIT_TARGET
             ):
                 if trabalhador is not None:
@@ -443,29 +610,56 @@ def main():
                 comando_atualizado = True
 
             epoca_movimento = None
+            movimento_enviado = None
             if args.drive and arduino is not None and comando_atualizado:
                 from controle.direcao import steer
-                epoca_movimento = arduino.connection_epoch
-                if steer(comando.angle, comando.speed) is False:
-                    raise RuntimeError(
-                        "comando de movimento nao foi enviado pela serial")
-                concluido_em = time.monotonic()
-                if busca is not None:
-                    if busca.consume_tracking_reset():
-                        if trabalhador is not None:
-                            trabalhador.reset_tracking()
-                        portao.reset()
-                        resultado_atual = None
-                        deteccao_atual = None
-                    if comando.state == busca.START:
-                        epoca_busca = arduino.connection_epoch
-                    if busca.notify_command_written(
-                        comando.state, concluido_em
-                    ):
-                        portao.reset()
-                        resultado_atual = None
-                        deteccao_atual = None
-                        ultimo_controle_ocioso = concluido_em
+                if passo_coleta is not None:
+                    erro_coleta = _aplicar_acoes_coleta(
+                        passo_coleta,
+                        arduino,
+                        steer,
+                        epoca_serial_esperada=epoca_coleta,
+                    )
+                    if erro_coleta is None:
+                        concluido_em = time.monotonic()
+                        if passo_coleta.futaba_action is not None:
+                            coleta.mark_futaba_started(now=concluido_em)
+                        if passo_coleta.motor_action == "forward":
+                            coleta.mark_forward_started(now=concluido_em)
+                        if passo_coleta.gripper_action is not None:
+                            coleta.mark_grippers_started(now=concluido_em)
+                    else:
+                        passo_coleta = coleta.fail(erro_coleta)
+                        comando = passo_coleta.motion_command()
+                        _aplicar_acoes_coleta(
+                            passo_coleta,
+                            arduino,
+                            steer,
+                        )
+                else:
+                    epoca_movimento = arduino.connection_epoch
+                    movimento_enviado = steer(
+                        comando.angle, comando.speed)
+                    if movimento_enviado is False:
+                        raise RuntimeError(
+                            "comando de movimento nao foi enviado pela serial")
+                    concluido_em = time.monotonic()
+                    if busca is not None:
+                        if busca.consume_tracking_reset():
+                            if trabalhador is not None:
+                                trabalhador.reset_tracking()
+                            portao.reset()
+                            resultado_atual = None
+                            deteccao_atual = None
+                        if comando.state == busca.START:
+                            epoca_busca = arduino.connection_epoch
+                        if busca.notify_command_written(
+                            comando.state, concluido_em
+                        ):
+                            portao.reset()
+                            resultado_atual = None
+                            deteccao_atual = None
+                            ultimo_controle_ocioso = concluido_em
 
             if arduino is not None:
                 arduino.refresh(fail_closed=True)
@@ -490,6 +684,41 @@ def main():
                     raise RuntimeError(
                         "serial mudou durante o giro de busca; "
                         "cobertura invalidada e motores parados")
+                if (
+                    coleta.started
+                    and epoca_coleta is not None
+                    and (
+                        not arduino.connected
+                        or arduino.connection_epoch != epoca_coleta
+                    )
+                ):
+                    raise RuntimeError(
+                        "serial mudou durante a coleta; "
+                        "motores e Futaba parados")
+
+            if (
+                args.drive
+                and not coleta.started
+                and _armar_coleta_confirmada(
+                    comando,
+                    coleta,
+                    arduino,
+                    movimento_enviado,
+                    epoca_movimento,
+                )
+            ):
+                epoca_coleta = arduino.connection_epoch
+                if trabalhador is not None:
+                    trabalhador.reset_tracking()
+                portao.reset()
+                busca = None
+                controlador = None
+                resultado_atual = None
+                deteccao_atual = None
+                ultimo_controle_ocioso = 0.0
+                print(
+                    f"[coleta] vitima {coleta.target_kind} confirmada; "
+                    "baixando, avancando, fechando e elevando")
 
             log_agora = time.monotonic()
             if (
@@ -539,6 +768,14 @@ def main():
                     break
 
             if comando.terminal:
+                transicao_para_coleta = (
+                    args.drive
+                    and comando.state == BallApproachController.NEAR
+                    and coleta.started
+                )
+                if transicao_para_coleta:
+                    time.sleep(TICK_S)
+                    continue
                 print(
                     f"[resgate] estado terminal {comando.state}; "
                     "motores parados")
@@ -556,6 +793,7 @@ def main():
         if arduino is not None:
             from controle.direcao import steer
             _melhor_esforco("parar os motores", steer)
+            _melhor_esforco("cortar o Futaba", arduino.parar_futaba)
         if trabalhador is not None:
             _melhor_esforco(
                 "encerrar o detector",

@@ -101,9 +101,8 @@ class PulsedSearchConfigTests(unittest.TestCase):
         self.assertGreaterEqual(cfg.BALL_SEARCH_TOTAL_TIMEOUT_S, minimo)
 
 
-    # Testes da cola de orquestracao removidos junto com ela: a
-    # coleta, o deposito e os codigos de saida da missao sairam do
-    # escopo atual do resgate.py. Os modulos continuam no repo.
+    # O prefixo da coleta voltou ao resgate.py. Deposito, busca da proxima
+    # vitima e saida continuam fora do fluxo atual.
 
 
 if __name__ == "__main__":

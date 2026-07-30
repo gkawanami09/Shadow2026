@@ -13,6 +13,14 @@ from controle.coleta_resgate import (  # noqa: E402
     BallPickupSequencer,
     PickupStep,
 )
+from controle.aproximacao_resgate import (  # noqa: E402
+    BallApproachController,
+    MotionCommand,
+)
+from resgate import (  # noqa: E402
+    _aplicar_acoes_coleta,
+    _armar_coleta_confirmada,
+)
 
 
 def _ack_step(pickup, step, now):
@@ -305,7 +313,167 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertFalse(pickup.start("silver"))
 
 
-# Testes da cola de orquestracao do resgate.py removidos: essa cola saiu do escopo atual (ver o docstring de resgate.py). Os modulos que ela orquestrava continuam no repositorio, com seus testes.
+class PickupActionApplicationTests(unittest.TestCase):
+    class FakeArduino:
+        def __init__(self):
+            self.calls = []
+            self.connected = True
+            self.connection_epoch = 7
+
+        def lado(self, esquerda, direita):
+            self.calls.append(("lado", esquerda, direita))
+            return True
+
+        def futaba(self, potencia, tempo_ms):
+            self.calls.append(("futaba", potencia, tempo_ms))
+            return True
+
+        def parar_futaba(self):
+            self.calls.append(("parar_futaba",))
+            return True
+
+        def garras(self, esquerda, direita):
+            self.calls.append(("garras", esquerda, direita))
+            return True
+
+    @staticmethod
+    def gravar_direcao(chamadas):
+        def direcao(angulo=190, velocidade=0.8):
+            chamadas.append(("direcao", angulo, velocidade))
+            return True
+        return direcao
+
+    def test_descida_comeca_com_rodas_zeradas(self):
+        arduino = self.FakeArduino()
+        passo = PickupStep(
+            "DESCER",
+            "baixando",
+            motor_action="hold",
+            futaba_action=(-20, 1500),
+        )
+
+        erro = _aplicar_acoes_coleta(
+            passo,
+            arduino,
+            self.gravar_direcao(arduino.calls),
+            epoca_serial_esperada=7,
+        )
+
+        self.assertIsNone(erro)
+        self.assertEqual(
+            arduino.calls,
+            [("lado", 0, 0), ("futaba", -20, 1500)],
+        )
+
+    def test_parar_acontece_antes_de_fechar_as_garras(self):
+        arduino = self.FakeArduino()
+        passo = PickupStep(
+            "FECHAR",
+            "fechando",
+            motor_action="stop",
+            gripper_action=(-50, 50),
+        )
+
+        erro = _aplicar_acoes_coleta(
+            passo,
+            arduino,
+            self.gravar_direcao(arduino.calls),
+            epoca_serial_esperada=7,
+        )
+
+        self.assertIsNone(erro)
+        self.assertEqual(
+            arduino.calls,
+            [("direcao", 190, 0.8), ("garras", -50, 50)],
+        )
+
+    def test_reconexao_bloqueia_a_proxima_acao(self):
+        arduino = self.FakeArduino()
+        arduino.connection_epoch = 8
+        passo = PickupStep(
+            "AVANCAR",
+            "avancando",
+            angle=0,
+            speed=cfg.BALL_PICKUP_FORWARD_SPEED,
+            motor_action="forward",
+        )
+
+        erro = _aplicar_acoes_coleta(
+            passo,
+            arduino,
+            self.gravar_direcao(arduino.calls),
+            epoca_serial_esperada=7,
+        )
+
+        self.assertIn("serial mudou", erro)
+        self.assertEqual(arduino.calls, [])
+
+
+class PickupHandoffTests(unittest.TestCase):
+    class FakeArduino:
+        connected = True
+        connection_epoch = 4
+
+    @staticmethod
+    def comando_proximo(tipo="silver"):
+        return MotionCommand(
+            BallApproachController.NEAR,
+            detail="vitima na posicao de coleta",
+            terminal=True,
+            pickup_in_range=True,
+            pickup_confirmations=cfg.BALL_STOP_CONFIRM_FRAMES,
+            target_kind=tipo,
+        )
+
+    def test_parar_estavel_arma_a_coleta_e_congela_a_cor(self):
+        coleta = BallPickupSequencer()
+
+        iniciou = _armar_coleta_confirmada(
+            self.comando_proximo("black"),
+            coleta,
+            self.FakeArduino(),
+            parada_enviada=True,
+            epoca_movimento=4,
+        )
+
+        self.assertTrue(iniciou)
+        self.assertTrue(coleta.started)
+        self.assertEqual(coleta.target_kind, "black")
+
+    def test_coleta_recusa_parar_sem_confirmacao_serial(self):
+        coleta = BallPickupSequencer()
+
+        with self.assertRaisesRegex(RuntimeError, "PARAR"):
+            _armar_coleta_confirmada(
+                self.comando_proximo(),
+                coleta,
+                self.FakeArduino(),
+                parada_enviada=False,
+                epoca_movimento=4,
+            )
+
+        self.assertFalse(coleta.started)
+
+    def test_coleta_recusa_proximidade_visual_incompleta(self):
+        coleta = BallPickupSequencer()
+        comando = MotionCommand(
+            BallApproachController.NEAR,
+            terminal=True,
+            pickup_in_range=True,
+            pickup_confirmations=cfg.BALL_STOP_CONFIRM_FRAMES - 1,
+            target_kind="silver",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "visual"):
+            _armar_coleta_confirmada(
+                comando,
+                coleta,
+                self.FakeArduino(),
+                parada_enviada=True,
+                epoca_movimento=4,
+            )
+
+        self.assertFalse(coleta.started)
 
 
 if __name__ == "__main__":
