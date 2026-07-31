@@ -28,7 +28,7 @@ from config import (
 
 
 class MonitorObstaculo:
-    """Lê o ultrassônico e trava após confirmação 2-de-3."""
+    """Le o ultrassonico e trava apos a quantidade configurada de leituras."""
 
     def __init__(
         self,
@@ -60,6 +60,10 @@ class MonitorObstaculo:
         self._proxima_solicitacao = 0.0
         self.parada_confirmada = False
         self.distancia_confirmada_mm = None
+        self.leituras_concluidas = 0
+        self.leituras_invalidas_consecutivas = 0
+        self.ultima_distancia_valida_mm = None
+        self.ultima_leitura_valida_em = None
 
     @property
     def bloqueia_velocidade_rapida(self):
@@ -78,7 +82,11 @@ class MonitorObstaculo:
 
         concluido, distancia_mm = arduino.poll_ultrassom()
         if concluido:
-            self._registrar_leitura(agora, distancia_mm)
+            self.leituras_concluidas += 1
+            if self._registrar_leitura(agora, distancia_mm):
+                self.leituras_invalidas_consecutivas = 0
+            else:
+                self.leituras_invalidas_consecutivas += 1
             # Ao confirmar, nao abra uma terceira medicao. Isso deixa a
             # serial livre para o comando de parada e para o deposito.
             if self.parada_confirmada:
@@ -96,7 +104,7 @@ class MonitorObstaculo:
         # None significa ausência de eco. Não confirma obstáculo nem é usado
         # como uma falsa leitura de distância livre.
         if distancia_mm is None:
-            return
+            return False
 
         distancia_mm = int(distancia_mm)
         if not (
@@ -104,7 +112,10 @@ class MonitorObstaculo:
             <= distancia_mm
             <= self.distancia_maxima_mm
         ):
-            return
+            return False
+
+        self.ultima_distancia_valida_mm = distancia_mm
+        self.ultima_leitura_valida_em = agora
 
         proxima = distancia_mm <= self.distancia_parada_mm
         self._leituras.append((agora, distancia_mm, proxima))
@@ -119,6 +130,7 @@ class MonitorObstaculo:
             self.parada_confirmada = True
             self.distancia_confirmada_mm = int(round(
                 statistics.median(leituras_proximas)))
+        return True
 
     def _descartar_antigas(self, agora):
         limite = agora - self.janela_s
@@ -131,6 +143,10 @@ class MonitorObstaculo:
         self._proxima_solicitacao = 0.0
         self.parada_confirmada = False
         self.distancia_confirmada_mm = None
+        self.leituras_concluidas = 0
+        self.leituras_invalidas_consecutivas = 0
+        self.ultima_distancia_valida_mm = None
+        self.ultima_leitura_valida_em = None
 
 
 def desviar_obstaculo(

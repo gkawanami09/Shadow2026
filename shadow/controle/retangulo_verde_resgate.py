@@ -108,6 +108,7 @@ class ControladorRetanguloVerde:
 
     APROXIMACAO_FINAL = "GREEN_FINAL_APPROACH"
     CONFIRMANDO_TELA = "GREEN_FULL_VERIFY"
+    CONFIRMANDO_DISTANCIA = "GREEN_5CM_VERIFY"
     CONCLUIDO = "GREEN_ARRIVAL_5CM"
     FALHA = "GREEN_FINAL_FAULT"
 
@@ -127,7 +128,7 @@ class ControladorRetanguloVerde:
             self.iniciar_avanco_direto(now=start_time)
 
     def iniciar_avanco_direto(self, now=None):
-        """Pula a procura: o segundo verde ja fornece a direcao do painel."""
+        """Inicia a etapa ultrassonica depois do alinhamento visual."""
         agora = time.monotonic() if now is None else float(now)
         self.aproximacao_final = True
         self._chegada_por_ultrassom = True
@@ -137,6 +138,10 @@ class ControladorRetanguloVerde:
         self._aproximacao_iniciada_em = None
         self._ultimo_frame_em = None
         self._ultimo_verde_em = None
+
+    @property
+    def ultrassom_habilitado(self):
+        return self._chegada_por_ultrassom
 
     @property
     def terminal(self):
@@ -152,10 +157,13 @@ class ControladorRetanguloVerde:
         timestamp_frame=None,
         now=None,
         distancia_chegada_mm=None,
+        distancia_atual_mm=None,
+        ultrassonico_sem_eco=False,
+        ultrassonico_falhou=False,
     ):
         agora = time.monotonic() if now is None else float(now)
 
-        if distancia_chegada_mm is not None:
+        if self._chegada_por_ultrassom and distancia_chegada_mm is not None:
             distancia_mm = int(round(float(distancia_chegada_mm)))
             if 1 <= distancia_mm <= cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM:
                 self._distancia_chegada_mm = distancia_mm
@@ -191,13 +199,34 @@ class ControladorRetanguloVerde:
             ):
                 return self._falhar(
                     "ultrassonico nao confirmou 5 cm dentro do tempo limite")
+            if ultrassonico_falhou:
+                return self._falhar(
+                    "ultrassonico ficou tres leituras sem eco; "
+                    "avanco cancelado para proteger a alimentacao")
+            if ultrassonico_sem_eco:
+                return self._parar(
+                    self.APROXIMACAO_FINAL,
+                    "medida sem eco; aguardando o ultrassonico parado",
+                )
+            if distancia_atual_mm is None:
+                return self._parar(
+                    self.APROXIMACAO_FINAL,
+                    "validando ultrassonico antes de ligar os motores",
+                )
+
+            distancia_atual_mm = int(round(float(distancia_atual_mm)))
+            if distancia_atual_mm <= cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM:
+                return self._parar(
+                    self.CONFIRMANDO_DISTANCIA,
+                    "distancia em ate 5 cm; confirmando parado",
+                )
             return MotionCommand(
                 self.APROXIMACAO_FINAL,
                 angle=0,
                 speed=cfg.RESCUE_GREEN_FINAL_FORWARD_SPEED,
                 detail=(
                     f"avancando reto em PWM {cfg.RESCUE_GREEN_FINAL_PWM}; "
-                    "aguardando ultrassonico confirmar 5 cm"
+                    f"ultrassonico={distancia_atual_mm / 10.0:.1f} cm"
                 ),
             )
 
@@ -302,8 +331,7 @@ class ControladorRetanguloVerde:
             and self.navegacao.state == self.navegacao.ARRIVAL_STOP
         ):
             self.navegacao.mark_arrival_stopped(now=agora)
-            self.aproximacao_final = True
-            self.confirmador.reset()
+            self.iniciar_avanco_direto(now=agora)
             return True
         return False
 

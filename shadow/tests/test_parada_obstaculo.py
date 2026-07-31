@@ -63,12 +63,12 @@ class RelogioFalso:
         self.tempo += duracao
 
 
-def criar_monitor():
+def criar_monitor(confirmacoes=2):
     return MonitorObstaculo(
         distancia_parada_mm=50,
         intervalo_s=.06,
         timeout_s=.08,
-        confirmacoes=2,
+        confirmacoes=confirmacoes,
         tamanho_historico=3,
         janela_s=.20,
         distancia_minima_mm=1,
@@ -84,6 +84,9 @@ class MonitorObstaculoTests(unittest.TestCase):
         self.assertFalse(monitor.atualizar(arduino, agora=0.00))
         self.assertTrue(monitor.bloqueia_velocidade_rapida)
         self.assertFalse(monitor.parada_confirmada)
+        self.assertEqual(monitor.leituras_concluidas, 1)
+        self.assertEqual(monitor.leituras_invalidas_consecutivas, 0)
+        self.assertEqual(monitor.ultima_distancia_valida_mm, 80)
 
     def test_acima_de_dez_cm_nao_bloqueia_velocidade_rapida(self):
         arduino = ArduinoFalso(((True, 101),))
@@ -141,6 +144,16 @@ class MonitorObstaculoTests(unittest.TestCase):
         self.assertFalse(monitor.atualizar(arduino, agora=0.00))
         self.assertTrue(monitor.atualizar(arduino, agora=0.06))
 
+    def test_deposito_pode_exigir_tres_leituras_proximas(self):
+        arduino = ArduinoFalso(
+            ((True, 49), (True, 45), (True, 48)))
+        monitor = criar_monitor(confirmacoes=3)
+
+        self.assertFalse(monitor.atualizar(arduino, agora=0.00))
+        self.assertFalse(monitor.atualizar(arduino, agora=0.06))
+        self.assertTrue(monitor.atualizar(arduino, agora=0.12))
+        self.assertEqual(monitor.distancia_confirmada_mm, 48)
+
     def test_acima_de_cinco_centimetros_nao_para(self):
         arduino = ArduinoFalso(((True, 51), (True, 51), (True, 51)))
         monitor = criar_monitor()
@@ -172,7 +185,23 @@ class MonitorObstaculoTests(unittest.TestCase):
 
         self.assertFalse(monitor.atualizar(arduino, agora=0.00))
         self.assertFalse(monitor.atualizar(arduino, agora=0.06))
+        self.assertEqual(monitor.leituras_invalidas_consecutivas, 1)
         self.assertFalse(monitor.atualizar(arduino, agora=0.12))
+        self.assertEqual(monitor.leituras_invalidas_consecutivas, 0)
+        self.assertEqual(monitor.ultima_distancia_valida_mm, 250)
+
+    def test_tres_leituras_sem_eco_ficam_registradas(self):
+        arduino = ArduinoFalso(
+            ((True, None), (True, None), (True, None)))
+        monitor = criar_monitor()
+
+        monitor.atualizar(arduino, agora=0.00)
+        monitor.atualizar(arduino, agora=0.06)
+        monitor.atualizar(arduino, agora=0.12)
+
+        self.assertEqual(monitor.leituras_concluidas, 3)
+        self.assertEqual(monitor.leituras_invalidas_consecutivas, 3)
+        self.assertIsNone(monitor.ultima_distancia_valida_mm)
 
     def test_nao_solicita_mais_rapido_que_sessenta_ms(self):
         arduino = ArduinoFalso()
@@ -207,6 +236,9 @@ class MonitorObstaculoTests(unittest.TestCase):
 
         self.assertFalse(monitor.parada_confirmada)
         self.assertIsNone(monitor.distancia_confirmada_mm)
+        self.assertEqual(monitor.leituras_concluidas, 0)
+        self.assertEqual(monitor.leituras_invalidas_consecutivas, 0)
+        self.assertIsNone(monitor.ultima_distancia_valida_mm)
         self.assertFalse(monitor.bloqueia_velocidade_rapida)
         self.assertFalse(monitor.atualizar(arduino, agora=1.00))
 

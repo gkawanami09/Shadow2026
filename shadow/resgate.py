@@ -456,6 +456,7 @@ def main():
     ultimo_detalhe = None
     ultimo_log = 0.0
     ultimo_controle_ocioso = 0.0
+    proxima_atualizacao_ultrassom_verde = 0.0
     epoca_busca = None
     epoca_coleta = None
     epoca_verde = None
@@ -598,8 +599,8 @@ def main():
                         if args.drive and contador_verde.completo:
                             # A segunda passagem foi confirmada com o robo
                             # parado durante SEARCH_OBSERVE. O painel ja esta
-                            # no quadro: nao terminar a volta nem iniciar uma
-                            # nova procura. Este mesmo frame comanda o avanco.
+                            # no quadro: primeiro centralizar e aproximar pela
+                            # camera; o ultrassonico continua desabilitado.
                             if trabalhador is not None:
                                 trabalhador.reset_tracking()
                             portao.reset()
@@ -607,13 +608,9 @@ def main():
                             controlador = None
                             controlador_verde = ControladorRetanguloVerde(
                                 start_time=agora,
-                                avanco_direto=True,
                             )
-                            monitor_chegada_verde = MonitorObstaculo(
-                                distancia_parada_mm=(
-                                    cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM
-                                ),
-                            )
+                            monitor_chegada_verde = None
+                            proxima_atualizacao_ultrassom_verde = 0.0
                             epoca_busca = None
                             epoca_verde = (
                                 arduino.connection_epoch
@@ -624,8 +621,7 @@ def main():
                             ultimo_controle_ocioso = 0.0
                             print(
                                 "[resgate] GREEN_ROUTE_START: segundo verde "
-                                "confirmado; avancando reto ate o "
-                                "ultrassonico confirmar 5 cm")
+                                "confirmado; alinhando primeiro pela camera")
 
             resultado = None
             if trabalhador is not None:
@@ -641,16 +637,61 @@ def main():
             passo_deposito_cinza = None
             coleta_concluida = None
             distancia_chegada_verde_mm = None
+            distancia_atual_verde_mm = None
+            medicao_ultrassom_verde_atualizada = False
+            ultrassonico_verde_sem_eco = False
+            ultrassonico_verde_falhou = False
+
+            if (
+                args.drive
+                and controlador_verde is not None
+                and controlador_verde.ultrassom_habilitado
+                and monitor_chegada_verde is None
+            ):
+                monitor_chegada_verde = MonitorObstaculo(
+                    distancia_parada_mm=(
+                        cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM
+                    ),
+                    confirmacoes=(
+                        cfg.RESCUE_GREEN_ULTRASONIC_CONFIRM_READINGS
+                    ),
+                    tamanho_historico=(
+                        cfg.RESCUE_GREEN_ULTRASONIC_CONFIRM_READINGS
+                    ),
+                )
+                proxima_atualizacao_ultrassom_verde = 0.0
+                print(
+                    "[resgate] camera alinhada; ultrassonico habilitado")
 
             if (
                 args.drive
                 and controlador_verde is not None
                 and monitor_chegada_verde is not None
                 and arduino is not None
-                and monitor_chegada_verde.atualizar(arduino, agora=agora)
             ):
+                if agora >= proxima_atualizacao_ultrassom_verde:
+                    leituras_antes = monitor_chegada_verde.leituras_concluidas
+                    monitor_chegada_verde.atualizar(arduino, agora=agora)
+                    medicao_ultrassom_verde_atualizada = (
+                        monitor_chegada_verde.leituras_concluidas
+                        != leituras_antes
+                    )
+                    proxima_atualizacao_ultrassom_verde = (
+                        agora
+                        + cfg.RESCUE_GREEN_ULTRASONIC_POLL_INTERVAL_S
+                    )
+
                 distancia_chegada_verde_mm = (
                     monitor_chegada_verde.distancia_confirmada_mm)
+                distancia_atual_verde_mm = (
+                    monitor_chegada_verde.ultima_distancia_valida_mm)
+                ultrassonico_verde_sem_eco = (
+                    monitor_chegada_verde.leituras_invalidas_consecutivas > 0
+                )
+                ultrassonico_verde_falhou = (
+                    monitor_chegada_verde.leituras_invalidas_consecutivas
+                    >= cfg.RESCUE_GREEN_ULTRASONIC_MAX_NO_ECHO
+                )
 
             if not armado:
                 restante = max(armado_em - agora, 0.0)
@@ -694,8 +735,9 @@ def main():
                 comando = passo_deposito_cinza.motion_command()
                 comando_atualizado = True
             elif controlador_verde is not None:
-                # O segundo verde define a direcao do avanco. A chegada
-                # fisica e confirmada pelo ultrassonico entre os frames.
+                # A camera primeiro confirma, centraliza e se aproxima do
+                # verde. Somente depois da parada visual o ultrassonico e
+                # habilitado para os centimetros finais.
                 if resultado is not None:
                     sequencia_resultado = resultado.sequence
                     metricas = resultado
@@ -707,12 +749,21 @@ def main():
                     frame_atual.shape if frame_atual is not None
                     else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
                           cfg.RESCUE_CAMERA_MAX_WIDTH, 3))
-                if distancia_chegada_verde_mm is not None:
+                dados_ultrassom = {
+                    "distancia_chegada_mm": distancia_chegada_verde_mm,
+                    "distancia_atual_mm": distancia_atual_verde_mm,
+                    "ultrassonico_sem_eco": ultrassonico_verde_sem_eco,
+                    "ultrassonico_falhou": ultrassonico_verde_falhou,
+                }
+                if (
+                    distancia_chegada_verde_mm is not None
+                    or medicao_ultrassom_verde_atualizada
+                ):
                     comando = controlador_verde.update(
-                        None,
+                        marcadores_atuais.get("green"),
                         forma,
                         now=agora,
-                        distancia_chegada_mm=distancia_chegada_verde_mm,
+                        **dados_ultrassom,
                     )
                     comando_atualizado = True
                     ultimo_controle_ocioso = agora
@@ -726,6 +777,7 @@ def main():
                         ),
                         timestamp_frame=pacote.captured_at,
                         now=agora,
+                        **dados_ultrassom,
                     )
                     comando_atualizado = True
                     ultimo_controle_ocioso = agora
@@ -734,7 +786,7 @@ def main():
                     >= INTERVALO_CONTROLE_OCIOSO_S
                 ):
                     comando = controlador_verde.update(
-                        None, forma, now=agora)
+                        None, forma, now=agora, **dados_ultrassom)
                     comando_atualizado = True
                     ultimo_controle_ocioso = agora
             elif detector is None:
@@ -1054,13 +1106,9 @@ def main():
                         controlador = None
                         controlador_verde = ControladorRetanguloVerde(
                             start_time=agora,
-                            avanco_direto=True,
                         )
-                        monitor_chegada_verde = MonitorObstaculo(
-                            distancia_parada_mm=(
-                                cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM
-                            ),
-                        )
+                        monitor_chegada_verde = None
+                        proxima_atualizacao_ultrassom_verde = 0.0
                         epoca_busca = None
                         epoca_verde = (
                             arduino.connection_epoch
@@ -1074,7 +1122,7 @@ def main():
                             detail=(
                                 "verde visto em duas passagens separadas e "
                                 "nenhuma vitima encontrada; "
-                                "indo ao retangulo verde ate 5 cm"),
+                                "alinhando ao retangulo verde pela camera"),
                         )
                         comando_atualizado = False
                 elif decisao_busca == BUSCA_REINICIAR:

@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 
 import numpy as np
@@ -26,6 +27,28 @@ def mascara_com_faixa(x1, x2):
     mascara = np.zeros(FORMATO[:2], dtype=np.uint8)
     mascara[:, x1:x2] = 255
     return mascara
+
+
+def marcador_verde(
+    timestamp,
+    center_x=320.0,
+    width=120.0,
+    bottom_y=380.0,
+):
+    return SimpleNamespace(
+        kind="green",
+        center_x=float(center_x),
+        center_y=330.0,
+        width=float(width),
+        height=100.0,
+        bottom_y=float(bottom_y),
+        area=float(width * 50.0),
+        confidence=0.95,
+        confirmed=True,
+        hits=3,
+        timestamp=float(timestamp),
+        track_locked=True,
+    )
 
 
 class ConfirmadorTelaVerdeTests(unittest.TestCase):
@@ -101,6 +124,7 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
             mascara_verde=mascara_com_faixa(400, 640),
             timestamp_frame=0.01,
             now=0.01,
+            distancia_atual_mm=300,
         )
 
         self.assertEqual(
@@ -111,26 +135,72 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertEqual(
             round(comando.speed * 120), cfg.RESCUE_GREEN_FINAL_PWM)
 
-    def test_segundo_verde_pode_iniciar_avanco_sem_nova_procura(self):
-        controlador = ControladorRetanguloVerde(
-            start_time=0.0,
-            avanco_direto=True,
-        )
+    def test_camera_alinha_e_aproxima_antes_de_habilitar_ultrassom(self):
+        controlador = ControladorRetanguloVerde(start_time=0.0)
 
-        comando = controlador.update(
-            None,
+        encontrou = controlador.update(
+            marcador_verde(0.01, center_x=500),
             FORMATO,
-            mascara_verde=mascara_com_faixa(180, 460),
-            timestamp_frame=0.01,
             now=0.01,
+            distancia_chegada_mm=30,
         )
+        self.assertEqual(encontrou.state, controlador.navegacao.TARGET_STOP)
+        self.assertFalse(controlador.ultrassom_habilitado)
+        controlador.notify_command_written(encontrou.state, now=0.02)
 
-        self.assertTrue(controlador.aproximacao_final)
-        self.assertEqual(comando.state, controlador.APROXIMACAO_FINAL)
-        self.assertEqual(comando.angle, 0)
+        alinhando = controlador.update(
+            marcador_verde(0.03, center_x=500),
+            FORMATO,
+            now=0.03,
+            distancia_chegada_mm=30,
+        )
+        self.assertEqual(alinhando.state, controlador.navegacao.ALIGN)
+        self.assertNotEqual(alinhando.angle, 0)
+        self.assertFalse(controlador.ultrassom_habilitado)
+
+        comandos = []
+        for instante in (0.10, 0.20, 0.30):
+            comandos.append(controlador.update(
+                marcador_verde(
+                    instante,
+                    center_x=320,
+                    width=220,
+                    bottom_y=430,
+                ),
+                FORMATO,
+                now=instante,
+                distancia_chegada_mm=30,
+            ))
+
         self.assertEqual(
-            round(comando.speed * 120), cfg.RESCUE_GREEN_FINAL_PWM)
-        self.assertNotIn("procurando", comando.detail.lower())
+            comandos[-1].state, controlador.navegacao.ARRIVAL_STOP)
+        self.assertFalse(controlador.ultrassom_habilitado)
+        controlador.notify_command_written(comandos[-1].state, now=0.31)
+        self.assertTrue(controlador.ultrassom_habilitado)
+
+        avanco = controlador.update(
+            marcador_verde(0.32),
+            FORMATO,
+            now=0.32,
+            distancia_atual_mm=300,
+        )
+        self.assertEqual(avanco.state, controlador.APROXIMACAO_FINAL)
+        self.assertEqual(avanco.angle, 0)
+        self.assertEqual(
+            round(avanco.speed * 120), cfg.RESCUE_GREEN_FINAL_PWM)
+
+    def test_programa_principal_nao_pula_alinhamento_visual(self):
+        fonte = (SHADOW_ROOT / "resgate.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("avanco_direto=True", fonte)
+        self.assertIn(
+            "and controlador_verde.ultrassom_habilitado",
+            fonte,
+        )
+        self.assertIn(
+            "monitor_chegada_verde = None",
+            fonte,
+        )
 
     def test_avanco_direto_nao_exige_tela_inteira_verde(self):
         controlador = ControladorRetanguloVerde(
@@ -140,7 +210,13 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         cheia = np.full(FORMATO[:2], 255, dtype=np.uint8)
 
         comando = controlador.update(
-            None, FORMATO, cheia, 0.10, now=0.10)
+            None,
+            FORMATO,
+            cheia,
+            0.10,
+            now=0.10,
+            distancia_atual_mm=300,
+        )
 
         self.assertEqual(comando.state, controlador.APROXIMACAO_FINAL)
         self.assertFalse(comando.terminal)
@@ -157,24 +233,75 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
             None,
             FORMATO,
             now=0.10,
-            distancia_chegada_mm=51,
+            distancia_atual_mm=51,
+        )
+        primeira_leitura = controlador.update(
+            None,
+            FORMATO,
+            now=0.15,
+            distancia_atual_mm=50,
         )
         chegada = controlador.update(
             None,
             FORMATO,
             now=0.20,
             distancia_chegada_mm=50,
+            distancia_atual_mm=50,
         )
         travado = controlador.update(None, FORMATO, now=0.30)
 
         self.assertEqual(longe.state, controlador.APROXIMACAO_FINAL)
         self.assertFalse(longe.terminal)
+        self.assertEqual(
+            primeira_leitura.state, controlador.CONFIRMANDO_DISTANCIA)
+        self.assertEqual(primeira_leitura.angle, 190)
+        self.assertFalse(primeira_leitura.terminal)
         self.assertEqual(chegada.state, controlador.CONCLUIDO)
         self.assertTrue(chegada.terminal)
         self.assertEqual(chegada.angle, 190)
         self.assertEqual(chegada.speed, 0.0)
         self.assertEqual(travado.state, controlador.CONCLUIDO)
         self.assertTrue(travado.terminal)
+
+    def test_avanco_direto_espera_primeira_leitura_valida(self):
+        controlador = ControladorRetanguloVerde(
+            start_time=0.0,
+            avanco_direto=True,
+        )
+
+        comando = controlador.update(None, FORMATO, now=0.10)
+
+        self.assertEqual(comando.state, controlador.APROXIMACAO_FINAL)
+        self.assertEqual(comando.angle, 190)
+        self.assertEqual(comando.speed, 0.0)
+        self.assertIn("validando ultrassonico", comando.detail)
+
+    def test_avanco_direto_para_no_primeiro_sem_eco_e_falha_no_terceiro(self):
+        controlador = ControladorRetanguloVerde(
+            start_time=0.0,
+            avanco_direto=True,
+        )
+
+        aguardando = controlador.update(
+            None,
+            FORMATO,
+            now=0.10,
+            distancia_atual_mm=300,
+            ultrassonico_sem_eco=True,
+        )
+        falha = controlador.update(
+            None,
+            FORMATO,
+            now=0.20,
+            distancia_atual_mm=300,
+            ultrassonico_sem_eco=True,
+            ultrassonico_falhou=True,
+        )
+
+        self.assertEqual(aguardando.angle, 190)
+        self.assertFalse(aguardando.terminal)
+        self.assertEqual(falha.state, controlador.FALHA)
+        self.assertTrue(falha.terminal)
 
     def test_avanco_direto_para_se_ultrassonico_nao_confirmar(self):
         controlador = ControladorRetanguloVerde(
@@ -192,24 +319,16 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertTrue(falha.terminal)
         self.assertEqual(falha.angle, 190)
 
-    def test_para_para_confirmar_e_encerra_no_terceiro_frame(self):
+    def test_tela_inteira_verde_nao_substitui_o_ultrassonico(self):
         cheia = np.full(FORMATO[:2], 255, dtype=np.uint8)
 
-        primeiro = self.controlador.update(
+        comando = self.controlador.update(
             None, FORMATO, cheia, 0.01, now=0.01)
-        segundo = self.controlador.update(
-            None, FORMATO, cheia, 0.11, now=0.11)
-        terceiro = self.controlador.update(
-            None, FORMATO, cheia, 0.21, now=0.21)
 
-        self.assertEqual(
-            primeiro.state, self.controlador.CONFIRMANDO_TELA)
-        self.assertEqual(primeiro.angle, 190)
-        self.assertFalse(primeiro.terminal)
-        self.assertFalse(segundo.terminal)
-        self.assertEqual(terceiro.state, self.controlador.CONCLUIDO)
-        self.assertTrue(terceiro.terminal)
-        self.assertEqual(terceiro.angle, 190)
+        self.assertEqual(comando.state, self.controlador.APROXIMACAO_FINAL)
+        self.assertEqual(comando.angle, 190)
+        self.assertFalse(comando.terminal)
+        self.assertIn("validando ultrassonico", comando.detail)
 
     def test_nao_avanca_sem_um_frame_novo(self):
         comando = self.controlador.update(
@@ -219,35 +338,27 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertEqual(comando.speed, 0.0)
         self.assertFalse(comando.terminal)
 
-    def test_mantem_reto_na_oscilacao_e_falha_se_o_verde_sumir(self):
-        vazio = np.zeros(FORMATO[:2], dtype=np.uint8)
-        primeiro = self.controlador.update(
-            None, FORMATO, vazio, 0.01, now=0.01)
-        falha = self.controlador.update(
+    def test_leitura_sem_eco_para_sem_depender_da_mascara_verde(self):
+        comando = self.controlador.update(
             None,
             FORMATO,
-            vazio,
-            0.02 + cfg.RESCUE_GREEN_FINAL_LOST_TIMEOUT_S,
-            now=0.01 + cfg.RESCUE_GREEN_FINAL_LOST_TIMEOUT_S,
+            now=0.10,
+            distancia_atual_mm=300,
+            ultrassonico_sem_eco=True,
         )
 
-        self.assertEqual(primeiro.angle, 0)
-        self.assertEqual(
-            round(primeiro.speed * 120), cfg.RESCUE_GREEN_FINAL_PWM)
-        self.assertFalse(primeiro.terminal)
-        self.assertEqual(falha.state, self.controlador.FALHA)
-        self.assertTrue(falha.terminal)
+        self.assertEqual(comando.angle, 190)
+        self.assertEqual(comando.speed, 0.0)
+        self.assertFalse(comando.terminal)
 
-    def test_timeout_final_tambem_funciona_com_frames_chegando(self):
-        parcial = mascara_com_faixa(200, 440)
+    def test_timeout_final_funciona_mesmo_com_distancia_valida(self):
         self.controlador.update(
-            None, FORMATO, parcial, 0.01, now=0.01)
+            None, FORMATO, now=0.01, distancia_atual_mm=300)
         falha = self.controlador.update(
             None,
             FORMATO,
-            parcial,
-            cfg.RESCUE_GREEN_FINAL_MAX_ACTIVE_S + 0.02,
             now=cfg.RESCUE_GREEN_FINAL_MAX_ACTIVE_S + 0.02,
+            distancia_atual_mm=300,
         )
 
         self.assertEqual(falha.state, self.controlador.FALHA)

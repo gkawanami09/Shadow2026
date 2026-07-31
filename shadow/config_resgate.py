@@ -312,18 +312,27 @@ RESCUE_GREEN_FULL_FRAME_MIN_RATIO = 0.88
 RESCUE_GREEN_FULL_FRAME_MARGIN_RATIO = 0.03
 RESCUE_GREEN_FULL_FRAME_CONFIRM_FRAMES = 3
 RESCUE_GREEN_FULL_FRAME_CONFIRM_WINDOW_S = 0.50
-# Assim que a segunda passagem verde e confirmada, o robo ja esta parado e
-# olhando para o painel. Ele avanca reto com o mesmo PWM 80 do segue-linha.
+# Depois da segunda passagem verde, a camera confirma, centraliza e aproxima o
+# robo do painel. So depois dessa etapa o avanco final usa o PWM 80.
 RESCUE_GREEN_FINAL_PWM = 80
 RESCUE_GREEN_FINAL_FORWARD_SPEED = RESCUE_GREEN_FINAL_PWM / 120.0
 # A camera frontal nao consegue ficar totalmente coberta pelo retangulo.
 # A chegada real e confirmada pelo HC-SR04 a 5 cm (o sensor usa milimetros).
 RESCUE_GREEN_ARRIVAL_DISTANCE_MM = 50
+# O loop principal roda a cada 5 ms, mas consultar a USB nessa frequencia nao
+# melhora o HC-SR04. Vinte ms ainda recolhe a resposta antes da proxima medida.
+RESCUE_GREEN_ULTRASONIC_POLL_INTERVAL_S = 0.02
+# Como o deposito e irreversivel, as tres leituras precisam concordar. O
+# monitor nasce somente depois do alinhamento, portanto nao herda ecos do giro.
+RESCUE_GREEN_ULTRASONIC_CONFIRM_READINGS = 3
+# O robo nunca avanca sem uma leitura valida. Tres medidas sem eco encerram a
+# aproximacao para impedir que os quatro motores fiquem presos contra a parede.
+RESCUE_GREEN_ULTRASONIC_MAX_NO_ECHO = 3
 RESCUE_GREEN_FINAL_CENTER_DEADBAND = 0.06
 RESCUE_GREEN_FINAL_STEER_MAX_ANGLE = 30
 RESCUE_GREEN_FINAL_MIN_VISIBLE_RATIO = 0.002
 RESCUE_GREEN_FINAL_LOST_TIMEOUT_S = 0.75
-RESCUE_GREEN_FINAL_MAX_ACTIVE_S = 12.0
+RESCUE_GREEN_FINAL_MAX_ACTIVE_S = 5.0
 
 # Hough + filtros medidos no Pi podem ultrapassar 0.20 s. O timestamp agora e
 # tirado depois da captura; 0.75 s ainda impede movimento com imagem congelada,
