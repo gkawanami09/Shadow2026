@@ -71,8 +71,10 @@ tanque aproximadamente 180° (2,27 s no PWM calibrado de 80), dá outra ré de
 3 s, usa `CACAMBA -90` para ir de 90° a 0°, faz duas sacudidas curtas para
 frente e para trás, usa `CACAMBA +90` para restaurar a posição de 90° e avança
 reto por mais 1,5 s antes de parar. Ao terminar o depósito verde, inicia uma
-varredura pelo marcador vermelho, repete o alinhamento visual e a aproximação
-ultrassônica e executa a mesma sequência. No vermelho, a caçamba abre de 90°
+varredura pulsada pelo marcador vermelho: gira em tanque no mesmo PWM da busca
+das vítimas, para, espera a câmera assentar e observa antes do próximo pulso.
+Quando confirma o vermelho, repete o alinhamento visual, a aproximação
+ultrassônica e a sequência física. No vermelho, a caçamba abre de 90°
 para 180° e depois retorna de 180° para 90°; no verde, continua abrindo de 90°
 para 0° e retornando para 90°.
 

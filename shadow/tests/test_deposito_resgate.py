@@ -112,6 +112,78 @@ class DepositMarkerControllerTests(unittest.TestCase):
         self.assertEqual(stop.state, controller.TURN_STOP)
         self.assertEqual(stop.angle, 190)
 
+    def test_busca_pulsada_gira_para_observa_e_so_entao_aceita_vermelho(self):
+        controller = DepositMarkerController(
+            "red",
+            start_time=0.0,
+            pulsed_search=True,
+        )
+
+        start = controller.update(None, FRAME_SHAPE, now=0.0)
+        self.assertEqual(start.state, controller.START)
+        self.assertEqual(start.angle, cfg.DEPOSIT_SEARCH_TANK_ANGLE)
+        controller.mark_rotation_started(now=0.0)
+
+        girando = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=cfg.DEPOSIT_SEARCH_PULSE_S - 0.001,
+        )
+        freando = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=cfg.DEPOSIT_SEARCH_PULSE_S,
+        )
+        self.assertEqual(girando.state, controller.ROTATING)
+        self.assertEqual(freando.state, controller.PULSE_BRAKE)
+        self.assertEqual(freando.angle, 190)
+
+        controller.mark_pulse_stopped(now=cfg.DEPOSIT_SEARCH_PULSE_S)
+        assentando = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=(
+                cfg.DEPOSIT_SEARCH_PULSE_S
+                + cfg.DEPOSIT_SEARCH_SETTLE_S
+                - 0.001
+            ),
+        )
+        observando_em = (
+            cfg.DEPOSIT_SEARCH_PULSE_S + cfg.DEPOSIT_SEARCH_SETTLE_S)
+        observando = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=observando_em,
+        )
+        self.assertEqual(assentando.state, controller.PULSE_SETTLE)
+        self.assertEqual(observando.state, controller.PULSE_OBSERVE)
+        self.assertEqual(observando.angle, 190)
+
+        antigo = controller.update(
+            marker(observando_em - 0.01, kind="red"),
+            FRAME_SHAPE,
+            now=observando_em + 0.01,
+        )
+        encontrado = controller.update(
+            marker(observando_em + 0.02, kind="red"),
+            FRAME_SHAPE,
+            now=observando_em + 0.02,
+        )
+        self.assertEqual(antigo.state, controller.PULSE_OBSERVE)
+        self.assertEqual(encontrado.state, controller.TARGET_STOP)
+
+        controller.mark_target_stopped(now=observando_em + 0.03)
+        centralizando = controller.update(
+            marker(
+                observando_em + 0.04,
+                kind="red",
+                center_x=520.0,
+            ),
+            FRAME_SHAPE,
+            now=observando_em + 0.04,
+        )
+        self.assertEqual(centralizando.state, controller.ALIGN)
+
     def test_wrong_color_is_ignored(self):
         controller = DepositMarkerController("green", start_time=0.0)
 

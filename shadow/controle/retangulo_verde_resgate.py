@@ -137,6 +137,15 @@ class ControladorRetanguloVerde:
                 cfg.RESCUE_GREEN_CAMERA_ALIGN_TANK_SPEED
             ),
             approach_speed=cfg.RESCUE_GREEN_CAMERA_APPROACH_SPEED,
+            pulsed_search=(target_kind == "red"),
+            search_tank_speed=(
+                cfg.RED_DEPOSIT_SEARCH_TANK_SPEED
+                if target_kind == "red" else None
+            ),
+            search_full_turn_s=(
+                cfg.RED_DEPOSIT_SEARCH_FULL_TURN_S
+                if target_kind == "red" else None
+            ),
         )
         self.confirmador = ConfirmadorTelaVerde()
         self.aproximacao_final = False
@@ -339,6 +348,12 @@ class ControladorRetanguloVerde:
             and self.navegacao.state == self.navegacao.TARGET_STOP
         ):
             self.navegacao.mark_target_stopped(now=agora)
+            return True
+        if (
+            state == self.navegacao.PULSE_BRAKE
+            and self.navegacao.state == self.navegacao.PULSE_BRAKE
+        ):
+            self.navegacao.mark_pulse_stopped(now=agora)
             return True
         if (
             state == self.navegacao.TURN_STOP

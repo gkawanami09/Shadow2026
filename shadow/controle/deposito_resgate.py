@@ -13,6 +13,9 @@ class DepositMarkerController:
 
     START = "DEPOSIT_SEARCH_START"
     ROTATING = "DEPOSIT_SEARCH"
+    PULSE_BRAKE = "DEPOSIT_SEARCH_BRAKE"
+    PULSE_SETTLE = "DEPOSIT_SEARCH_SETTLE"
+    PULSE_OBSERVE = "DEPOSIT_SEARCH_OBSERVE"
     TARGET_STOP = "DEPOSIT_TARGET_STOP"
     VERIFY = "DEPOSIT_VERIFY"
     TURN_STOP = "DEPOSIT_TURN_STOP"
@@ -31,6 +34,9 @@ class DepositMarkerController:
         near_confirm_frames=None,
         align_tank_speed=None,
         approach_speed=None,
+        pulsed_search=False,
+        search_tank_speed=None,
+        search_full_turn_s=None,
     ):
         if target_kind not in ("green", "red"):
             raise ValueError("marcador deve ser green ou red")
@@ -51,6 +57,19 @@ class DepositMarkerController:
         self.approach_speed = (
             None if approach_speed is None else float(approach_speed)
         )
+        self.pulsed_search = bool(pulsed_search)
+        self.search_tank_speed = float(
+            cfg.DEPOSIT_SEARCH_TANK_SPEED
+            if search_tank_speed is None else search_tank_speed
+        )
+        self.search_full_turn_s = float(
+            cfg.DEPOSIT_SEARCH_FULL_TURN_S
+            if search_full_turn_s is None else search_full_turn_s
+        )
+        if self.search_tank_speed <= 0.0:
+            raise ValueError("search_tank_speed deve ser positivo")
+        if self.search_full_turn_s <= 0.0:
+            raise ValueError("search_full_turn_s deve ser positivo")
         self.state = self.START
         self._created_at = (
             time.monotonic()
@@ -59,6 +78,11 @@ class DepositMarkerController:
         )
         self._rotation_started_at = None
         self._rotation_elapsed_s = 0.0
+        self._pulse_started_at = None
+        self._pulse_stopped_at = None
+        self._settled_at = None
+        self._observed_frames = 0
+        self._last_observed_timestamp = None
         self._active_started_at = None
         self._stopped_at = None
         self._last_seen_at = None
@@ -111,6 +135,31 @@ class DepositMarkerController:
                 self.TARGET_STOP,
                 "marcador encontrado; aguardando confirmacao de PARAR",
             )
+        if self.state == self.PULSE_BRAKE:
+            return self._stop(
+                self.PULSE_BRAKE,
+                "fim do pulso; aguardando confirmacao de PARAR",
+            )
+        if self.state == self.PULSE_SETTLE:
+            if (
+                self._pulse_stopped_at is not None
+                and now - self._pulse_stopped_at
+                >= cfg.DEPOSIT_SEARCH_SETTLE_S - 1e-9
+            ):
+                self.state = self.PULSE_OBSERVE
+                self._settled_at = now
+                self._observed_frames = 0
+                self._last_observed_timestamp = None
+                return self._stop(
+                    self.PULSE_OBSERVE,
+                    "chassi assentado; observando o marcador vermelho",
+                )
+            return self._stop(
+                self.PULSE_SETTLE,
+                "aguardando vibracao e camera assentarem",
+            )
+        if self.state == self.PULSE_OBSERVE:
+            return self._update_pulse_observe(detection, now)
         if self.state == self.TURN_STOP:
             return self._stop(
                 self.TURN_STOP,
@@ -138,6 +187,23 @@ class DepositMarkerController:
             )
 
         if self.state == self.ROTATING:
+            if self.pulsed_search:
+                if (
+                    self._pulse_started_at is not None
+                    and now - self._pulse_started_at
+                    >= cfg.DEPOSIT_SEARCH_PULSE_S - 1e-9
+                ):
+                    self.state = self.PULSE_BRAKE
+                    self._tracking_reset_requested = True
+                    return self._stop(
+                        self.PULSE_BRAKE,
+                        "fim do pulso de tanque; freando para observar",
+                    )
+                return self._tank(
+                    self.ROTATING,
+                    f"girando em pulso; procurando triangulo "
+                    f"{self.target_kind}",
+                )
             if self._valid_target(detection, now):
                 return self._request_target_stop(detection)
             if self._plausible_target(detection, now):
@@ -145,7 +211,7 @@ class DepositMarkerController:
             if (
                 self._rotation_started_at is not None
                 and self._rotation_elapsed(now)
-                >= cfg.DEPOSIT_SEARCH_FULL_TURN_S - 1e-9
+                >= self.search_full_turn_s - 1e-9
             ):
                 self.state = self.TURN_STOP
                 return self._stop(
@@ -183,7 +249,7 @@ class DepositMarkerController:
                 self.state = (
                     self.TURN_STOP
                     if self._rotation_elapsed_s
-                    >= cfg.DEPOSIT_SEARCH_FULL_TURN_S - 1e-9
+                    >= self.search_full_turn_s - 1e-9
                     else self.START
                 )
                 self._stopped_at = None
@@ -235,7 +301,19 @@ class DepositMarkerController:
         now = time.monotonic() if now is None else float(now)
         self.state = self.ROTATING
         self._rotation_started_at = now
+        self._pulse_started_at = now if self.pulsed_search else None
         self._mark_active(now)
+
+    def mark_pulse_stopped(self, now=None):
+        if self.state != self.PULSE_BRAKE:
+            raise RuntimeError(
+                "confirmacao de PARAR fora do fim do pulso de deposito")
+        now = time.monotonic() if now is None else float(now)
+        self._finish_rotation_segment(now)
+        self._pulse_started_at = None
+        self._pulse_stopped_at = now
+        self._settled_at = None
+        self.state = self.PULSE_SETTLE
 
     def mark_target_stopped(self, now=None):
         if self.state != self.TARGET_STOP:
@@ -277,12 +355,74 @@ class DepositMarkerController:
         self.state = self.ARRIVED
 
     def frame_allowed(self, captured_at):
+        if self.pulsed_search:
+            if self.state in (
+                self.START,
+                self.ROTATING,
+                self.PULSE_BRAKE,
+                self.PULSE_SETTLE,
+            ):
+                return False
+            if self.state == self.PULSE_OBSERVE:
+                return (
+                    self._settled_at is not None
+                    and float(captured_at) > self._settled_at + 1e-9
+                )
         if (
             self.state not in (self.VERIFY, self.FINAL_VERIFY)
             or self._stopped_at is None
         ):
             return True
         return float(captured_at) > self._stopped_at + 1e-9
+
+    def _update_pulse_observe(self, detection, now):
+        if self._valid_target(
+            detection, now, captured_after=self._settled_at
+        ):
+            return self._request_target_stop(detection)
+        if self._plausible_target(
+            detection, now, captured_after=self._settled_at
+        ):
+            return self._request_target_stop(detection, tentative=True)
+
+        timestamp = getattr(detection, "timestamp", None)
+        if (
+            timestamp is not None
+            and self.frame_allowed(timestamp)
+            and (
+                self._last_observed_timestamp is None
+                or float(timestamp) > self._last_observed_timestamp + 1e-9
+            )
+        ):
+            self._observed_frames += 1
+            self._last_observed_timestamp = float(timestamp)
+
+        observou_suficiente = (
+            self._observed_frames >= cfg.DEPOSIT_SEARCH_OBSERVE_FRAMES)
+        tempo_esgotado = (
+            self._settled_at is not None
+            and now - self._settled_at
+            >= cfg.DEPOSIT_SEARCH_OBSERVE_TIMEOUT_S - 1e-9
+        )
+        if observou_suficiente or tempo_esgotado:
+            if (
+                self._rotation_elapsed_s
+                >= self.search_full_turn_s - 1e-9
+            ):
+                self.state = self.TURN_STOP
+                return self._stop(
+                    self.TURN_STOP,
+                    "360 pulsado concluido; verificando vermelho parado",
+                )
+            self.state = self.START
+            return self._tank(
+                self.START,
+                "vermelho ausente; iniciando o proximo pulso de tanque",
+            )
+        return self._stop(
+            self.PULSE_OBSERVE,
+            "observando vermelho com o robo parado",
+        )
 
     def consume_tracking_reset(self):
         requested = self._tracking_reset_requested
@@ -442,12 +582,18 @@ class DepositMarkerController:
             ),
         )
 
-    def _plausible_target(self, detection, now):
+    def _plausible_target(self, detection, now, captured_after=None):
         if (
             detection is None
             or detection.kind != self.target_kind
             or float(detection.confidence)
             < float(getattr(cfg, "MARKER_MIN_CONFIDENCE", 0.60))
+        ):
+            return False
+        if (
+            captured_after is not None
+            and float(detection.timestamp)
+            <= float(captured_after) + 1e-9
         ):
             return False
         age = now - float(detection.timestamp)
@@ -550,12 +696,11 @@ class DepositMarkerController:
             terminal=True,
         )
 
-    @staticmethod
-    def _tank(state, detail):
+    def _tank(self, state, detail):
         return MotionCommand(
             state,
             angle=cfg.DEPOSIT_SEARCH_TANK_ANGLE,
-            speed=cfg.DEPOSIT_SEARCH_TANK_SPEED,
+            speed=self.search_tank_speed,
             detail=detail,
         )
 
