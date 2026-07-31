@@ -210,6 +210,24 @@ class DepositMarkerControllerTests(unittest.TestCase):
         self.assertEqual(arrived.state, controller.ARRIVED)
         self.assertTrue(arrived.terminal)
 
+    def test_confirmacao_visual_pode_ser_configurada_sem_mudar_o_padrao(self):
+        controller = DepositMarkerController(
+            "green",
+            start_time=0.0,
+            near_confirm_frames=1,
+        )
+        controller.state = controller.APPROACH
+
+        command = controller.update(
+            marker(0.10, width=220.0, bottom_y=440.0),
+            FRAME_SHAPE,
+            now=0.10,
+        )
+
+        self.assertEqual(command.state, controller.ARRIVAL_STOP)
+        self.assertEqual(command.angle, 190)
+        self.assertFalse(command.terminal)
+
     def test_loss_stops_before_search_can_resume(self):
         controller = DepositMarkerController("green", start_time=0.0)
         controller.state = controller.APPROACH

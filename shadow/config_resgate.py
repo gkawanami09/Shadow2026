@@ -255,6 +255,11 @@ BALL_SEARCH_TOTAL_TIMEOUT_S = 75.0
 # Uma coleta e selecao concluidas zeram toda esta contagem.
 RESCUE_GREEN_SIGHTINGS_REQUIRED = 2
 RESCUE_GREEN_REARM_FRAMES = 3
+# O rastreador ja exigiu tres aparicoes e a rota so comeca depois da segunda
+# passagem verde. Para entregar o controle ao ultrassonico basta um frame NOVO
+# depois da parada, desde que o painel esteja proximo e centralizado. Exigir
+# mais tres frames aqui prendia o robo em "confirmando 1/3" na arena.
+RESCUE_GREEN_CAMERA_NEAR_CONFIRM_FRAMES = 1
 # Se o verde nao puder ser confirmado, o robo nao pode girar para sempre.
 # Depois de tres voltas completas ele para em estado de falha, sem declarar
 # falsamente que terminou o resgate.

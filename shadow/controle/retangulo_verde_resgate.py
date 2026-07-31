@@ -114,7 +114,12 @@ class ControladorRetanguloVerde:
 
     def __init__(self, start_time=None, avanco_direto=False):
         self.navegacao = DepositMarkerController(
-            "green", start_time=start_time)
+            "green",
+            start_time=start_time,
+            near_confirm_frames=(
+                cfg.RESCUE_GREEN_CAMERA_NEAR_CONFIRM_FRAMES
+            ),
+        )
         self.confirmador = ConfirmadorTelaVerde()
         self.aproximacao_final = False
         self._aproximacao_iniciada_em = None

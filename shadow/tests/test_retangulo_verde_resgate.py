@@ -158,30 +158,28 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertNotEqual(alinhando.angle, 0)
         self.assertFalse(controlador.ultrassom_habilitado)
 
-        comandos = []
-        for instante in (0.10, 0.20, 0.30):
-            comandos.append(controlador.update(
-                marcador_verde(
-                    instante,
-                    center_x=320,
-                    width=220,
-                    bottom_y=430,
-                ),
-                FORMATO,
-                now=instante,
-                distancia_chegada_mm=30,
-            ))
+        chegada_visual = controlador.update(
+            marcador_verde(
+                0.10,
+                center_x=320,
+                width=220,
+                bottom_y=430,
+            ),
+            FORMATO,
+            now=0.10,
+            distancia_chegada_mm=30,
+        )
 
         self.assertEqual(
-            comandos[-1].state, controlador.navegacao.ARRIVAL_STOP)
+            chegada_visual.state, controlador.navegacao.ARRIVAL_STOP)
         self.assertFalse(controlador.ultrassom_habilitado)
-        controlador.notify_command_written(comandos[-1].state, now=0.31)
+        controlador.notify_command_written(chegada_visual.state, now=0.11)
         self.assertTrue(controlador.ultrassom_habilitado)
 
         avanco = controlador.update(
-            marcador_verde(0.32),
+            marcador_verde(0.12),
             FORMATO,
-            now=0.32,
+            now=0.12,
             distancia_atual_mm=300,
         )
         self.assertEqual(avanco.state, controlador.APROXIMACAO_FINAL)

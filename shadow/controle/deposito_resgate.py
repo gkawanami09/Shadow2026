@@ -24,10 +24,21 @@ class DepositMarkerController:
     ARRIVED = "DEPOSIT_ARRIVED"
     FAULT = "DEPOSIT_FAULT"
 
-    def __init__(self, target_kind, start_time=None):
+    def __init__(
+        self,
+        target_kind,
+        start_time=None,
+        near_confirm_frames=None,
+    ):
         if target_kind not in ("green", "red"):
             raise ValueError("marcador deve ser green ou red")
+        if near_confirm_frames is None:
+            near_confirm_frames = cfg.DEPOSIT_NEAR_CONFIRM_FRAMES
+        near_confirm_frames = int(near_confirm_frames)
+        if near_confirm_frames < 1:
+            raise ValueError("near_confirm_frames deve ser positivo")
         self.target_kind = target_kind
+        self.near_confirm_frames = near_confirm_frames
         self.state = self.START
         self._created_at = (
             time.monotonic()
@@ -296,7 +307,7 @@ class DepositMarkerController:
                     self._near_first_at = now
                 self._near_count += 1
                 self._last_near_timestamp = float(detection.timestamp)
-            if self._near_count >= cfg.DEPOSIT_NEAR_CONFIRM_FRAMES:
+            if self._near_count >= self.near_confirm_frames:
                 self.state = self.ARRIVAL_STOP
                 return self._stop(
                     self.ARRIVAL_STOP,
@@ -305,7 +316,7 @@ class DepositMarkerController:
             return self._stop(
                 self.APPROACH,
                 "marcador no ponto de deposito; confirmando "
-                f"{self._near_count}/{cfg.DEPOSIT_NEAR_CONFIRM_FRAMES}",
+                f"{self._near_count}/{self.near_confirm_frames}",
             )
         self._reset_near()
         if not self._observe_progress(
