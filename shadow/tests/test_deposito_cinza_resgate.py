@@ -133,21 +133,21 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         re = etapas["PRE_TURN_REVERSE"]
         self.assertEqual(frente.angulo, 0)
         self.assertEqual(re.angulo, 200)
-        self.assertEqual(frente.duracao, 0.5)
-        self.assertEqual(re.duracao, 3.0)
+        self.assertEqual(frente.duracao, 1.0)
+        self.assertEqual(re.duracao, 0.5)
         self.assertEqual(
             round(frente.velocidade * 120),
             cfg.SILVER_DEPOSIT_PRE_TURN_PWM,
         )
         self.assertEqual(frente.velocidade, re.velocidade)
 
-    def test_depois_de_fechar_avanca_reto_por_tres_segundos(self):
+    def test_depois_de_fechar_avanca_reto_por_um_segundo_e_meio(self):
         sequenciador = SequenciadorDepositoCinza()
         etapas = {etapa.nome: etapa for etapa in sequenciador._etapas}
 
         saida = etapas["EXIT_FORWARD"]
         self.assertEqual(saida.angulo, 0)
-        self.assertEqual(saida.duracao, 3.0)
+        self.assertEqual(saida.duracao, 1.5)
         self.assertEqual(
             round(saida.velocidade * 120),
             cfg.SILVER_DEPOSIT_EXIT_FORWARD_PWM,

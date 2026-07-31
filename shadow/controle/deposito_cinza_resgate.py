@@ -133,7 +133,7 @@ class SequenciadorDepositoCinza:
         etapas = [
             _Etapa(
                 "PRE_TURN_FORWARD",
-                "avancando reto por 0,5 segundo antes do giro",
+                "avancando reto por 1 segundo antes do giro",
                 0,
                 cfg.SILVER_DEPOSIT_PRE_TURN_SPEED,
                 cfg.SILVER_DEPOSIT_PRE_TURN_FORWARD_S,
@@ -147,7 +147,7 @@ class SequenciadorDepositoCinza:
             ),
             _Etapa(
                 "PRE_TURN_REVERSE",
-                "dando re por 3 segundos antes do giro",
+                "dando re por 0,5 segundo antes do giro",
                 200,
                 cfg.SILVER_DEPOSIT_PRE_TURN_SPEED,
                 cfg.SILVER_DEPOSIT_PRE_TURN_REVERSE_S,
@@ -243,7 +243,7 @@ class SequenciadorDepositoCinza:
         etapas.extend((
             _Etapa(
                 "EXIT_FORWARD",
-                "cacamba fechada; avancando reto por 3 segundos",
+                "cacamba fechada; avancando reto por 1,5 segundo",
                 0,
                 cfg.SILVER_DEPOSIT_EXIT_FORWARD_SPEED,
                 cfg.SILVER_DEPOSIT_EXIT_FORWARD_S,
