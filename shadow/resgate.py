@@ -4,9 +4,9 @@
 Depois de cada coleta, a vítima prata é selecionada pela garra esquerda e a
 preta pela direita. O robô volta à busca pulsada. Duas passagens separadas
 pelo marcador verde sem uma coleta no meio encerram a procura. Então o robô
-procura o retângulo verde e avança até o campo útil da câmera ficar verde.
-Se houver vítima prata armazenada, gira 180 graus, alinha de ré e esvazia o
-lado esquerdo da caçamba antes de encerrar.
+avança até o ultrassônico confirmar 5 cm do retângulo verde. Se houver vítima
+prata armazenada, gira 180 graus, alinha de ré e esvazia o lado esquerdo da
+caçamba antes de encerrar.
 
 Arquitetura da visão
 --------------------
@@ -57,6 +57,7 @@ from controle.contador_verde_resgate import (  # noqa: E402
 from controle.deposito_cinza_resgate import (  # noqa: E402
     SequenciadorDepositoCinza,
 )
+from controle.parada_obstaculo import MonitorObstaculo  # noqa: E402
 from controle.retangulo_verde_resgate import (  # noqa: E402
     ControladorRetanguloVerde,
 )
@@ -444,6 +445,7 @@ def main():
     marcadores = None
     controlador = None
     controlador_verde = None
+    monitor_chegada_verde = None
     deposito_cinza = None
     busca = None
     coleta = None
@@ -607,6 +609,11 @@ def main():
                                 start_time=agora,
                                 avanco_direto=True,
                             )
+                            monitor_chegada_verde = MonitorObstaculo(
+                                distancia_parada_mm=(
+                                    cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM
+                                ),
+                            )
                             epoca_busca = None
                             epoca_verde = (
                                 arduino.connection_epoch
@@ -617,8 +624,8 @@ def main():
                             ultimo_controle_ocioso = 0.0
                             print(
                                 "[resgate] GREEN_ROUTE_START: segundo verde "
-                                "confirmado; avancando reto ate a camera "
-                                "ficar verde")
+                                "confirmado; avancando reto ate o "
+                                "ultrassonico confirmar 5 cm")
 
             resultado = None
             if trabalhador is not None:
@@ -633,6 +640,17 @@ def main():
             passo_coleta = None
             passo_deposito_cinza = None
             coleta_concluida = None
+            distancia_chegada_verde_mm = None
+
+            if (
+                args.drive
+                and controlador_verde is not None
+                and monitor_chegada_verde is not None
+                and arduino is not None
+                and monitor_chegada_verde.atualizar(arduino, agora=agora)
+            ):
+                distancia_chegada_verde_mm = (
+                    monitor_chegada_verde.distancia_confirmada_mm)
 
             if not armado:
                 restante = max(armado_em - agora, 0.0)
@@ -676,8 +694,8 @@ def main():
                 comando = passo_deposito_cinza.motion_command()
                 comando_atualizado = True
             elif controlador_verde is not None:
-                # O detector de vitimas para nesta etapa. O marcador verde e
-                # a mascara HSV passam a ser a unica fonte de movimento.
+                # O segundo verde define a direcao do avanco. A chegada
+                # fisica e confirmada pelo ultrassonico entre os frames.
                 if resultado is not None:
                     sequencia_resultado = resultado.sequence
                     metricas = resultado
@@ -689,7 +707,16 @@ def main():
                     frame_atual.shape if frame_atual is not None
                     else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
                           cfg.RESCUE_CAMERA_MAX_WIDTH, 3))
-                if frame_novo:
+                if distancia_chegada_verde_mm is not None:
+                    comando = controlador_verde.update(
+                        None,
+                        forma,
+                        now=agora,
+                        distancia_chegada_mm=distancia_chegada_verde_mm,
+                    )
+                    comando_atualizado = True
+                    ultimo_controle_ocioso = agora
+                elif frame_novo:
                     comando = controlador_verde.update(
                         marcadores_atuais.get("green"),
                         forma,
@@ -953,10 +980,11 @@ def main():
                 and comando.terminal
             ):
                 print(
-                    "[resgate] tela verde confirmada; vitimas prata "
+                    "[resgate] chegada a 5 cm confirmada; vitimas prata "
                     f"armazenadas={vitimas_prata_resgatadas}")
                 if vitimas_prata_resgatadas > 0:
                     controlador_verde = None
+                    monitor_chegada_verde = None
                     deposito_cinza = SequenciadorDepositoCinza()
                     epoca_verde = None
                     epoca_deposito_cinza = (
@@ -1028,6 +1056,11 @@ def main():
                             start_time=agora,
                             avanco_direto=True,
                         )
+                        monitor_chegada_verde = MonitorObstaculo(
+                            distancia_parada_mm=(
+                                cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM
+                            ),
+                        )
                         epoca_busca = None
                         epoca_verde = (
                             arduino.connection_epoch
@@ -1041,7 +1074,7 @@ def main():
                             detail=(
                                 "verde visto em duas passagens separadas e "
                                 "nenhuma vitima encontrada; "
-                                "indo ao retangulo verde"),
+                                "indo ao retangulo verde ate 5 cm"),
                         )
                         comando_atualizado = False
                 elif decisao_busca == BUSCA_REINICIAR:

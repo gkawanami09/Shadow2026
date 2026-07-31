@@ -132,6 +132,66 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
             round(comando.speed * 120), cfg.RESCUE_GREEN_FINAL_PWM)
         self.assertNotIn("procurando", comando.detail.lower())
 
+    def test_avanco_direto_nao_exige_tela_inteira_verde(self):
+        controlador = ControladorRetanguloVerde(
+            start_time=0.0,
+            avanco_direto=True,
+        )
+        cheia = np.full(FORMATO[:2], 255, dtype=np.uint8)
+
+        comando = controlador.update(
+            None, FORMATO, cheia, 0.10, now=0.10)
+
+        self.assertEqual(comando.state, controlador.APROXIMACAO_FINAL)
+        self.assertFalse(comando.terminal)
+        self.assertEqual(comando.angle, 0)
+        self.assertIn("ultrassonico", comando.detail)
+
+    def test_avanco_direto_so_encerra_em_cinco_centimetros(self):
+        controlador = ControladorRetanguloVerde(
+            start_time=0.0,
+            avanco_direto=True,
+        )
+
+        longe = controlador.update(
+            None,
+            FORMATO,
+            now=0.10,
+            distancia_chegada_mm=51,
+        )
+        chegada = controlador.update(
+            None,
+            FORMATO,
+            now=0.20,
+            distancia_chegada_mm=50,
+        )
+        travado = controlador.update(None, FORMATO, now=0.30)
+
+        self.assertEqual(longe.state, controlador.APROXIMACAO_FINAL)
+        self.assertFalse(longe.terminal)
+        self.assertEqual(chegada.state, controlador.CONCLUIDO)
+        self.assertTrue(chegada.terminal)
+        self.assertEqual(chegada.angle, 190)
+        self.assertEqual(chegada.speed, 0.0)
+        self.assertEqual(travado.state, controlador.CONCLUIDO)
+        self.assertTrue(travado.terminal)
+
+    def test_avanco_direto_para_se_ultrassonico_nao_confirmar(self):
+        controlador = ControladorRetanguloVerde(
+            start_time=0.0,
+            avanco_direto=True,
+        )
+
+        falha = controlador.update(
+            None,
+            FORMATO,
+            now=cfg.RESCUE_GREEN_FINAL_MAX_ACTIVE_S,
+        )
+
+        self.assertEqual(falha.state, controlador.FALHA)
+        self.assertTrue(falha.terminal)
+        self.assertEqual(falha.angle, 190)
+
     def test_para_para_confirmar_e_encerra_no_terceiro_frame(self):
         cheia = np.full(FORMATO[:2], 255, dtype=np.uint8)
 

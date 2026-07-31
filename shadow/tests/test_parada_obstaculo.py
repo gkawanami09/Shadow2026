@@ -125,6 +125,15 @@ class MonitorObstaculoTests(unittest.TestCase):
         self.assertTrue(monitor.atualizar(arduino, agora=0.06))
         self.assertEqual(monitor.distancia_confirmada_mm, 46)
 
+    def test_confirmacao_nao_abre_uma_medicao_extra(self):
+        arduino = ArduinoFalso(((True, 48), (True, 44)))
+        monitor = criar_monitor()
+
+        monitor.atualizar(arduino, agora=0.00)
+        self.assertTrue(monitor.atualizar(arduino, agora=0.06))
+
+        self.assertEqual(arduino.solicitacoes, [.08])
+
     def test_cinco_centimetros_entram_no_limite(self):
         arduino = ArduinoFalso(((True, 50), (True, 50)))
         monitor = criar_monitor()

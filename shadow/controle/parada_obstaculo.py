@@ -79,6 +79,10 @@ class MonitorObstaculo:
         concluido, distancia_mm = arduino.poll_ultrassom()
         if concluido:
             self._registrar_leitura(agora, distancia_mm)
+            # Ao confirmar, nao abra uma terceira medicao. Isso deixa a
+            # serial livre para o comando de parada e para o deposito.
+            if self.parada_confirmada:
+                return True
 
         self._descartar_antigas(agora)
 

@@ -104,11 +104,11 @@ def medir_verde(mascara_verde):
 
 
 class ControladorRetanguloVerde:
-    """Procura o verde, aproxima e avanca ate o quadro ficar verde."""
+    """Procura o verde e controla a aproximacao final ao deposito."""
 
     APROXIMACAO_FINAL = "GREEN_FINAL_APPROACH"
     CONFIRMANDO_TELA = "GREEN_FULL_VERIFY"
-    CONCLUIDO = "GREEN_FULL_FRAME"
+    CONCLUIDO = "GREEN_ARRIVAL_5CM"
     FALHA = "GREEN_FINAL_FAULT"
 
     def __init__(self, start_time=None, avanco_direto=False):
@@ -120,12 +120,19 @@ class ControladorRetanguloVerde:
         self._ultimo_frame_em = None
         self._ultimo_verde_em = None
         self._detalhe_falha = ""
+        self._chegada_por_ultrassom = False
+        self._distancia_chegada_mm = None
+        self._avanco_direto_iniciado_em = None
         if avanco_direto:
-            self.iniciar_avanco_direto()
+            self.iniciar_avanco_direto(now=start_time)
 
-    def iniciar_avanco_direto(self):
+    def iniciar_avanco_direto(self, now=None):
         """Pula a procura: o segundo verde ja fornece a direcao do painel."""
+        agora = time.monotonic() if now is None else float(now)
         self.aproximacao_final = True
+        self._chegada_por_ultrassom = True
+        self._distancia_chegada_mm = None
+        self._avanco_direto_iniciado_em = agora
         self.confirmador.reset()
         self._aproximacao_iniciada_em = None
         self._ultimo_frame_em = None
@@ -134,7 +141,8 @@ class ControladorRetanguloVerde:
     @property
     def terminal(self):
         return self.navegacao.state == self.navegacao.FAULT or bool(
-            self._detalhe_falha) or self.confirmador.confirmado
+            self._detalhe_falha) or self.confirmador.confirmado or (
+                self._distancia_chegada_mm is not None)
 
     def update(
         self,
@@ -143,8 +151,23 @@ class ControladorRetanguloVerde:
         mascara_verde=None,
         timestamp_frame=None,
         now=None,
+        distancia_chegada_mm=None,
     ):
         agora = time.monotonic() if now is None else float(now)
+
+        if distancia_chegada_mm is not None:
+            distancia_mm = int(round(float(distancia_chegada_mm)))
+            if 1 <= distancia_mm <= cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM:
+                self._distancia_chegada_mm = distancia_mm
+
+        if self._distancia_chegada_mm is not None:
+            return self._parar(
+                self.CONCLUIDO,
+                "ultrassonico confirmou chegada a "
+                f"{self._distancia_chegada_mm / 10.0:.1f} cm; "
+                "deposito autorizado",
+                terminal=True,
+            )
 
         if self.confirmador.confirmado:
             return self._parar(
@@ -159,6 +182,24 @@ class ControladorRetanguloVerde:
         if not self.aproximacao_final:
             return self.navegacao.update(
                 deteccao_verde, formato_frame, now=agora)
+
+        if self._chegada_por_ultrassom:
+            if (
+                self._avanco_direto_iniciado_em is not None
+                and agora - self._avanco_direto_iniciado_em
+                >= cfg.RESCUE_GREEN_FINAL_MAX_ACTIVE_S
+            ):
+                return self._falhar(
+                    "ultrassonico nao confirmou 5 cm dentro do tempo limite")
+            return MotionCommand(
+                self.APROXIMACAO_FINAL,
+                angle=0,
+                speed=cfg.RESCUE_GREEN_FINAL_FORWARD_SPEED,
+                detail=(
+                    f"avancando reto em PWM {cfg.RESCUE_GREEN_FINAL_PWM}; "
+                    "aguardando ultrassonico confirmar 5 cm"
+                ),
+            )
 
         if (
             self._aproximacao_iniciada_em is not None

@@ -316,6 +316,9 @@ RESCUE_GREEN_FULL_FRAME_CONFIRM_WINDOW_S = 0.50
 # olhando para o painel. Ele avanca reto com o mesmo PWM 80 do segue-linha.
 RESCUE_GREEN_FINAL_PWM = 80
 RESCUE_GREEN_FINAL_FORWARD_SPEED = RESCUE_GREEN_FINAL_PWM / 120.0
+# A camera frontal nao consegue ficar totalmente coberta pelo retangulo.
+# A chegada real e confirmada pelo HC-SR04 a 5 cm (o sensor usa milimetros).
+RESCUE_GREEN_ARRIVAL_DISTANCE_MM = 50
 RESCUE_GREEN_FINAL_CENTER_DEADBAND = 0.06
 RESCUE_GREEN_FINAL_STEER_MAX_ANGLE = 30
 RESCUE_GREEN_FINAL_MIN_VISIBLE_RATIO = 0.002

@@ -650,9 +650,14 @@ class BallApproachControllerTests(unittest.TestCase):
         self.assertEqual(restarted.pickup_confirmations, 0)
         self.assertFalse(restarted.terminal)
 
-    def test_rescue_runtime_never_calls_ultrasonic_sensor(self):
+    def test_rescue_runtime_usa_monitor_ultrassonico_nao_bloqueante(self):
         source = (SHADOW_ROOT / "resgate.py").read_text(encoding="utf-8")
+        self.assertIn("MonitorObstaculo", source)
+        self.assertIn("RESCUE_GREEN_ARRIVAL_DISTANCE_MM", source)
+
         tree = ast.parse(source)
+        # O runtime usa o monitor compartilhado. Chamadas diretas aqui
+        # poderiam bloquear a visao ou disputar uma medicao ja pendente.
         forbidden_calls = {
             "distancia_ultrassom",
             "iniciar_ultrassom",
