@@ -89,7 +89,7 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         indice_re = next(
             i for i, nome in enumerate(nomes) if "REVERSE_ALIGN" in nome)
         indice_abertura = next(
-            i for i, nome in enumerate(nomes) if "BUCKET_OPEN_LEFT" in nome)
+            i for i, nome in enumerate(nomes) if "BUCKET_OPEN_RIGHT" in nome)
         indice_restauracao = next(
             i for i, nome in enumerate(nomes) if "BUCKET_RESTORE" in nome)
         self.assertLess(indice_giro, indice_re)
@@ -101,7 +101,7 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
             for passo in passos
             if passo.bucket_delta is not None
         ]
-        self.assertEqual(deltas, [90, -90])
+        self.assertEqual(deltas, [-90, 90])
         self.assertEqual(final.state, SequenciadorDepositoCinza.CONCLUIDO)
         self.assertTrue(final.terminal)
         self.assertEqual(final.angle, 190)
@@ -177,7 +177,7 @@ class AplicacaoDepositoCinzaTests(unittest.TestCase):
         passo = PassoDepositoCinza(
             "ABRIR",
             "abrindo",
-            bucket_delta=90,
+            bucket_delta=-90,
         )
 
         erro = _aplicar_acoes_deposito_cinza(
@@ -192,7 +192,7 @@ class AplicacaoDepositoCinzaTests(unittest.TestCase):
             arduino.chamadas,
             [
                 ("direcao", 190, 0.0),
-                ("servo", "CACAMBA", 90),
+                ("servo", "CACAMBA", -90),
             ],
         )
 
@@ -201,7 +201,7 @@ class AplicacaoDepositoCinzaTests(unittest.TestCase):
         passo = PassoDepositoCinza(
             "ABRIR",
             "abrindo",
-            bucket_delta=90,
+            bucket_delta=-90,
         )
 
         erro = _aplicar_acoes_deposito_cinza(
@@ -221,7 +221,7 @@ class AplicacaoDepositoCinzaTests(unittest.TestCase):
         passo = PassoDepositoCinza(
             "ABRIR",
             "abrindo",
-            bucket_delta=90,
+            bucket_delta=-90,
         )
 
         erro = _aplicar_acoes_deposito_cinza(

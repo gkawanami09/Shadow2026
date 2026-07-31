@@ -245,7 +245,7 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertEqual(comando.angle, 0)
         self.assertIn("ultrassonico", comando.detail)
 
-    def test_avanco_direto_so_encerra_em_cinco_centimetros(self):
+    def test_avanco_direto_so_encerra_em_seis_centimetros(self):
         controlador = ControladorRetanguloVerde(
             start_time=0.0,
             avanco_direto=True,
@@ -255,20 +255,20 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
             None,
             FORMATO,
             now=0.10,
-            distancia_atual_mm=51,
+            distancia_atual_mm=61,
         )
         primeira_leitura = controlador.update(
             None,
             FORMATO,
             now=0.15,
-            distancia_atual_mm=50,
+            distancia_atual_mm=60,
         )
         chegada = controlador.update(
             None,
             FORMATO,
             now=0.20,
-            distancia_chegada_mm=50,
-            distancia_atual_mm=50,
+            distancia_chegada_mm=60,
+            distancia_atual_mm=60,
         )
         travado = controlador.update(None, FORMATO, now=0.30)
 

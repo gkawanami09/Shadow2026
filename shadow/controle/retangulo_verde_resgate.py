@@ -108,8 +108,8 @@ class ControladorRetanguloVerde:
 
     APROXIMACAO_FINAL = "GREEN_FINAL_APPROACH"
     CONFIRMANDO_TELA = "GREEN_FULL_VERIFY"
-    CONFIRMANDO_DISTANCIA = "GREEN_5CM_VERIFY"
-    CONCLUIDO = "GREEN_ARRIVAL_5CM"
+    CONFIRMANDO_DISTANCIA = "GREEN_6CM_VERIFY"
+    CONCLUIDO = "GREEN_ARRIVAL_6CM"
     FALHA = "GREEN_FINAL_FAULT"
 
     def __init__(self, start_time=None, avanco_direto=False):
@@ -207,7 +207,7 @@ class ControladorRetanguloVerde:
                 >= cfg.RESCUE_GREEN_FINAL_MAX_ACTIVE_S
             ):
                 return self._falhar(
-                    "ultrassonico nao confirmou 5 cm dentro do tempo limite")
+                    "ultrassonico nao confirmou 6 cm dentro do tempo limite")
             if ultrassonico_falhou:
                 return self._falhar(
                     "ultrassonico ficou tres leituras sem eco; "
@@ -227,7 +227,7 @@ class ControladorRetanguloVerde:
             if distancia_atual_mm <= cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM:
                 return self._parar(
                     self.CONFIRMANDO_DISTANCIA,
-                    "distancia em ate 5 cm; confirmando parado",
+                    "distancia em ate 6 cm; confirmando parado",
                 )
             return MotionCommand(
                 self.APROXIMACAO_FINAL,

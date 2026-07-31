@@ -4,7 +4,7 @@
 Depois de cada coleta, a vítima prata é selecionada pela garra esquerda e a
 preta pela direita. O robô volta à busca pulsada. Duas passagens separadas
 pelo marcador verde sem uma coleta no meio encerram a procura. Então o robô
-avança até o ultrassônico confirmar 5 cm do retângulo verde. Se houver vítima
+avança até o ultrassônico confirmar 6 cm do retângulo verde. Se houver vítima
 prata armazenada, gira 180 graus, alinha de ré e esvazia o lado esquerdo da
 caçamba antes de encerrar.
 
@@ -1047,7 +1047,7 @@ def main():
                 and comando.terminal
             ):
                 print(
-                    "[resgate] chegada a 5 cm confirmada; vitimas prata "
+                    "[resgate] chegada a 6 cm confirmada; vitimas prata "
                     f"armazenadas={vitimas_prata_resgatadas}")
                 controlador_verde = None
                 monitor_chegada_verde = None

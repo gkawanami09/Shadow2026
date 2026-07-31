@@ -1,4 +1,4 @@
-"""Sequencia final para liberar as vitimas prata do lado esquerdo."""
+"""Sequencia final para liberar as vitimas prata pela saida configurada."""
 
 from dataclasses import dataclass
 import time
@@ -39,7 +39,7 @@ class _Etapa:
 
 
 class SequenciadorDepositoCinza:
-    """Gira, encosta, abre a esquerda, sacode e restaura a cacamba."""
+    """Gira, encosta, abre a saida da prata, sacode e restaura a cacamba."""
 
     INICIO = "SILVER_DEPOSIT_START"
     CONCLUIDO = "SILVER_DEPOSIT_COMPLETE"
@@ -160,8 +160,8 @@ class SequenciadorDepositoCinza:
                 0.12,
             ),
             _Etapa(
-                "BUCKET_OPEN_LEFT",
-                "abrindo cacamba da prata: 90 para 180 graus",
+                "BUCKET_OPEN_RIGHT",
+                "abrindo cacamba da prata: 90 para 0 graus",
                 190,
                 0.0,
                 cfg.SILVER_DEPOSIT_BUCKET_SETTLE_S,
@@ -205,7 +205,7 @@ class SequenciadorDepositoCinza:
 
         etapas.append(_Etapa(
             "BUCKET_RESTORE",
-            "restaurando cacamba de 180 para 90 graus",
+            "restaurando cacamba de 0 para 90 graus",
             190,
             0.0,
             cfg.SILVER_DEPOSIT_BUCKET_RESTORE_S,

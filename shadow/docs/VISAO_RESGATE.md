@@ -67,8 +67,8 @@ frames distintos com pelo menos 88% do campo útil verde.
 A confirmação da chegada ao verde sempre inicia a sequência física final. O
 contador de vítimas prata aparece apenas na telemetria e não bloqueia um teste
 com a esfera colocada manualmente na caçamba: giro tanque de aproximadamente
-180° (1,77 s no PWM calibrado de 80), ré de 3 s, `CACAMBA +90` para ir de 90°
-a 180°, duas sacudidas curtas para frente e para trás e `CACAMBA -90` para
+180° (1,77 s no PWM calibrado de 80), ré de 3 s, `CACAMBA -90` para ir de 90°
+a 0°, duas sacudidas curtas para frente e para trás e `CACAMBA +90` para
 restaurar a posição de 90°.
 
 O transporte de cada vítima até um depósito e a saída da sala **não** estão
