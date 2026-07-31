@@ -67,10 +67,14 @@ frames distintos com pelo menos 88% do campo útil verde.
 A confirmação da chegada ao verde sempre inicia a sequência física final. O
 contador de vítimas prata aparece apenas na telemetria e não bloqueia um teste
 com a esfera colocada manualmente na caçamba: avança 1 s, dá ré 0,5 s, gira em
-tanque aproximadamente 180° (1,97 s no PWM calibrado de 80), dá outra ré de
+tanque aproximadamente 180° (2,27 s no PWM calibrado de 80), dá outra ré de
 3 s, usa `CACAMBA -90` para ir de 90° a 0°, faz duas sacudidas curtas para
 frente e para trás, usa `CACAMBA +90` para restaurar a posição de 90° e avança
-reto por mais 1,5 s antes de parar.
+reto por mais 1,5 s antes de parar. Ao terminar o depósito verde, inicia uma
+varredura pelo marcador vermelho, repete o alinhamento visual e a aproximação
+ultrassônica e executa a mesma sequência. No vermelho, a caçamba abre de 90°
+para 180° e depois retorna de 180° para 90°; no verde, continua abrindo de 90°
+para 0° e retornando para 90°.
 
 O transporte de cada vítima até um depósito e a saída da sala **não** estão
 no fluxo atual. A navegação visual de `deposito_resgate.py` é reaproveitada

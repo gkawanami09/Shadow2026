@@ -39,13 +39,20 @@ class _Etapa:
 
 
 class SequenciadorDepositoCinza:
-    """Gira, encosta, abre a saida da prata, sacode e restaura a cacamba."""
+    """Gira, encosta, abre o lado escolhido, sacode e restaura a cacamba."""
 
     INICIO = "SILVER_DEPOSIT_START"
     CONCLUIDO = "SILVER_DEPOSIT_COMPLETE"
     FALHA = "SILVER_DEPOSIT_FAULT"
 
-    def __init__(self):
+    def __init__(self, marcador_destino="green"):
+        if marcador_destino not in ("green", "red"):
+            raise ValueError("marcador_destino deve ser green ou red")
+        self.marcador_destino = marcador_destino
+        if marcador_destino == "red":
+            self.INICIO = "BLACK_DEPOSIT_START"
+            self.CONCLUIDO = "BLACK_DEPOSIT_COMPLETE"
+            self.FALHA = "BLACK_DEPOSIT_FAULT"
         self._etapas = self._montar_etapas()
         self._indice = 0
         self._ativa = False
@@ -73,9 +80,12 @@ class SequenciadorDepositoCinza:
                 terminal=True,
             )
         if self._indice >= len(self._etapas):
+            destino = (
+                "verde" if self.marcador_destino == "green" else "vermelho")
             return PassoDepositoCinza(
                 self.CONCLUIDO,
-                "vitimas prata liberadas e cacamba restaurada para 90 graus",
+                f"deposito {destino} concluido e cacamba restaurada "
+                "para 90 graus",
                 terminal=True,
             )
 
@@ -121,15 +131,36 @@ class SequenciadorDepositoCinza:
             terminal=True,
         )
 
-    @staticmethod
-    def _estado_pendente(etapa):
-        return f"SILVER_DEPOSIT_{etapa.nome}_PENDING"
+    def _estado_pendente(self, etapa):
+        prefixo = (
+            "SILVER_DEPOSIT"
+            if self.marcador_destino == "green"
+            else "BLACK_DEPOSIT"
+        )
+        return f"{prefixo}_{etapa.nome}_PENDING"
 
-    @staticmethod
-    def _estado_ativo(etapa):
-        return f"SILVER_DEPOSIT_{etapa.nome}"
+    def _estado_ativo(self, etapa):
+        prefixo = (
+            "SILVER_DEPOSIT"
+            if self.marcador_destino == "green"
+            else "BLACK_DEPOSIT"
+        )
+        return f"{prefixo}_{etapa.nome}"
 
     def _montar_etapas(self):
+        deposito_verde = self.marcador_destino == "green"
+        delta_abertura = (
+            cfg.SILVER_DEPOSIT_BUCKET_OPEN_DELTA
+            if deposito_verde
+            else cfg.BLACK_DEPOSIT_BUCKET_OPEN_DELTA
+        )
+        delta_restauracao = (
+            cfg.SILVER_DEPOSIT_BUCKET_RESTORE_DELTA
+            if deposito_verde
+            else cfg.BLACK_DEPOSIT_BUCKET_RESTORE_DELTA
+        )
+        destino = "verde" if deposito_verde else "vermelho"
+        posicao_aberta = 0 if deposito_verde else 180
         etapas = [
             _Etapa(
                 "PRE_TURN_FORWARD",
@@ -188,12 +219,13 @@ class SequenciadorDepositoCinza:
                 0.12,
             ),
             _Etapa(
-                "BUCKET_OPEN_RIGHT",
-                "abrindo cacamba da prata: 90 para 0 graus",
+                f"BUCKET_OPEN_{self.marcador_destino.upper()}",
+                f"abrindo cacamba para o deposito {destino}: "
+                f"90 para {posicao_aberta} graus",
                 190,
                 0.0,
                 cfg.SILVER_DEPOSIT_BUCKET_SETTLE_S,
-                cfg.SILVER_DEPOSIT_BUCKET_OPEN_DELTA,
+                delta_abertura,
             ),
         ]
         self._indice_abertura = len(etapas) - 1
@@ -233,11 +265,11 @@ class SequenciadorDepositoCinza:
 
         etapas.append(_Etapa(
             "BUCKET_RESTORE",
-            "restaurando cacamba de 0 para 90 graus",
+            f"restaurando cacamba de {posicao_aberta} para 90 graus",
             190,
             0.0,
             cfg.SILVER_DEPOSIT_BUCKET_RESTORE_S,
-            cfg.SILVER_DEPOSIT_BUCKET_RESTORE_DELTA,
+            delta_restauracao,
         ))
         self._indice_restauracao = len(etapas) - 1
         etapas.extend((

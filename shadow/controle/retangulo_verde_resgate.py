@@ -104,7 +104,7 @@ def medir_verde(mascara_verde):
 
 
 class ControladorRetanguloVerde:
-    """Procura o verde e controla a aproximacao final ao deposito."""
+    """Procura o marcador escolhido e controla a aproximacao ao deposito."""
 
     APROXIMACAO_FINAL = "GREEN_FINAL_APPROACH"
     CONFIRMANDO_TELA = "GREEN_FULL_VERIFY"
@@ -112,9 +112,23 @@ class ControladorRetanguloVerde:
     CONCLUIDO = "GREEN_ARRIVAL_7CM"
     FALHA = "GREEN_FINAL_FAULT"
 
-    def __init__(self, start_time=None, avanco_direto=False):
+    def __init__(
+        self,
+        start_time=None,
+        avanco_direto=False,
+        target_kind="green",
+    ):
+        if target_kind not in ("green", "red"):
+            raise ValueError("target_kind deve ser green ou red")
+        self.target_kind = target_kind
+        if target_kind == "red":
+            self.APROXIMACAO_FINAL = "RED_FINAL_APPROACH"
+            self.CONFIRMANDO_TELA = "RED_FULL_VERIFY"
+            self.CONFIRMANDO_DISTANCIA = "RED_7CM_VERIFY"
+            self.CONCLUIDO = "RED_ARRIVAL_7CM"
+            self.FALHA = "RED_FINAL_FAULT"
         self.navegacao = DepositMarkerController(
-            "green",
+            target_kind,
             start_time=start_time,
             near_confirm_frames=(
                 cfg.RESCUE_GREEN_CAMERA_NEAR_CONFIRM_FRAMES
@@ -160,7 +174,7 @@ class ControladorRetanguloVerde:
 
     def update(
         self,
-        deteccao_verde,
+        deteccao_marcador,
         formato_frame,
         mascara_verde=None,
         timestamp_frame=None,
@@ -187,9 +201,10 @@ class ControladorRetanguloVerde:
             )
 
         if self.confirmador.confirmado:
+            nome = "verde" if self.target_kind == "green" else "vermelho"
             return self._parar(
                 self.CONCLUIDO,
-                "retangulo verde ocupa toda a camera; resgate encerrado",
+                f"retangulo {nome} ocupa toda a camera; deposito autorizado",
                 terminal=True,
             )
         if self._detalhe_falha:
@@ -198,7 +213,7 @@ class ControladorRetanguloVerde:
 
         if not self.aproximacao_final:
             return self.navegacao.update(
-                deteccao_verde, formato_frame, now=agora)
+                deteccao_marcador, formato_frame, now=agora)
 
         if self._chegada_por_ultrassom:
             if (
@@ -267,9 +282,11 @@ class ControladorRetanguloVerde:
             confirmado = self.confirmador.observar(
                 mascara_verde, timestamp_frame)
             if confirmado:
+                nome = (
+                    "verde" if self.target_kind == "green" else "vermelho")
                 return self._parar(
                     self.CONCLUIDO,
-                    "retangulo verde ocupa toda a camera; "
+                    f"retangulo {nome} ocupa toda a camera; "
                     f"cobertura={self.confirmador.proporcao:.0%}",
                     terminal=True,
                 )
@@ -361,14 +378,16 @@ class ControladorRetanguloVerde:
             agora - self._ultimo_verde_em
             >= cfg.RESCUE_GREEN_FINAL_LOST_TIMEOUT_S
         ):
+            nome = "verde" if self.target_kind == "green" else "vermelho"
             return self._falhar(
-                "verde sumiu durante a aproximacao final")
+                f"{nome} sumiu durante a aproximacao final")
+        nome = "verde" if self.target_kind == "green" else "vermelho"
         return MotionCommand(
             self.APROXIMACAO_FINAL,
             angle=0,
             speed=cfg.RESCUE_GREEN_FINAL_FORWARD_SPEED,
             detail=(
-                f"verde oscilou ({proporcao:.1%}); mantendo reto em PWM "
+                f"{nome} oscilou ({proporcao:.1%}); mantendo reto em PWM "
                 f"{cfg.RESCUE_GREEN_FINAL_PWM}"
             ),
         )

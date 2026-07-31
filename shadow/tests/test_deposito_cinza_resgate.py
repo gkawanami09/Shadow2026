@@ -16,6 +16,8 @@ from controle.deposito_cinza_resgate import (  # noqa: E402
 from resgate import (  # noqa: E402
     _aplicar_acoes_deposito_cinza,
     _preparar_deposito_cinza,
+    _preparar_deposito_final,
+    _proximo_marcador_deposito,
 )
 
 
@@ -50,7 +52,7 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertFalse(comando.terminal)
         self.assertIn("iniciando giro", comando.detail)
 
-    def test_giro_de_180_usa_metade_do_360_mais_duzentos_ms(self):
+    def test_giro_de_180_usa_metade_do_360_mais_quinhentos_ms(self):
         self.assertAlmostEqual(
             cfg.SILVER_DEPOSIT_TURN_S,
             (
@@ -59,7 +61,7 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
             ),
             places=6,
         )
-        self.assertAlmostEqual(cfg.SILVER_DEPOSIT_TURN_S, 1.97, places=2)
+        self.assertAlmostEqual(cfg.SILVER_DEPOSIT_TURN_S, 2.27, places=2)
 
         sequenciador = SequenciadorDepositoCinza()
         giro = next(
@@ -103,7 +105,7 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         indice_re = next(
             i for i, nome in enumerate(nomes) if "REVERSE_ALIGN" in nome)
         indice_abertura = next(
-            i for i, nome in enumerate(nomes) if "BUCKET_OPEN_RIGHT" in nome)
+            i for i, nome in enumerate(nomes) if "BUCKET_OPEN_GREEN" in nome)
         indice_restauracao = next(
             i for i, nome in enumerate(nomes) if "BUCKET_RESTORE" in nome)
         indice_saida = next(
@@ -124,6 +126,37 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertEqual(final.state, SequenciadorDepositoCinza.CONCLUIDO)
         self.assertTrue(final.terminal)
         self.assertEqual(final.angle, 190)
+
+    def test_vermelho_abre_e_restaura_a_cacamba_no_lado_oposto(self):
+        sequenciador = SequenciadorDepositoCinza("red")
+        agora = 10.0
+        deltas = []
+
+        while True:
+            passo = sequenciador.update(now=agora)
+            if passo.terminal:
+                final = passo
+                break
+            if passo.bucket_delta is not None:
+                deltas.append(passo.bucket_delta)
+            duracao = sequenciador._etapas[sequenciador._indice].duracao
+            self.assertTrue(sequenciador.notify_command_written(
+                passo.state, now=agora))
+            agora += duracao
+
+        self.assertEqual(deltas, [90, -90])
+        self.assertEqual(final.state, "BLACK_DEPOSIT_COMPLETE")
+        self.assertTrue(final.terminal)
+
+    def test_depois_do_verde_procura_vermelho_e_so_entao_encerra(self):
+        self.assertEqual(_proximo_marcador_deposito("green"), "red")
+        self.assertIsNone(_proximo_marcador_deposito("red"))
+
+        sequenciador, comando = _preparar_deposito_final("red", 1)
+        self.assertEqual(sequenciador.marcador_destino, "red")
+        self.assertEqual(comando.state, "BLACK_DEPOSIT_START")
+        self.assertIn("preta", comando.detail)
+        self.assertIn("vermelho", comando.detail)
 
     def test_avanco_e_re_antes_do_giro_usam_os_tempos_calibrados(self):
         sequenciador = SequenciadorDepositoCinza()

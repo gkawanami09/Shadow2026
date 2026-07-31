@@ -117,6 +117,25 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertTrue(mudou)
         self.assertTrue(self.controlador.aproximacao_final)
 
+    def test_mesma_logica_pode_procurar_e_confirmar_o_vermelho(self):
+        controlador = ControladorRetanguloVerde(
+            start_time=0.0,
+            avanco_direto=True,
+            target_kind="red",
+        )
+
+        self.assertEqual(controlador.target_kind, "red")
+        self.assertEqual(controlador.navegacao.target_kind, "red")
+        chegada = controlador.update(
+            None,
+            FORMATO,
+            now=0.1,
+            distancia_chegada_mm=cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM,
+            distancia_atual_mm=cfg.RESCUE_GREEN_ARRIVAL_DISTANCE_MM,
+        )
+        self.assertEqual(chegada.state, "RED_ARRIVAL_7CM")
+        self.assertTrue(chegada.terminal)
+
     def test_avanca_reto_em_pwm_80_mesmo_com_verde_de_um_lado(self):
         comando = self.controlador.update(
             None,

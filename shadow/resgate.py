@@ -4,9 +4,9 @@
 Depois de cada coleta, a vítima prata é selecionada pela garra esquerda e a
 preta pela direita. O robô volta à busca pulsada. Duas passagens separadas
 pelo marcador verde sem uma coleta no meio encerram a procura. Então o robô
-avança até o ultrassônico confirmar 7 cm do retângulo verde. Se houver vítima
-prata armazenada, gira 180 graus, alinha de ré e esvazia o lado esquerdo da
-caçamba antes de encerrar.
+avança até o ultrassônico confirmar 7 cm do retângulo verde, executa o
+depósito desse lado e então procura o vermelho. No vermelho repete a mesma
+sequência física, abrindo a caçamba para o lado oposto antes de encerrar.
 
 Arquitetura da visão
 --------------------
@@ -240,13 +240,13 @@ def _aplicar_acoes_deposito_cinza(
 
     try:
         if serial_mudou():
-            return "serial mudou durante o deposito da vitima prata"
+            return "serial mudou durante o deposito final"
         if acao_direcao(passo.angle, passo.speed) is False:
             return abortar(
                 "comando dos motores do deposito nao foi enviado")
         if serial_mudou():
             return abortar(
-                "serial mudou durante o deposito da vitima prata")
+                "serial mudou durante o deposito final")
 
         if passo.bucket_delta is not None:
             if arduino.servo("CACAMBA", passo.bucket_delta) is False:
@@ -254,25 +254,44 @@ def _aplicar_acoes_deposito_cinza(
                     "comando do servo da cacamba nao foi enviado")
             if serial_mudou():
                 return abortar(
-                    "serial mudou durante o deposito da vitima prata")
+                    "serial mudou durante o deposito final")
     except Exception as err:                         # noqa: BLE001
         return abortar(f"falha ao comandar deposito: {err}")
     return None
 
 
-def _preparar_deposito_cinza(vitimas_prata_resgatadas):
-    """Cria a sequencia fisica final sem depender do contador da coleta."""
-    quantidade = max(int(vitimas_prata_resgatadas), 0)
+def _preparar_deposito_final(marcador_destino, vitimas_resgatadas):
+    """Cria a sequencia fisica do marcador e do lado correspondente."""
+    if marcador_destino not in ("green", "red"):
+        raise ValueError("marcador_destino deve ser green ou red")
+    quantidade = max(int(vitimas_resgatadas), 0)
+    cor_vitima = "prata" if marcador_destino == "green" else "preta"
+    lado = "verde" if marcador_destino == "green" else "vermelho"
+    sequenciador = SequenciadorDepositoCinza(marcador_destino)
     return (
-        SequenciadorDepositoCinza(),
+        sequenciador,
         MotionCommand(
-            SequenciadorDepositoCinza.INICIO,
+            sequenciador.INICIO,
             detail=(
-                f"{quantidade} vitima(s) prata registrada(s); "
-                "iniciando giro e deposito esquerdo"
+                f"{quantidade} vitima(s) {cor_vitima} registrada(s); "
+                f"iniciando giro e deposito {lado}"
             ),
         ),
     )
+
+
+def _preparar_deposito_cinza(vitimas_prata_resgatadas):
+    """Mantem a entrada antiga para o deposito prata no marcador verde."""
+    return _preparar_deposito_final("green", vitimas_prata_resgatadas)
+
+
+def _proximo_marcador_deposito(marcador_atual):
+    """Depois do verde vem o vermelho; depois do vermelho a rota termina."""
+    if marcador_atual == "green":
+        return "red"
+    if marcador_atual == "red":
+        return None
+    raise ValueError("marcador_atual deve ser green ou red")
 
 
 def _armar_coleta_confirmada(
@@ -479,6 +498,7 @@ def main():
     varreduras_sem_vitima = 0
     vitimas_resgatadas = 0
     vitimas_prata_resgatadas = 0
+    vitimas_pretas_resgatadas = 0
     amostras_captura = deque(maxlen=60)
     instantes_deteccao = deque(maxlen=30)
 
@@ -751,8 +771,8 @@ def main():
                 comando_atualizado = True
             elif controlador_verde is not None:
                 # A camera primeiro confirma, centraliza e se aproxima do
-                # verde. Somente depois da parada visual o ultrassonico e
-                # habilitado para os centimetros finais.
+                # marcador escolhido. Somente depois da parada visual o
+                # ultrassonico e habilitado para os centimetros finais.
                 if resultado is not None:
                     sequencia_resultado = resultado.sequence
                     metricas = resultado
@@ -770,12 +790,14 @@ def main():
                     "ultrassonico_sem_eco": ultrassonico_verde_sem_eco,
                     "ultrassonico_falhou": ultrassonico_verde_falhou,
                 }
+                marcador_destino = controlador_verde.target_kind
+                deteccao_destino = marcadores_atuais.get(marcador_destino)
                 if (
                     distancia_chegada_verde_mm is not None
                     or medicao_ultrassom_verde_atualizada
                 ):
                     comando = controlador_verde.update(
-                        marcadores_atuais.get("green"),
+                        deteccao_destino,
                         forma,
                         now=agora,
                         **dados_ultrassom,
@@ -784,10 +806,10 @@ def main():
                     ultimo_controle_ocioso = agora
                 elif frame_novo:
                     comando = controlador_verde.update(
-                        marcadores_atuais.get("green"),
+                        deteccao_destino,
                         forma,
                         mascara_verde=(
-                            marcadores.mascaras.get("green")
+                            marcadores.mascaras.get(marcador_destino)
                             if marcadores is not None else None
                         ),
                         timestamp_frame=pacote.captured_at,
@@ -1037,22 +1059,78 @@ def main():
                     )
                 ):
                     raise RuntimeError(
-                        "serial mudou durante o deposito da vitima prata; "
+                        "serial mudou durante o deposito final; "
                         "motores parados e cacamba nao comandada")
 
             if (
                 args.drive
+                and deposito_cinza is not None
+                and passo_deposito_cinza is not None
+                and passo_deposito_cinza.state == deposito_cinza.CONCLUIDO
+                and passo_deposito_cinza.terminal
+            ):
+                marcador_concluido = deposito_cinza.marcador_destino
+                proximo_marcador = _proximo_marcador_deposito(
+                    marcador_concluido)
+                if proximo_marcador is not None:
+                    print(
+                        "[resgate] deposito verde concluido; "
+                        "iniciando procura pelo marcador vermelho")
+                    deposito_cinza = None
+                    epoca_deposito_cinza = None
+                    if marcadores is None:
+                        comando = MotionCommand(
+                            "RED_FINAL_FAULT",
+                            detail=(
+                                "deposito verde terminou, mas os marcadores "
+                                "estao desativados; robo parado"),
+                            terminal=True,
+                        )
+                    else:
+                        marcadores.reset()
+                        marcadores_atuais = {}
+                        controlador_verde = ControladorRetanguloVerde(
+                            start_time=agora,
+                            target_kind=proximo_marcador,
+                        )
+                        monitor_chegada_verde = None
+                        proxima_atualizacao_ultrassom_verde = 0.0
+                        epoca_verde = (
+                            arduino.connection_epoch
+                            if arduino is not None else None
+                        )
+                        ultimo_controle_ocioso = 0.0
+                        comando = MotionCommand(
+                            "RED_ROUTE_START",
+                            detail=(
+                                "reto final do verde concluido; procurando "
+                                "e alinhando ao retangulo vermelho"),
+                        )
+                        comando_atualizado = False
+
+            if (
+                args.drive
                 and controlador_verde is not None
-                and comando.state == ControladorRetanguloVerde.CONCLUIDO
+                and comando.state == controlador_verde.CONCLUIDO
                 and comando.terminal
             ):
+                marcador_chegada = controlador_verde.target_kind
+                nome_marcador = (
+                    "verde" if marcador_chegada == "green" else "vermelho")
+                quantidade_destino = (
+                    vitimas_prata_resgatadas
+                    if marcador_chegada == "green"
+                    else vitimas_pretas_resgatadas
+                )
                 print(
-                    "[resgate] chegada a 7 cm confirmada; vitimas prata "
-                    f"armazenadas={vitimas_prata_resgatadas}")
+                    f"[resgate] chegada a 7 cm do {nome_marcador} "
+                    f"confirmada; vitimas armazenadas={quantidade_destino}")
                 controlador_verde = None
                 monitor_chegada_verde = None
-                deposito_cinza, comando = _preparar_deposito_cinza(
-                    vitimas_prata_resgatadas)
+                deposito_cinza, comando = _preparar_deposito_final(
+                    marcador_chegada,
+                    quantidade_destino,
+                )
                 epoca_verde = None
                 epoca_deposito_cinza = (
                     arduino.connection_epoch
@@ -1065,6 +1143,8 @@ def main():
                 vitimas_resgatadas += 1
                 if coleta_concluida == "silver":
                     vitimas_prata_resgatadas += 1
+                elif coleta_concluida == "black":
+                    vitimas_pretas_resgatadas += 1
                 contador_verde.reset()
                 varreduras_sem_vitima = 0
                 epoca_coleta = None
