@@ -111,7 +111,7 @@ class ControladorRetanguloVerde:
     CONCLUIDO = "GREEN_FULL_FRAME"
     FALHA = "GREEN_FINAL_FAULT"
 
-    def __init__(self, start_time=None):
+    def __init__(self, start_time=None, avanco_direto=False):
         self.navegacao = DepositMarkerController(
             "green", start_time=start_time)
         self.confirmador = ConfirmadorTelaVerde()
@@ -120,6 +120,16 @@ class ControladorRetanguloVerde:
         self._ultimo_frame_em = None
         self._ultimo_verde_em = None
         self._detalhe_falha = ""
+        if avanco_direto:
+            self.iniciar_avanco_direto()
+
+    def iniciar_avanco_direto(self):
+        """Pula a procura: o segundo verde ja fornece a direcao do painel."""
+        self.aproximacao_final = True
+        self.confirmador.reset()
+        self._aproximacao_iniciada_em = None
+        self._ultimo_frame_em = None
+        self._ultimo_verde_em = None
 
     @property
     def terminal(self):
@@ -275,26 +285,23 @@ class ControladorRetanguloVerde:
         ):
             return self._falhar(
                 "verde sumiu durante a aproximacao final")
-        return self._parar(
+        return MotionCommand(
             self.APROXIMACAO_FINAL,
-            f"verde insuficiente ({proporcao:.0%}); robo parado",
+            angle=0,
+            speed=cfg.RESCUE_GREEN_FINAL_FORWARD_SPEED,
+            detail=(
+                f"verde oscilou ({proporcao:.1%}); mantendo reto em PWM "
+                f"{cfg.RESCUE_GREEN_FINAL_PWM}"
+            ),
         )
 
     def _avancar(self, erro, proporcao):
-        if abs(erro) <= cfg.RESCUE_GREEN_FINAL_CENTER_DEADBAND:
-            angulo = 0
-        else:
-            angulo = int(round(np.clip(
-                erro * cfg.RESCUE_GREEN_FINAL_STEER_MAX_ANGLE,
-                -cfg.RESCUE_GREEN_FINAL_STEER_MAX_ANGLE,
-                cfg.RESCUE_GREEN_FINAL_STEER_MAX_ANGLE,
-            )))
         return MotionCommand(
             self.APROXIMACAO_FINAL,
-            angle=angulo,
+            angle=0,
             speed=cfg.RESCUE_GREEN_FINAL_FORWARD_SPEED,
             detail=(
-                "avancando sobre o retangulo verde; "
+                f"avancando reto em PWM {cfg.RESCUE_GREEN_FINAL_PWM}; "
                 f"cobertura={proporcao:.0%}, erro={erro:+.2f}"
             ),
         )

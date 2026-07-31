@@ -94,7 +94,7 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertTrue(mudou)
         self.assertTrue(self.controlador.aproximacao_final)
 
-    def test_avanca_corrigindo_para_o_lado_do_verde(self):
+    def test_avanca_reto_em_pwm_80_mesmo_com_verde_de_um_lado(self):
         comando = self.controlador.update(
             None,
             FORMATO,
@@ -105,9 +105,32 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
 
         self.assertEqual(
             comando.state, self.controlador.APROXIMACAO_FINAL)
-        self.assertGreater(comando.angle, 0)
+        self.assertEqual(comando.angle, 0)
         self.assertEqual(
             comando.speed, cfg.RESCUE_GREEN_FINAL_FORWARD_SPEED)
+        self.assertEqual(
+            round(comando.speed * 120), cfg.RESCUE_GREEN_FINAL_PWM)
+
+    def test_segundo_verde_pode_iniciar_avanco_sem_nova_procura(self):
+        controlador = ControladorRetanguloVerde(
+            start_time=0.0,
+            avanco_direto=True,
+        )
+
+        comando = controlador.update(
+            None,
+            FORMATO,
+            mascara_verde=mascara_com_faixa(180, 460),
+            timestamp_frame=0.01,
+            now=0.01,
+        )
+
+        self.assertTrue(controlador.aproximacao_final)
+        self.assertEqual(comando.state, controlador.APROXIMACAO_FINAL)
+        self.assertEqual(comando.angle, 0)
+        self.assertEqual(
+            round(comando.speed * 120), cfg.RESCUE_GREEN_FINAL_PWM)
+        self.assertNotIn("procurando", comando.detail.lower())
 
     def test_para_para_confirmar_e_encerra_no_terceiro_frame(self):
         cheia = np.full(FORMATO[:2], 255, dtype=np.uint8)
@@ -136,7 +159,7 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertEqual(comando.speed, 0.0)
         self.assertFalse(comando.terminal)
 
-    def test_para_em_falha_se_o_verde_sumir(self):
+    def test_mantem_reto_na_oscilacao_e_falha_se_o_verde_sumir(self):
         vazio = np.zeros(FORMATO[:2], dtype=np.uint8)
         primeiro = self.controlador.update(
             None, FORMATO, vazio, 0.01, now=0.01)
@@ -148,7 +171,9 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
             now=0.01 + cfg.RESCUE_GREEN_FINAL_LOST_TIMEOUT_S,
         )
 
-        self.assertEqual(primeiro.angle, 190)
+        self.assertEqual(primeiro.angle, 0)
+        self.assertEqual(
+            round(primeiro.speed * 120), cfg.RESCUE_GREEN_FINAL_PWM)
         self.assertFalse(primeiro.terminal)
         self.assertEqual(falha.state, self.controlador.FALHA)
         self.assertTrue(falha.terminal)

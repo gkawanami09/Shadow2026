@@ -593,6 +593,32 @@ def main():
                             "[resgate] passagem verde "
                             f"{contador_verde.quantidade}/"
                             f"{contador_verde.necessario}")
+                        if args.drive and contador_verde.completo:
+                            # A segunda passagem foi confirmada com o robo
+                            # parado durante SEARCH_OBSERVE. O painel ja esta
+                            # no quadro: nao terminar a volta nem iniciar uma
+                            # nova procura. Este mesmo frame comanda o avanco.
+                            if trabalhador is not None:
+                                trabalhador.reset_tracking()
+                            portao.reset()
+                            busca = None
+                            controlador = None
+                            controlador_verde = ControladorRetanguloVerde(
+                                start_time=agora,
+                                avanco_direto=True,
+                            )
+                            epoca_busca = None
+                            epoca_verde = (
+                                arduino.connection_epoch
+                                if arduino is not None else None
+                            )
+                            resultado_atual = None
+                            deteccao_atual = None
+                            ultimo_controle_ocioso = 0.0
+                            print(
+                                "[resgate] GREEN_ROUTE_START: segundo verde "
+                                "confirmado; avancando reto ate a camera "
+                                "ficar verde")
 
             resultado = None
             if trabalhador is not None:
@@ -925,23 +951,26 @@ def main():
                 and controlador_verde is not None
                 and comando.state == ControladorRetanguloVerde.CONCLUIDO
                 and comando.terminal
-                and vitimas_prata_resgatadas > 0
             ):
-                controlador_verde = None
-                deposito_cinza = SequenciadorDepositoCinza()
-                epoca_verde = None
-                epoca_deposito_cinza = (
-                    arduino.connection_epoch
-                    if arduino is not None else None
-                )
-                ultimo_controle_ocioso = 0.0
-                comando = MotionCommand(
-                    SequenciadorDepositoCinza.INICIO,
-                    detail=(
-                        f"{vitimas_prata_resgatadas} vitima(s) prata "
-                        "armazenada(s); iniciando deposito esquerdo"),
-                )
-                comando_atualizado = False
+                print(
+                    "[resgate] tela verde confirmada; vitimas prata "
+                    f"armazenadas={vitimas_prata_resgatadas}")
+                if vitimas_prata_resgatadas > 0:
+                    controlador_verde = None
+                    deposito_cinza = SequenciadorDepositoCinza()
+                    epoca_verde = None
+                    epoca_deposito_cinza = (
+                        arduino.connection_epoch
+                        if arduino is not None else None
+                    )
+                    ultimo_controle_ocioso = 0.0
+                    comando = MotionCommand(
+                        SequenciadorDepositoCinza.INICIO,
+                        detail=(
+                            f"{vitimas_prata_resgatadas} vitima(s) prata "
+                            "armazenada(s); iniciando deposito esquerdo"),
+                    )
+                    comando_atualizado = False
 
             if coleta_concluida is not None:
                 vitimas_resgatadas += 1
@@ -996,7 +1025,9 @@ def main():
                         busca = None
                         controlador = None
                         controlador_verde = ControladorRetanguloVerde(
-                            start_time=agora)
+                            start_time=agora,
+                            avanco_direto=True,
+                        )
                         epoca_busca = None
                         epoca_verde = (
                             arduino.connection_epoch

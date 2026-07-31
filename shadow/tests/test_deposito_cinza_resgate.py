@@ -112,6 +112,11 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         sequenciador = SequenciadorDepositoCinza()
         nomes = [etapa.nome for etapa in sequenciador._etapas]
 
+        self.assertEqual(
+            round(cfg.SILVER_DEPOSIT_SHAKE_SPEED * 120),
+            cfg.SILVER_DEPOSIT_SHAKE_PWM,
+        )
+
         for numero in range(1, cfg.SILVER_DEPOSIT_SHAKE_REPETITIONS + 1):
             frente = nomes.index(f"SHAKE_FORWARD_{numero}")
             parada = nomes.index(f"SHAKE_FRONT_STOP_{numero}")
