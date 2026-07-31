@@ -50,6 +50,29 @@ class ContadorVerdeBuscaTests(unittest.TestCase):
         self.assertTrue(contador.observar(VerdeFalso(3.0)))
         self.assertTrue(contador.completo)
 
+    def test_mesmo_giro_com_oscilacao_nao_conta_o_verde_duas_vezes(self):
+        contador = ContadorVerdeBusca(necessario=2, frames_para_rearmar=3)
+
+        self.assertTrue(contador.observar(VerdeFalso(1.0), varredura=0))
+        for _ in range(6):
+            contador.observar(None, varredura=0)
+        self.assertFalse(
+            contador.observar(VerdeFalso(2.0), varredura=0))
+        self.assertEqual(contador.quantidade, 1)
+        self.assertFalse(contador.completo)
+
+    def test_segunda_varredura_pode_confirmar_a_segunda_passagem(self):
+        contador = ContadorVerdeBusca(necessario=2, frames_para_rearmar=3)
+
+        contador.observar(VerdeFalso(1.0), varredura=0)
+        for _ in range(3):
+            contador.observar(None, varredura=0)
+
+        self.assertTrue(
+            contador.observar(VerdeFalso(2.0), varredura=1))
+        self.assertEqual(contador.quantidade, 2)
+        self.assertTrue(contador.completo)
+
     def test_frame_durante_giro_nao_conta_nem_rearma(self):
         contador = ContadorVerdeBusca(necessario=2, frames_para_rearmar=1)
 

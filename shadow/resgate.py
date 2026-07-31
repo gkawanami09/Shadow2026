@@ -625,6 +625,7 @@ def main():
                     somou_verde = contador_verde.observar(
                         marcadores_atuais.get("green"),
                         permitido=busca.frame_allowed(pacote.captured_at),
+                        varredura=varreduras_sem_vitima,
                     )
                     if somou_verde:
                         print(

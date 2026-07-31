@@ -250,9 +250,9 @@ BALL_SEARCH_SECTORS = 9
 BALL_SEARCH_TOTAL_TIMEOUT_S = 75.0
 
 # Fim da busca de vitimas. O verde so conta durante uma observacao parada da
-# busca pulsada. Varios frames seguidos do mesmo marcador valem uma aparicao;
-# ele precisa sumir por tres frames validos antes de poder contar novamente.
-# Uma coleta e selecao concluidas zeram toda esta contagem.
+# busca pulsada. Varios frames seguidos do mesmo marcador valem uma aparicao e
+# cada varredura completa pode somar no maximo uma vez, mesmo se a deteccao
+# oscilar. Uma coleta e selecao concluidas zeram toda esta contagem.
 RESCUE_GREEN_SIGHTINGS_REQUIRED = 2
 RESCUE_GREEN_REARM_FRAMES = 3
 # O rastreador ja exigiu tres aparicoes e a rota so comeca depois da segunda

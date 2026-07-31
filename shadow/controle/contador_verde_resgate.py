@@ -48,13 +48,16 @@ class ContadorVerdeBusca:
         self._verde_armado = False
         self._frames_ausente = 0
         self._ultimo_timestamp = None
+        self._ultima_varredura_contada = None
 
-    def observar(self, deteccao, permitido=True):
+    def observar(self, deteccao, permitido=True, varredura=None):
         """Recebe um frame parado e devolve ``True`` se somou uma passagem.
 
         Frames capturados durante o giro nao contam e tambem nao rearmam o
         contador. Uma deteccao ainda em confirmacao mantem a passagem atual,
-        mas somente uma deteccao confirmada consegue somar.
+        mas somente uma deteccao confirmada consegue somar. Quando o numero da
+        varredura e informado, o mesmo giro completo pode somar no maximo uma
+        passagem, mesmo que o detector oscile ou o verde saia e volte ao quadro.
         """
         if not permitido:
             return False
@@ -78,9 +81,16 @@ class ContadorVerdeBusca:
         self._frames_ausente = 0
         if not bool(getattr(deteccao, "confirmed", False)):
             return False
+        if (
+            varredura is not None
+            and self._ultima_varredura_contada == int(varredura)
+        ):
+            return False
         if self._verde_armado:
             return False
 
         self._verde_armado = True
         self._quantidade += 1
+        if varredura is not None:
+            self._ultima_varredura_contada = int(varredura)
         return True
