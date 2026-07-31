@@ -321,6 +321,12 @@ RESCUE_GREEN_FULL_FRAME_CONFIRM_WINDOW_S = 0.50
 # robo do painel. So depois dessa etapa o avanco final usa o PWM 80.
 RESCUE_GREEN_FINAL_PWM = 80
 RESCUE_GREEN_FINAL_FORWARD_SPEED = RESCUE_GREEN_FINAL_PWM / 120.0
+# O alinhamento antigo usava arco em speed 0,25: com erro +0,58 isso chegava
+# ao chassi como aproximadamente PWM 32/12 e nao vencia o atrito. Na rota
+# final, centralizar usa tanque com o mesmo PWM real 80 da busca; depois a
+# aproximacao visual tambem conserva PWM 80 ate entregar ao ultrassonico.
+RESCUE_GREEN_CAMERA_ALIGN_TANK_SPEED = BALL_SEARCH_TANK_SPEED
+RESCUE_GREEN_CAMERA_APPROACH_SPEED = RESCUE_GREEN_FINAL_FORWARD_SPEED
 # A camera frontal nao consegue ficar totalmente coberta pelo retangulo.
 # A chegada real e confirmada pelo HC-SR04 a 5 cm (o sensor usa milimetros).
 RESCUE_GREEN_ARRIVAL_DISTANCE_MM = 50

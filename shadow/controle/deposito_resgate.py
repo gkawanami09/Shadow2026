@@ -29,6 +29,8 @@ class DepositMarkerController:
         target_kind,
         start_time=None,
         near_confirm_frames=None,
+        align_tank_speed=None,
+        approach_speed=None,
     ):
         if target_kind not in ("green", "red"):
             raise ValueError("marcador deve ser green ou red")
@@ -37,8 +39,18 @@ class DepositMarkerController:
         near_confirm_frames = int(near_confirm_frames)
         if near_confirm_frames < 1:
             raise ValueError("near_confirm_frames deve ser positivo")
+        if align_tank_speed is not None and float(align_tank_speed) <= 0.0:
+            raise ValueError("align_tank_speed deve ser positivo")
+        if approach_speed is not None and float(approach_speed) <= 0.0:
+            raise ValueError("approach_speed deve ser positivo")
         self.target_kind = target_kind
         self.near_confirm_frames = near_confirm_frames
+        self.align_tank_speed = (
+            None if align_tank_speed is None else float(align_tank_speed)
+        )
+        self.approach_speed = (
+            None if approach_speed is None else float(approach_speed)
+        )
         self.state = self.START
         self._created_at = (
             time.monotonic()
@@ -337,6 +349,21 @@ class DepositMarkerController:
         )
         if abs(error) > align_threshold:
             self.state = self.ALIGN
+            if self.align_tank_speed is not None:
+                angle = (
+                    cfg.DEPOSIT_SEARCH_TANK_ANGLE
+                    if error > 0
+                    else -cfg.DEPOSIT_SEARCH_TANK_ANGLE
+                )
+                return MotionCommand(
+                    self.ALIGN,
+                    angle=angle,
+                    speed=self.align_tank_speed,
+                    detail=(
+                        f"centralizando marcador {self.target_kind} em tanque; "
+                        f"erro={error:+.3f}"
+                    ),
+                )
             severity = float(np.clip(
                 (
                     abs(error) - cfg.DEPOSIT_ALIGN_EXIT_ERROR
@@ -386,10 +413,12 @@ class DepositMarkerController:
             0.0,
             1.0,
         ))
-        speed = (
-            cfg.DEPOSIT_APPROACH_SPEED_FAR * (1.0 - near_fraction)
-            + cfg.DEPOSIT_APPROACH_SPEED_NEAR * near_fraction
-        )
+        speed = self.approach_speed
+        if speed is None:
+            speed = (
+                cfg.DEPOSIT_APPROACH_SPEED_FAR * (1.0 - near_fraction)
+                + cfg.DEPOSIT_APPROACH_SPEED_NEAR * near_fraction
+            )
         return MotionCommand(
             self.APPROACH,
             angle=angle,

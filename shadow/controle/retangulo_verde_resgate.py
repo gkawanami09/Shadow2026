@@ -119,6 +119,10 @@ class ControladorRetanguloVerde:
             near_confirm_frames=(
                 cfg.RESCUE_GREEN_CAMERA_NEAR_CONFIRM_FRAMES
             ),
+            align_tank_speed=(
+                cfg.RESCUE_GREEN_CAMERA_ALIGN_TANK_SPEED
+            ),
+            approach_speed=cfg.RESCUE_GREEN_CAMERA_APPROACH_SPEED,
         )
         self.confirmador = ConfirmadorTelaVerde()
         self.aproximacao_final = False

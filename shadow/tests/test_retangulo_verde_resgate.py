@@ -155,7 +155,31 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
             distancia_chegada_mm=30,
         )
         self.assertEqual(alinhando.state, controlador.navegacao.ALIGN)
-        self.assertNotEqual(alinhando.angle, 0)
+        self.assertEqual(alinhando.angle, 180)
+        self.assertEqual(
+            round(alinhando.speed * 120 * 1.2),
+            cfg.RESCUE_GREEN_FINAL_PWM,
+        )
+        self.assertFalse(controlador.ultrassom_habilitado)
+
+        aproximando = controlador.update(
+            marcador_verde(
+                0.06,
+                center_x=320,
+                width=120,
+                bottom_y=380,
+            ),
+            FORMATO,
+            now=0.06,
+            distancia_chegada_mm=30,
+        )
+        self.assertEqual(
+            aproximando.state, controlador.navegacao.APPROACH)
+        self.assertEqual(aproximando.angle, 0)
+        self.assertEqual(
+            round(aproximando.speed * 120),
+            cfg.RESCUE_GREEN_FINAL_PWM,
+        )
         self.assertFalse(controlador.ultrassom_habilitado)
 
         chegada_visual = controlador.update(
