@@ -567,10 +567,13 @@ GREEN_RECTANGLE_ASSOCIATION_SIZE_FACTOR = 1.25
 # comando correspondente e aceito pela serial.
 SILVER_DEPOSIT_PRE_TURN_PWM = 80
 SILVER_DEPOSIT_PRE_TURN_SPEED = SILVER_DEPOSIT_PRE_TURN_PWM / 120.0
-SILVER_DEPOSIT_PRE_TURN_FORWARD_S = 3.0
+SILVER_DEPOSIT_PRE_TURN_FORWARD_S = 0.5
 SILVER_DEPOSIT_PRE_TURN_REVERSE_S = 3.0
 SILVER_DEPOSIT_TURN_SPEED = BALL_SEARCH_TANK_SPEED
-SILVER_DEPOSIT_TURN_S = BALL_SEARCH_FULL_TURN_S / 2.0
+SILVER_DEPOSIT_TURN_EXTRA_S = 0.20
+SILVER_DEPOSIT_TURN_S = (
+    BALL_SEARCH_FULL_TURN_S / 2.0 + SILVER_DEPOSIT_TURN_EXTRA_S
+)
 # A re antiga usava PWM 42 e uma das rodas nao vencia o atrito. As sacudidas
 # ja provaram que as quatro rodas recuam corretamente em PWM 80, entao o
 # alinhamento longo usa a mesma forca sem mudar sua duracao.

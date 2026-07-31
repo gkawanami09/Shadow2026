@@ -50,13 +50,16 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertFalse(comando.terminal)
         self.assertIn("iniciando giro", comando.detail)
 
-    def test_giro_de_180_usa_metade_da_calibracao_de_360(self):
+    def test_giro_de_180_usa_metade_do_360_mais_duzentos_ms(self):
         self.assertAlmostEqual(
             cfg.SILVER_DEPOSIT_TURN_S,
-            cfg.BALL_SEARCH_FULL_TURN_S / 2.0,
+            (
+                cfg.BALL_SEARCH_FULL_TURN_S / 2.0
+                + cfg.SILVER_DEPOSIT_TURN_EXTRA_S
+            ),
             places=6,
         )
-        self.assertAlmostEqual(cfg.SILVER_DEPOSIT_TURN_S, 1.77, places=2)
+        self.assertAlmostEqual(cfg.SILVER_DEPOSIT_TURN_S, 1.97, places=2)
 
         sequenciador = SequenciadorDepositoCinza()
         giro = next(
@@ -122,7 +125,7 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertTrue(final.terminal)
         self.assertEqual(final.angle, 190)
 
-    def test_avanco_e_re_antes_do_giro_duram_tres_segundos(self):
+    def test_avanco_e_re_antes_do_giro_usam_os_tempos_calibrados(self):
         sequenciador = SequenciadorDepositoCinza()
         etapas = {etapa.nome: etapa for etapa in sequenciador._etapas}
 
@@ -130,7 +133,7 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         re = etapas["PRE_TURN_REVERSE"]
         self.assertEqual(frente.angulo, 0)
         self.assertEqual(re.angulo, 200)
-        self.assertEqual(frente.duracao, 3.0)
+        self.assertEqual(frente.duracao, 0.5)
         self.assertEqual(re.duracao, 3.0)
         self.assertEqual(
             round(frente.velocidade * 120),

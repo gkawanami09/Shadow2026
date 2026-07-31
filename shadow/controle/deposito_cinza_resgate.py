@@ -133,7 +133,7 @@ class SequenciadorDepositoCinza:
         etapas = [
             _Etapa(
                 "PRE_TURN_FORWARD",
-                "avancando reto por 3 segundos antes do giro",
+                "avancando reto por 0,5 segundo antes do giro",
                 0,
                 cfg.SILVER_DEPOSIT_PRE_TURN_SPEED,
                 cfg.SILVER_DEPOSIT_PRE_TURN_FORWARD_S,
