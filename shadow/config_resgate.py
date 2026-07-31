@@ -328,8 +328,9 @@ RESCUE_GREEN_FINAL_FORWARD_SPEED = RESCUE_GREEN_FINAL_PWM / 120.0
 RESCUE_GREEN_CAMERA_ALIGN_TANK_SPEED = BALL_SEARCH_TANK_SPEED
 RESCUE_GREEN_CAMERA_APPROACH_SPEED = RESCUE_GREEN_FINAL_FORWARD_SPEED
 # A camera frontal nao consegue ficar totalmente coberta pelo retangulo.
-# A chegada real e confirmada pelo HC-SR04 a 6 cm (o sensor usa milimetros).
-RESCUE_GREEN_ARRIVAL_DISTANCE_MM = 60
+# Para compensar a inercia, a chegada e confirmada 1 cm antes: 7 cm do painel.
+# O sensor e todo o protocolo continuam usando milimetros.
+RESCUE_GREEN_ARRIVAL_DISTANCE_MM = 70
 # O loop principal roda a cada 5 ms, mas consultar a USB nessa frequencia nao
 # melhora o HC-SR04. Vinte ms ainda recolhe a resposta antes da proxima medida.
 RESCUE_GREEN_ULTRASONIC_POLL_INTERVAL_S = 0.02
@@ -566,7 +567,11 @@ GREEN_RECTANGLE_ASSOCIATION_SIZE_FACTOR = 1.25
 # comando correspondente e aceito pela serial.
 SILVER_DEPOSIT_TURN_SPEED = BALL_SEARCH_TANK_SPEED
 SILVER_DEPOSIT_TURN_S = BALL_SEARCH_FULL_TURN_S / 2.0
-SILVER_DEPOSIT_REVERSE_SPEED = 0.35
+# A re antiga usava PWM 42 e uma das rodas nao vencia o atrito. As sacudidas
+# ja provaram que as quatro rodas recuam corretamente em PWM 80, entao o
+# alinhamento longo usa a mesma forca sem mudar sua duracao.
+SILVER_DEPOSIT_REVERSE_PWM = 80
+SILVER_DEPOSIT_REVERSE_SPEED = SILVER_DEPOSIT_REVERSE_PWM / 120.0
 SILVER_DEPOSIT_REVERSE_S = 3.0
 SILVER_DEPOSIT_BUCKET_OPEN_DELTA = -90
 SILVER_DEPOSIT_BUCKET_SETTLE_S = 0.60

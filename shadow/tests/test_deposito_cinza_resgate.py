@@ -118,6 +118,10 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertEqual(etapa.duracao, 3.0)
         self.assertEqual(
             etapa.velocidade, cfg.SILVER_DEPOSIT_REVERSE_SPEED)
+        self.assertEqual(
+            round(etapa.velocidade * 120),
+            cfg.SILVER_DEPOSIT_REVERSE_PWM,
+        )
 
     def test_sacudida_e_rapida_e_tem_parada_antes_de_inverter(self):
         sequenciador = SequenciadorDepositoCinza()
