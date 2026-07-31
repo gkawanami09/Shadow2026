@@ -132,6 +132,34 @@ class SequenciadorDepositoCinza:
     def _montar_etapas(self):
         etapas = [
             _Etapa(
+                "PRE_TURN_FORWARD",
+                "avancando reto por 3 segundos antes do giro",
+                0,
+                cfg.SILVER_DEPOSIT_PRE_TURN_SPEED,
+                cfg.SILVER_DEPOSIT_PRE_TURN_FORWARD_S,
+            ),
+            _Etapa(
+                "PRE_TURN_FORWARD_STOP",
+                "avanco inicial concluido; parando antes da re",
+                190,
+                0.0,
+                0.10,
+            ),
+            _Etapa(
+                "PRE_TURN_REVERSE",
+                "dando re por 3 segundos antes do giro",
+                200,
+                cfg.SILVER_DEPOSIT_PRE_TURN_SPEED,
+                cfg.SILVER_DEPOSIT_PRE_TURN_REVERSE_S,
+            ),
+            _Etapa(
+                "PRE_TURN_REVERSE_STOP",
+                "re inicial concluida; parando antes do giro de 180 graus",
+                190,
+                0.0,
+                0.10,
+            ),
+            _Etapa(
                 "TURN_180",
                 "girando 180 graus em movimento de tanque",
                 180,
@@ -212,4 +240,20 @@ class SequenciadorDepositoCinza:
             cfg.SILVER_DEPOSIT_BUCKET_RESTORE_DELTA,
         ))
         self._indice_restauracao = len(etapas) - 1
+        etapas.extend((
+            _Etapa(
+                "EXIT_FORWARD",
+                "cacamba fechada; avancando reto por 3 segundos",
+                0,
+                cfg.SILVER_DEPOSIT_EXIT_FORWARD_SPEED,
+                cfg.SILVER_DEPOSIT_EXIT_FORWARD_S,
+            ),
+            _Etapa(
+                "EXIT_STOP",
+                "avanco final concluido; parando o robo",
+                190,
+                0.0,
+                0.10,
+            ),
+        ))
         return tuple(etapas)

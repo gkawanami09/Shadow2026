@@ -59,9 +59,13 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertAlmostEqual(cfg.SILVER_DEPOSIT_TURN_S, 1.77, places=2)
 
         sequenciador = SequenciadorDepositoCinza()
-        giro = sequenciador.update(now=100.0)
-        self.assertEqual(giro.angle, 180)
-        self.assertEqual(giro.speed, cfg.SILVER_DEPOSIT_TURN_SPEED)
+        giro = next(
+            etapa
+            for etapa in sequenciador._etapas
+            if etapa.nome == "TURN_180"
+        )
+        self.assertEqual(giro.angulo, 180)
+        self.assertEqual(giro.velocidade, cfg.SILVER_DEPOSIT_TURN_SPEED)
 
     def test_temporizador_so_comeca_depois_da_escrita_serial(self):
         sequenciador = SequenciadorDepositoCinza()
@@ -71,14 +75,15 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertEqual(primeiro.state, ainda_pendente.state)
         self.assertTrue(primeiro.state.endswith("_PENDING"))
 
+        duracao_primeira = sequenciador._etapas[0].duracao
         sequenciador.notify_command_written(primeiro.state, now=50.0)
         antes = sequenciador.update(
-            now=50.0 + cfg.SILVER_DEPOSIT_TURN_S - 0.001)
+            now=50.0 + duracao_primeira - 0.001)
         seguinte = sequenciador.update(
-            now=50.0 + cfg.SILVER_DEPOSIT_TURN_S)
+            now=50.0 + duracao_primeira)
 
         self.assertFalse(antes.state.endswith("_PENDING"))
-        self.assertIn("TURN_STOP", seguinte.state)
+        self.assertIn("PRE_TURN_FORWARD_STOP", seguinte.state)
 
     def test_sequencia_completa_respeita_ordem_e_restaura_cacamba(self):
         _sequenciador, passos, final = executar_sequencia()
@@ -86,15 +91,26 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
 
         indice_giro = next(
             i for i, nome in enumerate(nomes) if "TURN_180" in nome)
+        indice_pre_frente = next(
+            i for i, nome in enumerate(nomes)
+            if "PRE_TURN_FORWARD_PENDING" in nome)
+        indice_pre_re = next(
+            i for i, nome in enumerate(nomes)
+            if "PRE_TURN_REVERSE_PENDING" in nome)
         indice_re = next(
             i for i, nome in enumerate(nomes) if "REVERSE_ALIGN" in nome)
         indice_abertura = next(
             i for i, nome in enumerate(nomes) if "BUCKET_OPEN_RIGHT" in nome)
         indice_restauracao = next(
             i for i, nome in enumerate(nomes) if "BUCKET_RESTORE" in nome)
+        indice_saida = next(
+            i for i, nome in enumerate(nomes) if "EXIT_FORWARD" in nome)
+        self.assertLess(indice_pre_frente, indice_pre_re)
+        self.assertLess(indice_pre_re, indice_giro)
         self.assertLess(indice_giro, indice_re)
         self.assertLess(indice_re, indice_abertura)
         self.assertLess(indice_abertura, indice_restauracao)
+        self.assertLess(indice_restauracao, indice_saida)
 
         deltas = [
             passo.bucket_delta
@@ -105,6 +121,34 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertEqual(final.state, SequenciadorDepositoCinza.CONCLUIDO)
         self.assertTrue(final.terminal)
         self.assertEqual(final.angle, 190)
+
+    def test_avanco_e_re_antes_do_giro_duram_tres_segundos(self):
+        sequenciador = SequenciadorDepositoCinza()
+        etapas = {etapa.nome: etapa for etapa in sequenciador._etapas}
+
+        frente = etapas["PRE_TURN_FORWARD"]
+        re = etapas["PRE_TURN_REVERSE"]
+        self.assertEqual(frente.angulo, 0)
+        self.assertEqual(re.angulo, 200)
+        self.assertEqual(frente.duracao, 3.0)
+        self.assertEqual(re.duracao, 3.0)
+        self.assertEqual(
+            round(frente.velocidade * 120),
+            cfg.SILVER_DEPOSIT_PRE_TURN_PWM,
+        )
+        self.assertEqual(frente.velocidade, re.velocidade)
+
+    def test_depois_de_fechar_avanca_reto_por_tres_segundos(self):
+        sequenciador = SequenciadorDepositoCinza()
+        etapas = {etapa.nome: etapa for etapa in sequenciador._etapas}
+
+        saida = etapas["EXIT_FORWARD"]
+        self.assertEqual(saida.angulo, 0)
+        self.assertEqual(saida.duracao, 3.0)
+        self.assertEqual(
+            round(saida.velocidade * 120),
+            cfg.SILVER_DEPOSIT_EXIT_FORWARD_PWM,
+        )
 
     def test_re_de_alinhamento_dura_tres_segundos(self):
         sequenciador = SequenciadorDepositoCinza()
