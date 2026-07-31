@@ -13,7 +13,10 @@ from controle.deposito_cinza_resgate import (  # noqa: E402
     PassoDepositoCinza,
     SequenciadorDepositoCinza,
 )
-from resgate import _aplicar_acoes_deposito_cinza  # noqa: E402
+from resgate import (  # noqa: E402
+    _aplicar_acoes_deposito_cinza,
+    _preparar_deposito_cinza,
+)
 
 
 def executar_sequencia():
@@ -39,6 +42,14 @@ def executar_sequencia():
 
 
 class SequenciadorDepositoCinzaTests(unittest.TestCase):
+    def test_chegada_verde_inicia_deposito_mesmo_com_contador_zero(self):
+        sequenciador, comando = _preparar_deposito_cinza(0)
+
+        self.assertIsInstance(sequenciador, SequenciadorDepositoCinza)
+        self.assertEqual(comando.state, SequenciadorDepositoCinza.INICIO)
+        self.assertFalse(comando.terminal)
+        self.assertIn("iniciando giro", comando.detail)
+
     def test_giro_de_180_usa_metade_da_calibracao_de_360(self):
         self.assertAlmostEqual(
             cfg.SILVER_DEPOSIT_TURN_S,

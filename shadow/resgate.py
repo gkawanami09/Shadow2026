@@ -260,6 +260,21 @@ def _aplicar_acoes_deposito_cinza(
     return None
 
 
+def _preparar_deposito_cinza(vitimas_prata_resgatadas):
+    """Cria a sequencia fisica final sem depender do contador da coleta."""
+    quantidade = max(int(vitimas_prata_resgatadas), 0)
+    return (
+        SequenciadorDepositoCinza(),
+        MotionCommand(
+            SequenciadorDepositoCinza.INICIO,
+            detail=(
+                f"{quantidade} vitima(s) prata registrada(s); "
+                "iniciando giro e deposito esquerdo"
+            ),
+        ),
+    )
+
+
 def _armar_coleta_confirmada(
     comando,
     coleta,
@@ -1034,23 +1049,17 @@ def main():
                 print(
                     "[resgate] chegada a 5 cm confirmada; vitimas prata "
                     f"armazenadas={vitimas_prata_resgatadas}")
-                if vitimas_prata_resgatadas > 0:
-                    controlador_verde = None
-                    monitor_chegada_verde = None
-                    deposito_cinza = SequenciadorDepositoCinza()
-                    epoca_verde = None
-                    epoca_deposito_cinza = (
-                        arduino.connection_epoch
-                        if arduino is not None else None
-                    )
-                    ultimo_controle_ocioso = 0.0
-                    comando = MotionCommand(
-                        SequenciadorDepositoCinza.INICIO,
-                        detail=(
-                            f"{vitimas_prata_resgatadas} vitima(s) prata "
-                            "armazenada(s); iniciando deposito esquerdo"),
-                    )
-                    comando_atualizado = False
+                controlador_verde = None
+                monitor_chegada_verde = None
+                deposito_cinza, comando = _preparar_deposito_cinza(
+                    vitimas_prata_resgatadas)
+                epoca_verde = None
+                epoca_deposito_cinza = (
+                    arduino.connection_epoch
+                    if arduino is not None else None
+                )
+                ultimo_controle_ocioso = 0.0
+                comando_atualizado = False
 
             if coleta_concluida is not None:
                 vitimas_resgatadas += 1
