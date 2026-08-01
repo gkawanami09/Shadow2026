@@ -88,6 +88,10 @@ class DepositMarkerController:
         self._last_seen_at = None
         self._tentative_target = False
         self._tracking_reset_requested = False
+        # Na busca pulsada (usada pelo vermelho), o marcador pode estar bem
+        # na frente da camera ao terminar o deposito anterior. Primeiro o robo
+        # observa parado; so gira se essa observacao realmente vier vazia.
+        self._initial_observation_complete = not self.pulsed_search
         self._near_count = 0
         self._near_first_at = None
         self._last_near_timestamp = None
@@ -177,6 +181,16 @@ class DepositMarkerController:
             )
 
         if self.state == self.START:
+            if (
+                self.pulsed_search
+                and not self._initial_observation_complete
+            ):
+                self.state = self.PULSE_BRAKE
+                return self._stop(
+                    self.PULSE_BRAKE,
+                    f"parando para verificar o triangulo {self.target_kind} "
+                    "antes do primeiro giro",
+                )
             if self._valid_target(detection, now):
                 return self._request_target_stop(detection)
             if self._plausible_target(detection, now):
@@ -379,10 +393,12 @@ class DepositMarkerController:
         if self._valid_target(
             detection, now, captured_after=self._settled_at
         ):
+            self._initial_observation_complete = True
             return self._request_target_stop(detection)
         if self._plausible_target(
             detection, now, captured_after=self._settled_at
         ):
+            self._initial_observation_complete = True
             return self._request_target_stop(detection, tentative=True)
 
         timestamp = getattr(detection, "timestamp", None)
@@ -405,6 +421,7 @@ class DepositMarkerController:
             >= cfg.DEPOSIT_SEARCH_OBSERVE_TIMEOUT_S - 1e-9
         )
         if observou_suficiente or tempo_esgotado:
+            self._initial_observation_complete = True
             if (
                 self._rotation_elapsed_s
                 >= self.search_full_turn_s - 1e-9

@@ -145,35 +145,41 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertEqual(chegada.state, "RED_ARRIVAL_7CM")
         self.assertTrue(chegada.terminal)
 
-    def test_controlador_vermelho_confirma_parada_entre_pulsos(self):
+    def test_controlador_vermelho_observa_parado_antes_do_primeiro_pulso(self):
         controlador = ControladorRetanguloVerde(
             start_time=0.0,
             target_kind="red",
         )
 
         inicio = controlador.update(None, FORMATO, now=0.0)
+        self.assertEqual(
+            inicio.state,
+            controlador.navegacao.PULSE_BRAKE,
+        )
+        self.assertEqual(inicio.angle, 190)
         self.assertTrue(controlador.notify_command_written(
             inicio.state, now=0.0))
-        freio = controlador.update(
-            None,
-            FORMATO,
-            now=cfg.DEPOSIT_SEARCH_PULSE_S,
-        )
-        self.assertEqual(freio.state, controlador.navegacao.PULSE_BRAKE)
-        self.assertEqual(freio.angle, 190)
-        self.assertTrue(controlador.notify_command_written(
-            freio.state, now=cfg.DEPOSIT_SEARCH_PULSE_S))
 
         assentando = controlador.update(
             None,
             FORMATO,
-            now=cfg.DEPOSIT_SEARCH_PULSE_S + 0.01,
+            now=0.01,
+        )
+        observando = controlador.update(
+            None,
+            FORMATO,
+            now=cfg.DEPOSIT_SEARCH_SETTLE_S,
         )
         self.assertEqual(
             assentando.state,
             controlador.navegacao.PULSE_SETTLE,
         )
         self.assertEqual(assentando.angle, 190)
+        self.assertEqual(
+            observando.state,
+            controlador.navegacao.PULSE_OBSERVE,
+        )
+        self.assertEqual(observando.angle, 190)
 
     def test_avanca_reto_em_pwm_80_mesmo_com_verde_de_um_lado(self):
         comando = self.controlador.update(

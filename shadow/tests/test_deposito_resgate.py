@@ -120,36 +120,40 @@ class DepositMarkerControllerTests(unittest.TestCase):
         )
 
         start = controller.update(None, FRAME_SHAPE, now=0.0)
-        self.assertEqual(start.state, controller.START)
-        self.assertEqual(start.angle, cfg.DEPOSIT_SEARCH_TANK_ANGLE)
-        controller.mark_rotation_started(now=0.0)
+        self.assertEqual(start.state, controller.PULSE_BRAKE)
+        self.assertEqual(start.angle, 190)
+        controller.mark_pulse_stopped(now=0.0)
+
+        assentou_inicial = cfg.DEPOSIT_SEARCH_SETTLE_S
+        controller.update(None, FRAME_SHAPE, now=assentou_inicial)
+        iniciou_em = (
+            assentou_inicial + cfg.DEPOSIT_SEARCH_OBSERVE_TIMEOUT_S)
+        liberou = controller.update(None, FRAME_SHAPE, now=iniciou_em)
+        self.assertEqual(liberou.state, controller.START)
+        controller.mark_rotation_started(now=iniciou_em)
 
         girando = controller.update(
             None,
             FRAME_SHAPE,
-            now=cfg.DEPOSIT_SEARCH_PULSE_S - 0.001,
+            now=iniciou_em + cfg.DEPOSIT_SEARCH_PULSE_S - 0.001,
         )
         freando = controller.update(
             None,
             FRAME_SHAPE,
-            now=cfg.DEPOSIT_SEARCH_PULSE_S,
+            now=iniciou_em + cfg.DEPOSIT_SEARCH_PULSE_S,
         )
         self.assertEqual(girando.state, controller.ROTATING)
         self.assertEqual(freando.state, controller.PULSE_BRAKE)
         self.assertEqual(freando.angle, 190)
 
-        controller.mark_pulse_stopped(now=cfg.DEPOSIT_SEARCH_PULSE_S)
+        fim_pulso = iniciou_em + cfg.DEPOSIT_SEARCH_PULSE_S
+        controller.mark_pulse_stopped(now=fim_pulso)
         assentando = controller.update(
             None,
             FRAME_SHAPE,
-            now=(
-                cfg.DEPOSIT_SEARCH_PULSE_S
-                + cfg.DEPOSIT_SEARCH_SETTLE_S
-                - 0.001
-            ),
+            now=fim_pulso + cfg.DEPOSIT_SEARCH_SETTLE_S - 0.001,
         )
-        observando_em = (
-            cfg.DEPOSIT_SEARCH_PULSE_S + cfg.DEPOSIT_SEARCH_SETTLE_S)
+        observando_em = fim_pulso + cfg.DEPOSIT_SEARCH_SETTLE_S
         observando = controller.update(
             None,
             FRAME_SHAPE,
@@ -183,6 +187,27 @@ class DepositMarkerControllerTests(unittest.TestCase):
             now=observando_em + 0.04,
         )
         self.assertEqual(centralizando.state, controller.ALIGN)
+
+    def test_vermelho_visivel_antes_do_primeiro_giro_e_preservado(self):
+        controller = DepositMarkerController(
+            "red",
+            start_time=0.0,
+            pulsed_search=True,
+        )
+        parar = controller.update(None, FRAME_SHAPE, now=0.0)
+        controller.mark_pulse_stopped(now=0.0)
+        assentou = cfg.DEPOSIT_SEARCH_SETTLE_S
+        controller.update(None, FRAME_SHAPE, now=assentou)
+
+        encontrado = controller.update(
+            marker(assentou + 0.01, kind="red"),
+            FRAME_SHAPE,
+            now=assentou + 0.02,
+        )
+
+        self.assertEqual(parar.state, controller.PULSE_BRAKE)
+        self.assertEqual(encontrado.state, controller.TARGET_STOP)
+        self.assertAlmostEqual(controller._rotation_elapsed_s, 0.0)
 
     def test_wrong_color_is_ignored(self):
         controller = DepositMarkerController("green", start_time=0.0)
