@@ -39,14 +39,6 @@ def _run_sequence(target_kind, selection=False):
     now = 0.0
     actions = []
 
-    pre_forward = pickup.update(now=now)
-    actions.append(pre_forward)
-    _ack_step(pickup, pre_forward, now)
-
-    now += cfg.BALL_PICKUP_PRE_FORWARD_S
-    pre_stop = pickup.update(now=now)
-    actions.append(pre_stop)
-
     initial_down = pickup.update(now=now)
     actions.append(initial_down)
     _ack_step(pickup, initial_down, now)
@@ -59,7 +51,7 @@ def _run_sequence(target_kind, selection=False):
     actions.append(forward)
     _ack_step(pickup, forward, now)
 
-    now += cfg.BALL_PICKUP_FORWARD_S
+    now += cfg.BALL_PICKUP_FORWARD_LEAD_S
     final_forward = pickup.update(now=now)
     actions.append(final_forward)
 
@@ -127,7 +119,10 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertEqual(cfg.BALL_PICKUP_RELEASE_DELTA, 70)
         self.assertEqual(
             cfg.BALL_PICKUP_FORWARD_LEAD_S,
-            cfg.BALL_PICKUP_FORWARD_S,
+            (
+                cfg.BALL_PICKUP_PRE_FORWARD_S
+                + cfg.BALL_PICKUP_FORWARD_S
+            ),
         )
         self.assertEqual(
             (cfg.BALL_PICKUP_LIFT_POWER, cfg.BALL_PICKUP_LIFT_MS),
@@ -153,28 +148,15 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertFalse(pickup.start("black"))
         self.assertEqual(pickup.target_kind, "silver")
 
-    def test_no_gripper_action_before_full_forward_deadline(self):
+    def test_baixa_antes_de_avancar_e_preserva_o_tempo_total(self):
         pickup = BallPickupSequencer()
         pickup.start("silver")
-        first = pickup.update(now=0.0)
-        self.assertEqual(first.motor_action, "forward")
-        self.assertIsNone(first.futaba_action)
-        pickup.mark_forward_started(now=0.0)
-
-        before_pre = pickup.update(
-            now=cfg.BALL_PICKUP_PRE_FORWARD_S - 0.001)
-        self.assertEqual(before_pre.state, pickup.PRE_FORWARD_LEAD)
-        self.assertIsNone(before_pre.gripper_action)
-
-        pre_stop = pickup.update(now=cfg.BALL_PICKUP_PRE_FORWARD_S)
-        self.assertEqual(pre_stop.motor_action, "stop")
-
-        down = pickup.update(now=cfg.BALL_PICKUP_PRE_FORWARD_S)
-        pickup.mark_futaba_started(now=cfg.BALL_PICKUP_PRE_FORWARD_S)
+        down = pickup.update(now=0.0)
+        self.assertEqual(down.motor_action, "hold")
+        self.assertIsNotNone(down.futaba_action)
+        pickup.mark_futaba_started(now=0.0)
 
         down_wait = (
-            cfg.BALL_PICKUP_PRE_FORWARD_S
-            +
             cfg.BALL_PICKUP_FUTABA_MS / 1000.0
             + cfg.BALL_PICKUP_FUTABA_GUARD_S
         )
@@ -188,20 +170,20 @@ class BallPickupSequencerTests(unittest.TestCase):
         pickup.mark_forward_started(now=down_wait)
 
         before = pickup.update(
-            now=down_wait + cfg.BALL_PICKUP_FORWARD_S - 0.001)
+            now=down_wait + cfg.BALL_PICKUP_FORWARD_LEAD_S - 0.001)
         self.assertEqual(before.state, pickup.FORWARD_LEAD)
         self.assertIsNone(before.gripper_action)
         self.assertEqual(before.motor_action, "")
 
         final_forward = pickup.update(
-            now=down_wait + cfg.BALL_PICKUP_FORWARD_S)
+            now=down_wait + cfg.BALL_PICKUP_FORWARD_LEAD_S)
         self.assertEqual(final_forward.state, pickup.FINAL_FORWARD)
         self.assertIsNone(final_forward.gripper_action)
 
         before_close = pickup.update(
             now=(
                 down_wait
-                + cfg.BALL_PICKUP_FORWARD_S
+                + cfg.BALL_PICKUP_FORWARD_LEAD_S
                 + cfg.BALL_PICKUP_FINAL_FORWARD_S
                 - 0.001
             )
@@ -212,7 +194,7 @@ class BallPickupSequencerTests(unittest.TestCase):
         close = pickup.update(
             now=(
                 down_wait
-                + cfg.BALL_PICKUP_FORWARD_S
+                + cfg.BALL_PICKUP_FORWARD_LEAD_S
                 + cfg.BALL_PICKUP_FINAL_FORWARD_S
             )
         )
@@ -230,11 +212,6 @@ class BallPickupSequencerTests(unittest.TestCase):
         pickup.start("silver")
         now = 0.0
 
-        pre_forward = pickup.update(now=now)
-        _ack_step(pickup, pre_forward, now)
-        now += cfg.BALL_PICKUP_PRE_FORWARD_S
-        pickup.update(now=now)
-
         down = pickup.update(now=now)
         _ack_step(pickup, down, now)
         now += (
@@ -243,7 +220,7 @@ class BallPickupSequencerTests(unittest.TestCase):
         )
         forward = pickup.update(now=now)
         _ack_step(pickup, forward, now)
-        now += cfg.BALL_PICKUP_FORWARD_S
+        now += cfg.BALL_PICKUP_FORWARD_LEAD_S
         pickup.update(now=now)
         now += cfg.BALL_PICKUP_FINAL_FORWARD_S
         close = pickup.update(now=now)
@@ -362,35 +339,28 @@ class BallPickupSequencerTests(unittest.TestCase):
         pickup.start("silver")
 
         first = pickup.update(now=0.0)
-        self.assertEqual(first.motor_action, "forward")
+        self.assertEqual(first.motor_action, "hold")
+        self.assertIsNotNone(first.futaba_action)
         pending = pickup.update(now=50.0)
         self.assertEqual(pending.motor_action, "")
+        self.assertIsNone(pending.futaba_action)
         self.assertIsNone(pending.gripper_action)
 
-        pickup.mark_forward_started(now=50.0)
-        pre_done = 50.0 + cfg.BALL_PICKUP_PRE_FORWARD_S
-        pre_stop = pickup.update(now=pre_done)
-        self.assertEqual(pre_stop.motor_action, "stop")
-        down = pickup.update(now=pre_done)
-        self.assertIsNotNone(down.futaba_action)
-        pending_down = pickup.update(now=999.0)
-        self.assertIsNone(pending_down.futaba_action)
-
-        pickup.mark_futaba_started(now=999.0)
+        pickup.mark_futaba_started(now=50.0)
         down_done = (
-            999.0
+            50.0
             + cfg.BALL_PICKUP_FUTABA_MS / 1000.0
             + cfg.BALL_PICKUP_FUTABA_GUARD_S
         )
         forward = pickup.update(now=down_done)
         pickup.mark_forward_started(now=down_done)
         final_forward = pickup.update(
-            now=down_done + cfg.BALL_PICKUP_FORWARD_S)
+            now=down_done + cfg.BALL_PICKUP_FORWARD_LEAD_S)
         self.assertEqual(final_forward.state, pickup.FINAL_FORWARD)
         close = pickup.update(
             now=(
                 down_done
-                + cfg.BALL_PICKUP_FORWARD_S
+                + cfg.BALL_PICKUP_FORWARD_LEAD_S
                 + cfg.BALL_PICKUP_FINAL_FORWARD_S
             )
         )

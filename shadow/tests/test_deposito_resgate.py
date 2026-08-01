@@ -24,10 +24,6 @@ def pickup_ready(target_kind):
     now = 0.0
 
     pickup.update(now=now)
-    pickup.mark_forward_started(now=now)
-    now += cfg.BALL_PICKUP_PRE_FORWARD_S
-    pickup.update(now=now)
-    pickup.update(now=now)
     pickup.mark_futaba_started(now=now)
     now += (
         cfg.BALL_PICKUP_FUTABA_MS / 1000.0
@@ -35,7 +31,7 @@ def pickup_ready(target_kind):
     )
     pickup.update(now=now)
     pickup.mark_forward_started(now=now)
-    now += cfg.BALL_PICKUP_FORWARD_S
+    now += cfg.BALL_PICKUP_FORWARD_LEAD_S
     pickup.update(now=now)
     now += cfg.BALL_PICKUP_FINAL_FORWARD_S
     pickup.update(now=now)

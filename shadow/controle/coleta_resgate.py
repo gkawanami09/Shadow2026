@@ -96,7 +96,10 @@ class BallPickupSequencer:
                 "a coleta exige cor confirmada silver ou black")
         self._kind = target_kind
         self._wiggle_actions = self._build_wiggle_actions(target_kind)
-        self.state = self.PRE_FORWARD_START
+        # A garra desce antes de qualquer movimento. O avanco que antes era
+        # dividido em 1 s levantada + 1 s abaixada passa inteiro para depois
+        # da descida, preservando a distancia total.
+        self.state = self.FUTABA_START
         return True
 
     def update(self, now=None):
@@ -170,7 +173,7 @@ class BallPickupSequencer:
             self._deadline = None
             return PickupStep(
                 self.FORWARD_START,
-                "Futaba embaixo; iniciando segundo avanco de 1 s",
+                "Futaba embaixo; iniciando avanco total de 2 s",
                 angle=0,
                 speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 motor_action="forward",
@@ -189,7 +192,7 @@ class BallPickupSequencer:
             if now < self._deadline:
                 return PickupStep(
                     self.FORWARD_LEAD,
-                    "avancando por mais 1 s com as garras abertas",
+                    "avancando por 2 s com o Futaba embaixo",
                     angle=0,
                     speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 )
@@ -442,7 +445,7 @@ class BallPickupSequencer:
             "confirmacao do Futaba fora de um estado de partida")
 
     def mark_forward_started(self, now=None):
-        """Inicia o prazo do primeiro ou do segundo avanco."""
+        """Inicia o prazo do avanco feito com o Futaba embaixo."""
         now = time.monotonic() if now is None else float(now)
         if self.state == self.PRE_FORWARD_PENDING:
             self.state = self.PRE_FORWARD_LEAD
@@ -452,7 +455,7 @@ class BallPickupSequencer:
             raise RuntimeError(
                 "confirmacao do avanco fora do estado de partida")
         self.state = self.FORWARD_LEAD
-        self._deadline = now + cfg.BALL_PICKUP_FORWARD_S
+        self._deadline = now + cfg.BALL_PICKUP_FORWARD_LEAD_S
 
     def mark_grippers_started(self, now=None):
         """Confirma um lote de garras e inicia seu tempo fisico."""

@@ -178,9 +178,9 @@ BALL_CRESCENT_INNER_BOTTOM_RATIO = 0.82
 BALL_CRESCENT_TOKEN_TTL_S = 0.80
 
 # Coleta depois que a aproximacao visual termina. Nao existe etapa de re.
-# Primeiro o robo avanca por 1 s com o elevador levantado. Depois para, baixa
-# o Futaba, avanca por mais 1 s e completa 200 ms antes de fechar as garras.
-# Separar os avancos impede que a garra desca longe demais da esfera.
+# Primeiro o robo baixa o Futaba, sem avancar. Depois percorre com ele baixo a
+# soma dos dois avancos antigos (1 s + 1 s) e completa mais 200 ms antes de
+# fechar as garras. A distancia total comandada permanece igual.
 BALL_PICKUP_FUTABA_POWER = -20
 BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
@@ -189,9 +189,10 @@ BALL_PICKUP_RIGHT_DELTA = 60
 BALL_PICKUP_PRE_FORWARD_S = 1.00
 BALL_PICKUP_FORWARD_S = 1.00
 BALL_PICKUP_FINAL_FORWARD_S = 0.20
-# As garras so fecham depois do segundo avanco. O alias e mantido para os
-# modulos que usam o nome antigo deste intervalo.
-BALL_PICKUP_FORWARD_LEAD_S = BALL_PICKUP_FORWARD_S
+# Todo o avanco principal agora acontece com o Futaba embaixo.
+BALL_PICKUP_FORWARD_LEAD_S = (
+    BALL_PICKUP_PRE_FORWARD_S + BALL_PICKUP_FORWARD_S
+)
 BALL_PICKUP_FORWARD_SPEED = BALL_APPROACH_SPEED_NEAR
 BALL_PICKUP_GRIPPER_SETTLE_S = 0.50
 
