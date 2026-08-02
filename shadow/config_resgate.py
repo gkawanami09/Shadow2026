@@ -202,8 +202,12 @@ BALL_PICKUP_GRIPPER_STEP_INTERVAL_S = 0.08
 
 # Depois de prender a esfera, o elevador sobe, aplica um pulso curto para
 # descer e entao executa a liberacao correspondente a cor confirmada.
+# A subida terminava em 2,5 s. Agora ela para 200 ms antes e desacelera nos
+# 400 ms finais para nao bater no limite e voltar pela elasticidade/folga.
 BALL_PICKUP_LIFT_POWER = 20
-BALL_PICKUP_LIFT_MS = 2500
+BALL_PICKUP_LIFT_MS = 1900
+BALL_PICKUP_LIFT_SLOW_POWER = 10
+BALL_PICKUP_LIFT_SLOW_MS = 400
 BALL_PICKUP_LIFT_GUARD_S = 0.10
 BALL_PICKUP_LOWER_POWER = -20
 BALL_PICKUP_LOWER_MS = 25

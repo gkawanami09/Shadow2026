@@ -48,6 +48,8 @@ class BallPickupSequencer:
     GRIPPERS_WAIT = "PICKUP_GRIPPERS"
     LIFT_PENDING = "PICKUP_LIFT_PENDING"
     LIFT_WAIT = "PICKUP_LIFT"
+    LIFT_SLOW_PENDING = "PICKUP_LIFT_SLOW_PENDING"
+    LIFT_SLOW_WAIT = "PICKUP_LIFT_SLOW"
     CARRY_READY = "PICKUP_CARRY_READY"
     DEPOSIT_START = "PICKUP_DEPOSIT_START"
     LOWER_PENDING = "PICKUP_LOWER_PENDING"
@@ -243,7 +245,7 @@ class BallPickupSequencer:
             self._deadline = None
             return PickupStep(
                 self.LIFT_PENDING,
-                "garras fechadas; subindo o Futaba por 2,5 s",
+                "garras fechadas; iniciando subida do Futaba",
                 motor_action="hold",
                 futaba_action=(
                     cfg.BALL_PICKUP_LIFT_POWER,
@@ -261,7 +263,30 @@ class BallPickupSequencer:
             if now < self._deadline:
                 return PickupStep(
                     self.LIFT_WAIT,
-                    "subindo o Futaba por 2,5 s",
+                    "subindo o Futaba na velocidade normal",
+                )
+            self.state = self.LIFT_SLOW_PENDING
+            self._deadline = None
+            return PickupStep(
+                self.LIFT_SLOW_PENDING,
+                "perto do alto; reduzindo a velocidade do Futaba",
+                futaba_action=(
+                    cfg.BALL_PICKUP_LIFT_SLOW_POWER,
+                    cfg.BALL_PICKUP_LIFT_SLOW_MS,
+                ),
+            )
+
+        if self.state == self.LIFT_SLOW_PENDING:
+            return PickupStep(
+                self.LIFT_SLOW_PENDING,
+                "aguardando confirmacao da subida lenta do Futaba",
+            )
+
+        if self.state == self.LIFT_SLOW_WAIT:
+            if now < self._deadline:
+                return PickupStep(
+                    self.LIFT_SLOW_WAIT,
+                    "terminando a subida em velocidade reduzida",
                 )
             self.state = self.CARRY_READY
             self._deadline = None
@@ -429,9 +454,15 @@ class BallPickupSequencer:
             return
         if self.state == self.LIFT_PENDING:
             self.state = self.LIFT_WAIT
+            # Sem guarda entre as fases: a ordem lenta substitui a normal
+            # antes que o mecanismo tenha tempo de recuar.
+            self._deadline = now + cfg.BALL_PICKUP_LIFT_MS / 1000.0
+            return
+        if self.state == self.LIFT_SLOW_PENDING:
+            self.state = self.LIFT_SLOW_WAIT
             self._deadline = (
                 now
-                + cfg.BALL_PICKUP_LIFT_MS / 1000.0
+                + cfg.BALL_PICKUP_LIFT_SLOW_MS / 1000.0
                 + cfg.BALL_PICKUP_LIFT_GUARD_S
             )
             return

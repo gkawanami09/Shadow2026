@@ -44,10 +44,10 @@ def pickup_ready(target_kind):
             pickup.mark_grippers_started(now=now)
         if passo.futaba_action is not None:
             pickup.mark_futaba_started(now=now)
-    now += (
-        cfg.BALL_PICKUP_LIFT_MS / 1000.0
-        + cfg.BALL_PICKUP_LIFT_GUARD_S
-    )
+    now = pickup._deadline
+    pickup.update(now=now)
+    pickup.mark_futaba_started(now=now)
+    now = pickup._deadline
     pickup.update(now=now)
 
     if not pickup.ready_for_deposit:

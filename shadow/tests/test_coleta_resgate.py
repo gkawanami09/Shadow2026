@@ -44,6 +44,19 @@ def _terminar_fechamento_gradual(pickup, actions, now):
     return now, ultimo
 
 
+def _terminar_subida(pickup, actions):
+    """Executa a fase lenta e chega ao transporte com o Futaba parado."""
+    now = pickup._deadline
+    slow = pickup.update(now=now)
+    actions.append(slow)
+    _ack_step(pickup, slow, now)
+
+    now = pickup._deadline
+    carry = pickup.update(now=now)
+    actions.append(carry)
+    return now, carry
+
+
 def _run_sequence(target_kind, selection=False):
     """Executa todos os deadlines e devolve somente passos com acao."""
     pickup = BallPickupSequencer()
@@ -74,13 +87,7 @@ def _run_sequence(target_kind, selection=False):
     now, lift = _terminar_fechamento_gradual(
         pickup, actions, now)
 
-    now += (
-        cfg.BALL_PICKUP_LIFT_MS / 1000.0
-        + cfg.BALL_PICKUP_LIFT_GUARD_S
-    )
-    carry = pickup.update(now=now)
-    actions.append(carry)
-    _ack_step(pickup, carry, now)
+    now, carry = _terminar_subida(pickup, actions)
     retomou = (
         pickup.resume_selection()
         if selection else pickup.resume_deposit()
@@ -135,7 +142,18 @@ class BallPickupSequencerTests(unittest.TestCase):
         )
         self.assertEqual(
             (cfg.BALL_PICKUP_LIFT_POWER, cfg.BALL_PICKUP_LIFT_MS),
-            (20, 2500),
+            (20, 1900),
+        )
+        self.assertEqual(
+            (
+                cfg.BALL_PICKUP_LIFT_SLOW_POWER,
+                cfg.BALL_PICKUP_LIFT_SLOW_MS,
+            ),
+            (10, 400),
+        )
+        self.assertEqual(
+            cfg.BALL_PICKUP_LIFT_MS + cfg.BALL_PICKUP_LIFT_SLOW_MS,
+            2300,
         )
         self.assertEqual(
             (cfg.BALL_PICKUP_LOWER_POWER, cfg.BALL_PICKUP_LOWER_MS),
@@ -252,12 +270,7 @@ class BallPickupSequencerTests(unittest.TestCase):
         _ack_step(pickup, close, now)
         now, lift = _terminar_fechamento_gradual(
             pickup, [], now)
-        now += (
-            cfg.BALL_PICKUP_LIFT_MS / 1000.0
-            + cfg.BALL_PICKUP_LIFT_GUARD_S
-        )
-
-        carry = pickup.update(now=now)
+        now, carry = _terminar_subida(pickup, [])
         self.assertEqual(carry.state, pickup.CARRY_READY)
         self.assertTrue(carry.stop_futaba)
         self.assertTrue(pickup.ready_for_deposit)
@@ -299,7 +312,7 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertEqual(
             [step.futaba_action for step in actions
              if step.futaba_action is not None],
-            [(-20, 1500), (20, 2500), (-20, 25)],
+            [(-20, 1500), (20, 1900), (10, 400), (-20, 25)],
         )
         self.assertTrue(complete.terminal)
         self.assertEqual(complete.state, pickup.COMPLETE)
