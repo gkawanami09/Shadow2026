@@ -71,6 +71,7 @@ class BallPickupSequencer:
         self._wiggle_index = 0
         self._gripper_close_actions = ()
         self._gripper_close_index = 0
+        self._gripper_capture_action_count = 0
         self._terminal_detail = ""
         self._release_mode = "deposit"
 
@@ -292,8 +293,11 @@ class BallPickupSequencer:
             self._deadline = None
             return PickupStep(
                 self.CARRY_READY,
-                "esfera presa e elevada; aguardando o marcador de deposito",
-                stop_futaba=True,
+                "esfera elevada; sustentacao curta para evitar o recuo",
+                futaba_action=(
+                    cfg.BALL_PICKUP_LIFT_HOLD_POWER,
+                    cfg.BALL_PICKUP_LIFT_HOLD_MS,
+                ),
             )
 
         if self.state == self.CARRY_READY:
@@ -303,15 +307,20 @@ class BallPickupSequencer:
             )
 
         if self.state == self.DEPOSIT_START:
+            if self._release_mode == "selection":
+                # Na selecao imediatamente apos a coleta nao existe descida:
+                # aquele pulso contrario de 25 ms era o pequeno recuo visivel.
+                # A sustentacao curta continua enquanto a primeira garra abre.
+                self.state = self.RELEASE_PENDING
+                return PickupStep(
+                    self.RELEASE_PENDING,
+                    self._release_detail(),
+                    gripper_action=self._release_action(),
+                )
             self.state = self.LOWER_PENDING
             return PickupStep(
                 self.LOWER_PENDING,
-                (
-                    "vitima elevada; preparando a selecao por lado"
-                    if self._release_mode == "selection"
-                    else "marcador correto alcancado; descendo o Futaba "
-                    "por 25 ms"
-                ),
+                "marcador correto alcancado; descendo o Futaba por 25 ms",
                 futaba_action=(
                     cfg.BALL_PICKUP_LOWER_POWER,
                     cfg.BALL_PICKUP_LOWER_MS,
@@ -460,11 +469,12 @@ class BallPickupSequencer:
             return
         if self.state == self.LIFT_SLOW_PENDING:
             self.state = self.LIFT_SLOW_WAIT
-            self._deadline = (
-                now
-                + cfg.BALL_PICKUP_LIFT_SLOW_MS / 1000.0
-                + cfg.BALL_PICKUP_LIFT_GUARD_S
-            )
+            # A sustentacao curta substitui esta ordem sem um intervalo solto.
+            self._deadline = now + cfg.BALL_PICKUP_LIFT_SLOW_MS / 1000.0
+            return
+        if self.state == self.CARRY_READY:
+            # O pulso e temporizado pelo Arduino. Na missao, a selecao comeca
+            # logo depois e substitui esta ordem pela pequena descida.
             return
         if self.state == self.LOWER_PENDING:
             self.state = self.LOWER_WAIT
@@ -495,12 +505,17 @@ class BallPickupSequencer:
         now = time.monotonic() if now is None else float(now)
         if self.state == self.GRIPPERS_START:
             self.state = self.GRIPPERS_WAIT
-            intervalo = (
-                cfg.BALL_PICKUP_GRIPPER_STEP_INTERVAL_S
-                if self._gripper_close_index
-                < len(self._gripper_close_actions)
-                else cfg.BALL_PICKUP_GRIPPER_SETTLE_S
-            )
+            if self._gripper_close_index >= len(
+                self._gripper_close_actions
+            ):
+                intervalo = cfg.BALL_PICKUP_GRIPPER_SETTLE_S
+            elif (
+                self._gripper_close_index
+                <= self._gripper_capture_action_count
+            ):
+                intervalo = cfg.BALL_PICKUP_GRIPPER_CAPTURE_INTERVAL_S
+            else:
+                intervalo = cfg.BALL_PICKUP_GRIPPER_STEP_INTERVAL_S
             self._deadline = now + intervalo
             return
         if self.state == self.RELEASE_PENDING:
@@ -550,16 +565,32 @@ class BallPickupSequencer:
         )
 
     def _build_close_actions(self):
-        """Divide o fechamento e alterna esquerda/direita sem perder graus."""
+        """Captura rapido e completa o aperto sem perder nenhum grau."""
+        captura = int(cfg.BALL_PICKUP_GRIPPER_CAPTURE_DEGREES)
         passo = int(cfg.BALL_PICKUP_GRIPPER_STEP_DEGREES)
-        if passo <= 0:
-            raise ValueError("passo gradual das garras deve ser positivo")
+        if captura <= 0 or passo <= 0:
+            raise ValueError("passos das garras devem ser positivos")
 
         restantes = [
             int(cfg.BALL_PICKUP_LEFT_DELTA),
             int(cfg.BALL_PICKUP_RIGHT_DELTA),
         ]
         acoes = []
+
+        # Fecha primeiro a maior parte do vao. Os comandos ainda sao separados:
+        # as duas garras nunca partem juntas no mesmo pacote serial.
+        for indice in (0, 1):
+            restante = restantes[indice]
+            if restante == 0:
+                continue
+            deslocamento = min(abs(restante), captura)
+            deslocamento = deslocamento if restante > 0 else -deslocamento
+            acao = [0, 0]
+            acao[indice] = deslocamento
+            acoes.append(tuple(acao))
+            restantes[indice] -= deslocamento
+        self._gripper_capture_action_count = len(acoes)
+
         while restantes[0] != 0 or restantes[1] != 0:
             for indice in (0, 1):
                 restante = restantes[indice]

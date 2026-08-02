@@ -54,6 +54,7 @@ def _terminar_subida(pickup, actions):
     now = pickup._deadline
     carry = pickup.update(now=now)
     actions.append(carry)
+    _ack_step(pickup, carry, now)
     return now, carry
 
 
@@ -94,17 +95,20 @@ def _run_sequence(target_kind, selection=False):
     )
     if not retomou:
         raise AssertionError("liberacao nao foi iniciada no transporte")
-    lower = pickup.update(now=now)
-    actions.append(lower)
-    _ack_step(pickup, lower, now)
+    first_release_step = pickup.update(now=now)
+    actions.append(first_release_step)
+    _ack_step(pickup, first_release_step, now)
 
-    now += (
-        cfg.BALL_PICKUP_LOWER_MS / 1000.0
-        + cfg.BALL_PICKUP_LOWER_GUARD_S
-    )
-    release = pickup.update(now=now)
-    actions.append(release)
-    _ack_step(pickup, release, now)
+    if selection:
+        release = first_release_step
+    else:
+        now += (
+            cfg.BALL_PICKUP_LOWER_MS / 1000.0
+            + cfg.BALL_PICKUP_LOWER_GUARD_S
+        )
+        release = pickup.update(now=now)
+        actions.append(release)
+        _ack_step(pickup, release, now)
 
     now += cfg.BALL_PICKUP_GRIPPER_SETTLE_S
     for _ in range(cfg.BALL_PICKUP_WIGGLE_REPETITIONS * 2):
@@ -156,13 +160,22 @@ class BallPickupSequencerTests(unittest.TestCase):
             2300,
         )
         self.assertEqual(
+            (
+                cfg.BALL_PICKUP_LIFT_HOLD_POWER,
+                cfg.BALL_PICKUP_LIFT_HOLD_MS,
+            ),
+            (1, 300),
+        )
+        self.assertEqual(
             (cfg.BALL_PICKUP_LOWER_POWER, cfg.BALL_PICKUP_LOWER_MS),
             (-20, 25),
         )
         self.assertEqual(cfg.BALL_PICKUP_WIGGLE_DELTA, 40)
         self.assertEqual(cfg.BALL_PICKUP_WIGGLE_REPETITIONS, 2)
+        self.assertEqual(cfg.BALL_PICKUP_GRIPPER_CAPTURE_DEGREES, 30)
+        self.assertEqual(cfg.BALL_PICKUP_GRIPPER_CAPTURE_INTERVAL_S, 0.04)
         self.assertEqual(cfg.BALL_PICKUP_GRIPPER_STEP_DEGREES, 10)
-        self.assertEqual(cfg.BALL_PICKUP_GRIPPER_STEP_INTERVAL_S, 0.08)
+        self.assertEqual(cfg.BALL_PICKUP_GRIPPER_STEP_INTERVAL_S, 0.05)
 
     def test_start_requires_confirmed_kind_and_never_changes_it(self):
         pickup = BallPickupSequencer()
@@ -238,6 +251,11 @@ class BallPickupSequencerTests(unittest.TestCase):
             pickup, [], pickup._deadline)
         movimentos = list(pickup._gripper_close_actions)
         self.assertEqual(
+            movimentos[:2],
+            [(-30, 0), (0, 30)],
+        )
+        self.assertEqual(len(movimentos), 8)
+        self.assertEqual(
             sum(acao[0] for acao in movimentos),
             cfg.BALL_PICKUP_LEFT_DELTA,
         )
@@ -272,9 +290,15 @@ class BallPickupSequencerTests(unittest.TestCase):
             pickup, [], now)
         now, carry = _terminar_subida(pickup, [])
         self.assertEqual(carry.state, pickup.CARRY_READY)
-        self.assertTrue(carry.stop_futaba)
+        self.assertFalse(carry.stop_futaba)
         self.assertTrue(pickup.ready_for_deposit)
-        self.assertIsNone(carry.futaba_action)
+        self.assertEqual(
+            carry.futaba_action,
+            (
+                cfg.BALL_PICKUP_LIFT_HOLD_POWER,
+                cfg.BALL_PICKUP_LIFT_HOLD_MS,
+            ),
+        )
         self.assertIsNone(carry.gripper_action)
 
         for later in (now + 1.0, now + 30.0):
@@ -312,7 +336,13 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertEqual(
             [step.futaba_action for step in actions
              if step.futaba_action is not None],
-            [(-20, 1500), (20, 1900), (10, 400), (-20, 25)],
+            [
+                (-20, 1500),
+                (20, 1900),
+                (10, 400),
+                (1, 300),
+                (-20, 25),
+            ],
         )
         self.assertTrue(complete.terminal)
         self.assertEqual(complete.state, pickup.COMPLETE)
@@ -350,6 +380,16 @@ class BallPickupSequencerTests(unittest.TestCase):
                 self.assertEqual(
                     grippers[len(pickup._gripper_close_actions)],
                     expected_release,
+                )
+                self.assertNotIn(
+                    (
+                        cfg.BALL_PICKUP_LOWER_POWER,
+                        cfg.BALL_PICKUP_LOWER_MS,
+                    ),
+                    [
+                        step.futaba_action for step in actions
+                        if step.futaba_action is not None
+                    ],
                 )
                 self.assertEqual(complete.state, pickup.COMPLETE)
                 self.assertIn("selecao", complete.detail)

@@ -195,10 +195,12 @@ BALL_PICKUP_FORWARD_LEAD_S = (
 )
 BALL_PICKUP_FORWARD_SPEED = BALL_APPROACH_SPEED_NEAR
 BALL_PICKUP_GRIPPER_SETTLE_S = 0.50
-# Fecha uma garra por vez, em passos pequenos. Isso reduz o pico de corrente
-# comparado ao antigo salto simultaneo, sem mudar o aperto final configurado.
+# Primeiro captura a esfera rapidamente, depois completa o aperto em passos
+# menores. Continua movendo uma garra por vez para limitar o pico de corrente.
+BALL_PICKUP_GRIPPER_CAPTURE_DEGREES = 30
+BALL_PICKUP_GRIPPER_CAPTURE_INTERVAL_S = 0.04
 BALL_PICKUP_GRIPPER_STEP_DEGREES = 10
-BALL_PICKUP_GRIPPER_STEP_INTERVAL_S = 0.08
+BALL_PICKUP_GRIPPER_STEP_INTERVAL_S = 0.05
 
 # Depois de prender a esfera, o elevador sobe, aplica um pulso curto para
 # descer e entao executa a liberacao correspondente a cor confirmada.
@@ -208,7 +210,10 @@ BALL_PICKUP_LIFT_POWER = 20
 BALL_PICKUP_LIFT_MS = 1900
 BALL_PICKUP_LIFT_SLOW_POWER = 10
 BALL_PICKUP_LIFT_SLOW_MS = 400
-BALL_PICKUP_LIFT_GUARD_S = 0.10
+# Sustentacao curta no alto. Em servo continuo isto e velocidade minima, nao
+# controle real de torque; por isso o comando e fraco e limitado a 300 ms.
+BALL_PICKUP_LIFT_HOLD_POWER = 1
+BALL_PICKUP_LIFT_HOLD_MS = 300
 BALL_PICKUP_LOWER_POWER = -20
 BALL_PICKUP_LOWER_MS = 25
 BALL_PICKUP_LOWER_GUARD_S = 0.05
