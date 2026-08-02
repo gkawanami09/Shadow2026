@@ -32,6 +32,18 @@ def _ack_step(pickup, step, now):
         pickup.mark_grippers_started(now=now)
 
 
+def _terminar_fechamento_gradual(pickup, actions, now):
+    """Executa todos os pequenos passos ate iniciar a subida do Futaba."""
+    ultimo = None
+    while pickup.state in (pickup.GRIPPERS_START, pickup.GRIPPERS_WAIT):
+        if pickup.state == pickup.GRIPPERS_WAIT:
+            now = pickup._deadline
+        ultimo = pickup.update(now=now)
+        actions.append(ultimo)
+        _ack_step(pickup, ultimo, now)
+    return now, ultimo
+
+
 def _run_sequence(target_kind, selection=False):
     """Executa todos os deadlines e devolve somente passos com acao."""
     pickup = BallPickupSequencer()
@@ -59,11 +71,8 @@ def _run_sequence(target_kind, selection=False):
     close = pickup.update(now=now)
     actions.append(close)
     _ack_step(pickup, close, now)
-
-    now += cfg.BALL_PICKUP_GRIPPER_SETTLE_S
-    lift = pickup.update(now=now)
-    actions.append(lift)
-    _ack_step(pickup, lift, now)
+    now, lift = _terminar_fechamento_gradual(
+        pickup, actions, now)
 
     now += (
         cfg.BALL_PICKUP_LIFT_MS / 1000.0
@@ -114,7 +123,7 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertEqual(cfg.BALL_PICKUP_FINAL_FORWARD_S, 0.2)
         self.assertEqual(
             (cfg.BALL_PICKUP_LEFT_DELTA, cfg.BALL_PICKUP_RIGHT_DELTA),
-            (-70, 70),
+            (-55, 55),
         )
         self.assertEqual(cfg.BALL_PICKUP_RELEASE_DELTA, 70)
         self.assertEqual(
@@ -134,6 +143,8 @@ class BallPickupSequencerTests(unittest.TestCase):
         )
         self.assertEqual(cfg.BALL_PICKUP_WIGGLE_DELTA, 40)
         self.assertEqual(cfg.BALL_PICKUP_WIGGLE_REPETITIONS, 2)
+        self.assertEqual(cfg.BALL_PICKUP_GRIPPER_STEP_DEGREES, 10)
+        self.assertEqual(cfg.BALL_PICKUP_GRIPPER_STEP_INTERVAL_S, 0.08)
 
     def test_start_requires_confirmed_kind_and_never_changes_it(self):
         pickup = BallPickupSequencer()
@@ -199,13 +210,27 @@ class BallPickupSequencerTests(unittest.TestCase):
             )
         )
         self.assertEqual(close.motor_action, "stop")
+        movimentos = [close.gripper_action]
+        pickup.mark_grippers_started(now=(
+            down_wait
+            + cfg.BALL_PICKUP_FORWARD_LEAD_S
+            + cfg.BALL_PICKUP_FINAL_FORWARD_S
+        ))
+        _agora, _lift = _terminar_fechamento_gradual(
+            pickup, [], pickup._deadline)
+        movimentos = list(pickup._gripper_close_actions)
         self.assertEqual(
-            close.gripper_action,
-            (
-                cfg.BALL_PICKUP_LEFT_DELTA,
-                cfg.BALL_PICKUP_RIGHT_DELTA,
-            ),
+            sum(acao[0] for acao in movimentos),
+            cfg.BALL_PICKUP_LEFT_DELTA,
         )
+        self.assertEqual(
+            sum(acao[1] for acao in movimentos),
+            cfg.BALL_PICKUP_RIGHT_DELTA,
+        )
+        self.assertTrue(all(
+            (acao[0] == 0) != (acao[1] == 0)
+            for acao in movimentos
+        ))
 
     def test_release_is_blocked_while_carrying_until_marker_arrival(self):
         pickup = BallPickupSequencer()
@@ -225,9 +250,8 @@ class BallPickupSequencerTests(unittest.TestCase):
         now += cfg.BALL_PICKUP_FINAL_FORWARD_S
         close = pickup.update(now=now)
         _ack_step(pickup, close, now)
-        now += cfg.BALL_PICKUP_GRIPPER_SETTLE_S
-        lift = pickup.update(now=now)
-        _ack_step(pickup, lift, now)
+        now, lift = _terminar_fechamento_gradual(
+            pickup, [], now)
         now += (
             cfg.BALL_PICKUP_LIFT_MS / 1000.0
             + cfg.BALL_PICKUP_LIFT_GUARD_S
@@ -263,14 +287,13 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertEqual(
             [step.gripper_action for step in actions
             if step.gripper_action is not None],
-            [
-                (-70, 70),
+            list(pickup._gripper_close_actions) + [
                 (70, 0),
                 (0, 40),
                 (0, -40),
                 (0, 40),
                 (0, -40),
-                (0, -70),
+                (0, -cfg.BALL_PICKUP_RIGHT_DELTA),
             ],
         )
         self.assertEqual(
@@ -287,14 +310,13 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertEqual(
             [step.gripper_action for step in actions
             if step.gripper_action is not None],
-            [
-                (-70, 70),
+            list(pickup._gripper_close_actions) + [
                 (0, -70),
                 (-40, 0),
                 (40, 0),
                 (-40, 0),
                 (40, 0),
-                (70, 0),
+                (-cfg.BALL_PICKUP_LEFT_DELTA, 0),
             ],
         )
         self.assertTrue(complete.terminal)
@@ -312,7 +334,10 @@ class BallPickupSequencerTests(unittest.TestCase):
                     step.gripper_action for step in actions
                     if step.gripper_action is not None
                 ]
-                self.assertEqual(grippers[1], expected_release)
+                self.assertEqual(
+                    grippers[len(pickup._gripper_close_actions)],
+                    expected_release,
+                )
                 self.assertEqual(complete.state, pickup.COMPLETE)
                 self.assertIn("selecao", complete.detail)
 

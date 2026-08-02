@@ -67,6 +67,8 @@ class BallPickupSequencer:
         self._kind = None
         self._wiggle_actions = ()
         self._wiggle_index = 0
+        self._gripper_close_actions = ()
+        self._gripper_close_index = 0
         self._terminal_detail = ""
         self._release_mode = "deposit"
 
@@ -96,6 +98,8 @@ class BallPickupSequencer:
                 "a coleta exige cor confirmada silver ou black")
         self._kind = target_kind
         self._wiggle_actions = self._build_wiggle_actions(target_kind)
+        self._gripper_close_actions = self._build_close_actions()
+        self._gripper_close_index = 0
         # A garra desce antes de qualquer movimento. O avanco que antes era
         # dividido em 1 s levantada + 1 s abaixada passa inteiro para depois
         # da descida, preservando a distancia total.
@@ -215,15 +219,7 @@ class BallPickupSequencer:
                 )
             self.state = self.GRIPPERS_START
             self._deadline = None
-            return PickupStep(
-                self.GRIPPERS_START,
-                "reta concluida; parando e fechando as duas garras",
-                motor_action="stop",
-                gripper_action=(
-                    cfg.BALL_PICKUP_LEFT_DELTA,
-                    cfg.BALL_PICKUP_RIGHT_DELTA,
-                ),
-            )
+            return self._next_close_step(first=True)
 
         if self.state == self.GRIPPERS_START:
             return PickupStep(
@@ -235,8 +231,14 @@ class BallPickupSequencer:
             if now < self._deadline:
                 return PickupStep(
                     self.GRIPPERS_WAIT,
-                    "rodas paradas; aguardando as garras fecharem",
+                    "rodas paradas; fechando as garras gradualmente",
                 )
+            if self._gripper_close_index < len(
+                self._gripper_close_actions
+            ):
+                self.state = self.GRIPPERS_START
+                self._deadline = None
+                return self._next_close_step()
             self.state = self.LIFT_PENDING
             self._deadline = None
             return PickupStep(
@@ -462,7 +464,13 @@ class BallPickupSequencer:
         now = time.monotonic() if now is None else float(now)
         if self.state == self.GRIPPERS_START:
             self.state = self.GRIPPERS_WAIT
-            self._deadline = now + cfg.BALL_PICKUP_GRIPPER_SETTLE_S
+            intervalo = (
+                cfg.BALL_PICKUP_GRIPPER_STEP_INTERVAL_S
+                if self._gripper_close_index
+                < len(self._gripper_close_actions)
+                else cfg.BALL_PICKUP_GRIPPER_SETTLE_S
+            )
+            self._deadline = now + intervalo
             return
         if self.state == self.RELEASE_PENDING:
             self.state = self.RELEASE_WAIT
@@ -502,21 +510,54 @@ class BallPickupSequencer:
         return "esfera preta; abrindo primeiro a garra direita"
 
     def _restore_action(self):
-        """Compensa exatamente os deltas da liberacao e volta a (180, 0)."""
+        """Volta aos extremos iniciais considerando o clamp 0..180."""
         if self._kind == "silver":
-            return (
-                -(
-                    cfg.BALL_PICKUP_LEFT_DELTA
-                    + cfg.BALL_PICKUP_RELEASE_DELTA
-                ),
-                -cfg.BALL_PICKUP_RIGHT_DELTA,
-            )
+            return 0, -cfg.BALL_PICKUP_RIGHT_DELTA
         return (
             -cfg.BALL_PICKUP_LEFT_DELTA,
-            -(
-                cfg.BALL_PICKUP_RIGHT_DELTA
-                - cfg.BALL_PICKUP_RELEASE_DELTA
-            ),
+            0,
+        )
+
+    def _build_close_actions(self):
+        """Divide o fechamento e alterna esquerda/direita sem perder graus."""
+        passo = int(cfg.BALL_PICKUP_GRIPPER_STEP_DEGREES)
+        if passo <= 0:
+            raise ValueError("passo gradual das garras deve ser positivo")
+
+        restantes = [
+            int(cfg.BALL_PICKUP_LEFT_DELTA),
+            int(cfg.BALL_PICKUP_RIGHT_DELTA),
+        ]
+        acoes = []
+        while restantes[0] != 0 or restantes[1] != 0:
+            for indice in (0, 1):
+                restante = restantes[indice]
+                if restante == 0:
+                    continue
+                deslocamento = min(abs(restante), passo)
+                deslocamento = (
+                    deslocamento if restante > 0 else -deslocamento)
+                acao = [0, 0]
+                acao[indice] = deslocamento
+                acoes.append(tuple(acao))
+                restantes[indice] -= deslocamento
+        return tuple(acoes)
+
+    def _next_close_step(self, first=False):
+        if self._gripper_close_index >= len(self._gripper_close_actions):
+            raise RuntimeError("fechamento gradual das garras ja terminou")
+        acao = self._gripper_close_actions[self._gripper_close_index]
+        self._gripper_close_index += 1
+        return PickupStep(
+            self.GRIPPERS_START,
+            (
+                "parando; " if first else ""
+            )
+            + "fechando uma garra por vez "
+            + f"({self._gripper_close_index}/"
+            + f"{len(self._gripper_close_actions)})",
+            motor_action="stop" if first else "",
+            gripper_action=acao,
         )
 
     def _build_wiggle_actions(self, target_kind):

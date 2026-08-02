@@ -195,6 +195,10 @@ BALL_PICKUP_FORWARD_LEAD_S = (
 )
 BALL_PICKUP_FORWARD_SPEED = BALL_APPROACH_SPEED_NEAR
 BALL_PICKUP_GRIPPER_SETTLE_S = 0.50
+# Fecha uma garra por vez, em passos pequenos. Isso reduz o pico de corrente
+# comparado ao antigo salto simultaneo, sem mudar o aperto final configurado.
+BALL_PICKUP_GRIPPER_STEP_DEGREES = 10
+BALL_PICKUP_GRIPPER_STEP_INTERVAL_S = 0.08
 
 # Depois de prender a esfera, o elevador sobe, aplica um pulso curto para
 # descer e entao executa a liberacao correspondente a cor confirmada.

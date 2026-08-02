@@ -1259,7 +1259,7 @@ def main():
                 ultimo_controle_ocioso = 0.0
                 print(
                     f"[coleta] vitima {coleta.target_kind} confirmada; "
-                    "avancando, baixando, avancando, fechando e selecionando")
+                    "baixando, avancando, fechando devagar e selecionando")
 
             log_agora = time.monotonic()
             if (

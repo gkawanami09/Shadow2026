@@ -36,9 +36,14 @@ def pickup_ready(target_kind):
     now += cfg.BALL_PICKUP_FINAL_FORWARD_S
     pickup.update(now=now)
     pickup.mark_grippers_started(now=now)
-    now += cfg.BALL_PICKUP_GRIPPER_SETTLE_S
-    pickup.update(now=now)
-    pickup.mark_futaba_started(now=now)
+    while pickup.state in (pickup.GRIPPERS_START, pickup.GRIPPERS_WAIT):
+        if pickup.state == pickup.GRIPPERS_WAIT:
+            now = pickup._deadline
+        passo = pickup.update(now=now)
+        if passo.gripper_action is not None:
+            pickup.mark_grippers_started(now=now)
+        if passo.futaba_action is not None:
+            pickup.mark_futaba_started(now=now)
     now += (
         cfg.BALL_PICKUP_LIFT_MS / 1000.0
         + cfg.BALL_PICKUP_LIFT_GUARD_S
