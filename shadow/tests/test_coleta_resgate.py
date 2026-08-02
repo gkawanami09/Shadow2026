@@ -1,5 +1,6 @@
 """Testes da sequência de coleta das vítimas."""
 
+import inspect
 import sys
 from pathlib import Path
 import unittest
@@ -9,6 +10,7 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import config_resgate as cfg  # noqa: E402
+import resgate as modulo_resgate  # noqa: E402
 from controle.coleta_resgate import (  # noqa: E402
     BallPickupSequencer,
     PickupStep,
@@ -17,11 +19,18 @@ from controle.aproximacao_resgate import (  # noqa: E402
     BallApproachController,
     MotionCommand,
 )
+from controle.parede_vitima import (  # noqa: E402
+    PAREDE_RETA,
+    WallProbeStep,
+    WallTargetSignature,
+)
 from resgate import (  # noqa: E402
     _aplicar_acoes_coleta,
     _armar_coleta_confirmada,
+    _armar_coleta_parede_direta,
     _deve_reiniciar_busca_por_alvo_perdido,
 )
+from visao.deteccao import VictimDetection  # noqa: E402
 
 
 def _ack_step(pickup, step, now):
@@ -809,6 +818,136 @@ class PickupHandoffTests(unittest.TestCase):
         primeiro = coleta.update(now=0.0)
         self.assertEqual(primeiro.state, coleta.FUTABA_PENDING)
         self.assertIsNotNone(primeiro.futaba_action)
+
+    @staticmethod
+    def deteccao_parede(
+        centro_x=320,
+        centro_y=300,
+        raio=55,
+        instante=1.0,
+    ):
+        return VictimDetection(
+            "silver",
+            center_x=centro_x,
+            center_y=centro_y,
+            radius=raio,
+            confidence=0.95,
+            confirmed=True,
+            hits=5,
+            timestamp=instante,
+            track_locked=True,
+        )
+
+    @staticmethod
+    def passo_parede():
+        return WallProbeStep(
+            "WALL_COMPLETE",
+            "parede reta e alvo central confirmados",
+            motor_action="stop",
+            terminal=True,
+            result=PAREDE_RETA,
+            target_kind="silver",
+        )
+
+    def test_handoff_direto_preserva_yaw_e_arma_wall_mode(self):
+        coleta = BallPickupSequencer()
+        alvo = self.deteccao_parede()
+
+        iniciou = _armar_coleta_parede_direta(
+            self.passo_parede(),
+            coleta,
+            self.FakeArduino(),
+            parada_enviada=True,
+            epoca_movimento=4,
+            epoca_parede=4,
+            deteccao=alvo,
+            frame_shape=(480, 640, 3),
+            assinatura=WallTargetSignature.from_detection(alvo),
+            agora=1.1,
+        )
+
+        self.assertTrue(iniciou)
+        self.assertTrue(coleta.started)
+        self.assertTrue(coleta._wall_mode)
+        primeiro = coleta.update(now=0.0)
+        self.assertEqual(primeiro.state, coleta.FUTABA_PENDING)
+        self.assertIsNotNone(primeiro.futaba_action)
+        # HOLD envia rodas zeradas sem cancelar o pulso temporizado do Futaba.
+        self.assertEqual(primeiro.motor_action, "hold")
+
+    def test_handoff_direto_recusa_epoca_antiga_ou_alvo_fora_do_centro(self):
+        alvo = self.deteccao_parede()
+        assinatura = WallTargetSignature.from_detection(alvo)
+        argumentos = dict(
+            passo_parede=self.passo_parede(),
+            arduino=self.FakeArduino(),
+            parada_enviada=True,
+            epoca_movimento=4,
+            deteccao=alvo,
+            frame_shape=(480, 640, 3),
+            assinatura=assinatura,
+            agora=1.1,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "serial estavel"):
+            _armar_coleta_parede_direta(
+                coleta=BallPickupSequencer(),
+                epoca_parede=3,
+                **argumentos,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "reconfirmada"):
+            _armar_coleta_parede_direta(
+                coleta=BallPickupSequencer(),
+                epoca_parede=4,
+                **{
+                    **argumentos,
+                    "deteccao": self.deteccao_parede(centro_x=370),
+                },
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "reconfirmada"):
+            _armar_coleta_parede_direta(
+                coleta=BallPickupSequencer(),
+                epoca_parede=4,
+                **{
+                    **argumentos,
+                    "deteccao": self.deteccao_parede(
+                        centro_y=235, raio=36),
+                },
+            )
+
+        alvo_truncado = self.deteccao_parede()
+        alvo_truncado = VictimDetection(
+            alvo_truncado.kind,
+            center_x=alvo_truncado.center_x,
+            center_y=alvo_truncado.center_y,
+            radius=alvo_truncado.radius,
+            confidence=alvo_truncado.confidence,
+            confirmed=True,
+            hits=alvo_truncado.hits,
+            timestamp=alvo_truncado.timestamp,
+            track_locked=True,
+            truncated=True,
+        )
+        with self.assertRaisesRegex(RuntimeError, "reconfirmada"):
+            _armar_coleta_parede_direta(
+                coleta=BallPickupSequencer(),
+                epoca_parede=4,
+                **{
+                    **argumentos,
+                    "deteccao": alvo_truncado,
+                },
+            )
+
+    def test_main_nao_recria_aproximacao_depois_de_parede_reta(self):
+        fonte = inspect.getsource(modulo_resgate.main)
+        ramo_parede = fonte.split(
+            "passo_parede.result == PAREDE_RETA", 1)[1].split(
+                "elif (", 1)[0]
+
+        self.assertIn("_armar_coleta_parede_direta", ramo_parede)
+        self.assertNotIn("BallApproachController(", ramo_parede)
 
     def test_coleta_recusa_parar_sem_confirmacao_serial(self):
         coleta = BallPickupSequencer()

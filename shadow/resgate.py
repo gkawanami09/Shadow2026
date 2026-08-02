@@ -361,6 +361,62 @@ def _armar_coleta_confirmada(
     return True
 
 
+def _armar_coleta_parede_direta(
+    passo_parede,
+    coleta,
+    arduino,
+    parada_enviada,
+    epoca_movimento,
+    epoca_parede,
+    deteccao,
+    frame_shape,
+    assinatura,
+    agora,
+):
+    """Preserva o yaw confirmado e inicia a coleta especial sem reaproximar."""
+    if (
+        passo_parede is None
+        or not passo_parede.terminal
+        or passo_parede.result != PAREDE_RETA
+        or passo_parede.motor_action != "stop"
+    ):
+        raise RuntimeError(
+            "coleta de parede recusada: teste nao terminou em PARAR")
+    if (
+        parada_enviada is not True
+        or epoca_movimento is None
+        or arduino is None
+        or not arduino.connected
+        or arduino.connection_epoch != epoca_movimento
+        or epoca_parede != epoca_movimento
+    ):
+        raise RuntimeError(
+            "coleta de parede recusada: PARAR nao teve serial estavel")
+    if passo_parede.target_kind not in ("silver", "black"):
+        raise RuntimeError(
+            "coleta de parede recusada: cor da vitima nao confirmada")
+    if (
+        deteccao is None
+        or not deteccao.confirmed
+        or deteccao.kind != passo_parede.target_kind
+        or deteccao.truncated
+        or agora - deteccao.timestamp > cfg.BALL_FRAME_STALE_S
+        or assinatura is None
+        or not assinatura.matches(deteccao, frame_shape)
+        or not assinatura.matches_pickup_depth(deteccao, frame_shape)
+        or abs(deteccao.horizontal_error(frame_shape[1]))
+        > cfg.BALL_WALL_ALIGN_CENTER_DEADBAND
+    ):
+        raise RuntimeError(
+            "coleta de parede recusada: mesma vitima central nao foi "
+            "reconfirmada")
+    if coleta.started:
+        raise RuntimeError("coleta de parede recusada: sequencia ja iniciada")
+    if not coleta.start(passo_parede.target_kind, wall_mode=True):
+        raise RuntimeError("coleta de parede recusada pelo sequenciador")
+    return True
+
+
 def _deve_reiniciar_busca_por_alvo_perdido(
     busca,
     controlador,
@@ -1206,22 +1262,64 @@ def main():
                 and verificador_parede is not None
                 and passo_parede is not None
                 and passo_parede.terminal
-                and passo_parede.result in (LIVRE, PAREDE_RETA)
+                and passo_parede.result == PAREDE_RETA
             ):
-                modo_parede = passo_parede.result == PAREDE_RETA
+                _armar_coleta_parede_direta(
+                    passo_parede,
+                    coleta,
+                    arduino,
+                    movimento_enviado,
+                    epoca_movimento,
+                    epoca_parede,
+                    deteccao_atual,
+                    (
+                        frame_atual.shape if frame_atual is not None
+                        else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                              cfg.RESCUE_CAMERA_MAX_WIDTH, 3)
+                    ),
+                    verificador_parede.target_signature,
+                    agora,
+                )
+                epoca_coleta = arduino.connection_epoch
+                print(
+                    "[resgate] parede reta e mesma vitima confirmadas; "
+                    "iniciando coleta especial sem desfazer o yaw")
+                verificador_parede = None
+                passo_parede = None
+                epoca_parede = None
+                coleta_apos_teste_parede = None
+                busca = None
+                controlador = None
+                resultado_atual = None
+                deteccao_atual = None
+                portao.reset()
+                if trabalhador is not None:
+                    trabalhador.reset_tracking()
+                ultimo_controle_ocioso = 0.0
+                comando = MotionCommand(
+                    "WALL_PICKUP_ARMED",
+                    detail=(
+                        "PARAR confirmado; coleta de parede iniciada no "
+                        "mesmo yaw"),
+                    target_kind=coleta.target_kind,
+                )
+
+            elif (
+                args.drive
+                and verificador_parede is not None
+                and passo_parede is not None
+                and passo_parede.terminal
+                and passo_parede.result == LIVRE
+            ):
                 coleta_apos_teste_parede = WallPickupAuthorization(
                     target_kind=passo_parede.target_kind,
-                    wall_mode=modo_parede,
+                    wall_mode=False,
                     expires_at=(
                         agora + cfg.BALL_WALL_REAPPROACH_AUTH_S),
                     signature=verificador_parede.target_signature,
                 )
-                resultado_teste = (
-                    "parede reta provavel confirmada"
-                    if modo_parede else "caminho livre confirmado"
-                )
                 print(
-                    f"[resgate] {resultado_teste}; "
+                    "[resgate] caminho livre confirmado; "
                     "retomando a aproximacao visual antes da coleta")
                 verificador_parede = None
                 passo_parede = None
@@ -1237,7 +1335,7 @@ def main():
                 comando = MotionCommand(
                     "WALL_REAPPROACH",
                     detail=(
-                        f"{resultado_teste}; procurando novamente a vitima "
+                        "caminho livre; procurando novamente a vitima "
                         "no ponto original"
                     ),
                 )

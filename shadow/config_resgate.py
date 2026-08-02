@@ -228,8 +228,10 @@ BALL_PICKUP_WIGGLE_STEP_S = 0.20
 # Quando a vitima chega ao ponto de coleta, o ultrassonico mede primeiro no
 # centro. Se houver eco proximo, o robo mede uma vez de cada lado da posicao
 # original e retorna ao centro. Distancias proximas e parecidas nos dois lados
-# indicam parede reta provavel. Resultado misto ou muito diferente e tratado
-# como quina/duvida e nunca autoriza as garras.
+# indicam parede reta provavel. Resultado misto ou muito diferente aciona uma
+# correcao curta de yaw e o teste inteiro precisa convergir antes das garras.
+# Se ambos parecem livres, a varredura angular abaixo elimina o ponto cego de
+# uma parede inclinada antes de liberar a coleta normal.
 BALL_WALL_TEST_ENABLED = True
 BALL_WALL_PROBE_DISTANCE_MM = 220
 BALL_WALL_PROBE_SAMPLES = 3
@@ -248,6 +250,50 @@ BALL_WALL_PROBE_RETURN_MAX_CENTER_ERROR = 0.22
 BALL_WALL_PROBE_RADIUS_RATIO_MIN = 0.65
 BALL_WALL_PROBE_RADIUS_RATIO_MAX = 1.45
 BALL_WALL_PROBE_CENTER_Y_TOLERANCE_RATIO = 0.18
+# O teste nasce somente depois do NEAR visual. Antes do handoff direto para o
+# Futaba, a mesma esfera precisa voltar tambem a uma profundidade parecida com
+# esse NEAR; o envelope largo acima serve apenas para acompanha-la nas manobras.
+BALL_WALL_FINAL_RADIUS_RATIO_MIN = 0.85
+BALL_WALL_FINAL_RADIUS_RATIO_MAX = 1.18
+BALL_WALL_FINAL_BOTTOM_Y_TOLERANCE_RATIO = 0.06
+# A correcao final e somente longitudinal: as quatro rodas recebem o mesmo
+# comando curto, o robo freia e espera a imagem assentar antes de medir de
+# novo. Ela nunca tenta compensar uma leitura ruim com um movimento longo.
+BALL_WALL_DEPTH_PWM = 40
+BALL_WALL_DEPTH_PULSE_S = 0.08
+BALL_WALL_DEPTH_SETTLE_S = 0.15
+BALL_WALL_DEPTH_MAX_PULSES = 6
+BALL_WALL_DEPTH_MIN_PROGRESS = 0.01
+BALL_WALL_DEPTH_MAX_NO_PROGRESS_PULSES = 2
+# Se os dois lados medidos nao concordarem, o robo corrige o proprio angulo
+# antes de repetir o teste. O pivo usa somente as rodas traseiras: assim a
+# frente, que ja esta perto da vitima, desloca o minimo possivel.
+BALL_WALL_ALIGN_PIVOT_PWM = 50
+BALL_WALL_ALIGN_PIVOT_S = 0.12
+BALL_WALL_ALIGN_CENTER_DEADBAND = 0.08
+BALL_WALL_ALIGN_OMNI_PWM = 45
+BALL_WALL_ALIGN_OMNI_PULSE_S = 0.08
+BALL_WALL_ALIGN_SETTLE_S = 0.15
+BALL_WALL_ALIGN_MAX_CORRECTIONS = 3
+BALL_WALL_ALIGN_MAX_OMNI_PULSES = 6
+# Duas tentativas sem reduzir o erro horizontal encerram o teste. Isso evita
+# insistir contra uma quina ou perseguir outra esfera da mesma cor.
+BALL_WALL_ALIGN_MIN_PROGRESS = 0.01
+BALL_WALL_ALIGN_MAX_NO_PROGRESS_PULSES = 2
+# Se os dois offsets laterais parecem livres, ainda pode existir uma parede
+# inclinada fora do cone estreito do ultrassonico. Em cada offset o robo gira
+# somente a traseira para varrer tres angulos, freia, confirma um frame novo e
+# mede uma bateria completa. Se nao achar eco, restaura o angulo pela posicao
+# visual que a mesma esfera tinha antes da varredura.
+BALL_WALL_SCAN_PIVOT_PWM = 50
+BALL_WALL_SCAN_PULSE_S = 0.12
+BALL_WALL_SCAN_SETTLE_S = 0.15
+BALL_WALL_SCAN_MAX_OUTWARD_PULSES_PER_SIDE = 3
+BALL_WALL_SCAN_MAX_RESTORE_PULSES_PER_SIDE = 4
+BALL_WALL_SCAN_TOTAL_PULSE_LIMIT = 12
+BALL_WALL_SCAN_MIN_VISUAL_PROGRESS = 0.02
+BALL_WALL_SCAN_RESTORE_DEADBAND = 0.04
+BALL_WALL_SCAN_MAX_NO_PROGRESS_PULSES = 2
 BALL_WALL_REAPPROACH_AUTH_S = 3.00
 
 # Depois de confirmar a parede, a nova aproximacao usa a coleta especial:
