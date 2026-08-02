@@ -20,6 +20,7 @@ from controle.aproximacao_resgate import (  # noqa: E402
 from resgate import (  # noqa: E402
     _aplicar_acoes_coleta,
     _armar_coleta_confirmada,
+    _deve_reiniciar_busca_por_alvo_perdido,
 )
 
 
@@ -28,8 +29,52 @@ def _ack_step(pickup, step, now):
         pickup.mark_futaba_started(now=now)
     if step.motor_action == "forward":
         pickup.mark_forward_started(now=now)
+    if (
+        step.motor_action == "stop"
+        and step.state == pickup.WALL_PAUSE_PENDING
+    ):
+        pickup.mark_wall_pause_started(now=now)
+    if (
+        step.motor_action == "stop"
+        and step.state == pickup.WALL_POST_REVERSE_PENDING
+    ):
+        pickup.mark_post_reverse_pause_started(now=now)
+    if step.motor_action == "reverse":
+        pickup.mark_reverse_started(now=now)
     if step.gripper_action is not None:
         pickup.mark_grippers_started(now=now)
+
+
+class _ColetaParada:
+    started = False
+
+
+class ReaproximacaoParedeTests(unittest.TestCase):
+    def test_nao_abandona_reaproximacao_com_autorizacao_ativa(self):
+        comando = MotionCommand(BallApproachController.WAIT_TARGET)
+
+        reiniciar = _deve_reiniciar_busca_por_alvo_perdido(
+            busca=None,
+            controlador=object(),
+            coleta=_ColetaParada(),
+            comando=comando,
+            autorizacao_parede=object(),
+        )
+
+        self.assertFalse(reiniciar)
+
+    def test_reinicia_busca_sem_autorizacao_de_parede(self):
+        comando = MotionCommand(BallApproachController.WAIT_TARGET)
+
+        reiniciar = _deve_reiniciar_busca_por_alvo_perdido(
+            busca=None,
+            controlador=object(),
+            coleta=_ColetaParada(),
+            comando=comando,
+            autorizacao_parede=None,
+        )
+
+        self.assertTrue(reiniciar)
 
 
 def _terminar_fechamento_gradual(pickup, actions, now):
@@ -267,6 +312,143 @@ class BallPickupSequencerTests(unittest.TestCase):
             (acao[0] == 0) != (acao[1] == 0)
             for acao in movimentos
         ))
+
+    def test_modo_parede_avanca_para_re_e_so_entao_fecha(self):
+        pickup = BallPickupSequencer()
+        self.assertTrue(pickup.start("silver", wall_mode=True))
+        now = 0.0
+
+        down = pickup.update(now=now)
+        self.assertEqual(down.motor_action, "hold")
+        _ack_step(pickup, down, now)
+
+        now += (
+            cfg.BALL_PICKUP_FUTABA_MS / 1000.0
+            + cfg.BALL_PICKUP_FUTABA_GUARD_S
+        )
+        forward = pickup.update(now=now)
+        self.assertEqual(forward.motor_action, "forward")
+        self.assertIsNone(forward.gripper_action)
+        _ack_step(pickup, forward, now)
+
+        before_final = pickup.update(
+            now=now + cfg.BALL_WALL_PICKUP_FORWARD_S - 0.001)
+        self.assertEqual(before_final.state, pickup.FORWARD_LEAD)
+        self.assertEqual(before_final.motor_action, "")
+
+        now += cfg.BALL_WALL_PICKUP_FORWARD_S
+        final_forward = pickup.update(now=now)
+        self.assertEqual(final_forward.state, pickup.FINAL_FORWARD)
+        self.assertIsNone(final_forward.gripper_action)
+
+        before_pause = pickup.update(
+            now=now + cfg.BALL_PICKUP_FINAL_FORWARD_S - 0.001)
+        self.assertEqual(before_pause.state, pickup.FINAL_FORWARD)
+
+        now += cfg.BALL_PICKUP_FINAL_FORWARD_S
+        pause = pickup.update(now=now)
+        self.assertEqual(pause.state, pickup.WALL_PAUSE_PENDING)
+        self.assertEqual(pause.motor_action, "stop")
+        self.assertIsNone(pause.gripper_action)
+        _ack_step(pickup, pause, now)
+
+        before_reverse = pickup.update(
+            now=(
+                now
+                + cfg.BALL_WALL_PICKUP_DIRECTION_CHANGE_PAUSE_S
+                - 0.001
+            )
+        )
+        self.assertEqual(before_reverse.state, pickup.WALL_PAUSE_WAIT)
+
+        now += cfg.BALL_WALL_PICKUP_DIRECTION_CHANGE_PAUSE_S
+        reverse = pickup.update(now=now)
+        self.assertEqual(reverse.state, pickup.WALL_REVERSE_PENDING)
+        self.assertEqual(reverse.motor_action, "reverse")
+        self.assertEqual(reverse.angle, 200)
+        self.assertEqual(reverse.speed, cfg.BALL_WALL_PICKUP_REVERSE_SPEED)
+        self.assertIsNone(reverse.gripper_action)
+        _ack_step(pickup, reverse, now)
+
+        before_close = pickup.update(
+            now=now + cfg.BALL_WALL_PICKUP_REVERSE_S - 0.001)
+        self.assertEqual(before_close.state, pickup.WALL_REVERSE_WAIT)
+        self.assertIsNone(before_close.gripper_action)
+
+        now += cfg.BALL_WALL_PICKUP_REVERSE_S
+        post_reverse_stop = pickup.update(now=now)
+        self.assertEqual(
+            post_reverse_stop.state,
+            pickup.WALL_POST_REVERSE_PENDING,
+        )
+        self.assertEqual(post_reverse_stop.motor_action, "stop")
+        self.assertIsNone(post_reverse_stop.gripper_action)
+        pending_stop = pickup.update(now=now + 10.0)
+        self.assertEqual(
+            pending_stop.state,
+            pickup.WALL_POST_REVERSE_PENDING,
+        )
+        self.assertEqual(pending_stop.motor_action, "")
+        self.assertIsNone(pending_stop.gripper_action)
+        _ack_step(pickup, post_reverse_stop, now)
+
+        before_close = pickup.update(
+            now=(
+                now
+                + cfg.BALL_WALL_PICKUP_POST_REVERSE_PAUSE_S
+                - 0.001
+            )
+        )
+        self.assertEqual(
+            before_close.state,
+            pickup.WALL_POST_REVERSE_WAIT,
+        )
+        self.assertEqual(before_close.motor_action, "")
+        self.assertIsNone(before_close.gripper_action)
+
+        now += cfg.BALL_WALL_PICKUP_POST_REVERSE_PAUSE_S
+        close = pickup.update(now=now)
+        self.assertEqual(close.state, pickup.GRIPPERS_START)
+        self.assertEqual(close.motor_action, "")
+        self.assertEqual(close.gripper_action, (-30, 0))
+        actions = [close]
+        _ack_step(pickup, close, now)
+        now, _lift = _terminar_fechamento_gradual(
+            pickup, actions, now)
+        now, carry = _terminar_subida(pickup, actions)
+
+        self.assertEqual(carry.state, pickup.CARRY_READY)
+        self.assertEqual(
+            [step.gripper_action for step in actions
+             if step.gripper_action is not None],
+            list(pickup._gripper_close_actions),
+        )
+        self.assertTrue(pickup.resume_selection())
+        release = pickup.update(now=now)
+        self.assertEqual(release.gripper_action, (70, 0))
+
+    def test_modo_normal_nao_adiciona_pausa_nem_re(self):
+        pickup = BallPickupSequencer()
+        pickup.start("black")
+        now = 0.0
+
+        down = pickup.update(now=now)
+        _ack_step(pickup, down, now)
+        now += (
+            cfg.BALL_PICKUP_FUTABA_MS / 1000.0
+            + cfg.BALL_PICKUP_FUTABA_GUARD_S
+        )
+        forward = pickup.update(now=now)
+        _ack_step(pickup, forward, now)
+        now += cfg.BALL_PICKUP_FORWARD_LEAD_S
+        pickup.update(now=now)
+        now += cfg.BALL_PICKUP_FINAL_FORWARD_S
+
+        close = pickup.update(now=now)
+
+        self.assertEqual(close.state, pickup.GRIPPERS_START)
+        self.assertEqual(close.motor_action, "stop")
+        self.assertEqual(close.gripper_action, (-30, 0))
 
     def test_release_is_blocked_while_carrying_until_marker_arrival(self):
         pickup = BallPickupSequencer()
@@ -555,6 +737,29 @@ class PickupActionApplicationTests(unittest.TestCase):
         self.assertIn("serial mudou", erro)
         self.assertEqual(arduino.calls, [])
 
+    def test_re_da_parede_usa_o_angulo_e_a_velocidade_do_passo(self):
+        arduino = self.FakeArduino()
+        passo = PickupStep(
+            "RE_PAREDE",
+            "afastando antes de fechar",
+            angle=200,
+            speed=cfg.BALL_WALL_PICKUP_REVERSE_SPEED,
+            motor_action="reverse",
+        )
+
+        erro = _aplicar_acoes_coleta(
+            passo,
+            arduino,
+            self.gravar_direcao(arduino.calls),
+            epoca_serial_esperada=7,
+        )
+
+        self.assertIsNone(erro)
+        self.assertEqual(
+            arduino.calls,
+            [("direcao", 200, cfg.BALL_WALL_PICKUP_REVERSE_SPEED)],
+        )
+
 
 class PickupHandoffTests(unittest.TestCase):
     class FakeArduino:
@@ -586,6 +791,24 @@ class PickupHandoffTests(unittest.TestCase):
         self.assertTrue(iniciou)
         self.assertTrue(coleta.started)
         self.assertEqual(coleta.target_kind, "black")
+
+    def test_handoff_pode_armar_somente_a_coleta_especial_de_parede(self):
+        coleta = BallPickupSequencer()
+
+        iniciou = _armar_coleta_confirmada(
+            self.comando_proximo("silver"),
+            coleta,
+            self.FakeArduino(),
+            parada_enviada=True,
+            epoca_movimento=4,
+            modo_parede=True,
+        )
+
+        self.assertTrue(iniciou)
+        self.assertTrue(coleta._wall_mode)
+        primeiro = coleta.update(now=0.0)
+        self.assertEqual(primeiro.state, coleta.FUTABA_PENDING)
+        self.assertIsNotNone(primeiro.futaba_action)
 
     def test_coleta_recusa_parar_sem_confirmacao_serial(self):
         coleta = BallPickupSequencer()

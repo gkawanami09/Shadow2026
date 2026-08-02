@@ -44,6 +44,12 @@ class BallPickupSequencer:
     FORWARD_START = "PICKUP_FORWARD_START"
     FORWARD_LEAD = "PICKUP_FORWARD_LEAD"
     FINAL_FORWARD = "PICKUP_FINAL_FORWARD"
+    WALL_PAUSE_PENDING = "PICKUP_WALL_PAUSE_PENDING"
+    WALL_PAUSE_WAIT = "PICKUP_WALL_PAUSE_WAIT"
+    WALL_REVERSE_PENDING = "PICKUP_WALL_REVERSE_PENDING"
+    WALL_REVERSE_WAIT = "PICKUP_WALL_REVERSE_WAIT"
+    WALL_POST_REVERSE_PENDING = "PICKUP_WALL_POST_REVERSE_PENDING"
+    WALL_POST_REVERSE_WAIT = "PICKUP_WALL_POST_REVERSE_WAIT"
     GRIPPERS_START = "PICKUP_GRIPPERS_START"
     GRIPPERS_WAIT = "PICKUP_GRIPPERS"
     LIFT_PENDING = "PICKUP_LIFT_PENDING"
@@ -74,6 +80,7 @@ class BallPickupSequencer:
         self._gripper_capture_action_count = 0
         self._terminal_detail = ""
         self._release_mode = "deposit"
+        self._wall_mode = False
 
     @property
     def started(self):
@@ -92,7 +99,7 @@ class BallPickupSequencer:
         """A esfera esta fechada e elevada, pronta para ser transportada."""
         return self.state == self.CARRY_READY
 
-    def start(self, target_kind):
+    def start(self, target_kind, wall_mode=False):
         """Arma a sequencia e congela a cor ate o estado terminal."""
         if self.state != self.IDLE:
             return False
@@ -100,6 +107,7 @@ class BallPickupSequencer:
             raise ValueError(
                 "a coleta exige cor confirmada silver ou black")
         self._kind = target_kind
+        self._wall_mode = bool(wall_mode)
         self._wiggle_actions = self._build_wiggle_actions(target_kind)
         self._gripper_close_actions = self._build_close_actions()
         self._gripper_close_index = 0
@@ -178,9 +186,19 @@ class BallPickupSequencer:
                 )
             self.state = self.FORWARD_START
             self._deadline = None
+            tempo_avanco = (
+                cfg.BALL_WALL_PICKUP_FORWARD_S
+                if self._wall_mode
+                else cfg.BALL_PICKUP_FORWARD_LEAD_S
+            )
             return PickupStep(
                 self.FORWARD_START,
-                "Futaba embaixo; iniciando avanco total de 2 s",
+                (
+                    "Futaba embaixo; iniciando avanco contra a parede "
+                    f"por {tempo_avanco:.2f} s"
+                    if self._wall_mode
+                    else "Futaba embaixo; iniciando avanco total de 2 s"
+                ),
                 angle=0,
                 speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 motor_action="forward",
@@ -199,7 +217,11 @@ class BallPickupSequencer:
             if now < self._deadline:
                 return PickupStep(
                     self.FORWARD_LEAD,
-                    "avancando por 2 s com o Futaba embaixo",
+                    (
+                        "avancando com a garra aberta contra a parede"
+                        if self._wall_mode
+                        else "avancando por 2 s com o Futaba embaixo"
+                    ),
                     angle=0,
                     speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 )
@@ -220,9 +242,80 @@ class BallPickupSequencer:
                     angle=0,
                     speed=cfg.BALL_PICKUP_FORWARD_SPEED,
                 )
+            self._deadline = None
+            if self._wall_mode:
+                self.state = self.WALL_PAUSE_PENDING
+                return PickupStep(
+                    self.WALL_PAUSE_PENDING,
+                    "esfera pressionada; parando antes da re curta",
+                    motor_action="stop",
+                )
+            self.state = self.GRIPPERS_START
+            return self._next_close_step(first=True)
+
+        if self.state == self.WALL_PAUSE_PENDING:
+            return PickupStep(
+                self.WALL_PAUSE_PENDING,
+                "aguardando confirmacao da parada antes da re",
+            )
+
+        if self.state == self.WALL_PAUSE_WAIT:
+            if now < self._deadline:
+                return PickupStep(
+                    self.WALL_PAUSE_WAIT,
+                    "rodas paradas antes de inverter o movimento",
+                )
+            self.state = self.WALL_REVERSE_PENDING
+            self._deadline = None
+            return PickupStep(
+                self.WALL_REVERSE_PENDING,
+                "dando re curta para afastar a esfera da parede",
+                angle=200,
+                speed=cfg.BALL_WALL_PICKUP_REVERSE_SPEED,
+                motor_action="reverse",
+            )
+
+        if self.state == self.WALL_REVERSE_PENDING:
+            return PickupStep(
+                self.WALL_REVERSE_PENDING,
+                "aguardando confirmacao do comando de re",
+                angle=200,
+                speed=cfg.BALL_WALL_PICKUP_REVERSE_SPEED,
+            )
+
+        if self.state == self.WALL_REVERSE_WAIT:
+            if now < self._deadline:
+                return PickupStep(
+                    self.WALL_REVERSE_WAIT,
+                    "afastando da parede antes de fechar as garras",
+                    angle=200,
+                    speed=cfg.BALL_WALL_PICKUP_REVERSE_SPEED,
+                )
+            self.state = self.WALL_POST_REVERSE_PENDING
+            self._deadline = None
+            return PickupStep(
+                self.WALL_POST_REVERSE_PENDING,
+                "re concluida; freando antes de fechar as garras",
+                motor_action="stop",
+            )
+
+        if self.state == self.WALL_POST_REVERSE_PENDING:
+            return PickupStep(
+                self.WALL_POST_REVERSE_PENDING,
+                "aguardando confirmacao da parada depois da re",
+            )
+
+        if self.state == self.WALL_POST_REVERSE_WAIT:
+            if now < self._deadline:
+                return PickupStep(
+                    self.WALL_POST_REVERSE_WAIT,
+                    "aguardando o chassi assentar antes de fechar",
+                )
             self.state = self.GRIPPERS_START
             self._deadline = None
-            return self._next_close_step(first=True)
+            # As rodas ja foram paradas e assentaram no estado anterior.
+            # Portanto o fechamento sai sozinho, sem um segundo movimento.
+            return self._next_close_step(first=False)
 
         if self.state == self.GRIPPERS_START:
             return PickupStep(
@@ -498,7 +591,41 @@ class BallPickupSequencer:
             raise RuntimeError(
                 "confirmacao do avanco fora do estado de partida")
         self.state = self.FORWARD_LEAD
-        self._deadline = now + cfg.BALL_PICKUP_FORWARD_LEAD_S
+        duracao = (
+            cfg.BALL_WALL_PICKUP_FORWARD_S
+            if self._wall_mode
+            else cfg.BALL_PICKUP_FORWARD_LEAD_S
+        )
+        self._deadline = now + duracao
+
+    def mark_wall_pause_started(self, now=None):
+        """Inicia a pausa segura antes de inverter para a re."""
+        if self.state != self.WALL_PAUSE_PENDING:
+            raise RuntimeError(
+                "confirmacao da pausa fora do modo de parede")
+        now = time.monotonic() if now is None else float(now)
+        self.state = self.WALL_PAUSE_WAIT
+        self._deadline = (
+            now + cfg.BALL_WALL_PICKUP_DIRECTION_CHANGE_PAUSE_S)
+
+    def mark_reverse_started(self, now=None):
+        """Inicia o prazo da re somente depois da escrita serial."""
+        if self.state != self.WALL_REVERSE_PENDING:
+            raise RuntimeError(
+                "confirmacao da re fora do modo de parede")
+        now = time.monotonic() if now is None else float(now)
+        self.state = self.WALL_REVERSE_WAIT
+        self._deadline = now + cfg.BALL_WALL_PICKUP_REVERSE_S
+
+    def mark_post_reverse_pause_started(self, now=None):
+        """Inicia o assentamento somente apos confirmar o STOP pos-re."""
+        if self.state != self.WALL_POST_REVERSE_PENDING:
+            raise RuntimeError(
+                "confirmacao da pausa pos-re fora do modo de parede")
+        now = time.monotonic() if now is None else float(now)
+        self.state = self.WALL_POST_REVERSE_WAIT
+        self._deadline = (
+            now + cfg.BALL_WALL_PICKUP_POST_REVERSE_PAUSE_S)
 
     def mark_grippers_started(self, now=None):
         """Confirma um lote de garras e inicia seu tempo fisico."""

@@ -58,6 +58,13 @@ from controle.deposito_cinza_resgate import (  # noqa: E402
     SequenciadorDepositoCinza,
 )
 from controle.parada_obstaculo import MonitorObstaculo  # noqa: E402
+from controle.parede_vitima import (  # noqa: E402
+    LIVRE,
+    PAREDE_RETA,
+    WallPickupAuthorization,
+    WallProbeController,
+    aplicar_acao_parede,
+)
 from controle.retangulo_verde_resgate import (  # noqa: E402
     ControladorRetanguloVerde,
 )
@@ -138,7 +145,7 @@ def _aplicar_acoes_coleta(
     epoca_serial_esperada=None,
 ):
     """Aplica uma única vez os eventos físicos emitidos pelo sequenciador."""
-    avanco_iniciado = False
+    movimento_iniciado = False
     motor_parado = False
 
     def serial_mudou():
@@ -155,7 +162,7 @@ def _aplicar_acoes_coleta(
         # parar as rodas neste mesmo tick.
         if (
             not motor_parado
-            and (avanco_iniciado or passo.gripper_action is not None)
+            and (movimento_iniciado or passo.gripper_action is not None)
         ):
             try:
                 acao_direcao()
@@ -176,7 +183,7 @@ def _aplicar_acoes_coleta(
             if acao_direcao() is False:
                 return "PARAR nao foi enviado pela serial"
             motor_parado = True
-        elif passo.motor_action not in ("", "forward"):
+        elif passo.motor_action not in ("", "forward", "reverse"):
             return f"acao de motor desconhecida: {passo.motor_action}"
 
         if serial_mudou():
@@ -195,10 +202,11 @@ def _aplicar_acoes_coleta(
             if serial_mudou():
                 return abortar("serial mudou durante a coleta")
 
-        if passo.motor_action == "forward":
+        if passo.motor_action in ("forward", "reverse"):
             if acao_direcao(passo.angle, passo.speed) is False:
-                return "comando de avanco nao foi enviado pela serial"
-            avanco_iniciado = True
+                nome = "avanco" if passo.motor_action == "forward" else "re"
+                return f"comando de {nome} nao foi enviado pela serial"
+            movimento_iniciado = True
             if serial_mudou():
                 return abortar("serial mudou durante a coleta")
 
@@ -294,19 +302,19 @@ def _proximo_marcador_deposito(marcador_atual):
     raise ValueError("marcador_atual deve ser green ou red")
 
 
-def _armar_coleta_confirmada(
+def _validar_inicio_coleta(
     comando,
     coleta,
     arduino,
     parada_enviada,
     epoca_movimento,
 ):
-    """Só arma a coleta após confirmação visual e PARAR serial estável."""
+    """Valida o ponto de coleta sem mexer no Futaba ou nas garras."""
     if (
         comando.state != BallApproachController.NEAR
         or coleta.started
     ):
-        return False
+        return None
     if (
         not comando.terminal
         or not comando.pickup_in_range
@@ -327,9 +335,47 @@ def _armar_coleta_confirmada(
     if comando.target_kind not in ("silver", "black"):
         raise RuntimeError(
             "coleta recusada: cor da vitima nao foi confirmada")
-    if not coleta.start(comando.target_kind):
+    return comando.target_kind
+
+
+def _armar_coleta_confirmada(
+    comando,
+    coleta,
+    arduino,
+    parada_enviada,
+    epoca_movimento,
+    modo_parede=False,
+):
+    """Só arma a coleta após confirmação visual e PARAR serial estável."""
+    target_kind = _validar_inicio_coleta(
+        comando,
+        coleta,
+        arduino,
+        parada_enviada,
+        epoca_movimento,
+    )
+    if target_kind is None:
+        return False
+    if not coleta.start(target_kind, wall_mode=modo_parede):
         raise RuntimeError("coleta recusada: sequencia ja iniciada")
     return True
+
+
+def _deve_reiniciar_busca_por_alvo_perdido(
+    busca,
+    controlador,
+    coleta,
+    comando,
+    autorizacao_parede=None,
+):
+    """Nao abandona a reaproximacao enquanto seus frames sao confirmados."""
+    return (
+        busca is None
+        and controlador is not None
+        and not coleta.started
+        and autorizacao_parede is None
+        and comando.state == BallApproachController.WAIT_TARGET
+    )
 
 
 class MarkerPair:
@@ -481,6 +527,7 @@ def main():
     controlador_verde = None
     monitor_chegada_verde = None
     deposito_cinza = None
+    verificador_parede = None
     busca = None
     coleta = None
     contador_verde = ContadorVerdeBusca()
@@ -493,12 +540,14 @@ def main():
     proxima_atualizacao_ultrassom_verde = 0.0
     epoca_busca = None
     epoca_coleta = None
+    epoca_parede = None
     epoca_verde = None
     epoca_deposito_cinza = None
     varreduras_sem_vitima = 0
     vitimas_resgatadas = 0
     vitimas_prata_resgatadas = 0
     vitimas_pretas_resgatadas = 0
+    coleta_apos_teste_parede = None
     amostras_captura = deque(maxlen=60)
     instantes_deteccao = deque(maxlen=30)
 
@@ -600,6 +649,15 @@ def main():
             armado = agora >= armado_em
 
             if (
+                coleta_apos_teste_parede is not None
+                and agora > coleta_apos_teste_parede.expires_at
+            ):
+                print(
+                    "[resgate] autorizacao do teste de parede expirou; "
+                    "voltando a procurar a vitima com seguranca")
+                coleta_apos_teste_parede = None
+
+            if (
                 trabalhador is not None
                 and frame_novo
                 and armado
@@ -670,6 +728,7 @@ def main():
             agora = time.monotonic()
             comando_atualizado = False
             passo_coleta = None
+            passo_parede = None
             passo_deposito_cinza = None
             coleta_concluida = None
             distancia_chegada_verde_mm = None
@@ -734,6 +793,34 @@ def main():
                 comando = MotionCommand(
                     "ARMING",
                     detail=f"camera fluida; PARAR por mais {restante:.1f} s")
+            elif verificador_parede is not None:
+                # Durante este teste as rodas obedecem somente ao pequeno
+                # deslocamento lateral do verificador. A deteccao continua
+                # rodando para comprovar que a esfera saiu do eixo central do
+                # ultrassonico antes de interpretar o eco como parede.
+                if resultado is not None:
+                    sequencia_resultado = resultado.sequence
+                    metricas = resultado
+                    instantes_deteccao.append(resultado.completed_at)
+                    if agora - resultado.captured_at <= cfg.BALL_FRAME_STALE_S:
+                        resultado_atual = resultado
+                        deteccao_atual = resultado.detection
+                    else:
+                        resultado_atual = None
+                        deteccao_atual = None
+
+                forma = (
+                    frame_atual.shape if frame_atual is not None
+                    else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                          cfg.RESCUE_CAMERA_MAX_WIDTH, 3))
+                passo_parede = verificador_parede.update(
+                    arduino,
+                    detection=deteccao_atual,
+                    frame_shape=forma,
+                    now=agora,
+                )
+                comando = passo_parede.motion_command()
+                comando_atualizado = True
             elif coleta.started:
                 # Um resultado que já estava em processamento pode chegar
                 # depois do início da coleta. Ele serve apenas para telemetria:
@@ -894,13 +981,17 @@ def main():
 
             # Alvo perdido durante a aproximacao: volta a procurar em vez de
             # esperar parado ate o timeout longo.
-            if (
-                args.drive
-                and busca is None
-                and controlador is not None
-                and not coleta.started
-                and comando.state == BallApproachController.WAIT_TARGET
+            if args.drive and _deve_reiniciar_busca_por_alvo_perdido(
+                busca,
+                controlador,
+                coleta,
+                comando,
+                autorizacao_parede=coleta_apos_teste_parede,
             ):
+                # O resultado do teste vale somente para a mesma aproximacao.
+                # Se a vitima sumiu, outra esfera da mesma cor nao pode herdar
+                # por engano a autorizacao especial de parede.
+                coleta_apos_teste_parede = None
                 if trabalhador is not None:
                     trabalhador.reset_tracking()
                 portao.reset()
@@ -909,7 +1000,7 @@ def main():
                 resultado_atual = None
                 deteccao_atual = None
                 epoca_busca = None
-                ultimo_controle_ocioso = 0.0
+                ultimo_controle_ocioso = agora
                 comando = busca.update(None, now=agora)
                 comando_atualizado = True
 
@@ -928,8 +1019,23 @@ def main():
                         concluido_em = time.monotonic()
                         if passo_coleta.futaba_action is not None:
                             coleta.mark_futaba_started(now=concluido_em)
+                        if (
+                            passo_coleta.state
+                            == BallPickupSequencer.WALL_PAUSE_PENDING
+                            and passo_coleta.motor_action == "stop"
+                        ):
+                            coleta.mark_wall_pause_started(now=concluido_em)
+                        if (
+                            passo_coleta.state
+                            == BallPickupSequencer.WALL_POST_REVERSE_PENDING
+                            and passo_coleta.motor_action == "stop"
+                        ):
+                            coleta.mark_post_reverse_pause_started(
+                                now=concluido_em)
                         if passo_coleta.motor_action == "forward":
                             coleta.mark_forward_started(now=concluido_em)
+                        if passo_coleta.motor_action == "reverse":
+                            coleta.mark_reverse_started(now=concluido_em)
                         if passo_coleta.gripper_action is not None:
                             coleta.mark_grippers_started(now=concluido_em)
                         if (
@@ -952,6 +1058,27 @@ def main():
                             passo_coleta,
                             arduino,
                             steer,
+                        )
+                elif passo_parede is not None:
+                    epoca_movimento = arduino.connection_epoch
+                    erro_parede = aplicar_acao_parede(
+                        passo_parede,
+                        arduino,
+                        epoca_serial_esperada=epoca_parede,
+                    )
+                    movimento_enviado = erro_parede is None
+                    if erro_parede is not None:
+                        passo_parede = verificador_parede.fail(
+                            erro_parede)
+                        comando = passo_parede.motion_command()
+                        aplicar_acao_parede(passo_parede, arduino)
+                    elif (
+                        passo_parede.motor_action
+                        and not passo_parede.terminal
+                    ):
+                        verificador_parede.notify_command_written(
+                            passo_parede.state,
+                            now=time.monotonic(),
                         )
                 elif passo_deposito_cinza is not None:
                     epoca_movimento = arduino.connection_epoch
@@ -1029,6 +1156,17 @@ def main():
                         "serial mudou durante o giro de busca; "
                         "cobertura invalidada e motores parados")
                 if (
+                    verificador_parede is not None
+                    and epoca_parede is not None
+                    and (
+                        not arduino.connected
+                        or arduino.connection_epoch != epoca_parede
+                    )
+                ):
+                    raise RuntimeError(
+                        "serial mudou durante o teste de parede; "
+                        "motores e garras parados")
+                if (
                     coleta.started
                     and epoca_coleta is not None
                     and (
@@ -1062,6 +1200,48 @@ def main():
                     raise RuntimeError(
                         "serial mudou durante o deposito final; "
                         "motores parados e cacamba nao comandada")
+
+            if (
+                args.drive
+                and verificador_parede is not None
+                and passo_parede is not None
+                and passo_parede.terminal
+                and passo_parede.result in (LIVRE, PAREDE_RETA)
+            ):
+                modo_parede = passo_parede.result == PAREDE_RETA
+                coleta_apos_teste_parede = WallPickupAuthorization(
+                    target_kind=passo_parede.target_kind,
+                    wall_mode=modo_parede,
+                    expires_at=(
+                        agora + cfg.BALL_WALL_REAPPROACH_AUTH_S),
+                    signature=verificador_parede.target_signature,
+                )
+                resultado_teste = (
+                    "parede reta provavel confirmada"
+                    if modo_parede else "caminho livre confirmado"
+                )
+                print(
+                    f"[resgate] {resultado_teste}; "
+                    "retomando a aproximacao visual antes da coleta")
+                verificador_parede = None
+                passo_parede = None
+                epoca_parede = None
+                # Nao reinicia o tracker aqui: ele e a identidade temporal da
+                # esfera testada. O portao abaixo ainda exige frames novos.
+                portao.reset()
+                busca = None
+                controlador = BallApproachController(start_time=agora)
+                resultado_atual = None
+                deteccao_atual = None
+                ultimo_controle_ocioso = agora
+                comando = MotionCommand(
+                    "WALL_REAPPROACH",
+                    detail=(
+                        f"{resultado_teste}; procurando novamente a vitima "
+                        "no ponto original"
+                    ),
+                )
+                comando_atualizado = False
 
             if (
                 args.drive
@@ -1240,26 +1420,121 @@ def main():
             if (
                 args.drive
                 and not coleta.started
-                and _armar_coleta_confirmada(
+                and verificador_parede is None
+                and comando.state == BallApproachController.NEAR
+            ):
+                tipo_confirmado = _validar_inicio_coleta(
                     comando,
                     coleta,
                     arduino,
                     movimento_enviado,
                     epoca_movimento,
                 )
-            ):
-                epoca_coleta = arduino.connection_epoch
-                if trabalhador is not None:
-                    trabalhador.reset_tracking()
-                portao.reset()
-                busca = None
-                controlador = None
-                resultado_atual = None
-                deteccao_atual = None
-                ultimo_controle_ocioso = 0.0
-                print(
-                    f"[coleta] vitima {coleta.target_kind} confirmada; "
-                    "baixando, avancando, fechando devagar e selecionando")
+                iniciou_coleta = False
+                modo_coleta_parede = False
+                forma_alvo = (
+                    frame_atual.shape if frame_atual is not None
+                    else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                          cfg.RESCUE_CAMERA_MAX_WIDTH, 3))
+                alvo_visual_coleta = deteccao_atual
+                if (
+                    alvo_visual_coleta is None
+                    and resultado_atual is not None
+                ):
+                    alvo_visual_coleta = resultado_atual.locked_detection
+
+                if (
+                    coleta_apos_teste_parede is not None
+                    and (
+                        coleta_apos_teste_parede.target_kind
+                        != tipo_confirmado
+                        or not coleta_apos_teste_parede.matches(
+                            alvo_visual_coleta,
+                            forma_alvo,
+                            agora,
+                        )
+                    )
+                ):
+                    # O detector mudou de alvo durante a reaproximacao. A
+                    # decisao anterior nao vale para outra esfera.
+                    coleta_apos_teste_parede = None
+
+                if coleta_apos_teste_parede is not None:
+                    modo_parede = coleta_apos_teste_parede.wall_mode
+                    modo_coleta_parede = modo_parede
+                    iniciou_coleta = _armar_coleta_confirmada(
+                        comando,
+                        coleta,
+                        arduino,
+                        movimento_enviado,
+                        epoca_movimento,
+                        modo_parede=modo_parede,
+                    )
+                    coleta_apos_teste_parede = None
+                elif cfg.BALL_WALL_TEST_ENABLED:
+                    if (
+                        alvo_visual_coleta is None
+                        or not alvo_visual_coleta.confirmed
+                        or alvo_visual_coleta.kind != tipo_confirmado
+                    ):
+                        comando = MotionCommand(
+                            "WALL_PROBE_FAULT",
+                            detail=(
+                                "deteccao original indisponivel; teste "
+                                "lateral e garras bloqueados"
+                            ),
+                            terminal=True,
+                        )
+                    else:
+                        verificador_parede = WallProbeController(
+                            tipo_confirmado,
+                            target_detection=alvo_visual_coleta,
+                            start_time=agora,
+                        )
+                        epoca_parede = arduino.connection_epoch
+                        busca = None
+                        controlador = None
+                        resultado_atual = None
+                        deteccao_atual = None
+                        portao.reset()
+                        ultimo_controle_ocioso = 0.0
+                        comando = MotionCommand(
+                            "WALL_PROBE_START",
+                            detail=(
+                                f"vitima {tipo_confirmado} proxima; "
+                                "medindo antes do teste lateral"
+                            ),
+                        )
+                        comando_atualizado = False
+                        print(
+                            "[resgate] medindo o eixo; se houver eco proximo, "
+                            "testara os dois lados com as garras bloqueadas")
+                else:
+                    iniciou_coleta = _armar_coleta_confirmada(
+                        comando,
+                        coleta,
+                        arduino,
+                        movimento_enviado,
+                        epoca_movimento,
+                    )
+
+                if iniciou_coleta:
+                    epoca_coleta = arduino.connection_epoch
+                    if trabalhador is not None:
+                        trabalhador.reset_tracking()
+                    portao.reset()
+                    busca = None
+                    controlador = None
+                    resultado_atual = None
+                    deteccao_atual = None
+                    ultimo_controle_ocioso = 0.0
+                    modo = (
+                        "parede: empurrando, dando re e "
+                        if modo_coleta_parede else ""
+                    )
+                    print(
+                        f"[coleta] vitima {coleta.target_kind} confirmada; "
+                        f"{modo}baixando, fechando e selecionando")
 
             log_agora = time.monotonic()
             if (

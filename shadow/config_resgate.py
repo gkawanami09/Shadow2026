@@ -177,10 +177,10 @@ BALL_CRESCENT_INNER_ASSOCIATION_X_RATIO = 0.22
 BALL_CRESCENT_INNER_BOTTOM_RATIO = 0.82
 BALL_CRESCENT_TOKEN_TTL_S = 0.80
 
-# Coleta depois que a aproximacao visual termina. Nao existe etapa de re.
+# Coleta normal depois que a aproximacao visual termina. Nela nao existe re.
 # Primeiro o robo baixa o Futaba, sem avancar. Depois percorre com ele baixo a
 # soma dos dois avancos antigos (1 s + 1 s) e completa mais 200 ms antes de
-# fechar as garras. A distancia total comandada permanece igual.
+# fechar as garras. Somente o modo de parede, configurado abaixo, acrescenta re.
 BALL_PICKUP_FUTABA_POWER = -20
 BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
@@ -223,6 +223,40 @@ BALL_PICKUP_RELEASE_DELTA = 70
 BALL_PICKUP_WIGGLE_DELTA = 40
 BALL_PICKUP_WIGGLE_REPETITIONS = 2
 BALL_PICKUP_WIGGLE_STEP_S = 0.20
+
+# --- Teste experimental de vitima encostada na parede ---------------------
+# Quando a vitima chega ao ponto de coleta, o ultrassonico mede primeiro no
+# centro. Se houver eco proximo, o robo mede uma vez de cada lado da posicao
+# original e retorna ao centro. Distancias proximas e parecidas nos dois lados
+# indicam parede reta provavel. Resultado misto ou muito diferente e tratado
+# como quina/duvida e nunca autoriza as garras.
+BALL_WALL_TEST_ENABLED = True
+BALL_WALL_PROBE_DISTANCE_MM = 220
+BALL_WALL_PROBE_SAMPLES = 3
+BALL_WALL_PROBE_MIN_CLOSE_SAMPLES = 2
+BALL_WALL_PROBE_SIMILARITY_MM = 45
+BALL_WALL_PROBE_READ_TIMEOUT_S = 0.08
+BALL_WALL_PROBE_SAMPLE_INTERVAL_S = 0.06
+BALL_WALL_PROBE_MEASURE_TIMEOUT_S = 0.60
+BALL_WALL_PROBE_LATERAL_PWM = 50
+BALL_WALL_PROBE_LATERAL_S = 0.20
+BALL_WALL_PROBE_SETTLE_S = 0.15
+BALL_WALL_PROBE_FRAME_TIMEOUT_S = 0.60
+BALL_WALL_PROBE_BALL_OUTSIDE_CENTER_ERROR = 0.20
+BALL_WALL_PROBE_VISUAL_CONFIRM_FRAMES = 2
+BALL_WALL_PROBE_RETURN_MAX_CENTER_ERROR = 0.22
+BALL_WALL_PROBE_RADIUS_RATIO_MIN = 0.65
+BALL_WALL_PROBE_RADIUS_RATIO_MAX = 1.45
+BALL_WALL_PROBE_CENTER_Y_TOLERANCE_RATIO = 0.18
+BALL_WALL_REAPPROACH_AUTH_S = 3.00
+
+# Depois de confirmar a parede, a nova aproximacao usa a coleta especial:
+# empurra um pouco mais com a garra aberta, da uma re curta e so entao fecha.
+BALL_WALL_PICKUP_FORWARD_S = 2.50
+BALL_WALL_PICKUP_REVERSE_SPEED = 0.65
+BALL_WALL_PICKUP_REVERSE_S = 0.85
+BALL_WALL_PICKUP_DIRECTION_CHANGE_PAUSE_S = 0.05
+BALL_WALL_PICKUP_POST_REVERSE_PAUSE_S = 0.10
 
 # Busca das proximas vitimas. O Shadow nao possui IMU: o 360 e temporizado.
 # steer() multiplica o pivot por 1,2, por isso 80 / (120 * 1,2) produz PWM 80

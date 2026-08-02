@@ -22,6 +22,7 @@ class Arduino:
         self._ultra_deadline = 0.0
         self._ultra_ready = False
         self._ultra_value = None
+        self._ultra_response_received = False
         self._manual_pending = False
         self._manual_response = None
 
@@ -110,6 +111,17 @@ class Arduino:
     def connected(self):
         return self._connected
 
+    @property
+    def ultima_leitura_ultrassom_respondeu(self):
+        """Distingue ``sem eco`` do firmware de timeout da comunicacao.
+
+        ``poll_ultrassom()`` continua com o contrato antigo: ambos devolvem
+        distancia ``None``. Este sinal adicional permite que rotinas de
+        seguranca bloqueiem uma manobra quando o Arduino nem chegou a
+        responder, sem confundir isso com um ambiente realmente sem eco.
+        """
+        return bool(self._ultra_response_received)
+
     def lado(self, esq, dir_):
         """LADO <esq> <dir> — signed wheel speeds, left pair / right pair."""
         esq, dir_ = int(round(esq)), int(round(dir_))
@@ -196,6 +208,7 @@ class Arduino:
         self._ultra_pending = True
         self._ultra_deadline = time.monotonic() + timeout
         self._ultra_value = None
+        self._ultra_response_received = False
         self._write_line("ULTRASSOM")
         if not self._connected:
             self._ultra_pending = False
@@ -212,6 +225,7 @@ class Arduino:
             self._ultra_pending = False
             self._ultra_ready = True
             self._ultra_value = None
+            self._ultra_response_received = False
 
         if not self._ultra_ready:
             return False, None
@@ -225,6 +239,7 @@ class Arduino:
         self._ultra_pending = False
         self._ultra_ready = False
         self._ultra_value = None
+        self._ultra_response_received = False
         self._ultra_deadline = 0.0
 
     def futaba(self, potencia, tempo_ms):
@@ -398,9 +413,12 @@ class Arduino:
             if self._ultra_pending:
                 try:
                     value = int(line.split()[-1])
+                    resposta_valida = value == -1 or value >= 0
                 except (ValueError, IndexError):
                     value = -1
+                    resposta_valida = False
                 self._ultra_value = None if value < 0 else value
+                self._ultra_response_received = resposta_valida
                 self._ultra_pending = False
                 self._ultra_ready = True
                 return

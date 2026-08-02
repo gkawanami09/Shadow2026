@@ -68,6 +68,7 @@ class RescueSerialLedTests(unittest.TestCase):
         arduino._ultra_deadline = 0.0
         arduino._ultra_ready = False
         arduino._ultra_value = None
+        arduino._ultra_response_received = False
         arduino._manual_pending = False
         arduino._manual_response = None
         return arduino
@@ -175,6 +176,7 @@ class RescueSerialLedTests(unittest.TestCase):
         self.assertTrue(arduino.iniciar_ultrassom(timeout=0.05))
         arduino._ser.feed(b"OK ULTRASSOM -1\n")
         self.assertEqual(arduino.poll_ultrassom(), (True, None))
+        self.assertTrue(arduino.ultima_leitura_ultrassom_respondeu)
 
         self.assertTrue(arduino.iniciar_ultrassom(timeout=0.05))
         arduino.cancelar_ultrassom()
@@ -190,6 +192,15 @@ class RescueSerialLedTests(unittest.TestCase):
         ):
             self.assertTrue(arduino.iniciar_ultrassom(timeout=0.05))
             self.assertEqual(arduino.poll_ultrassom(), (True, None))
+            self.assertFalse(arduino.ultima_leitura_ultrassom_respondeu)
+
+    def test_malformed_ultrasonic_reply_is_not_a_valid_no_echo(self):
+        arduino = self._connected_arduino()
+        self.assertTrue(arduino.iniciar_ultrassom(timeout=0.05))
+        arduino._ser.feed(b"OK ULTRASSOM invalido\n")
+
+        self.assertEqual(arduino.poll_ultrassom(), (True, None))
+        self.assertFalse(arduino.ultima_leitura_ultrassom_respondeu)
 
     def test_manual_serial_command_still_receives_routed_reply(self):
         arduino = self._connected_arduino()
