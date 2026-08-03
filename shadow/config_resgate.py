@@ -125,15 +125,11 @@ BALL_ALIGN_THRESHOLD = 0.24
 BALL_ALIGN_EXIT_THRESHOLD = 0.15
 BALL_ALIGN_ARC_MIN_ANGLE = 65
 BALL_ALIGN_ARC_MAX_ANGLE = 82
-# A faixa antiga chegava ao motor externo como aproximadamente PWM 36..41 e
-# podia apenas produzir ruido sem vencer o atrito. O alinhamento visual agora
-# trabalha entre PWM 70 e 85; continua proporcional ao erro e para assim que
-# a esfera entra na zona central. Isto afeta somente o estado ALIGN depois que
-# o YOLO ja encontrou a bolinha — a varredura SEARCH continua em PWM 80.
-BALL_ALIGN_PWM_MIN = 70
-BALL_ALIGN_PWM_MAX = 85
-BALL_ALIGN_SPEED_MIN = BALL_ALIGN_PWM_MIN / 120.0
-BALL_ALIGN_SPEED_MAX = BALL_ALIGN_PWM_MAX / 120.0
+# Um pequeno aumento sobre os antigos 36..41 PWM vence melhor o atrito sem
+# deixar o alinhamento agressivo. O angulo continua proporcional ao erro.
+BALL_ALIGN_PWM = 50
+BALL_ALIGN_SPEED_MIN = BALL_ALIGN_PWM / 120.0
+BALL_ALIGN_SPEED_MAX = BALL_ALIGN_PWM / 120.0
 BALL_STEER_MAX_ANGLE = 60
 BALL_APPROACH_SPEED_FAR = 0.45
 BALL_APPROACH_SPEED_NEAR = 0.35
@@ -163,22 +159,6 @@ BALL_LOCKED_CIRCLE_CONFIRM_FRAMES = 2
 BALL_NEAR_CONFIRM_MAX_MISSES = 1
 BALL_NEAR_CONFIRM_GRACE_S = 0.18
 BALL_NEAR_CONFIRM_WINDOW_S = 0.35
-
-# Correcao para a vitima que ja chegou perto demais antes da coleta. O YOLO
-# nao mede centimetros: a decisao combina o tamanho aparente com a base da
-# caixa abaixo do quadro e exige dois frames novos da mesma cor. So entao o
-# robo da uma re curta, freia e volta a confirmar visualmente antes de baixar
-# o Futaba. As proporcoes independem de a visao trabalhar em 320x240 ou
-# 640x480.
-BALL_TOO_CLOSE_RADIUS_RATIO = 0.18
-BALL_TOO_CLOSE_BOTTOM_RATIO = 1.02
-BALL_TOO_CLOSE_MAX_CENTER_ERROR = 0.16
-BALL_TOO_CLOSE_CONFIRM_FRAMES = 2
-BALL_TOO_CLOSE_CONFIRM_WINDOW_S = 0.25
-BALL_TOO_CLOSE_REVERSE_SPEED = 0.30
-BALL_TOO_CLOSE_REVERSE_S = 0.30
-BALL_TOO_CLOSE_SETTLE_S = 0.15
-BALL_TOO_CLOSE_MAX_BACKOFFS = 2
 
 
 # A meia-lua so pode concluir uma aproximacao visual real. O token e armado
@@ -218,11 +198,12 @@ BALL_PICKUP_FORWARD_LEAD_S = (
 )
 BALL_PICKUP_FORWARD_SPEED = BALL_APPROACH_SPEED_NEAR
 BALL_PICKUP_GRIPPER_SETTLE_S = 0.50
-# Primeiro captura a esfera rapidamente, depois completa o aperto em passos
-# menores. Continua movendo uma garra por vez para limitar o pico de corrente.
-BALL_PICKUP_GRIPPER_CAPTURE_DEGREES = 30
+# Primeiro captura a esfera rapidamente e termina em um unico passo menor.
+# Continua movendo uma garra por vez, separada por 40 ms, para limitar o pico
+# de corrente, mas chega ao angulo final com 4 comandos em vez de 8.
+BALL_PICKUP_GRIPPER_CAPTURE_DEGREES = 40
 BALL_PICKUP_GRIPPER_CAPTURE_INTERVAL_S = 0.04
-BALL_PICKUP_GRIPPER_STEP_DEGREES = 10
+BALL_PICKUP_GRIPPER_STEP_DEGREES = 15
 BALL_PICKUP_GRIPPER_STEP_INTERVAL_S = 0.05
 
 # Depois de prender a esfera, o elevador sobe, aplica um pulso curto para

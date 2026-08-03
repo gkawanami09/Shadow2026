@@ -227,9 +227,9 @@ class BallPickupSequencerTests(unittest.TestCase):
         )
         self.assertEqual(cfg.BALL_PICKUP_WIGGLE_DELTA, 40)
         self.assertEqual(cfg.BALL_PICKUP_WIGGLE_REPETITIONS, 2)
-        self.assertEqual(cfg.BALL_PICKUP_GRIPPER_CAPTURE_DEGREES, 30)
+        self.assertEqual(cfg.BALL_PICKUP_GRIPPER_CAPTURE_DEGREES, 40)
         self.assertEqual(cfg.BALL_PICKUP_GRIPPER_CAPTURE_INTERVAL_S, 0.04)
-        self.assertEqual(cfg.BALL_PICKUP_GRIPPER_STEP_DEGREES, 10)
+        self.assertEqual(cfg.BALL_PICKUP_GRIPPER_STEP_DEGREES, 15)
         self.assertEqual(cfg.BALL_PICKUP_GRIPPER_STEP_INTERVAL_S, 0.05)
 
     def test_start_requires_confirmed_kind_and_never_changes_it(self):
@@ -307,9 +307,9 @@ class BallPickupSequencerTests(unittest.TestCase):
         movimentos = list(pickup._gripper_close_actions)
         self.assertEqual(
             movimentos[:2],
-            [(-30, 0), (0, 30)],
+            [(-40, 0), (0, 40)],
         )
-        self.assertEqual(len(movimentos), 8)
+        self.assertEqual(len(movimentos), 4)
         self.assertEqual(
             sum(acao[0] for acao in movimentos),
             cfg.BALL_PICKUP_LEFT_DELTA,
@@ -420,7 +420,10 @@ class BallPickupSequencerTests(unittest.TestCase):
         close = pickup.update(now=now)
         self.assertEqual(close.state, pickup.GRIPPERS_START)
         self.assertEqual(close.motor_action, "")
-        self.assertEqual(close.gripper_action, (-30, 0))
+        self.assertEqual(
+            close.gripper_action,
+            (-cfg.BALL_PICKUP_GRIPPER_CAPTURE_DEGREES, 0),
+        )
         actions = [close]
         _ack_step(pickup, close, now)
         now, _lift = _terminar_fechamento_gradual(
@@ -458,7 +461,10 @@ class BallPickupSequencerTests(unittest.TestCase):
 
         self.assertEqual(close.state, pickup.GRIPPERS_START)
         self.assertEqual(close.motor_action, "stop")
-        self.assertEqual(close.gripper_action, (-30, 0))
+        self.assertEqual(
+            close.gripper_action,
+            (-cfg.BALL_PICKUP_GRIPPER_CAPTURE_DEGREES, 0),
+        )
 
     def test_release_is_blocked_while_carrying_until_marker_arrival(self):
         pickup = BallPickupSequencer()

@@ -162,12 +162,8 @@ class BallApproachControllerTests(unittest.TestCase):
         )
         self.assertLessEqual(abs(strong.angle), 90)
         self.assertGreater(abs(strong.angle), abs(moderate.angle))
-        self.assertGreater(strong.speed, moderate.speed)
-        self.assertGreaterEqual(
-            moderate.speed, cfg.BALL_ALIGN_PWM_MIN / 120.0)
-        self.assertLessEqual(
-            strong.speed, cfg.BALL_ALIGN_PWM_MAX / 120.0)
-        # O aumento pertence somente ao alinhamento depois da deteccao.
+        self.assertEqual(moderate.speed, cfg.BALL_ALIGN_PWM / 120.0)
+        self.assertEqual(strong.speed, cfg.BALL_ALIGN_PWM / 120.0)
         self.assertEqual(cfg.BALL_SEARCH_TANK_PWM, 80)
 
     def test_alignment_hysteresis_prevents_threshold_chatter(self):
@@ -522,131 +518,6 @@ class BallApproachControllerTests(unittest.TestCase):
         self.assertEqual(command.state, controller.APPROACH)
         self.assertFalse(command.terminal)
         self.assertFalse(command.pickup_in_range)
-
-    def test_bolinha_muito_perto_exige_dois_frames_novos_travados(self):
-        controller = BallApproachController(start_time=0.0)
-        raio = self.shape[0] * 0.19
-        centro_y = self.shape[0] * 1.04 - raio
-
-        primeiro = controller.update(
-            detection(
-                y=centro_y,
-                radius=raio,
-                timestamp=0.10,
-                track_locked=True,
-            ),
-            self.shape,
-            now=0.10,
-        )
-        repetido = controller.update(
-            detection(
-                y=centro_y,
-                radius=raio,
-                timestamp=0.10,
-                track_locked=True,
-            ),
-            self.shape,
-            now=0.12,
-        )
-        segundo = controller.update(
-            detection(
-                y=centro_y,
-                radius=raio,
-                timestamp=0.15,
-                track_locked=True,
-            ),
-            self.shape,
-            now=0.15,
-        )
-
-        self.assertEqual(primeiro.state, controller.NEAR_CONFIRM)
-        self.assertEqual(repetido.state, controller.NEAR_CONFIRM)
-        self.assertFalse(primeiro.pickup_in_range)
-        self.assertFalse(repetido.pickup_in_range)
-        self.assertEqual(
-            segundo.state, controller.TOO_CLOSE_REVERSE_PENDING)
-        self.assertEqual(segundo.angle, 200)
-        self.assertEqual(segundo.speed, cfg.BALL_TOO_CLOSE_REVERSE_SPEED)
-        self.assertFalse(segundo.terminal)
-        self.assertFalse(segundo.pickup_in_range)
-
-    def test_re_curta_so_conta_tempo_depois_da_escrita_serial(self):
-        controller = BallApproachController(start_time=0.0)
-        controller.state = controller.TOO_CLOSE_REVERSE_PENDING
-        controller._too_close_kind = "silver"
-        controller._too_close_backoffs = 1
-
-        ainda_pendente = controller.update(None, self.shape, now=20.0)
-        self.assertEqual(
-            ainda_pendente.state, controller.TOO_CLOSE_REVERSE_PENDING)
-
-        self.assertTrue(controller.notify_command_written(
-            ainda_pendente.state, now=20.0))
-        durante = controller.update(
-            None,
-            self.shape,
-            now=20.0 + cfg.BALL_TOO_CLOSE_REVERSE_S - 0.01,
-        )
-        freio = controller.update(
-            None,
-            self.shape,
-            now=20.0 + cfg.BALL_TOO_CLOSE_REVERSE_S,
-        )
-
-        self.assertEqual(durante.state, controller.TOO_CLOSE_REVERSE)
-        self.assertEqual(durante.angle, 200)
-        self.assertEqual(
-            freio.state, controller.TOO_CLOSE_BRAKE_PENDING)
-        self.assertEqual(freio.angle, 190)
-
-    def test_depois_da_re_freia_reseta_tracker_e_reconfirma(self):
-        controller = BallApproachController(start_time=0.0)
-        controller.state = controller.TOO_CLOSE_BRAKE_PENDING
-        controller._too_close_kind = "black"
-
-        self.assertTrue(controller.notify_command_written(
-            controller.TOO_CLOSE_BRAKE_PENDING, now=5.0))
-        self.assertTrue(controller.consume_tracking_reset())
-        self.assertFalse(controller.consume_tracking_reset())
-
-        assentando = controller.update(
-            None,
-            self.shape,
-            now=5.0 + cfg.BALL_TOO_CLOSE_SETTLE_S - 0.01,
-        )
-        reconfirmando = controller.update(
-            None,
-            self.shape,
-            now=5.0 + cfg.BALL_TOO_CLOSE_SETTLE_S,
-        )
-
-        self.assertEqual(assentando.state, controller.TOO_CLOSE_SETTLE)
-        self.assertEqual(reconfirmando.state, controller.WAIT_TARGET)
-        self.assertFalse(reconfirmando.terminal)
-        self.assertFalse(reconfirmando.pickup_in_range)
-
-    def test_caixa_grande_sem_track_travado_nao_da_re(self):
-        controller = BallApproachController(start_time=0.0)
-        raio = self.shape[0] * 0.19
-        centro_y = self.shape[0] * 1.04 - raio
-        comando = None
-        for indice in range(3):
-            agora = 0.10 + indice * 0.05
-            comando = controller.update(
-                detection(
-                    y=centro_y,
-                    radius=raio,
-                    timestamp=agora,
-                    track_locked=False,
-                ),
-                self.shape,
-                now=agora,
-            )
-
-        self.assertNotIn(comando.state, (
-            controller.TOO_CLOSE_REVERSE_PENDING,
-            controller.TOO_CLOSE_REVERSE,
-        ))
 
     def test_crescent_cannot_cold_arm_without_approach_history(self):
         controller = BallApproachController(start_time=0.0)

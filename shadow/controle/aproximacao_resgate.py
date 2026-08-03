@@ -28,10 +28,6 @@ class BallApproachController:
     ALIGN = "ALIGN"
     APPROACH = "APPROACH"
     NEAR_CONFIRM = "NEAR_CONFIRM"
-    TOO_CLOSE_REVERSE_PENDING = "TOO_CLOSE_REVERSE_PENDING"
-    TOO_CLOSE_REVERSE = "TOO_CLOSE_REVERSE"
-    TOO_CLOSE_BRAKE_PENDING = "TOO_CLOSE_BRAKE_PENDING"
-    TOO_CLOSE_SETTLE = "TOO_CLOSE_SETTLE"
     LOST = "LOST"
     NEAR = "NEAR"
     FAULT = "FAULT"
@@ -56,13 +52,6 @@ class BallApproachController:
         self._near_hold_until = None
         self._near_misses = 0
         self._near_kind = None
-        self._too_close_count = 0
-        self._too_close_last_timestamp = None
-        self._too_close_first_at = None
-        self._too_close_kind = None
-        self._too_close_backoffs = 0
-        self._too_close_deadline = None
-        self._tracking_reset_pending = False
         self._pixel_scale = 1.0
         self._terminal_detail = ""
 
@@ -76,14 +65,6 @@ class BallApproachController:
         now = time.monotonic() if now is None else float(now)
         height, width = frame_shape[:2]
         self._pixel_scale = cfg.ball_pixel_scale(width, height)
-
-        if self.state in (
-            self.TOO_CLOSE_REVERSE_PENDING,
-            self.TOO_CLOSE_REVERSE,
-            self.TOO_CLOSE_BRAKE_PENDING,
-            self.TOO_CLOSE_SETTLE,
-        ):
-            return self._update_too_close_backoff(now)
 
         if self.state == self.NEAR:
             return MotionCommand(
@@ -130,67 +111,6 @@ class BallApproachController:
                     width,
                     now,
                 )
-
-        too_close = self._too_close_measurement(
-            detection if detection_confirmed else None,
-            height,
-            width,
-        )
-        if too_close:
-            timestamp = float(detection.timestamp)
-            if self._too_close_kind != detection.kind:
-                self._reset_too_close_confirmation()
-                self._too_close_kind = detection.kind
-            if (
-                self._too_close_first_at is not None
-                and now - self._too_close_first_at
-                > cfg.BALL_TOO_CLOSE_CONFIRM_WINDOW_S
-            ):
-                self._reset_too_close_confirmation()
-                self._too_close_kind = detection.kind
-            if (
-                self._too_close_last_timestamp is None
-                or timestamp > self._too_close_last_timestamp + 1e-9
-            ):
-                if self._too_close_first_at is None:
-                    self._too_close_first_at = now
-                self._too_close_count += 1
-                self._too_close_last_timestamp = timestamp
-
-            if (
-                self._too_close_count
-                >= cfg.BALL_TOO_CLOSE_CONFIRM_FRAMES
-            ):
-                if (
-                    self._too_close_backoffs
-                    >= cfg.BALL_TOO_CLOSE_MAX_BACKOFFS
-                ):
-                    return self._fault(
-                        "vitima continua perto demais depois das res "
-                        "de seguranca")
-                self._too_close_backoffs += 1
-                self._reset_near_confirmation()
-                self.progress.clear()
-                self.state = self.TOO_CLOSE_REVERSE_PENDING
-                return self._update_too_close_backoff(now)
-
-            # A primeira medicao ja para as rodas. Assim o segundo frame nao
-            # e capturado enquanto o robo continua empurrando a esfera.
-            self._reset_near_confirmation()
-            self.progress.clear()
-            self.state = self.NEAR_CONFIRM
-            return MotionCommand(
-                self.state,
-                detail=(
-                    "vitima possivelmente perto demais; confirmando "
-                    f"{self._too_close_count}/"
-                    f"{cfg.BALL_TOO_CLOSE_CONFIRM_FRAMES}; "
-                    f"raio={detection.radius / max(height, 1):.0%}, "
-                    f"base={detection.bottom_y / max(height, 1):.0%}"
-                ),
-                target_kind=detection.kind,
-            )
-        self._reset_too_close_confirmation()
 
         self._refresh_crescent_token(now)
 
@@ -472,123 +392,6 @@ class BallApproachController:
         self._near_hold_until = None
         self._near_misses = 0
         self._near_kind = None
-
-    def _reset_too_close_confirmation(self):
-        self._too_close_count = 0
-        self._too_close_last_timestamp = None
-        self._too_close_first_at = None
-        self._too_close_kind = None
-
-    @staticmethod
-    def _too_close_measurement(detection, frame_height, frame_width):
-        """Confirma excesso de proximidade pela geometria entregue pelo YOLO."""
-        if (
-            detection is None
-            or not detection.confirmed
-            or not bool(getattr(detection, "track_locked", False))
-            or getattr(detection, "truncated", False)
-        ):
-            return False
-        if (
-            abs(detection.horizontal_error(frame_width))
-            > cfg.BALL_TOO_CLOSE_MAX_CENTER_ERROR
-        ):
-            return False
-        altura = max(float(frame_height), 1.0)
-        return (
-            float(detection.radius) / altura
-            >= cfg.BALL_TOO_CLOSE_RADIUS_RATIO
-            and float(detection.bottom_y) / altura
-            >= cfg.BALL_TOO_CLOSE_BOTTOM_RATIO
-        )
-
-    def _update_too_close_backoff(self, now):
-        if self.state == self.TOO_CLOSE_REVERSE_PENDING:
-            return MotionCommand(
-                self.state,
-                angle=200,
-                speed=cfg.BALL_TOO_CLOSE_REVERSE_SPEED,
-                detail=(
-                    "vitima perto demais; iniciando re curta "
-                    f"{self._too_close_backoffs}/"
-                    f"{cfg.BALL_TOO_CLOSE_MAX_BACKOFFS}"
-                ),
-                target_kind=self._too_close_kind,
-            )
-
-        if self.state == self.TOO_CLOSE_REVERSE:
-            if now < self._too_close_deadline:
-                return MotionCommand(
-                    self.state,
-                    angle=200,
-                    speed=cfg.BALL_TOO_CLOSE_REVERSE_SPEED,
-                    detail="afastando antes de baixar o Futaba",
-                    target_kind=self._too_close_kind,
-                )
-            self.state = self.TOO_CLOSE_BRAKE_PENDING
-            return MotionCommand(
-                self.state,
-                detail="re curta concluida; freando para observar",
-                target_kind=self._too_close_kind,
-            )
-
-        if self.state == self.TOO_CLOSE_BRAKE_PENDING:
-            return MotionCommand(
-                self.state,
-                detail="aguardando confirmacao da frenagem",
-                target_kind=self._too_close_kind,
-            )
-
-        if self.state == self.TOO_CLOSE_SETTLE:
-            if now < self._too_close_deadline:
-                return MotionCommand(
-                    self.state,
-                    detail="camera estabilizando depois da re curta",
-                    target_kind=self._too_close_kind,
-                )
-            self.state = self.WAIT_TARGET
-            self.wait_started = now
-            self.active_started = None
-            self.last_seen = None
-            self.progress.clear()
-            self._clear_approach_history()
-            self._reset_near_confirmation()
-            self._reset_too_close_confirmation()
-            self._too_close_deadline = None
-            return MotionCommand(
-                self.state,
-                detail="re concluida; reconfirmando a bolinha",
-            )
-
-        raise RuntimeError("estado invalido da re por excesso de proximidade")
-
-    def notify_command_written(self, state, now=None):
-        """Inicia os tempos da re somente depois da escrita serial."""
-        now = time.monotonic() if now is None else float(now)
-        if (
-            state == self.TOO_CLOSE_REVERSE_PENDING
-            and self.state == self.TOO_CLOSE_REVERSE_PENDING
-        ):
-            self.state = self.TOO_CLOSE_REVERSE
-            self._too_close_deadline = (
-                now + cfg.BALL_TOO_CLOSE_REVERSE_S)
-            return True
-        if (
-            state == self.TOO_CLOSE_BRAKE_PENDING
-            and self.state == self.TOO_CLOSE_BRAKE_PENDING
-        ):
-            self.state = self.TOO_CLOSE_SETTLE
-            self._too_close_deadline = (
-                now + cfg.BALL_TOO_CLOSE_SETTLE_S)
-            self._tracking_reset_pending = True
-            return True
-        return False
-
-    def consume_tracking_reset(self):
-        """Pede frames novos depois que o chassi termina a re."""
-        pendente = self._tracking_reset_pending
-        self._tracking_reset_pending = False
-        return pendente
 
     def _locked_circle_near(
         self,

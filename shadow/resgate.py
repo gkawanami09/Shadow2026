@@ -1358,16 +1358,6 @@ def main():
                             marcadores_atuais = {}
                         controlador_verde.notify_command_written(
                             comando.state, concluido_em)
-                    elif controlador is not None:
-                        controlador.notify_command_written(
-                            comando.state, concluido_em)
-                        if controlador.consume_tracking_reset():
-                            if trabalhador is not None:
-                                trabalhador.reset_tracking()
-                            portao.reset()
-                            resultado_atual = None
-                            deteccao_atual = None
-                            ultimo_controle_ocioso = concluido_em
 
             if arduino is not None:
                 arduino.refresh(fail_closed=True)
