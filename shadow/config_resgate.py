@@ -157,6 +157,22 @@ BALL_NEAR_CONFIRM_MAX_MISSES = 1
 BALL_NEAR_CONFIRM_GRACE_S = 0.18
 BALL_NEAR_CONFIRM_WINDOW_S = 0.35
 
+# Correcao para a vitima que ja chegou perto demais antes da coleta. O YOLO
+# nao mede centimetros: a decisao combina o tamanho aparente com a base da
+# caixa abaixo do quadro e exige dois frames novos da mesma cor. So entao o
+# robo da uma re curta, freia e volta a confirmar visualmente antes de baixar
+# o Futaba. As proporcoes independem de a visao trabalhar em 320x240 ou
+# 640x480.
+BALL_TOO_CLOSE_RADIUS_RATIO = 0.18
+BALL_TOO_CLOSE_BOTTOM_RATIO = 1.02
+BALL_TOO_CLOSE_MAX_CENTER_ERROR = 0.16
+BALL_TOO_CLOSE_CONFIRM_FRAMES = 2
+BALL_TOO_CLOSE_CONFIRM_WINDOW_S = 0.25
+BALL_TOO_CLOSE_REVERSE_SPEED = 0.30
+BALL_TOO_CLOSE_REVERSE_S = 0.30
+BALL_TOO_CLOSE_SETTLE_S = 0.15
+BALL_TOO_CLOSE_MAX_BACKOFFS = 2
+
 
 # A meia-lua so pode concluir uma aproximacao visual real. O token e armado
 # por uma serie temporal de circulos centralizados, crescentes e ja baixos no
@@ -217,6 +233,14 @@ BALL_PICKUP_LIFT_HOLD_MS = 300
 BALL_PICKUP_LOWER_POWER = -20
 BALL_PICKUP_LOWER_MS = 25
 BALL_PICKUP_LOWER_GUARD_S = 0.05
+
+# Se o Arduino reiniciar durante a coleta, o firmware volta as garras para a
+# posicao aberta. O Raspberry espera a nova conexao, mantem as rodas zeradas,
+# leva o Futaba novamente para cima e reinicia a mesma coleta normal. O limite
+# impede insistencia infinita caso exista uma falha eletrica ou mecanica real.
+BALL_PICKUP_SERIAL_RECOVERY_MAX_RETRIES = 2
+BALL_PICKUP_SERIAL_RECOVERY_CONNECT_TIMEOUT_S = 8.0
+BALL_PICKUP_SERIAL_RECOVERY_POLL_S = 0.05
 # A abertura compensa todo o fechamento de 70 graus para a vitima nao ficar
 # presa durante a selecao esquerda/direita.
 BALL_PICKUP_RELEASE_DELTA = 70
@@ -232,7 +256,9 @@ BALL_PICKUP_WIGGLE_STEP_S = 0.20
 # correcao curta de yaw e o teste inteiro precisa convergir antes das garras.
 # Se ambos parecem livres, a varredura angular abaixo elimina o ponto cego de
 # uma parede inclinada antes de liberar a coleta normal.
-BALL_WALL_TEST_ENABLED = True
+# Desativado: toda vitima usa a mesma coleta normal. O ultrassonico nao pode
+# mais trocar a sequencia apenas porque encontrou uma parede ou outro eco.
+BALL_WALL_TEST_ENABLED = False
 BALL_WALL_PROBE_DISTANCE_MM = 220
 BALL_WALL_PROBE_SAMPLES = 3
 BALL_WALL_PROBE_MIN_CLOSE_SAMPLES = 2

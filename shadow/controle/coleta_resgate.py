@@ -660,6 +660,40 @@ class BallPickupSequencer:
         raise RuntimeError(
             "confirmacao das garras fora de um estado de partida")
 
+    def recovery_lift_profile(self, now=None):
+        """Calcula quanto ainda e seguro subir depois de um reinicio serial.
+
+        Antes da subida normal, o Futaba pode estar em qualquer ponto baixo e
+        recebe o perfil completo. Se a queda aconteceu durante a propria
+        subida, usa somente o tempo que faltava. Depois da fase normal, aplica
+        apenas a fase lenta: assim nao repete 1,9 s contra o batente superior.
+        """
+        now = time.monotonic() if now is None else float(now)
+        normal_ms = int(cfg.BALL_PICKUP_LIFT_MS)
+        lento_ms = int(cfg.BALL_PICKUP_LIFT_SLOW_MS)
+
+        if self.state == self.LIFT_WAIT and self._deadline is not None:
+            restante_ms = int(round(max(self._deadline - now, 0.0) * 1000.0))
+            return min(restante_ms, normal_ms), lento_ms
+        if self.state == self.LIFT_SLOW_WAIT and self._deadline is not None:
+            restante_ms = int(round(max(self._deadline - now, 0.0) * 1000.0))
+            return 0, min(restante_ms, lento_ms)
+        if self.state in (
+            self.LIFT_SLOW_PENDING,
+            self.CARRY_READY,
+            self.DEPOSIT_START,
+            self.LOWER_PENDING,
+            self.LOWER_WAIT,
+            self.RELEASE_PENDING,
+            self.RELEASE_WAIT,
+            self.WIGGLE_PENDING,
+            self.WIGGLE_WAIT,
+            self.RESTORE_PENDING,
+            self.RESTORE_WAIT,
+        ):
+            return 0, lento_ms
+        return normal_ms, lento_ms
+
     def fail(self, detail):
         self.state = self.FAULT
         self._terminal_detail = str(detail)

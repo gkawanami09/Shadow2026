@@ -29,6 +29,7 @@ from resgate import (  # noqa: E402
     _armar_coleta_confirmada,
     _armar_coleta_parede_direta,
     _deve_reiniciar_busca_por_alvo_perdido,
+    _recuperar_coleta_apos_reinicio,
 )
 from visao.deteccao import VictimDetection  # noqa: E402
 
@@ -649,6 +650,170 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertIsNone(fault.gripper_action)
         self.assertTrue(fault.terminal)
         self.assertFalse(pickup.start("silver"))
+
+    def test_perfil_de_recuperacao_completa_so_o_tempo_restante(self):
+        pickup = BallPickupSequencer()
+        pickup.start("silver")
+        pickup.state = pickup.LIFT_WAIT
+        pickup._deadline = 1.20
+
+        self.assertEqual(
+            pickup.recovery_lift_profile(now=0.70),
+            (500, cfg.BALL_PICKUP_LIFT_SLOW_MS),
+        )
+
+        pickup.state = pickup.LIFT_SLOW_WAIT
+        pickup._deadline = 1.00
+        self.assertEqual(
+            pickup.recovery_lift_profile(now=0.75),
+            (0, 250),
+        )
+
+
+class PickupSerialRecoveryTests(unittest.TestCase):
+    class FakeClock:
+        def __init__(self):
+            self.now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += max(float(seconds), 0.0)
+
+    class FakeArduino:
+        def __init__(self, clock, reconnect=True, reset_at=None):
+            self.clock = clock
+            self.connected = False
+            self.connection_epoch = 0
+            self.reconnect = reconnect
+            self.reset_at = reset_at
+            self.reset_done = False
+            self.calls = []
+
+        def refresh(self, fail_closed=False):
+            self.calls.append(("refresh", bool(fail_closed)))
+            if not self.connected and self.reconnect:
+                self.connected = True
+                self.connection_epoch += 1
+            if (
+                self.connected
+                and self.reset_at is not None
+                and not self.reset_done
+                and self.clock.now >= self.reset_at
+            ):
+                self.connection_epoch += 1
+                self.reset_done = True
+
+        def lado(self, esquerda, direita):
+            self.calls.append(("lado", esquerda, direita))
+            return self.connected
+
+        def futaba(self, potencia, tempo_ms):
+            self.calls.append(("futaba", potencia, tempo_ms))
+            return self.connected
+
+        def parar_futaba(self):
+            self.calls.append(("parar_futaba",))
+            return self.connected
+
+    @staticmethod
+    def coleta_em_andamento(tipo="silver"):
+        coleta = BallPickupSequencer()
+        coleta.start(tipo, wall_mode=True)
+        return coleta
+
+    def test_reconecta_sobe_e_reinicia_sempre_em_modo_normal(self):
+        clock = self.FakeClock()
+        arduino = self.FakeArduino(clock)
+
+        nova, epoca = _recuperar_coleta_apos_reinicio(
+            self.coleta_em_andamento(),
+            arduino,
+            tentativa=1,
+            relogio=clock.monotonic,
+            dormir=clock.sleep,
+        )
+
+        self.assertEqual(epoca, arduino.connection_epoch)
+        self.assertTrue(nova.started)
+        self.assertEqual(nova.target_kind, "silver")
+        self.assertFalse(nova._wall_mode)
+        self.assertEqual(nova.state, nova.FUTABA_START)
+        self.assertIn(("lado", 0, 0), arduino.calls)
+        self.assertIn((
+            "futaba",
+            cfg.BALL_PICKUP_LIFT_POWER,
+            cfg.BALL_PICKUP_LIFT_MS,
+        ), arduino.calls)
+        self.assertIn((
+            "futaba",
+            cfg.BALL_PICKUP_LIFT_SLOW_POWER,
+            cfg.BALL_PICKUP_LIFT_SLOW_MS,
+        ), arduino.calls)
+        self.assertEqual(arduino.calls[-1], ("parar_futaba",))
+
+    def test_reset_durante_subida_completa_apenas_o_tempo_restante(self):
+        clock = self.FakeClock()
+        arduino = self.FakeArduino(clock, reset_at=0.50)
+
+        nova, _epoca = _recuperar_coleta_apos_reinicio(
+            self.coleta_em_andamento("black"),
+            arduino,
+            tentativa=1,
+            relogio=clock.monotonic,
+            dormir=clock.sleep,
+        )
+
+        pulsos_normais = [
+            chamada[2] for chamada in arduino.calls
+            if chamada[:2] == ("futaba", cfg.BALL_PICKUP_LIFT_POWER)
+        ]
+        self.assertEqual(len(pulsos_normais), 2)
+        self.assertEqual(pulsos_normais[0], cfg.BALL_PICKUP_LIFT_MS)
+        self.assertAlmostEqual(
+            pulsos_normais[1],
+            cfg.BALL_PICKUP_LIFT_MS - 500,
+            delta=int(cfg.BALL_PICKUP_SERIAL_RECOVERY_POLL_S * 1000) + 1,
+        )
+        self.assertEqual(nova.target_kind, "black")
+        self.assertFalse(nova._wall_mode)
+
+    def test_sem_reconexao_falha_depois_do_timeout_limitado(self):
+        clock = self.FakeClock()
+        arduino = self.FakeArduino(clock, reconnect=False)
+
+        with self.assertRaisesRegex(RuntimeError, "nao reconectou"):
+            _recuperar_coleta_apos_reinicio(
+                self.coleta_em_andamento(),
+                arduino,
+                tentativa=1,
+                relogio=clock.monotonic,
+                dormir=clock.sleep,
+            )
+
+    def test_limite_de_recuperacoes_bloqueia_nova_tentativa(self):
+        clock = self.FakeClock()
+        arduino = self.FakeArduino(clock)
+
+        with self.assertRaisesRegex(RuntimeError, "limite"):
+            _recuperar_coleta_apos_reinicio(
+                self.coleta_em_andamento(),
+                arduino,
+                tentativa=cfg.BALL_PICKUP_SERIAL_RECOVERY_MAX_RETRIES + 1,
+                relogio=clock.monotonic,
+                dormir=clock.sleep,
+            )
+        self.assertEqual(arduino.calls, [])
+
+    def test_main_nao_transforma_reinicio_da_coleta_em_terminal(self):
+        fonte = inspect.getsource(modulo_resgate.main)
+        self.assertIn("recuperar_coleta_serial", fonte)
+        self.assertNotIn(
+            '"serial mudou durante a coleta; sequencia cancelada"', fonte)
+
+    def test_modo_especial_de_parede_esta_desativado(self):
+        self.assertFalse(cfg.BALL_WALL_TEST_ENABLED)
 
 
 class PickupActionApplicationTests(unittest.TestCase):

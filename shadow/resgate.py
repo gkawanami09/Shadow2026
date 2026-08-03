@@ -222,6 +222,136 @@ def _aplicar_acoes_coleta(
     return None
 
 
+def _aguardar_reconexao_coleta(
+    arduino,
+    relogio=time.monotonic,
+    dormir=time.sleep,
+):
+    """Espera o Arduino voltar e deixa as quatro rodas realmente zeradas."""
+    limite = relogio() + cfg.BALL_PICKUP_SERIAL_RECOVERY_CONNECT_TIMEOUT_S
+    while True:
+        arduino.refresh(fail_closed=True)
+        if arduino.connected:
+            epoca = arduino.connection_epoch
+            if arduino.lado(0, 0) is not False and (
+                arduino.connected and arduino.connection_epoch == epoca
+            ):
+                return epoca
+        restante = limite - relogio()
+        if restante <= 0:
+            raise RuntimeError(
+                "Arduino nao reconectou durante a recuperacao da coleta")
+        dormir(min(cfg.BALL_PICKUP_SERIAL_RECOVERY_POLL_S, restante))
+
+
+def _executar_pulso_futaba_recuperacao(
+    arduino,
+    epoca,
+    potencia,
+    tempo_ms,
+    relogio=time.monotonic,
+    dormir=time.sleep,
+):
+    """Executa parte da subida e devolve o tempo que faltou se houver reset."""
+    tempo_ms = max(int(round(tempo_ms)), 0)
+    if tempo_ms == 0:
+        return True, 0
+    inicio = relogio()
+    if arduino.futaba(potencia, tempo_ms) is False or (
+        not arduino.connected or arduino.connection_epoch != epoca
+    ):
+        return False, tempo_ms
+
+    fim = inicio + tempo_ms / 1000.0
+    while True:
+        restante_s = fim - relogio()
+        if restante_s <= 0:
+            return True, 0
+        dormir(min(cfg.BALL_PICKUP_SERIAL_RECOVERY_POLL_S, restante_s))
+        arduino.refresh(fail_closed=True)
+        if not arduino.connected or arduino.connection_epoch != epoca:
+            executado_ms = max(int(round((relogio() - inicio) * 1000.0)), 0)
+            return False, max(tempo_ms - executado_ms, 0)
+
+
+def _recuperar_coleta_apos_reinicio(
+    coleta,
+    arduino,
+    tentativa,
+    relogio=time.monotonic,
+    dormir=time.sleep,
+):
+    """Sobe o Futaba apos o reboot e rearma a mesma coleta em modo normal."""
+    if coleta is None or coleta.target_kind not in ("silver", "black"):
+        raise RuntimeError(
+            "recuperacao recusada: cor da coleta anterior desconhecida")
+    tentativa = int(tentativa)
+    if not 1 <= tentativa <= cfg.BALL_PICKUP_SERIAL_RECOVERY_MAX_RETRIES:
+        raise RuntimeError(
+            "limite de recuperacoes seriais da coleta atingido")
+
+    tipo = coleta.target_kind
+    normal_ms, lento_ms = coleta.recovery_lift_profile(now=relogio())
+    reinicios_internos = 0
+
+    while normal_ms > 0 or lento_ms > 0:
+        epoca = _aguardar_reconexao_coleta(
+            arduino, relogio=relogio, dormir=dormir)
+
+        if normal_ms > 0:
+            terminou, normal_ms = _executar_pulso_futaba_recuperacao(
+                arduino,
+                epoca,
+                cfg.BALL_PICKUP_LIFT_POWER,
+                normal_ms,
+                relogio=relogio,
+                dormir=dormir,
+            )
+            if not terminou:
+                reinicios_internos += 1
+                if (
+                    reinicios_internos
+                    > cfg.BALL_PICKUP_SERIAL_RECOVERY_MAX_RETRIES
+                ):
+                    raise RuntimeError(
+                        "Arduino reiniciou repetidamente durante a subida "
+                        "de recuperacao")
+                continue
+
+        if lento_ms > 0:
+            terminou, lento_ms = _executar_pulso_futaba_recuperacao(
+                arduino,
+                epoca,
+                cfg.BALL_PICKUP_LIFT_SLOW_POWER,
+                lento_ms,
+                relogio=relogio,
+                dormir=dormir,
+            )
+            if not terminou:
+                reinicios_internos += 1
+                if (
+                    reinicios_internos
+                    > cfg.BALL_PICKUP_SERIAL_RECOVERY_MAX_RETRIES
+                ):
+                    raise RuntimeError(
+                        "Arduino reiniciou repetidamente durante a subida "
+                        "lenta de recuperacao")
+                continue
+
+    epoca = _aguardar_reconexao_coleta(
+        arduino, relogio=relogio, dormir=dormir)
+    if arduino.parar_futaba() is False or (
+        not arduino.connected or arduino.connection_epoch != epoca
+    ):
+        raise RuntimeError(
+            "nao foi possivel parar o Futaba depois da recuperacao")
+
+    nova_coleta = BallPickupSequencer()
+    if not nova_coleta.start(tipo, wall_mode=False):
+        raise RuntimeError("nao foi possivel reiniciar a coleta normal")
+    return nova_coleta, epoca
+
+
 def _aplicar_acoes_deposito_cinza(
     passo,
     arduino,
@@ -603,6 +733,7 @@ def main():
     vitimas_resgatadas = 0
     vitimas_prata_resgatadas = 0
     vitimas_pretas_resgatadas = 0
+    tentativas_recuperacao_coleta = 0
     coleta_apos_teste_parede = None
     amostras_captura = deque(maxlen=60)
     instantes_deteccao = deque(maxlen=30)
@@ -679,6 +810,36 @@ def main():
         deteccao_atual = None
         marcadores_atuais = {}
         metricas = None
+
+        def recuperar_coleta_serial(motivo):
+            nonlocal coleta
+            nonlocal epoca_coleta
+            nonlocal tentativas_recuperacao_coleta
+
+            tentativas_recuperacao_coleta += 1
+            print(
+                "[coleta] Arduino reiniciou; recuperacao "
+                f"{tentativas_recuperacao_coleta}/"
+                f"{cfg.BALL_PICKUP_SERIAL_RECOVERY_MAX_RETRIES}: {motivo}")
+            coleta, epoca_coleta = _recuperar_coleta_apos_reinicio(
+                coleta,
+                arduino,
+                tentativas_recuperacao_coleta,
+            )
+            if trabalhador is not None:
+                trabalhador.reset_tracking()
+            portao.reset()
+            print(
+                "[coleta] Futaba levantado e serial estavel; "
+                f"reiniciando coleta normal da vitima {coleta.target_kind}")
+            return MotionCommand(
+                "PICKUP_SERIAL_RECOVERED",
+                detail=(
+                    "Arduino reconectado; Futaba levantado; repetindo a "
+                    "coleta normal"
+                ),
+                target_kind=coleta.target_kind,
+            )
 
         if args.drive:
             print(
@@ -888,20 +1049,21 @@ def main():
                 resultado_atual = None
                 deteccao_atual = None
 
-                if (
-                    arduino is not None
-                    and epoca_coleta is not None
-                    and (
+                serial_coleta_mudou = False
+                if arduino is not None and epoca_coleta is not None:
+                    arduino.refresh(fail_closed=True)
+                    serial_coleta_mudou = (
                         not arduino.connected
                         or arduino.connection_epoch != epoca_coleta
                     )
-                ):
-                    passo_coleta = coleta.fail(
-                        "serial mudou durante a coleta; sequencia cancelada")
+
+                if serial_coleta_mudou:
+                    comando = recuperar_coleta_serial(
+                        "conexao mudou antes do proximo passo")
+                    passo_coleta = None
                 else:
                     passo_coleta = coleta.update(now=agora)
-
-                comando = passo_coleta.motion_command()
+                    comando = passo_coleta.motion_command()
                 comando_atualizado = True
             elif deposito_cinza is not None:
                 if resultado is not None:
@@ -1108,13 +1270,22 @@ def main():
                         ):
                             coleta_concluida = coleta.target_kind
                     else:
-                        passo_coleta = coleta.fail(erro_coleta)
-                        comando = passo_coleta.motion_command()
-                        _aplicar_acoes_coleta(
-                            passo_coleta,
-                            arduino,
-                            steer,
+                        serial_reiniciou = (
+                            not arduino.connected
+                            or epoca_coleta is None
+                            or arduino.connection_epoch != epoca_coleta
                         )
+                        if serial_reiniciou:
+                            comando = recuperar_coleta_serial(erro_coleta)
+                            passo_coleta = None
+                        else:
+                            passo_coleta = coleta.fail(erro_coleta)
+                            comando = passo_coleta.motion_command()
+                            _aplicar_acoes_coleta(
+                                passo_coleta,
+                                arduino,
+                                steer,
+                            )
                 elif passo_parede is not None:
                     epoca_movimento = arduino.connection_epoch
                     erro_parede = aplicar_acao_parede(
@@ -1187,6 +1358,16 @@ def main():
                             marcadores_atuais = {}
                         controlador_verde.notify_command_written(
                             comando.state, concluido_em)
+                    elif controlador is not None:
+                        controlador.notify_command_written(
+                            comando.state, concluido_em)
+                        if controlador.consume_tracking_reset():
+                            if trabalhador is not None:
+                                trabalhador.reset_tracking()
+                            portao.reset()
+                            resultado_atual = None
+                            deteccao_atual = None
+                            ultimo_controle_ocioso = concluido_em
 
             if arduino is not None:
                 arduino.refresh(fail_closed=True)
@@ -1230,9 +1411,11 @@ def main():
                         or arduino.connection_epoch != epoca_coleta
                     )
                 ):
-                    raise RuntimeError(
-                        "serial mudou durante a coleta; "
-                        "motores e Futaba parados")
+                    comando = recuperar_coleta_serial(
+                        "conexao mudou depois do comando da coleta")
+                    passo_coleta = None
+                    epoca_movimento = None
+                    movimento_enviado = None
                 if (
                     controlador_verde is not None
                     and epoca_verde is not None
@@ -1426,6 +1609,7 @@ def main():
                     vitimas_pretas_resgatadas += 1
                 contador_verde.reset()
                 varreduras_sem_vitima = 0
+                tentativas_recuperacao_coleta = 0
                 epoca_coleta = None
                 coleta = BallPickupSequencer()
                 if trabalhador is not None:
