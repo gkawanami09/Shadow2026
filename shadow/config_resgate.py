@@ -125,8 +125,15 @@ BALL_ALIGN_THRESHOLD = 0.24
 BALL_ALIGN_EXIT_THRESHOLD = 0.15
 BALL_ALIGN_ARC_MIN_ANGLE = 65
 BALL_ALIGN_ARC_MAX_ANGLE = 82
-BALL_ALIGN_SPEED_MIN = 0.30
-BALL_ALIGN_SPEED_MAX = 0.34
+# A faixa antiga chegava ao motor externo como aproximadamente PWM 36..41 e
+# podia apenas produzir ruido sem vencer o atrito. O alinhamento visual agora
+# trabalha entre PWM 70 e 85; continua proporcional ao erro e para assim que
+# a esfera entra na zona central. Isto afeta somente o estado ALIGN depois que
+# o YOLO ja encontrou a bolinha — a varredura SEARCH continua em PWM 80.
+BALL_ALIGN_PWM_MIN = 70
+BALL_ALIGN_PWM_MAX = 85
+BALL_ALIGN_SPEED_MIN = BALL_ALIGN_PWM_MIN / 120.0
+BALL_ALIGN_SPEED_MAX = BALL_ALIGN_PWM_MAX / 120.0
 BALL_STEER_MAX_ANGLE = 60
 BALL_APPROACH_SPEED_FAR = 0.45
 BALL_APPROACH_SPEED_NEAR = 0.35

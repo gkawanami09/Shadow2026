@@ -163,6 +163,12 @@ class BallApproachControllerTests(unittest.TestCase):
         self.assertLessEqual(abs(strong.angle), 90)
         self.assertGreater(abs(strong.angle), abs(moderate.angle))
         self.assertGreater(strong.speed, moderate.speed)
+        self.assertGreaterEqual(
+            moderate.speed, cfg.BALL_ALIGN_PWM_MIN / 120.0)
+        self.assertLessEqual(
+            strong.speed, cfg.BALL_ALIGN_PWM_MAX / 120.0)
+        # O aumento pertence somente ao alinhamento depois da deteccao.
+        self.assertEqual(cfg.BALL_SEARCH_TANK_PWM, 80)
 
     def test_alignment_hysteresis_prevents_threshold_chatter(self):
         controller = BallApproachController(start_time=0.0)
