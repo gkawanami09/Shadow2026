@@ -49,27 +49,29 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
 
 
 def _enter_rescue_zone(arduino):
-    """Atravessa a soleira prata e entrega o robô parado, com o LED apagado.
+    """PARA, confirma parado, avança 1 s e entrega o robô com o LED apagado.
 
-    O tempo NÃO é a única evidência: o avanço termina assim que a faixa deixa
-    de ser vista (ela passou por baixo do robô). O timeout existe apenas como
-    limite de segurança para o caso de a faixa continuar visível por erro de
-    detecção — sem ele o robô atravessaria a sala inteira em linha reta.
+    A ordem importa e foi pedida assim:
+
+    1. **PARAR.** A faixa prata é decidida por TEXTURA, e textura medida com
+       o chassi em movimento sai borrada. Parar antes de decidir é o que
+       torna a confirmação confiável.
+    2. **1 segundo reto**, para atravessar a soleira e entrar na sala.
+    3. Entregar o robô parado, com o LED apagado.
+
+    O timeout continua existindo como limite de segurança: sem ele, uma
+    detecção presa faria o robô atravessar a sala inteira em linha reta.
     """
+    steer()  # 1. PARAR para confirmar com o chassi imóvel
+    sleep_steering(config.ENTRY_CONFIRM_PAUSE_S)
+
     started = time.monotonic()
     steer(0, config.ENTRY_ADVANCE_SPEED)
-    motivo = "timeout"
-    while True:
-        elapsed = time.monotonic() - started
-        if elapsed >= config.ENTRY_ADVANCE_TIMEOUT_S:
-            break
-        if (
-            elapsed >= config.ENTRY_ADVANCE_MIN_S
-            and not entry_silver_detected.value
-        ):
-            motivo = "faixa passou para trás"
-            break
+    limite = min(config.ENTRY_ADVANCE_S, config.ENTRY_ADVANCE_TIMEOUT_S)
+    motivo = f"{limite:.2f} s de avanço"
+    while time.monotonic() - started < limite:
         sleep_steering(.02)
+    elapsed = time.monotonic() - started
 
     steer()  # PARAR antes de qualquer outra coisa
     # O LED só pode ser apagado enquanto esta serial ainda existe. O processo

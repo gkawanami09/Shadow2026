@@ -326,8 +326,14 @@ ENTRY_SILVER_COOLDOWN_S = 8.
 # Entrada na sala depois da confirmação. O tempo NÃO é a única evidência: o
 # avanço termina quando a faixa deixa de ser vista (passou por baixo do robô)
 # e o timeout é apenas o limite de segurança.
+# Entrada na sala, com a sequência pedida: PARAR para ter certeza, depois
+# 1 segundo reto, depois entregar o robô para a busca de bolinha.
+# A pausa antes de andar existe para a confirmação acontecer com o chassi
+# imóvel — a faixa prata é decidida por textura, e textura medida em
+# movimento sai borrada.
 ENTRY_ADVANCE_SPEED = .40
-ENTRY_ADVANCE_MIN_S = .60
+ENTRY_CONFIRM_PAUSE_S = .35
+ENTRY_ADVANCE_S = 1.0
 ENTRY_ADVANCE_TIMEOUT_S = 3.5
 
 # ----------------------------------------------------------------------------

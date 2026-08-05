@@ -514,6 +514,14 @@ EXIT_BLACK_MIN_CONFIDENCE = 0.55
 
 EXIT_BLACK_VOTES_NEEDED = 3
 EXIT_BLACK_VOTE_WINDOW = 5
+# Evidencia FRACA (fallback de Hough, faixa fina vista de longe) exige mais
+# confirmacoes que a faixa larga da mascara. Medido: o clutter da sala produz
+# segmentos retos e escuros de ate 0.34 da largura, contra 0.45 da faixa
+# real — nao existe limiar unico que separe os dois com folga. O que separa e
+# a PERSISTENCIA: a soleira continua ali enquanto o robo se aproxima; a
+# sombra da barreira muda de forma a cada pulso do giro.
+EXIT_BLACK_WEAK_VOTES_NEEDED = 5
+EXIT_BLACK_WEAK_VOTE_WINDOW = 6
 EXIT_BLACK_COOLDOWN_S = 0.0
 
 # A camera de resgate fica quase horizontal. Quando a soleira esta longe ela
@@ -526,10 +534,25 @@ EXIT_LINE_ROI_BOTTOM = 0.93
 EXIT_LINE_CANNY_LOW = 40
 EXIT_LINE_CANNY_HIGH = 120
 EXIT_LINE_HOUGH_THRESHOLD_RATIO = 0.055
-EXIT_LINE_MIN_LENGTH_RATIO = 0.25
+# MEDIDO nas fotos reais de captures/linha_preta e linha_prata: com 0.25 o
+# fallback aceitava segmentos de 26% a 45% da largura e disparava na SOMBRA
+# SOB A BARREIRA BRANCA em 5 de 6 imagens — inclusive em fotos onde nao ha
+# faixa preta nenhuma. A soleira de saida atravessa a porta inteira; um
+# risco curto no chao nunca e ela.
+# 0.45 fica acima do pior clutter medido (0.34: sombra da barreira, borda de
+# mesa) e abaixo da faixa real (0.45+). A margem e fina de proposito: o
+# fallback de Hough NAO decide sozinho — ver EXIT_BLACK_WEAK_VOTES_NEEDED.
+EXIT_LINE_MIN_LENGTH_RATIO = 0.45
 EXIT_LINE_MAX_GAP_RATIO = 0.05
 EXIT_LINE_MAX_ANGLE_DEG = 22.0
 EXIT_LINE_MAX_DARK_SIDE_VALUE = 110.0
+
+# A borda do retangulo verde/vermelho tambem e um risco reto e escuro de um
+# lado. Sem esta exclusao o robo confunde o marcador com a soleira — foi o
+# sintoma relatado. A mascara dos marcadores e dilatada antes de excluir.
+EXIT_BLACK_EXCLUDE_MARKERS = True
+EXIT_BLACK_MARKER_DILATE_PX = 9
+EXIT_BLACK_MARKER_MAX_OVERLAP = 0.25
 
 # Travessia da soleira de saida. Igual a entrada: o tempo e apenas o limite
 # de seguranca; o fim normal e a faixa deixar de ser vista.

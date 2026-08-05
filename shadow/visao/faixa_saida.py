@@ -16,6 +16,7 @@ garante isso é o coordenador da missão, que só instancia o detector nesse
 estado — fora dele a faixa preta não pode interromper a busca de vítimas.
 """
 
+from collections import deque
 from dataclasses import dataclass
 import math
 
@@ -45,6 +46,10 @@ class ExitStripeDetection:
     confidence: float
     timestamp: float
     bbox: tuple
+    #: Como o candidato foi encontrado. ``"mascara"`` e a faixa escura larga
+    #: (evidencia forte); ``"perspectiva"`` e a linha fina vista de longe
+    #: pelo fallback de Hough (evidencia FRACA, exige mais confirmacoes).
+    via: str = "mascara"
 
 
 def default_geometry():
@@ -89,6 +94,7 @@ class BlackExitDetector:
         self.last_reason = "inicio"
         self.last_mask = None
         self.last_band = None
+        self.last_marker_mask = None
 
     def detect(self, frame_bgr, timestamp=None):
         if (
@@ -103,6 +109,14 @@ class BlackExitDetector:
         self.last_band = None
 
         mask = dark_mask(frame_bgr, self.hsv_min, self.hsv_max)
+        # A borda dos retangulos verde/vermelho tambem e um risco reto e
+        # escuro de um lado; sem remove-la o robo confunde o marcador com a
+        # soleira. A mascara e apagada ANTES da busca de faixa, para o
+        # marcador nao sequer virar candidato.
+        marcadores = self._marker_exclusion_mask(frame_bgr)
+        if marcadores is not None:
+            mask[marcadores > 0] = 0
+        self.last_marker_mask = marcadores
         self.last_mask = mask
 
         band, reason = find_transversal_band(
@@ -113,7 +127,7 @@ class BlackExitDetector:
         )
         if band is None:
             perspectiva = self._detect_perspective_line(
-                frame_bgr, timestamp)
+                frame_bgr, timestamp, marcadores)
             if perspectiva is not None:
                 self.last_reason = ""
                 return perspectiva
@@ -168,7 +182,27 @@ class BlackExitDetector:
         )
 
     @staticmethod
-    def _detect_perspective_line(frame_bgr, timestamp):
+    def _marker_exclusion_mask(frame_bgr):
+        """Regiao ocupada pelos retangulos verde/vermelho, dilatada.
+
+        Dilatar e essencial: quem engana o detector nao e o miolo colorido do
+        marcador (esse nao e escuro), e a BORDA dele — um risco reto com um
+        lado escuro, exatamente a assinatura que o fallback procura.
+        """
+        if not cfg.EXIT_BLACK_EXCLUDE_MARKERS:
+            return None
+        from visao.marcador_resgate import color_masks
+        mascaras = color_masks(frame_bgr)
+        juntas = cv2.bitwise_or(mascaras["green"], mascaras["red"])
+        lado = max(int(cfg.EXIT_BLACK_MARKER_DILATE_PX), 1)
+        if lado % 2 == 0:
+            lado += 1
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (lado, lado))
+        return cv2.dilate(juntas, kernel)
+
+    @staticmethod
+    def _detect_perspective_line(frame_bgr, timestamp, marcadores=None):
         """Encontra a soleira fina e inclinada vista de longe.
 
         O caminho principal continua sendo a mascara preta. Este fallback so
@@ -190,6 +224,9 @@ class BlackExitDetector:
         bottom = int(round(height * cfg.EXIT_LINE_ROI_BOTTOM))
         edges[:top, :] = 0
         edges[bottom:, :] = 0
+        # A borda do marcador vira aresta de Hough como qualquer outra.
+        if marcadores is not None:
+            edges[marcadores > 0] = 0
 
         lines = cv2.HoughLinesP(
             edges,
@@ -287,6 +324,7 @@ class BlackExitDetector:
             confidence=confidence,
             timestamp=float(timestamp),
             bbox=(left, top_y, box_width, bottom_y - top_y + 1),
+            via="perspectiva",
         )
 
     @staticmethod
@@ -352,6 +390,8 @@ class BlackExitGate:
             if confirmer is None else confirmer
         )
         self.last_detection = None
+        self._historico = deque(maxlen=cfg.EXIT_BLACK_WEAK_VOTE_WINDOW)
+        self._ultimo_timestamp = None
 
     @property
     def confirmed(self):
@@ -368,9 +408,33 @@ class BlackExitGate:
     def update(self, frame_bgr, timestamp=None, now=None):
         detection = self.detector.detect(frame_bgr, timestamp=timestamp)
         self.last_detection = detection
+
+        novo_frame = (
+            self._ultimo_timestamp is None
+            or timestamp is None
+            or timestamp > self._ultimo_timestamp + 1e-9
+        )
+        if novo_frame:
+            self._ultimo_timestamp = timestamp
+            self._historico.append(
+                None if detection is None else detection.via)
+
         confirmed = self.confirmer.update(
             detection is not None,
             timestamp=0.0 if timestamp is None else timestamp,
             now=now,
         )
-        return confirmed, detection
+        if not confirmed:
+            return False, detection
+
+        fortes = sum(1 for via in self._historico if via == "mascara")
+        fracos = sum(1 for via in self._historico if via == "perspectiva")
+        if fortes == 0 and fracos < cfg.EXIT_BLACK_WEAK_VOTES_NEEDED:
+            # Só o fallback de Hough votou. Medido nas fotos reais da arena,
+            # o clutter da sala (sombra da barreira, borda de mesa) produz
+            # segmentos quase tão longos quanto a soleira — nenhum limiar de
+            # comprimento separa os dois com folga. O que separa é PERSISTIR:
+            # a soleira continua ali enquanto o robô se aproxima, a sombra
+            # muda de forma a cada pulso do giro.
+            return False, detection
+        return True, detection
