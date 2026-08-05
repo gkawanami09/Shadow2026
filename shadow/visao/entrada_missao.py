@@ -24,16 +24,16 @@ def build_entry_gate():
     """Cria o portão da faixa prata apenas no modo de missão completa."""
     if not mission_mode.value or not config.ENTRY_SILVER_ENABLED:
         return None
-    # A entrada usa a MESMA assinatura da confirmação de saída: textura.
-    # O gate HSV anterior exigia fita clara e neutra, mas medido nas fotos
-    # reais da fita ela aparece com V 50..140 e S 36..70 — enquanto o piso
-    # branco dá V 199..228 e S 16..24. O piso passava e a fita não.
-    # Ver o docstring de visao/entrada_prata.py.
-    from visao.entrada_prata import PortaoEntradaPrata
+    from visao.faixa_entrada import (EntrySilverDetector, EntrySilverGate,
+                                     load_bounds)
+    # A faixa prata pertence ao perfil da CÂMERA DE LINHA; os limites da
+    # vítima prateada vivem em config_resgate e nunca são lidos aqui.
+    hsv_min, hsv_max = load_bounds(config_manager)
     print(
-        "[visão] faixa prata de entrada armada — assinatura de TEXTURA "
-        "(mesma da confirmação de saída)")
-    return PortaoEntradaPrata()
+        f"[visão] faixa prata de entrada armada — HSV {hsv_min}..{hsv_max} "
+        "(perfil da câmera de linha)")
+    return EntrySilverGate(
+        detector=EntrySilverDetector(hsv_min=hsv_min, hsv_max=hsv_max))
 
 
 def update_entry_silver(entry_gate, frame, captured_at, line_ahead=False,
