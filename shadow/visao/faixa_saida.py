@@ -17,6 +17,7 @@ estado — fora dele a faixa preta não pode interromper a busca de vítimas.
 """
 
 from dataclasses import dataclass
+import math
 
 import cv2
 import numpy as np
@@ -111,6 +112,11 @@ class BlackExitDetector:
             roi_bottom_ratio=cfg.EXIT_BLACK_ROI_BOTTOM,
         )
         if band is None:
+            perspectiva = self._detect_perspective_line(
+                frame_bgr, timestamp)
+            if perspectiva is not None:
+                self.last_reason = ""
+                return perspectiva
             # "compacta" é o motivo devolvido quando uma esfera preta chega
             # até aqui: ela é escura e está na ROI, mas não é alongada.
             self.last_reason = reason
@@ -159,6 +165,128 @@ class BlackExitDetector:
             confidence=confidence,
             timestamp=timestamp,
             bbox=band.bbox,
+        )
+
+    @staticmethod
+    def _detect_perspective_line(frame_bgr, timestamp):
+        """Encontra a soleira fina e inclinada vista de longe.
+
+        O caminho principal continua sendo a mascara preta. Este fallback so
+        procura segmentos na parte inferior, exige comprimento proporcional
+        e confirma que pelo menos um dos lados da borda e escuro. A borda
+        curva de uma esfera nao produz um trecho reto desse comprimento.
+        """
+        height, width = frame_bgr.shape[:2]
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        value = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)[:, :, 2]
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(
+            blurred,
+            cfg.EXIT_LINE_CANNY_LOW,
+            cfg.EXIT_LINE_CANNY_HIGH,
+        )
+
+        top = int(round(height * cfg.EXIT_LINE_ROI_TOP))
+        bottom = int(round(height * cfg.EXIT_LINE_ROI_BOTTOM))
+        edges[:top, :] = 0
+        edges[bottom:, :] = 0
+
+        lines = cv2.HoughLinesP(
+            edges,
+            1,
+            np.pi / 180.0,
+            threshold=max(
+                12, int(round(width * cfg.EXIT_LINE_HOUGH_THRESHOLD_RATIO))),
+            minLineLength=max(
+                20, int(round(width * cfg.EXIT_LINE_MIN_LENGTH_RATIO))),
+            maxLineGap=max(
+                2, int(round(width * cfg.EXIT_LINE_MAX_GAP_RATIO))),
+        )
+        if lines is None:
+            return None
+
+        candidates = []
+        margin = max(3, int(round(height * 0.018)))
+        for x1, y1, x2, y2 in lines[:, 0]:
+            dx = float(x2 - x1)
+            dy = float(y2 - y1)
+            length = math.hypot(dx, dy)
+            if length < width * cfg.EXIT_LINE_MIN_LENGTH_RATIO:
+                continue
+            angle = math.degrees(math.atan2(dy, dx))
+            if abs(angle) > cfg.EXIT_LINE_MAX_ANGLE_DEG:
+                continue
+
+            center_y = (float(y1) + float(y2)) / 2.0
+            center_y_px = int(round(center_y))
+            left = max(min(int(x1), int(x2)), 0)
+            right = min(max(int(x1), int(x2)) + 1, width)
+            above = value[
+                max(center_y_px - margin, 0):center_y_px,
+                left:right,
+            ]
+            below = value[
+                center_y_px:min(center_y_px + margin, height),
+                left:right,
+            ]
+            medians = [
+                float(np.median(sample)) for sample in (above, below)
+                if sample.size
+            ]
+            if not medians:
+                continue
+            dark_value = min(medians)
+            if dark_value > cfg.EXIT_LINE_MAX_DARK_SIDE_VALUE:
+                continue
+            contrast = (
+                abs(medians[0] - medians[-1])
+                if len(medians) > 1 else 0.0)
+
+            y_ratio = center_y / max(float(height), 1.0)
+            length_ratio = length / max(float(width), 1.0)
+            score = (
+                length_ratio
+                + 0.80 * y_ratio
+                - 0.30 * abs(angle)
+                / max(cfg.EXIT_LINE_MAX_ANGLE_DEG, 1.0)
+            )
+            candidates.append(
+                (score, x1, y1, x2, y2, length, dark_value, contrast))
+
+        if not candidates:
+            return None
+
+        _, x1, y1, x2, y2, length, dark_value, contrast = max(
+            candidates, key=lambda item: item[0])
+        left = max(min(int(x1), int(x2)), 0)
+        right = min(max(int(x1), int(x2)) + 1, width)
+        center_y = int(round((float(y1) + float(y2)) / 2.0))
+        span_ratio = abs(float(x2 - x1)) / max(float(width), 1.0)
+        thickness = margin * 2 + 1
+        confidence = _clip01(
+            0.55
+            + 0.30 * (span_ratio - cfg.EXIT_LINE_MIN_LENGTH_RATIO)
+            + 0.15 * contrast / 80.0
+        )
+        top_y = max(center_y - margin, 0)
+        bottom_y = min(center_y + margin, height - 1)
+        box_width = max(right - left, 1)
+
+        return ExitStripeDetection(
+            center_x=(float(x1) + float(x2)) / 2.0,
+            center_y=(float(y1) + float(y2)) / 2.0,
+            width=box_width,
+            height=bottom_y - top_y + 1,
+            top_y=top_y,
+            bottom_y=bottom_y,
+            span_ratio=span_ratio,
+            thickness_ratio=thickness / max(float(height), 1.0),
+            aspect=length / max(float(thickness), 1.0),
+            value=dark_value,
+            surround_contrast=contrast,
+            confidence=confidence,
+            timestamp=float(timestamp),
+            bbox=(left, top_y, box_width, bottom_y - top_y + 1),
         )
 
     @staticmethod

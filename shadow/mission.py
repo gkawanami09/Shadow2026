@@ -209,6 +209,7 @@ class MissionSystem:
             "--drive",
             "--camera-index", str(self.args.rescue_camera_index),
             "--policy", self.args.policy,
+            "--gerenciado-pela-missao",
         ]
         if self.args.debug:
             comando.append("--debug")
@@ -354,7 +355,11 @@ def main():
             else:
                 print(
                     f"[missão] o resgate terminou com código {returncode}; "
-                    "voltando ao percurso mesmo assim para tentar a saída")
+                    "faixa preta não confirmada; permanecendo parado")
+                coordinator.abort(
+                    f"saída do resgate não confirmada: código {returncode}")
+                codigo = returncode or RESCUE_EXIT_INCOMPLETE
+                break
 
             # Handoff resgate → percurso, na ordem testada.
             HandoffExecutor(system, HANDOFF_TO_LINE).run()

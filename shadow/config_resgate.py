@@ -516,6 +516,21 @@ EXIT_BLACK_VOTES_NEEDED = 3
 EXIT_BLACK_VOTE_WINDOW = 5
 EXIT_BLACK_COOLDOWN_S = 0.0
 
+# A camera de resgate fica quase horizontal. Quando a soleira esta longe ela
+# aparece como uma linha fina e inclinada, nao como um retangulo perfeitamente
+# horizontal. Este segundo caminho geometrico usa segmentos longos somente na
+# parte inferior da imagem. A esfera preta continua excluida porque sua borda
+# e curva e nao produz um segmento reto com este comprimento.
+EXIT_LINE_ROI_TOP = 0.55
+EXIT_LINE_ROI_BOTTOM = 0.93
+EXIT_LINE_CANNY_LOW = 40
+EXIT_LINE_CANNY_HIGH = 120
+EXIT_LINE_HOUGH_THRESHOLD_RATIO = 0.055
+EXIT_LINE_MIN_LENGTH_RATIO = 0.25
+EXIT_LINE_MAX_GAP_RATIO = 0.05
+EXIT_LINE_MAX_ANGLE_DEG = 22.0
+EXIT_LINE_MAX_DARK_SIDE_VALUE = 110.0
+
 # Travessia da soleira de saida. Igual a entrada: o tempo e apenas o limite
 # de seguranca; o fim normal e a faixa deixar de ser vista.
 EXIT_ADVANCE_SPEED = 0.35
@@ -533,6 +548,33 @@ EXIT_SEARCH_TANK_SPEED = BALL_SEARCH_TANK_SPEED
 EXIT_ALIGN_MAX_CENTER_ERROR = 0.12
 EXIT_ALIGN_ANGLE = 55
 EXIT_ALIGN_SPEED = 0.26
+
+# Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
+# aproxima ate deixar de enxergar a soleira. So entao a camera de linha abre e
+# o robo avanca devagar. A decisao exige 3 de 5 frames: um reflexo isolado
+# nunca autoriza a volta ao percurso.
+EXIT_LINE_VERIFY_SPEED = 0.35
+EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
+EXIT_LINE_VERIFY_VOTES = 3
+EXIT_LINE_VERIFY_WINDOW = 5
+EXIT_LINE_VERIFY_MAX_AGE_S = 0.35
+EXIT_LINE_VERIFY_EDGE_MIN = 18
+EXIT_LINE_VERIFY_EDGE_FILL = 0.48
+EXIT_LINE_VERIFY_DARK_VALUE_MAX = 100
+EXIT_LINE_VERIFY_DARK_LOCAL_MAX = 12
+EXIT_LINE_VERIFY_DARK_ROW_FILL = 0.60
+EXIT_LINE_VERIFY_DARK_MIN_HEIGHT_RATIO = 0.05
+# Medido nas quatro imagens reais de 05/08: preto ficou em 6-7 e prata em
+# 13-21 depois da normalizacao para 448x252. A zona 9.5..11.5 permanece
+# inconclusiva em vez de arriscar classificar prata como preta.
+EXIT_LINE_VERIFY_BLACK_TEXTURE_MAX = 9.5
+EXIT_LINE_VERIFY_SILVER_TEXTURE_MIN = 11.5
+EXIT_LINE_VERIFY_TEXTURE_ROI_TOP = 0.15
+EXIT_LINE_VERIFY_TEXTURE_ROI_BOTTOM = 0.75
+EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED = 0.35
+EXIT_LINE_VERIFY_REJECT_REVERSE_S = 0.70
+EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED = 0.40
+EXIT_LINE_VERIFY_BLACK_FORWARD_S = 0.45
 
 # Mapeamento final dos DOIS triangulos, so para diagnostico e para provar que
 # a sala foi compreendida. Nenhum deles comanda o robo nesta fase.

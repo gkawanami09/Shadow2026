@@ -34,6 +34,7 @@ Exemplos::
 import argparse
 from collections import deque
 from pathlib import Path
+import subprocess
 import sys
 import time
 
@@ -68,7 +69,15 @@ from controle.parede_vitima import (  # noqa: E402
 from controle.retangulo_verde_resgate import (  # noqa: E402
     ControladorRetanguloVerde,
 )
+from controle.saida_resgate import ExitPhaseController  # noqa: E402
 from visao import overlay_resgate  # noqa: E402
+from visao.confirmacao_saida_linha import (  # noqa: E402
+    NAO_PRETA,
+    PRETA,
+    ConfirmadorFaixaSaidaLinha,
+    anotar_confirmacao,
+)
+from visao.faixa_saida import BlackExitGate  # noqa: E402
 from visao.marcador_resgate import (  # noqa: E402
     GreenRectangleDetector,
     MarkerDetector,
@@ -93,6 +102,7 @@ INTERVALO_LOG_S = 0.50
 TICK_S = 0.005
 
 EXIT_OK = 0
+EXIT_INCOMPLETE = 3
 EXIT_SEM_MODELO = 4
 
 
@@ -640,6 +650,155 @@ class MarkerPair:
         self.mascaras = {"green": None, "red": None}
 
 
+def _mover_saida_por_tempo(
+    arduino,
+    acao_direcao,
+    angulo,
+    velocidade,
+    duracao,
+    epoca_serial,
+):
+    """Executa um trecho curto sem deixar o watchdog ou a serial vencerem."""
+    enviado = acao_direcao(angulo, velocidade)
+    if enviado is False:
+        raise RuntimeError("comando da verificacao de saida nao foi enviado")
+    prazo = time.monotonic() + max(float(duracao), 0.0)
+    while time.monotonic() < prazo:
+        arduino.refresh(fail_closed=True)
+        if (
+            not arduino.connected
+            or arduino.connection_epoch != epoca_serial
+        ):
+            acao_direcao()
+            raise RuntimeError(
+                "serial mudou durante a verificacao da faixa de saida")
+        time.sleep(min(0.02, max(prazo - time.monotonic(), 0.0)))
+
+
+def _confirmar_saida_com_camera_linha(arduino, debug=False):
+    """Avanca ate a soleira e decide PRETA ou NAO_PRETA em 3 de 5 frames."""
+    from controle.direcao import steer
+    from visao.captura import LineCamera
+
+    camera = None
+    confirmador = ConfirmadorFaixaSaidaLinha()
+    epoca_serial = arduino.connection_epoch
+    inicio = time.monotonic()
+    ultimo_log = 0.0
+    ultimo_resumo = None
+
+    try:
+        steer()
+        camera = LineCamera()
+        print(
+            "[saida] camera do segue-linha aberta; avancando devagar ate "
+            "a faixa entrar no quadro")
+        if steer(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
+            raise RuntimeError("nao foi possivel iniciar a aproximacao final")
+
+        while True:
+            frame = camera.get_frame()
+            agora = time.monotonic()
+            decisao, resultado = confirmador.update(
+                frame,
+                timestamp=agora,
+                now=agora,
+            )
+            arduino.refresh(fail_closed=True)
+            if (
+                not arduino.connected
+                or arduino.connection_epoch != epoca_serial
+            ):
+                raise RuntimeError(
+                    "serial mudou durante a confirmacao preta/prata")
+
+            resumo = (
+                resultado.classificacao,
+                confirmador.votos_pretos,
+                confirmador.votos_nao_pretos,
+            )
+            if resumo != ultimo_resumo and agora - ultimo_log >= 0.15:
+                print(
+                    "[saida] confirmando: "
+                    f"{resultado.classificacao}; "
+                    f"preta={confirmador.votos_pretos}/"
+                    f"{cfg.EXIT_LINE_VERIFY_VOTES} "
+                    f"nao-preta={confirmador.votos_nao_pretos}/"
+                    f"{cfg.EXIT_LINE_VERIFY_VOTES} "
+                    f"textura={resultado.textura:.1f}")
+                ultimo_resumo = resumo
+                ultimo_log = agora
+
+            if debug:
+                cv2.imshow(
+                    JANELA,
+                    anotar_confirmacao(frame, resultado, decisao),
+                )
+                tecla = cv2.waitKey(1) & 0xFF
+                if tecla in (ord("q"), 27):
+                    steer()
+                    return False
+
+            if decisao == PRETA:
+                print(
+                    "[saida] faixa PRETA confirmada em 3 de 5 frames; "
+                    "entrando no percurso")
+                _mover_saida_por_tempo(
+                    arduino,
+                    steer,
+                    0,
+                    cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED,
+                    cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_S,
+                    epoca_serial,
+                )
+                steer()
+                return True
+
+            if decisao == NAO_PRETA:
+                print(
+                    "[saida] faixa rejeitada: assinatura de PRATA; "
+                    "dando re e parando")
+                steer()
+                _mover_saida_por_tempo(
+                    arduino,
+                    steer,
+                    200,
+                    cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED,
+                    cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
+                    epoca_serial,
+                )
+                steer()
+                return False
+
+            if agora - inicio >= cfg.EXIT_LINE_VERIFY_TIMEOUT_S:
+                print(
+                    "[saida] nao foi possivel confirmar preto no prazo; "
+                    "dando re e parando por seguranca")
+                steer()
+                _mover_saida_por_tempo(
+                    arduino,
+                    steer,
+                    200,
+                    cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED,
+                    cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
+                    epoca_serial,
+                )
+                steer()
+                return False
+    finally:
+        steer()
+        if camera is not None:
+            camera.close()
+
+
+def _iniciar_segue_linha(debug=False):
+    comando = [sys.executable, str(Path(__file__).resolve().parent / "main.py")]
+    if debug:
+        comando.append("--debug")
+    print(f"[saida] iniciando segue-linha: {' '.join(comando)}")
+    return subprocess.call(comando, cwd=str(Path(__file__).resolve().parent))
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
@@ -653,6 +812,10 @@ def parse_args():
     parser.add_argument(
         "--target", choices=("any", "black", "silver"), default="any",
         help="tipo de vitima aceito (padrao: any)")
+    parser.add_argument(
+        "--policy", choices=("nearest_valid", "silver_first"),
+        default="nearest_valid",
+        help=argparse.SUPPRESS)
     parser.add_argument(
         "--drive", action="store_true",
         help=(
@@ -672,6 +835,9 @@ def parse_args():
     parser.add_argument(
         "--sem-marcadores", action="store_true",
         help="desliga os marcadores e exercita so as vitimas")
+    parser.add_argument(
+        "--gerenciado-pela-missao", action="store_true",
+        help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.video is not None and args.drive:
         parser.error("--drive nao pode ser usado junto com --video")
@@ -713,6 +879,10 @@ def main():
     controlador_verde = None
     monitor_chegada_verde = None
     deposito_cinza = None
+    controlador_saida = None
+    portao_saida = None
+    deteccao_saida = None
+    faltas_saida = 0
     verificador_parede = None
     busca = None
     coleta = None
@@ -729,6 +899,7 @@ def main():
     epoca_parede = None
     epoca_verde = None
     epoca_deposito_cinza = None
+    epoca_saida = None
     varreduras_sem_vitima = 0
     vitimas_resgatadas = 0
     vitimas_prata_resgatadas = 0
@@ -737,6 +908,8 @@ def main():
     coleta_apos_teste_parede = None
     amostras_captura = deque(maxlen=60)
     instantes_deteccao = deque(maxlen=30)
+    iniciar_segue_linha = False
+    codigo_saida = EXIT_INCOMPLETE if args.drive else EXIT_OK
 
     detector = preparar_detector_de_vitimas(args)
     if detector is False:
@@ -881,6 +1054,7 @@ def main():
                 and not coleta.started
                 and controlador_verde is None
                 and deposito_cinza is None
+                and controlador_saida is None
             ):
                 trabalhador.submit(
                     frame_atual,
@@ -893,6 +1067,7 @@ def main():
                 and frame_novo
                 and not coleta.started
                 and deposito_cinza is None
+                and controlador_saida is None
             ):
                 marcadores_atuais = marcadores.update(
                     frame_atual, pacote.captured_at)
@@ -933,6 +1108,31 @@ def main():
                             print(
                                 "[resgate] GREEN_ROUTE_START: segundo verde "
                                 "confirmado; alinhando primeiro pela camera")
+
+            if (
+                controlador_saida is not None
+                and portao_saida is not None
+                and frame_novo
+                and controlador_saida.frame_allowed(pacote.captured_at)
+            ):
+                confirmada_saida, candidata_saida = portao_saida.update(
+                    frame_atual,
+                    timestamp=pacote.captured_at,
+                    now=agora,
+                )
+                if controlador_saida.state == controlador_saida.CROSS:
+                    if candidata_saida is None:
+                        faltas_saida += 1
+                        if faltas_saida >= 2:
+                            deteccao_saida = None
+                    else:
+                        faltas_saida = 0
+                        deteccao_saida = candidata_saida
+                elif confirmada_saida:
+                    deteccao_saida = candidata_saida
+                    faltas_saida = 0
+                else:
+                    deteccao_saida = None
 
             resultado = None
             if trabalhador is not None:
@@ -1075,6 +1275,41 @@ def main():
                 passo_deposito_cinza = deposito_cinza.update(now=agora)
                 comando = passo_deposito_cinza.motion_command()
                 comando_atualizado = True
+            elif controlador_saida is not None:
+                # Esta fase so existe depois do deposito vermelho. A camera
+                # de resgate procura e centraliza a soleira; a confirmacao de
+                # preto contra prata fica para a camera de linha, mais perto.
+                if resultado is not None:
+                    sequencia_resultado = resultado.sequence
+                    metricas = resultado
+                    instantes_deteccao.append(resultado.completed_at)
+                resultado_atual = None
+                deteccao_atual = None
+
+                if (
+                    frame_novo
+                    or agora - ultimo_controle_ocioso
+                    >= INTERVALO_CONTROLE_OCIOSO_S
+                ):
+                    forma = (
+                        frame_atual.shape if frame_atual is not None
+                        else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                              cfg.RESCUE_CAMERA_MAX_WIDTH, 3)
+                    )
+                    comando = controlador_saida.update(
+                        deteccao_saida,
+                        forma,
+                        mapper=None,
+                        now=agora,
+                    )
+                    if (
+                        comando.state == controlador_saida.ALIGN
+                        and controlador_saida.aligned(
+                            deteccao_saida, forma)
+                    ):
+                        comando = controlador_saida.begin_cross(now=agora)
+                    comando_atualizado = True
+                    ultimo_controle_ocioso = agora
             elif controlador_verde is not None:
                 # A camera primeiro confirma, centraliza e se aproxima do
                 # marcador escolhido. Somente depois da parada visual o
@@ -1358,6 +1593,21 @@ def main():
                             marcadores_atuais = {}
                         controlador_verde.notify_command_written(
                             comando.state, concluido_em)
+                    elif controlador_saida is not None:
+                        if controlador_saida.consume_tracking_reset():
+                            if portao_saida is not None:
+                                portao_saida.reset(now=concluido_em)
+                            deteccao_saida = None
+                            faltas_saida = 0
+                        if comando.state == controlador_saida.SEARCH_START:
+                            epoca_saida = arduino.connection_epoch
+                        if controlador_saida.notify_command_written(
+                            comando.state, concluido_em
+                        ):
+                            if portao_saida is not None:
+                                portao_saida.reset(now=concluido_em)
+                            deteccao_saida = None
+                            faltas_saida = 0
 
             if arduino is not None:
                 arduino.refresh(fail_closed=True)
@@ -1429,6 +1679,17 @@ def main():
                     raise RuntimeError(
                         "serial mudou durante o deposito final; "
                         "motores parados e cacamba nao comandada")
+                if (
+                    controlador_saida is not None
+                    and epoca_saida is not None
+                    and (
+                        not arduino.connected
+                        or arduino.connection_epoch != epoca_saida
+                    )
+                ):
+                    raise RuntimeError(
+                        "serial mudou durante a busca da faixa de saida; "
+                        "motores parados")
 
             if (
                 args.drive
@@ -1559,6 +1820,35 @@ def main():
                                 "e alinhando ao retangulo vermelho"),
                         )
                         comando_atualizado = False
+                else:
+                    # O reto final do deposito vermelho terminou. Somente
+                    # agora a faixa de saida passa a existir para a visao.
+                    print(
+                        "[resgate] deposito vermelho concluido; "
+                        "procurando e alinhando com a faixa de saida")
+                    deposito_cinza = None
+                    epoca_deposito_cinza = None
+                    busca = None
+                    controlador = None
+                    controlador_verde = None
+                    monitor_chegada_verde = None
+                    resultado_atual = None
+                    deteccao_atual = None
+                    portao.reset()
+                    controlador_saida = ExitPhaseController(start_time=agora)
+                    portao_saida = BlackExitGate()
+                    deteccao_saida = None
+                    faltas_saida = 0
+                    epoca_saida = arduino.connection_epoch
+                    forma = (
+                        frame_atual.shape if frame_atual is not None
+                        else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                              cfg.RESCUE_CAMERA_MAX_WIDTH, 3)
+                    )
+                    comando = controlador_saida.update(
+                        None, forma, mapper=None, now=agora)
+                    ultimo_controle_ocioso = agora
+                    comando_atualizado = False
 
             if (
                 args.drive
@@ -1808,6 +2098,57 @@ def main():
                         f"[coleta] vitima {coleta.target_kind} confirmada; "
                         f"{modo}baixando, fechando e selecionando")
 
+            if (
+                args.drive
+                and controlador_saida is not None
+                and comando.state == controlador_saida.DONE
+                and comando.terminal
+            ):
+                from controle.direcao import steer
+
+                steer()
+                print(
+                    "[saida] a camera de resgate chegou ao limite visual; "
+                    "trocando para a camera do segue-linha")
+                if trabalhador is not None:
+                    trabalhador.close(timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
+                    trabalhador = None
+                if captura is not None:
+                    fechou = captura.close(
+                        timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
+                    if not fechou:
+                        raise RuntimeError(
+                            "a camera de resgate nao fechou antes da troca")
+                    captura = None
+                    fonte = None
+
+                confirmou_preta = _confirmar_saida_com_camera_linha(
+                    arduino,
+                    debug=args.debug,
+                )
+                frame_atual = None
+                controlador_saida = None
+                portao_saida = None
+                deteccao_saida = None
+                epoca_saida = None
+                if confirmou_preta:
+                    codigo_saida = EXIT_OK
+                    iniciar_segue_linha = True
+                    comando = MotionCommand(
+                        "EXIT_BLACK_CONFIRMED",
+                        detail=(
+                            "faixa preta confirmada; segue-linha sera "
+                            "iniciado apos liberar camera e serial"),
+                        terminal=True,
+                    )
+                else:
+                    codigo_saida = EXIT_INCOMPLETE
+                    comando = MotionCommand(
+                        "EXIT_NOT_BLACK",
+                        detail="faixa nao preta; re concluida e robo parado",
+                        terminal=True,
+                    )
+
             log_agora = time.monotonic()
             if (
                 comando.state != ultimo_estado
@@ -1850,6 +2191,25 @@ def main():
                     desempenho=desempenho,
                     guard=getattr(detector, "guard", None),
                 )
+                if deteccao_saida is not None:
+                    x, y, w, h = deteccao_saida.bbox
+                    cv2.rectangle(
+                        anotado,
+                        (int(x), int(y)),
+                        (int(x + w - 1), int(y + h - 1)),
+                        (255, 0, 255),
+                        2,
+                    )
+                    cv2.putText(
+                        anotado,
+                        "candidata a faixa de saida",
+                        (8, 44),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.52,
+                        (255, 0, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
                 cv2.imshow(JANELA, anotado)
                 tecla = cv2.waitKey(1) & 0xFF
                 if tecla in (ord("q"), 27):
@@ -1907,7 +2267,9 @@ def main():
         print(
             "[resgate] encerrado com PARAR" if args.drive
             else "[resgate] encerrado; motores nunca foram habilitados")
-    return EXIT_OK
+    if iniciar_segue_linha and not args.gerenciado_pela_missao:
+        return _iniciar_segue_linha(debug=args.debug)
+    return codigo_saida
 
 
 if __name__ == "__main__":
