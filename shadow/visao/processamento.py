@@ -365,6 +365,45 @@ def vision_loop(debug=False):
                 counter = 0
 
             if debug:
+                # A caixa vermelha desenhada por `check_green` é um candidato
+                # VERDE, não a faixa prata. Mostre a entrada com outra cor e
+                # com seus votos para o debug não induzir ao diagnóstico
+                # errado.
+                if entry_gate is not None and entry_armed.value:
+                    entrada = entry_gate.last_detection
+                    banda = entry_gate.detector.last_band
+                    if entrada is not None:
+                        x, y, w, h = entrada.bbox
+                        cv2.rectangle(
+                            cv2_img,
+                            (int(x), int(y)),
+                            (int(x + w - 1), int(y + h - 1)),
+                            (255, 255, 0),
+                            2,
+                        )
+                    elif banda is not None:
+                        x, y, w, h = banda.bbox
+                        cv2.rectangle(
+                            cv2_img,
+                            (int(x), int(y)),
+                            (int(x + w - 1), int(y + h - 1)),
+                            (0, 165, 255),
+                            1,
+                        )
+                    motivo_entrada = (
+                        entry_gate.detector.last_reason or "candidata")
+                    cv2.putText(
+                        cv2_img,
+                        f"PRATA {entry_gate.votes}/"
+                        f"{config.ENTRY_SILVER_VOTE_WINDOW} "
+                        f"{motivo_entrada}",
+                        (5, 42),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        .35,
+                        (255, 255, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
                 cv2.putText(cv2_img, f"{fps} fps  ang={line_angle.value}  {line_status.value}",
                             (5, camera_y - 8), cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
                 cv2.putText(cv2_img, str(status.value), (5, 14),

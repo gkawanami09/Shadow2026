@@ -220,6 +220,35 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(command.speed, cfg.EXIT_ALIGN_SPEED)
         self.assertEqual(cfg.EXIT_ALIGN_PWM, 50)
 
+    def test_falha_visual_curta_no_alinhamento_nao_reinicia_o_giro(self):
+        assentou = self._ate_observar()
+        soleira = FakeExit(center_x=320.0, timestamp=assentou + 0.01)
+        self.exit.update(soleira, FRAME_SHAPE, now=assentou + 0.02)
+
+        falha_curta = self.exit.update(
+            None,
+            FRAME_SHAPE,
+            now=assentou + 0.02 + cfg.EXIT_ALIGN_LOST_TIMEOUT_S / 2,
+        )
+
+        self.assertEqual(falha_curta.state, self.exit.ALIGN)
+        self.assertEqual(falha_curta.angle, 190)
+        self.assertEqual(falha_curta.speed, 0.0)
+
+    def test_falha_visual_persistente_retorna_a_procura(self):
+        assentou = self._ate_observar()
+        soleira = FakeExit(center_x=320.0, timestamp=assentou + 0.01)
+        self.exit.update(soleira, FRAME_SHAPE, now=assentou + 0.02)
+
+        falha_longa = self.exit.update(
+            None,
+            FRAME_SHAPE,
+            now=assentou + 0.03 + cfg.EXIT_ALIGN_LOST_TIMEOUT_S,
+        )
+
+        self.assertEqual(falha_longa.state, self.exit.SEARCH_START)
+        self.assertEqual(falha_longa.angle, cfg.EXIT_SEARCH_TANK_ANGLE)
+
     def test_perda_curta_apos_confirmar_nao_interrompe_o_avanco(self):
         inicio, command = self._ate_comecar_travessia()
         self.exit.notify_command_written(

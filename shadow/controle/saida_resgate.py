@@ -46,6 +46,7 @@ class ExitPhaseController:
         self._settled_at = None
         self._cross_started_at = None
         self._cross_finished_at = None
+        self._align_last_seen_at = None
         self._tracking_reset_requested = False
         self.mapped_triangles = {"green": False, "red": False}
 
@@ -186,6 +187,7 @@ class ExitPhaseController:
         if self._usable(exit_detection, now):
             self.state = self.ALIGN
             self._stopped_at = None
+            self._align_last_seen_at = now
             return self._align_command(exit_detection, frame_shape)
         if (
             self._settled_at is not None
@@ -201,11 +203,27 @@ class ExitPhaseController:
 
     def _on_align(self, exit_detection, frame_shape, now):
         if not self._usable(exit_detection, now):
-            # Perdeu a soleira: parar e voltar a procurar, nunca seguir cego.
+            # Uma borda fina pode falhar em um único frame mesmo com o chassi
+            # parado. Não recomece o giro imediatamente, pois isso ultrapassa
+            # justamente a faixa que já estava sendo alinhada.
+            perdida_por = now - (
+                self._align_last_seen_at
+                if self._align_last_seen_at is not None
+                else now
+            )
+            if perdida_por < cfg.EXIT_ALIGN_LOST_TIMEOUT_S - 1e-9:
+                return self._stop(
+                    self.ALIGN,
+                    f"soleira oculta por {perdida_por:.2f}s; "
+                    "parado aguardando reaparecer",
+                )
+            # Perda persistente: voltar a procurar sem avançar às cegas.
             self._tracking_reset_requested = True
             self.state = self.SEARCH_START
+            self._align_last_seen_at = None
             return self._tank(
                 self.SEARCH_START, "soleira perdida; retomando a procura")
+        self._align_last_seen_at = now
         if not self.aligned(exit_detection, frame_shape):
             self._stopped_at = None
             return self._align_command(exit_detection, frame_shape)

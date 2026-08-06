@@ -531,7 +531,11 @@ EXIT_BLACK_GREEN_VETO_HSV_MAX = (110, 255, 255)
 EXIT_BLACK_GREEN_VETO_MARGIN_RATIO = 0.06
 EXIT_BLACK_GREEN_VETO_MAX_RATIO = 0.18
 
-EXIT_BLACK_VOTES_NEEDED = 3
+# A câmera de resgate enxerga a soleira rente ao chão por poucos quadros entre
+# dois pulsos. Duas imagens novas ainda rejeitam um borrão isolado, e esta
+# decisão NÃO libera a saída sozinha: ultrassônico e câmera de linha fazem as
+# duas confirmações seguintes.
+EXIT_BLACK_VOTES_NEEDED = 2
 EXIT_BLACK_VOTE_WINDOW = 5
 EXIT_BLACK_COOLDOWN_S = 0.0
 
@@ -605,7 +609,9 @@ EXIT_SEARCH_TIMEOUT_S = 60.0
 # terminar o pulso, frear e assentar o chassi.
 EXIT_SEARCH_PULSE_S = DEPOSIT_SEARCH_PULSE_S
 EXIT_SEARCH_SETTLE_S = BALL_SEARCH_SETTLE_S
-EXIT_SEARCH_OBSERVE_TIMEOUT_S = BALL_SEARCH_OBSERVE_TIMEOUT_S
+# A faixa preta é muito mais fina que uma esfera. Dê tempo para dois frames
+# nítidos chegarem depois de a vibração do pulso acabar.
+EXIT_SEARCH_OBSERVE_TIMEOUT_S = DEPOSIT_SEARCH_VERIFY_TIMEOUT_S
 EXIT_SEARCH_TANK_ANGLE = DEPOSIT_SEARCH_TANK_ANGLE
 EXIT_SEARCH_TANK_SPEED = RED_DEPOSIT_SEARCH_TANK_SPEED
 
@@ -616,6 +622,9 @@ EXIT_ALIGN_ANGLE = 180
 EXIT_ALIGN_PWM = 50
 EXIT_ALIGN_SPEED = EXIT_ALIGN_PWM / (120 * 1.2)
 EXIT_ALIGN_SETTLE_S = EXIT_SEARCH_SETTLE_S
+# Uma falha de segmentação isolada não pode mandar o robô voltar ao giro e
+# ultrapassar uma faixa que já estava centralizada.
+EXIT_ALIGN_LOST_TIMEOUT_S = 0.35
 
 # Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
 # aproxima ate deixar de enxergar a soleira. So entao a camera de linha abre e

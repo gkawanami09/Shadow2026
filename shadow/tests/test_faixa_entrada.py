@@ -102,6 +102,22 @@ class EntrySilverDetectorTests(unittest.TestCase):
             detection,
             "fita refletiva sobre piso de mesmo brilho deveria ser aceita")
 
+    def test_reflexo_espalhado_perto_da_camera_usa_segunda_mascara(self):
+        """A faixa perto da lente não pode virar vários riscos desconectados."""
+        frame = cs.faixa_prata(
+            piso=205,
+            base=212,
+            brilho=238,
+            densidade_brilho=0.18,
+        )
+        detection = self.detector.detect(
+            frame, line_ahead=False, timestamp=2.0)
+        self.assertIsNotNone(detection)
+        self.assertGreaterEqual(
+            detection.confidence,
+            config.ENTRY_SILVER_MIN_CONFIDENCE,
+        )
+
     def test_linha_preta_continuando_veta_a_entrada(self):
         frame = cs.faixa_prata()
         self.assertIsNotNone(

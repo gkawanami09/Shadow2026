@@ -296,6 +296,12 @@ ENTRY_SILVER_MIN_ASPECT = 3.5
 # piso sair da máscara e só a fita continuar. Zero desliga o filtro.
 ENTRY_SILVER_LOCAL_WINDOW_PX = 7
 ENTRY_SILVER_MIN_LOCAL_RANGE = 18
+# A fita real perde parte do reflexo quando chega muito perto da câmera. Se a
+# máscara principal não formar uma faixa, o detector tenta uma segunda vez
+# com este limite, mas exige confiança maior depois. O piso liso continua sem
+# textura suficiente e não passa pela geometria transversal.
+ENTRY_SILVER_FALLBACK_LOCAL_RANGE = 12
+ENTRY_SILVER_FALLBACK_MIN_CONFIDENCE = .70
 
 # Aparência. Neutralidade + assinatura reflexiva. O papel branco fosco é
 # neutro mas quase não tem faixa dinâmica nem brilho especular concentrado.

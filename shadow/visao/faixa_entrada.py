@@ -189,6 +189,46 @@ class EntrySilverDetector:
             roi_top_ratio=config.ENTRY_SILVER_ROI_TOP,
             roi_bottom_ratio=config.ENTRY_SILVER_ROI_BOTTOM,
         )
+        usou_reflexo_flexivel = False
+        limite_principal = (
+            config.ENTRY_SILVER_MIN_LOCAL_RANGE
+            if self.min_local_range is None
+            else float(self.min_local_range)
+        )
+        limite_flexivel = min(
+            limite_principal,
+            float(config.ENTRY_SILVER_FALLBACK_LOCAL_RANGE),
+        )
+        if (
+            band is None
+            and not bool(line_ahead)
+            and limite_flexivel < limite_principal
+        ):
+            # Perto da câmera, a fita ocupa muitos pixels e o reflexo fica
+            # espalhado. A máscara rígida pode virar várias linhas finas.
+            # Uma segunda máscara apenas recompõe a forma; todos os testes de
+            # largura, aspecto, neutralidade, contraste e confiança continuam.
+            mask_flexivel = silver_mask(
+                frame_bgr,
+                self.hsv_min,
+                self.hsv_max,
+                min_local_range=limite_flexivel,
+                hsv_image=hsv_image,
+            )
+            banda_flexivel, motivo_flexivel = find_transversal_band(
+                mask_flexivel,
+                self.geometry,
+                roi_top_ratio=config.ENTRY_SILVER_ROI_TOP,
+                roi_bottom_ratio=config.ENTRY_SILVER_ROI_BOTTOM,
+            )
+            if banda_flexivel is not None:
+                mask = mask_flexivel
+                self.last_mask = mask
+                band = banda_flexivel
+                reason = ""
+                usou_reflexo_flexivel = True
+            else:
+                reason = motivo_flexivel
         if band is None:
             self.last_reason = reason
             return None
@@ -254,7 +294,12 @@ class EntrySilverDetector:
 
         confidence = self._confidence(
             band, dynamic_range, highlight_fraction, surround_contrast)
-        if confidence < config.ENTRY_SILVER_MIN_CONFIDENCE:
+        confianca_minima = (
+            config.ENTRY_SILVER_FALLBACK_MIN_CONFIDENCE
+            if usou_reflexo_flexivel
+            else config.ENTRY_SILVER_MIN_CONFIDENCE
+        )
+        if confidence < confianca_minima:
             self.last_reason = "confianca"
             return None
 
