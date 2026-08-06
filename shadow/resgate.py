@@ -697,8 +697,8 @@ def _recuperar_bloqueio_saida(arduino, acao_direcao, epoca_serial):
     _mover_saida_por_tempo(
         arduino,
         acao_direcao,
-        cfg.EXIT_SEARCH_TANK_ANGLE,
-        cfg.EXIT_SEARCH_TANK_SPEED,
+        cfg.DEPOSIT_SEARCH_TANK_ANGLE,
+        cfg.RED_DEPOSIT_SEARCH_TANK_SPEED,
         cfg.EXIT_CLEARANCE_ESCAPE_TURN_S,
         epoca_serial,
     )

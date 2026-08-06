@@ -324,13 +324,15 @@ class ExitClearanceTests(unittest.TestCase):
                     7,
                 ),
                 (
-                    cfg.EXIT_SEARCH_TANK_ANGLE,
-                    cfg.EXIT_SEARCH_TANK_SPEED,
+                    cfg.DEPOSIT_SEARCH_TANK_ANGLE,
+                    cfg.RED_DEPOSIT_SEARCH_TANK_SPEED,
                     cfg.EXIT_CLEARANCE_ESCAPE_TURN_S,
                     7,
                 ),
             ],
         )
+        self.assertEqual(cfg.EXIT_CLEARANCE_ESCAPE_TURN_S, 0.80)
+        self.assertEqual(cfg.EXIT_SEARCH_PULSE_S, 0.80)
         self.assertEqual(len(paradas), 3)
 
 

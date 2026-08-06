@@ -578,15 +578,19 @@ EXIT_CLEARANCE_REVERSE_SPEED = EXIT_ADVANCE_SPEED
 # Quando o ultrassonico veta um candidato visto pela camera de resgate, um
 # recuo curto e um pequeno giro mudam o ponto de vista antes da nova busca.
 EXIT_CLEARANCE_BLOCKED_REVERSE_S = 0.30
-EXIT_CLEARANCE_ESCAPE_TURN_S = 0.50
+# Usa exatamente o tanque da procura do retangulo vermelho, mas por dois
+# pulsos. Um pulso de 0,40 s mudou pouco o enquadramento no teste real.
+EXIT_CLEARANCE_ESCAPE_TURN_S = DEPOSIT_SEARCH_PULSE_S * 2.0
 
 # Giro pulsado de procura da saida quando nenhuma faixa esta no campo.
 EXIT_SEARCH_TIMEOUT_S = 60.0
-EXIT_SEARCH_PULSE_S = BALL_SEARCH_PULSE_S
+# Depois de uma tentativa rejeitada, muda um setor maior. Se a faixa aparecer
+# antes dos 0,80 s, a pre-visualizacao freia o giro imediatamente.
+EXIT_SEARCH_PULSE_S = DEPOSIT_SEARCH_PULSE_S * 2.0
 EXIT_SEARCH_SETTLE_S = BALL_SEARCH_SETTLE_S
 EXIT_SEARCH_OBSERVE_TIMEOUT_S = BALL_SEARCH_OBSERVE_TIMEOUT_S
-EXIT_SEARCH_TANK_ANGLE = BALL_SEARCH_TANK_ANGLE
-EXIT_SEARCH_TANK_SPEED = BALL_SEARCH_TANK_SPEED
+EXIT_SEARCH_TANK_ANGLE = DEPOSIT_SEARCH_TANK_ANGLE
+EXIT_SEARCH_TANK_SPEED = RED_DEPOSIT_SEARCH_TANK_SPEED
 
 # Alinhamento com a soleira antes de atravessar. Arco suave, nunca pivo.
 EXIT_ALIGN_MAX_CENTER_ERROR = 0.12
