@@ -301,7 +301,7 @@ ENTRY_SILVER_MIN_LOCAL_RANGE = 18
 # com este limite, mas exige confiança maior depois. O piso liso continua sem
 # textura suficiente e não passa pela geometria transversal.
 ENTRY_SILVER_FALLBACK_LOCAL_RANGE = 12
-ENTRY_SILVER_FALLBACK_MIN_CONFIDENCE = .70
+ENTRY_SILVER_FALLBACK_MIN_CONFIDENCE = .60
 
 # Aparência. Neutralidade + assinatura reflexiva. O papel branco fosco é
 # neutro mas quase não tem faixa dinâmica nem brilho especular concentrado.
@@ -314,16 +314,17 @@ ENTRY_SILVER_MIN_HIGHLIGHT_FRACTION = .02
 # mais clara OU mais escura que o piso. O que não pode é ser igual ao piso.
 ENTRY_SILVER_SURROUND_MARGIN_RATIO = .06
 ENTRY_SILVER_MIN_SURROUND_CONTRAST = 12.
-ENTRY_SILVER_MIN_CONFIDENCE = .55
+ENTRY_SILVER_MIN_CONFIDENCE = .45
 
 # Evidência de contexto: a linha preta termina antes da entrada. Exigir isso
 # impede que um brilho sobre a linha, com a linha continuando à frente, seja
 # lido como entrada da sala.
 ENTRY_SILVER_REQUIRE_LINE_END = True
 
-# Confirmação temporal: votação 3-de-5 em frames distintos e recentes.
-ENTRY_SILVER_VOTES_NEEDED = 3
-ENTRY_SILVER_VOTE_WINDOW = 5
+# Confirmação temporal rápida: dois frames distintos ainda eliminam um
+# reflexo isolado, mas não deixam o robô preso diante da entrada verdadeira.
+ENTRY_SILVER_VOTES_NEEDED = 2
+ENTRY_SILVER_VOTE_WINDOW = 3
 ENTRY_SILVER_MAX_AGE_S = .35
 # Depois de sair da sala o robô volta a ver prata; o cooldown impede
 # reentrada imediata na mesma faixa.

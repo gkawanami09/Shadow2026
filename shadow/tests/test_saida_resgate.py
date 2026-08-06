@@ -126,24 +126,6 @@ class ExitPhaseTests(unittest.TestCase):
         assentou = self._ate_observar(inicio=inicio)
         instante = assentou + 0.02
         soleira = FakeExit(center_x=center_x, timestamp=instante - 0.01)
-        alinhando = self.exit.update(
-            soleira, FRAME_SHAPE, now=instante)
-        self.assertEqual(alinhando.state, self.exit.ALIGN)
-
-        if center_x != 320.0:
-            instante += 0.03
-            soleira = FakeExit(
-                center_x=320.0,
-                timestamp=instante,
-            )
-        instante += 0.03
-        freio = self.exit.update(
-            soleira, FRAME_SHAPE, now=instante)
-        self.assertEqual(freio.state, self.exit.ALIGN)
-        self.assertEqual(freio.angle, 190)
-
-        instante += cfg.EXIT_ALIGN_SETTLE_S
-        soleira = FakeExit(center_x=320.0, timestamp=instante)
         travessia = self.exit.update(
             soleira, FRAME_SHAPE, now=instante)
         self.assertEqual(travessia.state, self.exit.CROSS)
@@ -198,14 +180,13 @@ class ExitPhaseTests(unittest.TestCase):
             antigo, FRAME_SHAPE, now=assentou + 0.02)
         self.assertEqual(command.state, self.exit.SEARCH_OBSERVE)
 
-    def test_soleira_confirmada_para_antes_de_avancar(self):
+    def test_soleira_confirmada_e_alinhada_avanca_imediatamente(self):
         assentou = self._ate_observar()
         soleira = FakeExit(center_x=320.0, timestamp=assentou + 0.01)
         command = self.exit.update(
             soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.ALIGN)
-        self.assertEqual(command.angle, 190)
-        self.assertEqual(command.speed, 0.0)
+        self.assertEqual(command.state, self.exit.CROSS)
+        self.assertEqual(command.angle, 0)
         self.assertEqual(cfg.EXIT_ADVANCE_PWM, 80)
 
     def test_rejeicao_final_da_re_de_um_segundo(self):
@@ -255,7 +236,7 @@ class ExitPhaseTests(unittest.TestCase):
         freio = self.exit.update(None, FRAME_SHAPE, now=fim)
         self.assertEqual(freio.state, self.exit.ALIGN_BRAKE)
         self.assertEqual(freio.angle, 190)
-        self.assertTrue(
+        self.assertFalse(
             self.exit.notify_command_written(freio.state, now=fim))
 
         assentado = fim + cfg.EXIT_ALIGN_SETTLE_S
@@ -266,8 +247,8 @@ class ExitPhaseTests(unittest.TestCase):
 
     def test_falha_visual_curta_no_alinhamento_nao_reinicia_o_giro(self):
         assentou = self._ate_observar()
-        soleira = FakeExit(center_x=320.0, timestamp=assentou + 0.01)
-        self.exit.update(soleira, FRAME_SHAPE, now=assentou + 0.02)
+        self.exit.state = self.exit.ALIGN
+        self.exit._align_last_seen_at = assentou + 0.02
 
         falha_curta = self.exit.update(
             None,
@@ -281,8 +262,8 @@ class ExitPhaseTests(unittest.TestCase):
 
     def test_falha_visual_persistente_retorna_a_procura(self):
         assentou = self._ate_observar()
-        soleira = FakeExit(center_x=320.0, timestamp=assentou + 0.01)
-        self.exit.update(soleira, FRAME_SHAPE, now=assentou + 0.02)
+        self.exit.state = self.exit.ALIGN
+        self.exit._align_last_seen_at = assentou + 0.02
 
         falha_longa = self.exit.update(
             None,

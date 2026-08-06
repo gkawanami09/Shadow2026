@@ -592,10 +592,16 @@ class BlackExitGate:
         )
         self.last_detection = None
         self._vote_reference = None
+        self._locked_reference = None
 
     @property
     def confirmed(self):
         return self.confirmer.confirmed
+
+    @property
+    def track_locked(self):
+        """A mesma faixa preta continua sendo o único alvo aceito?"""
+        return self._locked_reference is not None
 
     @property
     def votes(self):
@@ -605,6 +611,7 @@ class BlackExitGate:
         self.confirmer.reset(now=now)
         self.last_detection = None
         self._vote_reference = None
+        self._locked_reference = None
 
     def preview(self, frame_bgr, timestamp=None):
         """Detecta durante o giro sem permitir que o frame some um voto.
@@ -619,7 +626,7 @@ class BlackExitGate:
 
     def update(self, frame_bgr, timestamp=None, now=None):
         detection = self.detector.detect(frame_bgr, timestamp=timestamp)
-        self.last_detection = detection
+        current_reference = None
         if detection is not None:
             height, width = frame_bgr.shape[:2]
             current_reference = (
@@ -627,6 +634,18 @@ class BlackExitGate:
                 float(detection.center_y) / max(float(height), 1.0),
                 float(detection.span_ratio),
             )
+            if self.track_locked:
+                if not self._same_locked_candidate(
+                    self._locked_reference, current_reference
+                ):
+                    # Não troque a soleira já confirmada por uma sombra,
+                    # parede ou objeto preto que apareceu durante o pulso.
+                    self.last_detection = None
+                    return True, None
+                self._locked_reference = current_reference
+                self._vote_reference = current_reference
+                self.last_detection = detection
+                return True, detection
             if (
                 self._vote_reference is not None
                 and not self._same_candidate(
@@ -637,11 +656,20 @@ class BlackExitGate:
                 # contagem anterior nao pode ser aproveitada.
                 self.confirmer.reset(now=now)
             self._vote_reference = current_reference
+        elif self.track_locked:
+            # Um frame borrado não desfaz o lock. O controlador permanece
+            # parado e aguarda a faixa reaparecer dentro do timeout próprio.
+            self.last_detection = None
+            return True, None
+
+        self.last_detection = detection
         confirmed = self.confirmer.update(
             detection is not None,
             timestamp=0.0 if timestamp is None else timestamp,
             now=now,
         )
+        if confirmed and detection is not None:
+            self._locked_reference = current_reference
         if detection is None and self.confirmer.votes == 0:
             self._vote_reference = None
         return confirmed, detection
@@ -655,4 +683,15 @@ class BlackExitGate:
             <= cfg.EXIT_BLACK_MAX_VOTE_CENTER_Y_DRIFT_RATIO
             and abs(reference[2] - current[2])
             <= cfg.EXIT_BLACK_MAX_VOTE_SPAN_DRIFT_RATIO
+        )
+
+    @staticmethod
+    def _same_locked_candidate(reference, current):
+        return (
+            abs(reference[0] - current[0])
+            <= cfg.EXIT_BLACK_LOCK_MAX_CENTER_X_DRIFT_RATIO
+            and abs(reference[1] - current[1])
+            <= cfg.EXIT_BLACK_LOCK_MAX_CENTER_Y_DRIFT_RATIO
+            and abs(reference[2] - current[2])
+            <= cfg.EXIT_BLACK_LOCK_MAX_SPAN_DRIFT_RATIO
         )

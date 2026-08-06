@@ -283,6 +283,87 @@ class BlackExitGateTests(unittest.TestCase):
         self.assertFalse(confirmed)
         self.assertEqual(gate.votes, 1)
 
+    def test_lock_sobrevive_a_frame_ausente_e_reassocia_a_mesma_faixa(self):
+        class DetectorComFalhaCurta:
+            def __init__(self):
+                self.centros = [
+                    320.0,
+                    322.0,
+                    None,
+                    330.0,
+                ]
+
+            def detect(self, _frame, timestamp=None):
+                centro = self.centros.pop(0)
+                if centro is None:
+                    return None
+                return SimpleNamespace(
+                    center_x=centro,
+                    center_y=390.0,
+                    span_ratio=0.70,
+                    timestamp=timestamp,
+                )
+
+        gate = BlackExitGate(
+            detector=DetectorComFalhaCurta(),
+            confirmer=StripeConfirmer(
+                votes_needed=2,
+                window=3,
+                max_age_s=cfg.BALL_FRAME_STALE_S,
+            ),
+        )
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 185)
+        gate.update(frame, timestamp=1.00, now=1.00)
+        confirmed, detection = gate.update(
+            frame, timestamp=1.05, now=1.05)
+        self.assertTrue(confirmed)
+        self.assertIsNotNone(detection)
+        self.assertTrue(gate.track_locked)
+
+        confirmed, detection = gate.update(
+            frame, timestamp=1.10, now=1.10)
+        self.assertTrue(confirmed)
+        self.assertIsNone(detection)
+        self.assertTrue(gate.track_locked)
+
+        confirmed, detection = gate.update(
+            frame, timestamp=1.15, now=1.15)
+        self.assertTrue(confirmed)
+        self.assertIsNotNone(detection)
+        self.assertEqual(detection.center_x, 330.0)
+
+    def test_lock_nao_troca_a_faixa_por_objeto_distante(self):
+        class DetectorQueTroca:
+            def __init__(self):
+                self.centros = [100.0, 102.0, 600.0]
+
+            def detect(self, _frame, timestamp=None):
+                centro = self.centros.pop(0)
+                return SimpleNamespace(
+                    center_x=centro,
+                    center_y=390.0,
+                    span_ratio=0.70,
+                    timestamp=timestamp,
+                )
+
+        gate = BlackExitGate(
+            detector=DetectorQueTroca(),
+            confirmer=StripeConfirmer(
+                votes_needed=2,
+                window=3,
+                max_age_s=cfg.BALL_FRAME_STALE_S,
+            ),
+        )
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 185)
+        gate.update(frame, timestamp=1.00, now=1.00)
+        gate.update(frame, timestamp=1.05, now=1.05)
+        confirmed, detection = gate.update(
+            frame, timestamp=1.10, now=1.10)
+
+        self.assertTrue(confirmed)
+        self.assertIsNone(detection)
+        self.assertTrue(gate.track_locked)
+
 
 if __name__ == "__main__":
     unittest.main()

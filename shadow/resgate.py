@@ -2659,6 +2659,20 @@ def main():
                         1,
                         cv2.LINE_AA,
                     )
+                if (
+                    portao_saida is not None
+                    and portao_saida.track_locked
+                ):
+                    cv2.putText(
+                        anotado,
+                        "FAIXA PRETA LOCK",
+                        (8, 82),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.50,
+                        (255, 255, 0),
+                        2,
+                        cv2.LINE_AA,
+                    )
                 cv2.imshow(JANELA, anotado)
                 tecla = cv2.waitKey(1) & 0xFF
                 if tecla in (ord("q"), 27):

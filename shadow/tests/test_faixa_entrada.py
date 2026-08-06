@@ -164,7 +164,7 @@ class EntrySilverGateTests(unittest.TestCase):
         self.assertFalse(confirmed)
         self.assertIsNotNone(detection)
 
-    def test_tres_frames_distintos_confirmam(self):
+    def test_dois_frames_distintos_confirmam(self):
         gate = self._gate()
         frame = cs.faixa_prata()
         confirmed = False

@@ -569,6 +569,12 @@ EXIT_LINE_MIN_CONTRAST_SUPPORT = 0.45
 EXIT_BLACK_MAX_VOTE_CENTER_X_DRIFT_RATIO = 0.14
 EXIT_BLACK_MAX_VOTE_CENTER_Y_DRIFT_RATIO = 0.10
 EXIT_BLACK_MAX_VOTE_SPAN_DRIFT_RATIO = 0.22
+# Depois da confirmação, a faixa fica travada durante os pulsos de
+# alinhamento. Estes limites são mais largos que os da votação porque o
+# próprio movimento omni/tanque desloca a faixa na imagem.
+EXIT_BLACK_LOCK_MAX_CENTER_X_DRIFT_RATIO = 0.35
+EXIT_BLACK_LOCK_MAX_CENTER_Y_DRIFT_RATIO = 0.28
+EXIT_BLACK_LOCK_MAX_SPAN_DRIFT_RATIO = 0.45
 
 # Travessia da soleira de saida. Igual a entrada: o tempo e apenas o limite
 # de seguranca; o fim normal e a faixa deixar de ser vista.

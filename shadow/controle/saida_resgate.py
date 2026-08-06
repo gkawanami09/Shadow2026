@@ -254,19 +254,9 @@ class ExitPhaseController:
             return self._start_yaw_correction(erro_angulo)
         if abs(erro_centro) > cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
             return self._start_lateral_correction(erro_centro)
-        if self._stopped_at is None:
-            self._stopped_at = now
-            return self._stop(
-                self.ALIGN,
-                "soleira centralizada e perpendicular; "
-                "freando antes de avancar",
-            )
-        if now - self._stopped_at >= cfg.EXIT_ALIGN_SETTLE_S - 1e-9:
-            return self.begin_cross(now=now)
-        return self._stop(
-            self.ALIGN,
-            "soleira alinhada; aguardando o chassi assentar",
-        )
+        # O frame é novo e foi capturado depois da frenagem/estabilização.
+        # Esperar uma segunda vez só dá oportunidade para perder o alvo.
+        return self.begin_cross(now=now)
 
     def _on_align_motion(self, now):
         if self._align_motion_started_at is None:
@@ -352,7 +342,9 @@ class ExitPhaseController:
             self._stopped_at = now
             self._align_motion_started_at = None
             self._align_frame_after = None
-            return True
+            # Diferente da busca inicial, o alinhamento já possui uma faixa
+            # confirmada. Não apague seu gate: mantenha o LOCK entre pulsos.
+            return False
         if state == self.CROSS and self._cross_started_at is None:
             self._cross_started_at = now
             return False
@@ -379,11 +371,7 @@ class ExitPhaseController:
             return self._start_yaw_correction(erro_angulo)
         if abs(erro_centro) > cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
             return self._start_lateral_correction(erro_centro)
-        return self._stop(
-            self.ALIGN,
-            "soleira alinhada "
-            f"(lateral={erro_centro:+.2f}, "
-            f"inclinacao={erro_angulo:+.1f} graus)")
+        return self.begin_cross()
 
     def aligned(self, detection, frame_shape):
         """A soleira está centralizada o bastante para atravessar?"""

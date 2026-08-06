@@ -72,6 +72,10 @@ class MissionDebugWindowTests(unittest.TestCase):
 
 
 class MissionEntryAdvanceTests(unittest.TestCase):
+    def test_entrada_prata_confirma_em_dois_de_tres_frames(self):
+        self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 2)
+        self.assertEqual(config.ENTRY_SILVER_VOTE_WINDOW, 3)
+
     def test_faixa_fina_distante_pede_avanco_antes_da_correcao(self):
         self.assertTrue(_deve_pre_avancar_entrada(
             modo_missao=True,
