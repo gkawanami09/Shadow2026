@@ -11,6 +11,7 @@ from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
                     RAMP_SWAP_TRIGGER, VISION_MAX_FRAMES, camera_x, camera_y)
 from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
+                                         entry_armed,
                                          green_candidate,
                                          get_time_average, last_bottom_point,
                                          last_bottom_point_y,
