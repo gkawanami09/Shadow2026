@@ -680,6 +680,29 @@ def _mover_saida_por_tempo(
         time.sleep(min(0.02, max(prazo - time.monotonic(), 0.0)))
 
 
+def _recuperar_bloqueio_saida(arduino, acao_direcao, epoca_serial):
+    """Recua meio segundo e muda o setor visto antes de procurar de novo."""
+    acao_direcao()
+    _mover_saida_por_tempo(
+        arduino,
+        acao_direcao,
+        200,
+        cfg.EXIT_CLEARANCE_REVERSE_SPEED,
+        cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
+        epoca_serial,
+    )
+    acao_direcao()
+    _mover_saida_por_tempo(
+        arduino,
+        acao_direcao,
+        cfg.EXIT_SEARCH_TANK_ANGLE,
+        cfg.EXIT_SEARCH_TANK_SPEED,
+        cfg.EXIT_CLEARANCE_ESCAPE_TURN_S,
+        epoca_serial,
+    )
+    acao_direcao()
+
+
 def _novo_monitor_corredor_saida():
     """Cria o monitor de 15 cm usado nas duas etapas da saída."""
     return MonitorObstaculo(
@@ -2306,22 +2329,19 @@ def main():
                     )
                     print(
                         f"[saida] {motivo_corredor}; leituras="
-                        f"{list(leituras_corredor)}; desfazendo "
-                        f"{tempo_avanco_saida:.2f} s de avanco")
-                    if tempo_avanco_saida > 0.0:
-                        _mover_saida_por_tempo(
-                            arduino,
-                            steer,
-                            200,
-                            cfg.EXIT_CLEARANCE_REVERSE_SPEED,
-                            tempo_avanco_saida,
-                            arduino.connection_epoch,
-                        )
-                    steer()
+                        f"{list(leituras_corredor)}; recuando "
+                        f"{cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S:.2f} s "
+                        "e girando um setor curto")
+                    _recuperar_bloqueio_saida(
+                        arduino,
+                        steer,
+                        arduino.connection_epoch,
+                    )
 
                     # A camera de resgate continua aberta. A tentativa falsa
-                    # e descartada e a busca pulsada recomeca do ponto que o
-                    # robo ocupava antes de avancar.
+                    # e descartada. O recuo curto e o giro acima impedem que
+                    # a proxima busca torne a enquadrar exatamente a mesma
+                    # parede ou mancha.
                     agora_reinicio = time.monotonic()
                     controlador_saida = ExitPhaseController(
                         start_time=(

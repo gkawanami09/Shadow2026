@@ -575,6 +575,10 @@ EXIT_CLEARANCE_SAMPLE_INTERVAL_S = 0.06
 EXIT_CLEARANCE_MIN_VALID_MM = 1
 EXIT_CLEARANCE_MAX_VALID_MM = 4000
 EXIT_CLEARANCE_REVERSE_SPEED = EXIT_ADVANCE_SPEED
+# Quando o ultrassonico veta um candidato visto pela camera de resgate, um
+# recuo curto e um pequeno giro mudam o ponto de vista antes da nova busca.
+EXIT_CLEARANCE_BLOCKED_REVERSE_S = 0.50
+EXIT_CLEARANCE_ESCAPE_TURN_S = 0.30
 
 # Giro pulsado de procura da saida quando nenhuma faixa esta no campo.
 EXIT_SEARCH_TIMEOUT_S = 60.0

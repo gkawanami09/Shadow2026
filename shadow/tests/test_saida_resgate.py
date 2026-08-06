@@ -19,6 +19,7 @@ from resgate import (  # noqa: E402
     CORREDOR_BLOQUEADO,
     CORREDOR_INCONCLUSIVO,
     CORREDOR_LIVRE,
+    _recuperar_bloqueio_saida,
     _validar_corredor_saida,
 )
 from tests.test_confirmacao_saida_linha import cena_prata  # noqa: E402
@@ -288,6 +289,49 @@ class ExitClearanceTests(unittest.TestCase):
         self.assertEqual(state, CORREDOR_INCONCLUSIVO)
         self.assertIsNone(distance)
         self.assertEqual(readings, ())
+
+    def test_bloqueio_recua_500ms_e_gira_antes_de_recomecar(self):
+        movimentos = []
+        paradas = []
+
+        def direcao(*args):
+            if args:
+                movimentos.append(args)
+            else:
+                paradas.append(True)
+            return True
+
+        with patch.object(
+            resgate_runtime,
+            "_mover_saida_por_tempo",
+            side_effect=lambda _a, _d, angulo, velocidade, duracao, epoca: (
+                movimentos.append((angulo, velocidade, duracao, epoca))
+            ),
+        ):
+            _recuperar_bloqueio_saida(
+                FakeUltrasonicArduino([]),
+                direcao,
+                7,
+            )
+
+        self.assertEqual(
+            movimentos,
+            [
+                (
+                    200,
+                    cfg.EXIT_CLEARANCE_REVERSE_SPEED,
+                    0.50,
+                    7,
+                ),
+                (
+                    cfg.EXIT_SEARCH_TANK_ANGLE,
+                    cfg.EXIT_SEARCH_TANK_SPEED,
+                    cfg.EXIT_CLEARANCE_ESCAPE_TURN_S,
+                    7,
+                ),
+            ],
+        )
+        self.assertEqual(len(paradas), 3)
 
 
 class SilverStripeRuntimeTests(unittest.TestCase):
