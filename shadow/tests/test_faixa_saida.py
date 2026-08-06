@@ -50,7 +50,8 @@ class BlackExitDetectorTests(unittest.TestCase):
         Isto isola o teste de contraste — a faixa tem geometria perfeita e é
         reprovada apenas por não se destacar do piso ao redor.
         """
-        frame = cs.faixa_preta(piso=85, valor=65)
+        frame = cs.faixa_preta(
+            topo=0.82, espessura=0.08, piso=85, valor=65)
         self.assertIsNone(self.detector.detect(frame, timestamp=1.0))
         self.assertEqual(self.detector.last_reason, "sem_contraste")
 
@@ -75,6 +76,45 @@ class BlackExitDetectorTests(unittest.TestCase):
             -1,
         )
         self.assertIsNone(self.detector.detect(frame, timestamp=1.0))
+
+    def test_faixa_curta_e_fina_rente_ao_chao_e_aceita(self):
+        """De longe, a soleira ocupa só parte da largura e poucos pixels."""
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 190)
+        height, width = frame.shape[:2]
+        y = int(round(height * 0.88))
+        x1 = int(round(width * 0.34))
+        x2 = int(round(width * 0.66))
+        cv2.rectangle(
+            frame,
+            (x1, y),
+            (x2, y + max(int(round(height * 0.025)), 4)),
+            (18, 18, 18),
+            -1,
+        )
+
+        detection = self.detector.detect(frame, timestamp=1.0)
+
+        self.assertIsNotNone(detection)
+        self.assertGreaterEqual(
+            detection.center_y / height, cfg.EXIT_BLACK_ROI_TOP)
+
+    def test_faixa_de_tres_pixels_rente_ao_chao_e_aceita(self):
+        """A câmera quase horizontal reduz a soleira a uma linha muito fina."""
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 190)
+        height, width = frame.shape[:2]
+        cv2.line(
+            frame,
+            (int(width * 0.27), int(height * 0.89)),
+            (int(width * 0.73), int(height * 0.91)),
+            (18, 18, 18),
+            3,
+        )
+
+        detection = self.detector.detect(frame, timestamp=1.0)
+
+        self.assertIsNotNone(detection)
+        self.assertGreaterEqual(
+            detection.span_ratio, cfg.EXIT_LINE_MIN_LENGTH_RATIO)
 
     def test_triangulos_coloridos_nao_acionam_saida(self):
         """Verde e vermelho saturados não são escuros e não viram soleira."""
@@ -111,12 +151,12 @@ class BlackExitDetectorTests(unittest.TestCase):
         """Trechos quebrados da mesma fita são unidos pelo fallback."""
         frame = cs.piso_neutro(cs.RESCUE_FRAME, 190)
         faixa = np.asarray(
-            [[90, 360], [560, 325], [560, 339], [90, 374]],
+            [[90, 430], [560, 395], [560, 409], [90, 444]],
             dtype=np.int32,
         )
         cv2.fillConvexPoly(frame, faixa, (25, 25, 25))
         for x in (220, 350, 480):
-            cv2.rectangle(frame, (x, 320), (x + 12, 390),
+            cv2.rectangle(frame, (x, 390), (x + 12, 460),
                           (190, 190, 190), -1)
 
         detection = self.detector.detect(frame, timestamp=1.0)

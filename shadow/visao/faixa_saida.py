@@ -313,9 +313,16 @@ class BlackExitDetector:
 
             positive_side = []
             negative_side = []
+            center_side = []
             for point_x, point_y in zip(sample_x, sample_y):
                 positive_values = []
                 negative_values = []
+                center_values = []
+                for offset in (-1.0, 0.0, 1.0):
+                    x = int(round(point_x + normal_x * offset))
+                    y = int(round(point_y + normal_y * offset))
+                    if 0 <= x < width and 0 <= y < height:
+                        center_values.append(value[y, x])
                 for offset in np.linspace(2.0, float(margin), 3):
                     for values, direction in (
                         (positive_values, 1.0),
@@ -327,14 +334,19 @@ class BlackExitDetector:
                             point_y + direction * normal_y * offset))
                         if 0 <= x < width and 0 <= y < height:
                             values.append(value[y, x])
-                if positive_values and negative_values:
+                if positive_values and negative_values and center_values:
                     positive_side.append(float(np.median(positive_values)))
                     negative_side.append(float(np.median(negative_values)))
+                    # A linha do Hough costuma cair em uma das duas bordas.
+                    # O menor valor entre centro e um pixel de cada lado
+                    # alcança a fita mesmo quando ela tem só 2 ou 3 pixels.
+                    center_side.append(float(np.min(center_values)))
 
             if not positive_side:
                 continue
             positive_side = np.asarray(positive_side, dtype=np.float32)
             negative_side = np.asarray(negative_side, dtype=np.float32)
+            center_side = np.asarray(center_side, dtype=np.float32)
             if np.median(positive_side) <= np.median(negative_side):
                 dark_side, light_side = positive_side, negative_side
             else:
@@ -347,13 +359,40 @@ class BlackExitDetector:
             contrast = float(np.median(differences))
             contrast_support = float(np.mean(
                 differences >= cfg.EXIT_LINE_MIN_SIDE_CONTRAST))
-            if (
+            thick_ok = not (
                 dark_value > cfg.EXIT_LINE_MAX_DARK_SIDE_VALUE
                 or dark_support < cfg.EXIT_LINE_MIN_DARK_SUPPORT
                 or contrast < cfg.EXIT_LINE_MIN_SIDE_CONTRAST
                 or contrast_support < cfg.EXIT_LINE_MIN_CONTRAST_SUPPORT
-            ):
+            )
+
+            # Para a soleira muito distante, a fita pode ter só alguns
+            # pixels: nesse caso ambos os lados são claros e apenas o centro
+            # da linha é escuro. Este segundo teste cobre exatamente isso.
+            thin_light_side = np.maximum(positive_side, negative_side)
+            thin_dark_value = float(np.median(center_side))
+            thin_dark_support = float(np.mean(
+                center_side <= cfg.EXIT_LINE_MAX_DARK_SIDE_VALUE))
+            thin_differences = thin_light_side - center_side
+            thin_contrast = float(np.median(thin_differences))
+            thin_contrast_support = float(np.mean(
+                thin_differences >= cfg.EXIT_LINE_MIN_SIDE_CONTRAST))
+            thin_ok = (
+                thin_dark_value <= cfg.EXIT_LINE_MAX_DARK_SIDE_VALUE
+                and thin_dark_support >= cfg.EXIT_LINE_MIN_DARK_SUPPORT
+                and thin_contrast >= cfg.EXIT_LINE_MIN_SIDE_CONTRAST
+                and thin_contrast_support
+                >= cfg.EXIT_LINE_MIN_CONTRAST_SUPPORT
+            )
+            if not thick_ok and not thin_ok:
                 continue
+            if thin_ok and (
+                not thick_ok or thin_contrast_support > contrast_support
+            ):
+                dark_value = thin_dark_value
+                dark_support = thin_dark_support
+                contrast = thin_contrast
+                contrast_support = thin_contrast_support
 
             middle_y = slope * center_x + intercept
             y_ratio = middle_y / max(float(height), 1.0)

@@ -256,6 +256,30 @@ class DepositMarkerController:
                 >= cfg.DEPOSIT_SEARCH_VERIFY_TIMEOUT_S
             ):
                 if self.state == self.FINAL_VERIFY:
+                    if self.target_kind == "red":
+                        # O vermelho e obrigatorio depois do deposito verde.
+                        # Uma volta vazia significa apenas que ele ficou fora
+                        # do campo da camera, nao que a missao deve terminar.
+                        # Zera somente a volta atual e continua a busca
+                        # pulsada: girar, parar, assentar e observar.
+                        self.state = self.START
+                        self._rotation_started_at = None
+                        self._rotation_elapsed_s = 0.0
+                        self._pulse_started_at = None
+                        self._pulse_stopped_at = None
+                        self._settled_at = None
+                        self._stopped_at = None
+                        self._tentative_target = False
+                        self._tracking_reset_requested = True
+                        self._initial_observation_complete = True
+                        self._active_started_at = now
+                        self._reset_near()
+                        self._reset_progress()
+                        return self._tank(
+                            self.START,
+                            "vermelho nao encontrado nesta volta; "
+                            "continuando a busca pulsada",
+                        )
                     return self._fault(
                         f"triangulo {self.target_kind} nao encontrado "
                         "apos um giro completo; esfera mantida na garra"

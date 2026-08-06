@@ -403,7 +403,7 @@ class DepositMarkerControllerTests(unittest.TestCase):
         self.assertEqual(global_fault.state, controller.FAULT)
         self.assertTrue(global_fault.terminal)
 
-    def test_no_marker_after_full_turn_faults_without_authorizing_deposit(self):
+    def test_vermelho_ausente_apos_volta_reinicia_busca_sem_depositar(self):
         controller = DepositMarkerController("red", start_time=0.0)
         controller.update(None, FRAME_SHAPE, now=0.0)
         controller.mark_rotation_started(now=0.0)
@@ -413,6 +413,36 @@ class DepositMarkerControllerTests(unittest.TestCase):
             now=cfg.DEPOSIT_SEARCH_FULL_TURN_S,
         )
         self.assertEqual(turn_stop.state, controller.TURN_STOP)
+        controller.mark_full_turn_stopped(
+            now=cfg.DEPOSIT_SEARCH_FULL_TURN_S)
+
+        restart = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=(
+                cfg.DEPOSIT_SEARCH_FULL_TURN_S
+                + cfg.DEPOSIT_SEARCH_VERIFY_TIMEOUT_S
+            ),
+        )
+
+        self.assertEqual(restart.state, controller.START)
+        self.assertEqual(restart.angle, cfg.DEPOSIT_SEARCH_TANK_ANGLE)
+        self.assertEqual(restart.speed, controller.search_tank_speed)
+        self.assertFalse(restart.terminal)
+        self.assertFalse(controller.arrived)
+        self.assertIn("continuando", restart.detail)
+        self.assertEqual(controller._rotation_elapsed_s, 0.0)
+        self.assertTrue(controller.consume_tracking_reset())
+
+    def test_verde_ausente_apos_volta_ainda_falha_com_robo_parado(self):
+        controller = DepositMarkerController("green", start_time=0.0)
+        controller.update(None, FRAME_SHAPE, now=0.0)
+        controller.mark_rotation_started(now=0.0)
+        controller.update(
+            None,
+            FRAME_SHAPE,
+            now=cfg.DEPOSIT_SEARCH_FULL_TURN_S,
+        )
         controller.mark_full_turn_stopped(
             now=cfg.DEPOSIT_SEARCH_FULL_TURN_S)
 
@@ -427,8 +457,7 @@ class DepositMarkerControllerTests(unittest.TestCase):
 
         self.assertEqual(fault.state, controller.FAULT)
         self.assertTrue(fault.terminal)
-        self.assertFalse(controller.arrived)
-        self.assertIn("mantida", fault.detail)
+        self.assertEqual(fault.angle, 190)
 
     # Testes da cola de orquestracao removidos junto com ela: a
     # coleta, o deposito e os codigos de saida da missao sairam do

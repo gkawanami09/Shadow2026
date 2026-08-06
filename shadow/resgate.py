@@ -2495,6 +2495,47 @@ def main():
                     desempenho=desempenho,
                     guard=getattr(detector, "guard", None),
                 )
+                if controlador_saida is not None:
+                    altura_saida, largura_saida = anotado.shape[:2]
+                    topo_saida = int(round(
+                        altura_saida * min(
+                            cfg.EXIT_BLACK_ROI_TOP,
+                            cfg.EXIT_LINE_ROI_TOP,
+                        )
+                    ))
+                    fundo_saida = min(
+                        int(round(
+                            altura_saida * max(
+                                cfg.EXIT_BLACK_ROI_BOTTOM,
+                                cfg.EXIT_LINE_ROI_BOTTOM,
+                            )
+                        )),
+                        altura_saida - 1,
+                    )
+                    cv2.line(
+                        anotado,
+                        (0, topo_saida),
+                        (largura_saida - 1, topo_saida),
+                        (255, 255, 0),
+                        2,
+                    )
+                    cv2.line(
+                        anotado,
+                        (0, fundo_saida),
+                        (largura_saida - 1, fundo_saida),
+                        (255, 255, 0),
+                        2,
+                    )
+                    cv2.putText(
+                        anotado,
+                        "PROCURANDO FAIXA SOMENTE RENTE AO CHAO",
+                        (8, max(topo_saida - 7, 18)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.46,
+                        (255, 255, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
                 if deteccao_saida is not None:
                     x, y, w, h = deteccao_saida.bbox
                     cv2.rectangle(

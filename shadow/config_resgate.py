@@ -488,13 +488,14 @@ EXIT_BLACK_ENABLED = True
 EXIT_BLACK_HSV_MIN = (0, 0, 0)
 EXIT_BLACK_HSV_MAX = (180, 255, 70)
 
-# A soleira de saída aparece no piso, na parte inferior da câmera. Começar em
-# 72% evita que o reflexo do próprio robô na parede prata vire uma faixa.
-EXIT_BLACK_ROI_TOP = 0.72
+# A soleira de saída aparece rente ao chão. Os 78% superiores ficam fora da
+# procura para o robô, o reflexo na parede e o retângulo verde não virarem
+# candidatos. A confirmação final continua sendo feita pela câmera de linha.
+EXIT_BLACK_ROI_TOP = 0.78
 EXIT_BLACK_ROI_BOTTOM = 1.00
 
-EXIT_BLACK_MIN_ROW_FILL = 0.45
-EXIT_BLACK_MIN_SPAN_RATIO = 0.60
+EXIT_BLACK_MIN_ROW_FILL = 0.30
+EXIT_BLACK_MIN_SPAN_RATIO = 0.28
 EXIT_BLACK_MAX_SPAN_RATIO = 1.00
 EXIT_BLACK_MIN_THICKNESS_RATIO = 0.03
 # Teto que exclui a esfera preta por construcao: para um disco de raio r, as
@@ -505,7 +506,7 @@ EXIT_BLACK_MIN_THICKNESS_RATIO = 0.03
 EXIT_BLACK_MAX_THICKNESS_RATIO = 0.30
 EXIT_BLACK_MIN_FILL_RATIO = 0.55
 # Mais exigente que a entrada: aqui existe uma esfera preta na mesma arena.
-EXIT_BLACK_MIN_ASPECT = 4.0
+EXIT_BLACK_MIN_ASPECT = 3.0
 
 EXIT_BLACK_MAX_INSIDE_VALUE = 80.0
 # Contraste COM SINAL: o piso ao redor precisa ser mais claro que a faixa.
@@ -523,24 +524,24 @@ EXIT_BLACK_COOLDOWN_S = 0.0
 # horizontal. Um segmento isolado nao basta: riscos, manchas e quinas da arena
 # tambem produzem linhas no Canny. O detector junta somente trechos colineares
 # e exige uma borda escura continua ocupando quase metade da imagem.
-EXIT_LINE_ROI_TOP = 0.72
-EXIT_LINE_ROI_BOTTOM = 0.97
-EXIT_LINE_CANNY_LOW = 40
-EXIT_LINE_CANNY_HIGH = 120
-EXIT_LINE_HOUGH_THRESHOLD_RATIO = 0.035
+EXIT_LINE_ROI_TOP = 0.78
+EXIT_LINE_ROI_BOTTOM = 0.995
+EXIT_LINE_CANNY_LOW = 25
+EXIT_LINE_CANNY_HIGH = 90
+EXIT_LINE_HOUGH_THRESHOLD_RATIO = 0.020
 # Cada pedaco pode ser curto porque reflexos quebram visualmente a fita.
-EXIT_LINE_MIN_SEGMENT_RATIO = 0.08
+EXIT_LINE_MIN_SEGMENT_RATIO = 0.05
 # Depois de unir os pedacos, a borda precisa atravessar boa parte da imagem.
-EXIT_LINE_MIN_LENGTH_RATIO = 0.45
+EXIT_LINE_MIN_LENGTH_RATIO = 0.25
 EXIT_LINE_MAX_GAP_RATIO = 0.04
 EXIT_LINE_MAX_ANGLE_DEG = 22.0
 EXIT_LINE_MAX_GROUP_ANGLE_DIFF_DEG = 5.0
 EXIT_LINE_MAX_GROUP_Y_DISTANCE_RATIO = 0.025
 EXIT_LINE_MAX_JOIN_GAP_RATIO = 0.08
-EXIT_LINE_MAX_DARK_SIDE_VALUE = 110.0
-EXIT_LINE_MIN_DARK_SUPPORT = 0.65
-EXIT_LINE_MIN_SIDE_CONTRAST = 25.0
-EXIT_LINE_MIN_CONTRAST_SUPPORT = 0.55
+EXIT_LINE_MAX_DARK_SIDE_VALUE = 125.0
+EXIT_LINE_MIN_DARK_SUPPORT = 0.55
+EXIT_LINE_MIN_SIDE_CONTRAST = 18.0
+EXIT_LINE_MIN_CONTRAST_SUPPORT = 0.45
 
 # Os votos sao feitos com o robo parado. Portanto, a mesma faixa deve aparecer
 # praticamente no mesmo lugar nos frames usados na confirmacao. Isso impede
