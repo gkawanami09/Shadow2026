@@ -682,6 +682,36 @@ def _mover_saida_por_tempo(
         time.sleep(min(0.02, max(prazo - time.monotonic(), 0.0)))
 
 
+def _avancar_entrada_da_missao(args, arduino, acao_direcao):
+    """Atravessa a faixa prata antes da primeira busca por vitimas."""
+    if not (
+        args.drive
+        and args.gerenciado_pela_missao
+        and arduino is not None
+    ):
+        return False
+
+    epoca_serial = arduino.connection_epoch
+    print(
+        "[resgate] entrada da missao: avancando reto por "
+        f"{cfg.MISSION_ENTRY_FORWARD_S:.1f} s antes de procurar vitimas")
+    try:
+        _mover_saida_por_tempo(
+            arduino,
+            acao_direcao,
+            0,
+            cfg.MISSION_ENTRY_FORWARD_SPEED,
+            cfg.MISSION_ENTRY_FORWARD_S,
+            epoca_serial,
+        )
+    finally:
+        acao_direcao()
+    print(
+        "[resgate] entrada concluida; iniciando a busca giratoria "
+        "das vitimas")
+    return True
+
+
 def _recuperar_bloqueio_saida(arduino, acao_direcao, epoca_serial):
     """Recua meio segundo e muda o setor visto antes de procurar de novo."""
     acao_direcao()
@@ -1177,9 +1207,17 @@ def main():
         if not args.sem_marcadores:
             marcadores = MarkerPair()
 
+        entrada_da_missao_concluida = _avancar_entrada_da_missao(
+            args,
+            arduino,
+            steer if sessao_hardware else None,
+        )
         inicio = time.monotonic()
         armado_em = (
-            inicio + cfg.RESCUE_ARM_DELAY_S if args.drive else inicio)
+            inicio
+            if entrada_da_missao_concluida or not args.drive
+            else inicio + cfg.RESCUE_ARM_DELAY_S
+        )
         controlador = (
             None if args.drive
             else BallApproachController(start_time=armado_em))

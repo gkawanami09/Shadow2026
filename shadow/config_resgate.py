@@ -38,6 +38,14 @@ RESCUE_DETECTOR_MAX_HEIGHT = 240
 RESCUE_ARM_DELAY_S = 3.0
 RESCUE_WORKER_JOIN_TIMEOUT_S = 2.0
 
+# Ao entrar na sala pela missao completa, o segue-linha entrega os motores
+# parados ao resgate. O robo atravessa a faixa prata em linha reta antes de
+# iniciar os pulsos de giro que procuram as vitimas. Este movimento nao e
+# executado ao abrir ``resgate.py`` sozinho.
+MISSION_ENTRY_FORWARD_S = 1.0
+MISSION_ENTRY_FORWARD_PWM = 80
+MISSION_ENTRY_FORWARD_SPEED = MISSION_ENTRY_FORWARD_PWM / 120.0
+
 
 # ---------------------------------------------------------------------------
 # Camada de plausibilidade fisica (visao/plausibilidade.py)

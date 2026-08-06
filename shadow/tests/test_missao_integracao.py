@@ -6,7 +6,9 @@ e ``mission.py`` tomam com base no inventário e na fase de saída.
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +16,70 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
 import config_resgate as cfg  # noqa: E402
+import resgate  # noqa: E402
+
+
+class MissionEntryAdvanceTests(unittest.TestCase):
+    def test_avanco_da_entrada_tem_um_segundo_e_pwm_80(self):
+        self.assertEqual(cfg.MISSION_ENTRY_FORWARD_S, 1.0)
+        self.assertEqual(cfg.MISSION_ENTRY_FORWARD_PWM, 80)
+        self.assertAlmostEqual(
+            cfg.MISSION_ENTRY_FORWARD_SPEED * 120,
+            cfg.MISSION_ENTRY_FORWARD_PWM,
+        )
+
+    def test_missao_avanca_e_para_antes_da_busca(self):
+        args = SimpleNamespace(
+            drive=True,
+            gerenciado_pela_missao=True,
+        )
+        arduino = SimpleNamespace(connection_epoch=7)
+        comandos = []
+
+        def direcao(*argumentos):
+            comandos.append(argumentos)
+            return True
+
+        with patch.object(
+            resgate,
+            "_mover_saida_por_tempo",
+        ) as mover:
+            executou = resgate._avancar_entrada_da_missao(
+                args,
+                arduino,
+                direcao,
+            )
+
+        self.assertTrue(executou)
+        mover.assert_called_once_with(
+            arduino,
+            direcao,
+            0,
+            cfg.MISSION_ENTRY_FORWARD_SPEED,
+            cfg.MISSION_ENTRY_FORWARD_S,
+            7,
+        )
+        self.assertEqual(comandos, [()])
+
+    def test_resgate_aberto_sozinho_nao_faz_o_avanco(self):
+        args = SimpleNamespace(
+            drive=True,
+            gerenciado_pela_missao=False,
+        )
+        arduino = SimpleNamespace(connection_epoch=7)
+
+        with patch.object(
+            resgate,
+            "_mover_saida_por_tempo",
+        ) as mover:
+            executou = resgate._avancar_entrada_da_missao(
+                args,
+                arduino,
+                lambda *_: True,
+            )
+
+        self.assertFalse(executou)
+        mover.assert_not_called()
 
 
 class ConfigProfileSeparationTests(unittest.TestCase):
