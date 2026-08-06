@@ -13,6 +13,12 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config_resgate as cfg  # noqa: E402
 from controle.saida_resgate import ExitPhaseController  # noqa: E402
+from resgate import (  # noqa: E402
+    CORREDOR_BLOQUEADO,
+    CORREDOR_INCONCLUSIVO,
+    CORREDOR_LIVRE,
+    _validar_corredor_saida,
+)
 from visao.triangulos_finais import (  # noqa: E402
     annotate_final_triangles,
     dominant_channel,
@@ -46,6 +52,45 @@ class FakeMapper:
     @property
     def both_found(self):
         return all(self.confirmed.values())
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += max(float(seconds), 0.001)
+
+
+class FakeUltrasonicArduino:
+    def __init__(self, readings):
+        self.readings = list(readings)
+        self.connected = True
+        self.connection_epoch = 1
+        self.active = False
+
+    def cancelar_ultrassom(self):
+        self.active = False
+
+    def iniciar_ultrassom(self, timeout):
+        if self.active:
+            return False
+        self.active = True
+        return True
+
+    def poll_ultrassom(self):
+        if not self.active:
+            return False, None
+        self.active = False
+        if not self.readings:
+            return True, None
+        return True, self.readings.pop(0)
+
+    def refresh(self, fail_closed=True):
+        return True
 
 
 class ExitPhaseTests(unittest.TestCase):
@@ -161,6 +206,10 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertTrue(final.terminal)
         self.assertEqual(final.angle, 190)
         self.assertTrue(self.exit.succeeded)
+        self.assertAlmostEqual(
+            self.exit.cross_elapsed_s,
+            tarde - (assentou + 0.03),
+        )
 
     def test_travessia_tem_timeout_de_seguranca(self):
         assentou = self._ate_observar()
@@ -185,6 +234,41 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertTrue(command.terminal)
         self.assertEqual(command.angle, 190)
         self.assertFalse(self.exit.succeeded)
+
+
+class ExitClearanceTests(unittest.TestCase):
+    def _validate(self, readings):
+        clock = FakeClock()
+        arduino = FakeUltrasonicArduino(readings)
+        return _validar_corredor_saida(
+            arduino,
+            relogio=clock,
+            dormir=clock.sleep,
+        )
+
+    def test_tres_medidas_acima_de_15_cm_liberam_camera_de_linha(self):
+        state, distance, readings = self._validate([210, 190, 180])
+        self.assertEqual(state, CORREDOR_LIVRE)
+        self.assertEqual(distance, 180)
+        self.assertEqual(readings, (210, 190, 180))
+
+    def test_duas_medidas_em_15_cm_bloqueiam_a_tentativa(self):
+        state, distance, readings = self._validate([143, 260, 148])
+        self.assertEqual(state, CORREDOR_BLOQUEADO)
+        self.assertEqual(distance, 146)
+        self.assertEqual(readings, (143, 260, 148))
+
+    def test_uma_medida_proxima_isolada_nao_libera_a_tentativa(self):
+        state, distance, readings = self._validate([145, 230, 240])
+        self.assertEqual(state, CORREDOR_INCONCLUSIVO)
+        self.assertEqual(distance, 145)
+        self.assertEqual(readings, (145, 230, 240))
+
+    def test_sensor_sem_eco_nao_e_tratado_como_corredor_livre(self):
+        state, distance, readings = self._validate([None] * 20)
+        self.assertEqual(state, CORREDOR_INCONCLUSIVO)
+        self.assertIsNone(distance)
+        self.assertEqual(readings, ())
 
 
 class OverlayColorTests(unittest.TestCase):

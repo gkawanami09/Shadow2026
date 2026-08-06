@@ -45,6 +45,7 @@ class ExitPhaseController:
         self._stopped_at = None
         self._settled_at = None
         self._cross_started_at = None
+        self._cross_finished_at = None
         self._tracking_reset_requested = False
         self.mapped_triangles = {"green": False, "red": False}
 
@@ -55,6 +56,18 @@ class ExitPhaseController:
     @property
     def succeeded(self):
         return self.state == self.DONE
+
+    @property
+    def cross_elapsed_s(self):
+        """Tempo real em que o comando reto da tentativa ficou ativo."""
+        if self._cross_started_at is None:
+            return 0.0
+        end = (
+            self._cross_finished_at
+            if self._cross_finished_at is not None
+            else time.monotonic()
+        )
+        return max(float(end) - float(self._cross_started_at), 0.0)
 
     @property
     def stopped(self):
@@ -199,6 +212,7 @@ class ExitPhaseController:
                 self.CROSS, "atravessando a soleira de saida")
         elapsed = now - self._cross_started_at
         if elapsed >= cfg.EXIT_ADVANCE_TIMEOUT_S - 1e-9:
+            self._cross_finished_at = now
             self.state = self.DONE
             return self._stop(
                 self.DONE,
@@ -209,6 +223,7 @@ class ExitPhaseController:
             and exit_detection is None
         ):
             # Evidência visual: a faixa passou para trás do robô.
+            self._cross_finished_at = now
             self.state = self.DONE
             return self._stop(
                 self.DONE,
@@ -245,6 +260,7 @@ class ExitPhaseController:
                 "travessia exige soleira confirmada durante a observacao")
         self.state = self.CROSS
         self._cross_started_at = None
+        self._cross_finished_at = None
         return self._forward(
             self.CROSS,
             "soleira confirmada de longe; avancando reto imediatamente",

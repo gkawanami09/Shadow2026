@@ -2,7 +2,11 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
+
+import cv2
+import numpy as np
 
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +68,50 @@ class BlackExitDetectorTests(unittest.TestCase):
             frame[330:420, 200:440] = cor
             self.assertIsNone(self.detector.detect(frame, timestamp=1.0))
 
+    def test_manchas_e_risco_curto_nao_acionam_fallback(self):
+        """Uma região escura local não é uma faixa transversal."""
+        frames = []
+
+        mancha = cs.piso_neutro(cs.RESCUE_FRAME, 190)
+        cv2.ellipse(mancha, (320, 370), (100, 45), 12, 0, 360,
+                    (25, 25, 25), -1)
+        frames.append(mancha)
+
+        risco = cs.piso_neutro(cs.RESCUE_FRAME, 190)
+        cv2.line(risco, (210, 350), (390, 370), (20, 20, 20), 3)
+        frames.append(risco)
+
+        irregular = cs.piso_neutro(cs.RESCUE_FRAME, 190)
+        pontos = np.asarray([
+            [130, 350], [210, 325], [290, 345], [370, 320], [460, 360],
+            [420, 405], [330, 385], [240, 410], [150, 390],
+        ], dtype=np.int32)
+        cv2.fillPoly(irregular, [pontos], (25, 25, 25))
+        frames.append(irregular)
+
+        for frame in frames:
+            self.assertIsNone(self.detector.detect(frame, timestamp=1.0))
+
+    def test_faixa_fina_com_reflexos_ainda_e_aceita(self):
+        """Trechos quebrados da mesma fita são unidos pelo fallback."""
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 190)
+        faixa = np.asarray(
+            [[90, 360], [560, 325], [560, 339], [90, 374]],
+            dtype=np.int32,
+        )
+        cv2.fillConvexPoly(frame, faixa, (25, 25, 25))
+        for x in (220, 350, 480):
+            cv2.rectangle(frame, (x, 320), (x + 12, 390),
+                          (190, 190, 190), -1)
+
+        detection = self.detector.detect(frame, timestamp=1.0)
+
+        self.assertIsNotNone(detection)
+        self.assertGreaterEqual(
+            detection.span_ratio, cfg.EXIT_LINE_MIN_LENGTH_RATIO)
+        self.assertGreaterEqual(
+            detection.dark_support, cfg.EXIT_LINE_MIN_DARK_SUPPORT)
+
 
 class BlackExitGateTests(unittest.TestCase):
     def _gate(self):
@@ -113,6 +161,40 @@ class BlackExitGateTests(unittest.TestCase):
             confirmed, _ = gate.update(
                 frame, timestamp=timestamp, now=timestamp)
         self.assertFalse(confirmed)
+
+    def test_candidatos_em_lugares_diferentes_nao_somam_votos(self):
+        class DetectorQuePula:
+            def __init__(self):
+                self.index = 0
+
+            def detect(self, _frame, timestamp=None):
+                centros = (90.0, 320.0, 550.0)
+                centro = centros[self.index]
+                self.index = min(self.index + 1, len(centros) - 1)
+                return SimpleNamespace(
+                    center_x=centro,
+                    center_y=360.0,
+                    span_ratio=0.50,
+                    timestamp=timestamp,
+                )
+
+        gate = BlackExitGate(
+            detector=DetectorQuePula(),
+            confirmer=StripeConfirmer(
+                votes_needed=cfg.EXIT_BLACK_VOTES_NEEDED,
+                window=cfg.EXIT_BLACK_VOTE_WINDOW,
+                max_age_s=cfg.BALL_FRAME_STALE_S,
+            ),
+        )
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 185)
+        confirmed = False
+        for index in range(3):
+            timestamp = 1.0 + index * 0.05
+            confirmed, _ = gate.update(
+                frame, timestamp=timestamp, now=timestamp)
+
+        self.assertFalse(confirmed)
+        self.assertEqual(gate.votes, 1)
 
 
 if __name__ == "__main__":

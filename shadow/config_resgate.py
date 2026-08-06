@@ -518,18 +518,34 @@ EXIT_BLACK_COOLDOWN_S = 0.0
 
 # A camera de resgate fica quase horizontal. Quando a soleira esta longe ela
 # aparece como uma linha fina e inclinada, nao como um retangulo perfeitamente
-# horizontal. Este segundo caminho geometrico usa segmentos longos somente na
-# parte inferior da imagem. A esfera preta continua excluida porque sua borda
-# e curva e nao produz um segmento reto com este comprimento.
+# horizontal. Um segmento isolado nao basta: riscos, manchas e quinas da arena
+# tambem produzem linhas no Canny. O detector junta somente trechos colineares
+# e exige uma borda escura continua ocupando quase metade da imagem.
 EXIT_LINE_ROI_TOP = 0.55
-EXIT_LINE_ROI_BOTTOM = 0.93
+EXIT_LINE_ROI_BOTTOM = 0.97
 EXIT_LINE_CANNY_LOW = 40
 EXIT_LINE_CANNY_HIGH = 120
-EXIT_LINE_HOUGH_THRESHOLD_RATIO = 0.055
-EXIT_LINE_MIN_LENGTH_RATIO = 0.25
-EXIT_LINE_MAX_GAP_RATIO = 0.05
+EXIT_LINE_HOUGH_THRESHOLD_RATIO = 0.035
+# Cada pedaco pode ser curto porque reflexos quebram visualmente a fita.
+EXIT_LINE_MIN_SEGMENT_RATIO = 0.08
+# Depois de unir os pedacos, a borda precisa atravessar boa parte da imagem.
+EXIT_LINE_MIN_LENGTH_RATIO = 0.45
+EXIT_LINE_MAX_GAP_RATIO = 0.04
 EXIT_LINE_MAX_ANGLE_DEG = 22.0
+EXIT_LINE_MAX_GROUP_ANGLE_DIFF_DEG = 5.0
+EXIT_LINE_MAX_GROUP_Y_DISTANCE_RATIO = 0.025
+EXIT_LINE_MAX_JOIN_GAP_RATIO = 0.08
 EXIT_LINE_MAX_DARK_SIDE_VALUE = 110.0
+EXIT_LINE_MIN_DARK_SUPPORT = 0.65
+EXIT_LINE_MIN_SIDE_CONTRAST = 25.0
+EXIT_LINE_MIN_CONTRAST_SUPPORT = 0.55
+
+# Os votos sao feitos com o robo parado. Portanto, a mesma faixa deve aparecer
+# praticamente no mesmo lugar nos frames usados na confirmacao. Isso impede
+# que tres bordas/manchas diferentes completem a votacao 3-de-5.
+EXIT_BLACK_MAX_VOTE_CENTER_X_DRIFT_RATIO = 0.14
+EXIT_BLACK_MAX_VOTE_CENTER_Y_DRIFT_RATIO = 0.10
+EXIT_BLACK_MAX_VOTE_SPAN_DRIFT_RATIO = 0.22
 
 # Travessia da soleira de saida. Igual a entrada: o tempo e apenas o limite
 # de seguranca; o fim normal e a faixa deixar de ser vista.
@@ -541,6 +557,21 @@ EXIT_ADVANCE_PWM = 80
 EXIT_ADVANCE_SPEED = EXIT_ADVANCE_PWM / 120.0
 EXIT_ADVANCE_MIN_S = 0.60
 EXIT_ADVANCE_TIMEOUT_S = 3.5
+
+# Antes de entregar a decisao para a camera do segue-linha, o robo para e
+# confirma que nao esta apenas olhando uma mancha/objeto proximo. Tres medidas
+# livres sao obrigatorias. Duas medidas proximas confirmam o bloqueio; medida
+# sem eco ou resultado misturado nunca autoriza a troca de camera.
+EXIT_CLEARANCE_DISTANCE_MM = 150
+EXIT_CLEARANCE_VALID_READINGS = 3
+EXIT_CLEARANCE_NEAR_CONFIRMATIONS = 2
+EXIT_CLEARANCE_TIMEOUT_S = 0.90
+EXIT_CLEARANCE_READ_TIMEOUT_S = 0.08
+EXIT_CLEARANCE_SAMPLE_INTERVAL_S = 0.06
+EXIT_CLEARANCE_MIN_VALID_MM = 1
+EXIT_CLEARANCE_MAX_VALID_MM = 4000
+EXIT_CLEARANCE_REVERSE_SPEED = EXIT_ADVANCE_SPEED
+
 # Giro pulsado de procura da saida quando nenhuma faixa esta no campo.
 EXIT_SEARCH_TIMEOUT_S = 60.0
 EXIT_SEARCH_PULSE_S = BALL_SEARCH_PULSE_S

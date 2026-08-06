@@ -73,6 +73,11 @@ class MonitorObstaculo:
             for _, distancia, _ in self._leituras
         )
 
+    @property
+    def distancias_validas(self):
+        """Cópia das medidas válidas ainda presentes na janela temporal."""
+        return tuple(distancia for _, distancia, _ in self._leituras)
+
     def atualizar(self, arduino, agora=None):
         """Atualiza uma vez e retorna True quando a parada estiver travada."""
         agora = time.monotonic() if agora is None else float(agora)
@@ -147,6 +152,11 @@ class MonitorObstaculo:
         self.leituras_invalidas_consecutivas = 0
         self.ultima_distancia_valida_mm = None
         self.ultima_leitura_valida_em = None
+
+    def cancelar(self, arduino):
+        """Cancela uma medição pendente sem expor a serial ao coordenador."""
+        arduino.cancelar_ultrassom()
+        self._proxima_solicitacao = 0.0
 
 
 def desviar_obstaculo(

@@ -106,6 +106,10 @@ EXIT_OK = 0
 EXIT_INCOMPLETE = 3
 EXIT_SEM_MODELO = 4
 
+CORREDOR_LIVRE = "livre"
+CORREDOR_BLOQUEADO = "bloqueado"
+CORREDOR_INCONCLUSIVO = "inconclusivo"
+
 
 class VideoSource:
     """Reprodução de vídeo gravado. Nunca aciona motores."""
@@ -674,6 +678,72 @@ def _mover_saida_por_tempo(
             raise RuntimeError(
                 "serial mudou durante a verificacao da faixa de saida")
         time.sleep(min(0.02, max(prazo - time.monotonic(), 0.0)))
+
+
+def _validar_corredor_saida(
+    arduino,
+    relogio=time.monotonic,
+    dormir=time.sleep,
+):
+    """Confirma pelo ultrassonico se ha espaco antes da camera de linha.
+
+    O robo ja deve estar parado. Um eco isolado nao bloqueia a saida, mas
+    tambem nao autorizamos a troca de camera se as medidas forem misturadas ou
+    se o sensor nao responder. Assim uma falha do HC-SR04 nunca vira "livre".
+    """
+    epoca_serial = arduino.connection_epoch
+    prazo = relogio() + cfg.EXIT_CLEARANCE_TIMEOUT_S
+    monitor = MonitorObstaculo(
+        distancia_parada_mm=cfg.EXIT_CLEARANCE_DISTANCE_MM,
+        intervalo_s=cfg.EXIT_CLEARANCE_SAMPLE_INTERVAL_S,
+        timeout_s=cfg.EXIT_CLEARANCE_READ_TIMEOUT_S,
+        confirmacoes=cfg.EXIT_CLEARANCE_NEAR_CONFIRMATIONS,
+        tamanho_historico=cfg.EXIT_CLEARANCE_VALID_READINGS,
+        janela_s=cfg.EXIT_CLEARANCE_TIMEOUT_S,
+        distancia_minima_mm=cfg.EXIT_CLEARANCE_MIN_VALID_MM,
+        distancia_maxima_mm=cfg.EXIT_CLEARANCE_MAX_VALID_MM,
+        distancia_bloqueio_rapido_mm=cfg.EXIT_CLEARANCE_DISTANCE_MM,
+    )
+    monitor.cancelar(arduino)
+
+    try:
+        while relogio() < prazo:
+            agora = relogio()
+            monitor.atualizar(arduino, agora=agora)
+            leituras = monitor.distancias_validas
+
+            if monitor.parada_confirmada:
+                return (
+                    CORREDOR_BLOQUEADO,
+                    monitor.distancia_confirmada_mm,
+                    leituras,
+                )
+
+            if len(leituras) >= cfg.EXIT_CLEARANCE_VALID_READINGS:
+                if all(
+                    distancia > cfg.EXIT_CLEARANCE_DISTANCE_MM
+                    for distancia in leituras
+                ):
+                    return CORREDOR_LIVRE, min(leituras), leituras
+                return CORREDOR_INCONCLUSIVO, min(leituras), leituras
+
+            arduino.refresh(fail_closed=True)
+            if (
+                not arduino.connected
+                or arduino.connection_epoch != epoca_serial
+            ):
+                raise RuntimeError(
+                    "serial mudou durante a validacao ultrassonica da saida")
+            dormir(min(0.01, max(prazo - relogio(), 0.0)))
+    finally:
+        monitor.cancelar(arduino)
+
+    leituras = monitor.distancias_validas
+    return (
+        CORREDOR_INCONCLUSIVO,
+        min(leituras) if leituras else None,
+        leituras,
+    )
 
 
 def _confirmar_saida_com_camera_linha(arduino, debug=False):
@@ -2111,6 +2181,71 @@ def main():
                 from controle.direcao import steer
 
                 steer()
+                tempo_avanco_saida = controlador_saida.cross_elapsed_s
+                estado_corredor, distancia_corredor_mm, leituras_corredor = (
+                    _validar_corredor_saida(arduino)
+                )
+                if estado_corredor != CORREDOR_LIVRE:
+                    motivo_corredor = (
+                        f"objeto confirmado a "
+                        f"{distancia_corredor_mm / 10.0:.1f} cm"
+                        if estado_corredor == CORREDOR_BLOQUEADO
+                        and distancia_corredor_mm is not None
+                        else "medicao inconclusiva"
+                    )
+                    print(
+                        f"[saida] {motivo_corredor}; leituras="
+                        f"{list(leituras_corredor)}; desfazendo "
+                        f"{tempo_avanco_saida:.2f} s de avanco")
+                    if tempo_avanco_saida > 0.0:
+                        _mover_saida_por_tempo(
+                            arduino,
+                            steer,
+                            200,
+                            cfg.EXIT_CLEARANCE_REVERSE_SPEED,
+                            tempo_avanco_saida,
+                            arduino.connection_epoch,
+                        )
+                    steer()
+
+                    # A camera de resgate continua aberta. A tentativa falsa
+                    # e descartada e a busca pulsada recomeca do ponto que o
+                    # robo ocupava antes de avancar.
+                    agora_reinicio = time.monotonic()
+                    controlador_saida = ExitPhaseController(
+                        start_time=(
+                            inicio_saida
+                            if inicio_saida is not None
+                            else agora_reinicio
+                        )
+                    )
+                    portao_saida = BlackExitGate()
+                    epoca_saida = arduino.connection_epoch
+                    deteccao_saida = None
+                    faltas_saida = 0
+                    resultado_atual = None
+                    deteccao_atual = None
+                    forma = (
+                        cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                        cfg.RESCUE_CAMERA_MAX_WIDTH,
+                        3,
+                    )
+                    comando = controlador_saida.update(
+                        None,
+                        forma,
+                        mapper=None,
+                        now=agora_reinicio,
+                    )
+                    ultimo_controle_ocioso = agora_reinicio
+                    print(
+                        "[saida] camera de resgate mantida; "
+                        "continuando a procura da faixa")
+                    continue
+
+                print(
+                    "[saida] corredor livre confirmado pelo ultrassonico "
+                    f"({distancia_corredor_mm / 10.0:.1f} cm); "
+                    "liberando a camera de linha")
                 print(
                     "[saida] a camera de resgate chegou ao limite visual; "
                     "trocando para a camera do segue-linha")
