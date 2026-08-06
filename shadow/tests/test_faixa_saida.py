@@ -175,6 +175,20 @@ class BlackExitDetectorTests(unittest.TestCase):
         self.assertGreaterEqual(
             detection.dark_support, cfg.EXIT_LINE_MIN_DARK_SUPPORT)
 
+    def test_inclinacao_da_faixa_grossa_tem_sinal_e_magnitude(self):
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 190)
+        faixa = np.asarray(
+            [[40, 385], [600, 430], [600, 455], [40, 410]],
+            dtype=np.int32,
+        )
+        cv2.fillConvexPoly(frame, faixa, (20, 20, 20))
+
+        detection = self.detector.detect(frame, timestamp=1.0)
+
+        self.assertIsNotNone(detection)
+        self.assertGreater(detection.angle_deg, 2.0)
+        self.assertLess(detection.angle_deg, 8.0)
+
 
 class BlackExitGateTests(unittest.TestCase):
     def _gate(self):

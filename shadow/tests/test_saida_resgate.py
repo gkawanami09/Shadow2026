@@ -37,6 +37,7 @@ FRAME_SHAPE = (480, 640, 3)
 class FakeExit:
     center_x: float = 320.0
     timestamp: float = 0.0
+    angle_deg: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -210,15 +211,58 @@ class ExitPhaseTests(unittest.TestCase):
     def test_rejeicao_final_da_re_de_um_segundo(self):
         self.assertEqual(cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S, 1.0)
 
-    def test_soleira_deslocada_gira_tanque_ate_o_centro(self):
+    def test_soleira_deslocada_translada_com_omni_sem_mudar_yaw(self):
         assentou = self._ate_observar()
         soleira = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
         command = self.exit.update(
             soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.ALIGN)
-        self.assertEqual(command.angle, cfg.EXIT_ALIGN_ANGLE)
+        pwm = cfg.EXIT_ALIGN_OMNI_PWM
+        self.assertEqual(command.state, self.exit.ALIGN_LATERAL)
+        self.assertEqual(command.wheel_speeds, (pwm, -pwm, -pwm, pwm))
+        self.assertEqual(command.angle, 190)
+
+    def test_soleira_a_esquerda_translada_omni_para_esquerda(self):
+        assentou = self._ate_observar()
+        soleira = FakeExit(center_x=80.0, timestamp=assentou + 0.01)
+        command = self.exit.update(
+            soleira, FRAME_SHAPE, now=assentou + 0.02)
+        pwm = cfg.EXIT_ALIGN_OMNI_PWM
+        self.assertEqual(command.state, self.exit.ALIGN_LATERAL)
+        self.assertEqual(command.wheel_speeds, (-pwm, pwm, pwm, -pwm))
+
+    def test_inclinacao_e_corrigida_por_tanque_antes_do_lateral(self):
+        assentou = self._ate_observar()
+        soleira = FakeExit(
+            center_x=600.0,
+            angle_deg=-12.0,
+            timestamp=assentou + 0.01,
+        )
+        command = self.exit.update(
+            soleira, FRAME_SHAPE, now=assentou + 0.02)
+        self.assertEqual(command.state, self.exit.ALIGN_YAW)
+        self.assertEqual(command.angle, -cfg.EXIT_ALIGN_ANGLE)
         self.assertEqual(command.speed, cfg.EXIT_ALIGN_SPEED)
-        self.assertEqual(cfg.EXIT_ALIGN_PWM, 50)
+        self.assertIsNone(command.wheel_speeds)
+
+    def test_pulso_omni_freia_assenta_e_exige_frame_novo(self):
+        assentou = self._ate_observar()
+        inicio = assentou + 0.02
+        soleira = FakeExit(center_x=600.0, timestamp=inicio - 0.01)
+        pulso = self.exit.update(soleira, FRAME_SHAPE, now=inicio)
+        self.exit.notify_command_written(pulso.state, now=inicio)
+
+        fim = inicio + cfg.EXIT_ALIGN_OMNI_MAX_PULSE_S + 0.01
+        freio = self.exit.update(None, FRAME_SHAPE, now=fim)
+        self.assertEqual(freio.state, self.exit.ALIGN_BRAKE)
+        self.assertEqual(freio.angle, 190)
+        self.assertTrue(
+            self.exit.notify_command_written(freio.state, now=fim))
+
+        assentado = fim + cfg.EXIT_ALIGN_SETTLE_S
+        medindo = self.exit.update(None, FRAME_SHAPE, now=assentado)
+        self.assertEqual(medindo.state, self.exit.ALIGN)
+        self.assertFalse(self.exit.frame_allowed(assentado))
+        self.assertTrue(self.exit.frame_allowed(assentado + 0.01))
 
     def test_falha_visual_curta_no_alinhamento_nao_reinicia_o_giro(self):
         assentou = self._ate_observar()

@@ -179,7 +179,33 @@ class BlackExitDetector:
             confidence=confidence,
             timestamp=timestamp,
             bbox=band.bbox,
+            angle_deg=self._band_angle_deg(mask, band),
         )
+
+    @staticmethod
+    def _band_angle_deg(mask, band):
+        """Mede a inclinação do eixo longo usando os pixels da própria fita."""
+        recorte = mask[
+            band.top_y:band.bottom_y + 1,
+            band.left_x:band.right_x + 1,
+        ]
+        ys, xs = np.nonzero(recorte)
+        if xs.size < 12:
+            return 0.0
+        pontos = np.column_stack((
+            xs.astype(np.float64) + float(band.left_x),
+            ys.astype(np.float64) + float(band.top_y),
+        ))
+        pontos -= np.mean(pontos, axis=0, keepdims=True)
+        covariancia = np.cov(pontos, rowvar=False)
+        valores, vetores = np.linalg.eigh(covariancia)
+        eixo = vetores[:, int(np.argmax(valores))]
+        angulo = math.degrees(math.atan2(float(eixo[1]), float(eixo[0])))
+        while angulo > 90.0:
+            angulo -= 180.0
+        while angulo < -90.0:
+            angulo += 180.0
+        return float(angulo)
 
     @staticmethod
     def _green_ratio(frame_bgr, bbox):

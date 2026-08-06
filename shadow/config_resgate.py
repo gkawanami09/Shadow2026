@@ -615,13 +615,22 @@ EXIT_SEARCH_OBSERVE_TIMEOUT_S = DEPOSIT_SEARCH_VERIFY_TIMEOUT_S
 EXIT_SEARCH_TANK_ANGLE = DEPOSIT_SEARCH_TANK_ANGLE
 EXIT_SEARCH_TANK_SPEED = RED_DEPOSIT_SEARCH_TANK_SPEED
 
-# Alinhamento com o centro da soleira antes de qualquer avanco. Tanque com
-# PWM 50 gira o chassi sem se aproximar da faixa enquanto ainda esta torto.
-EXIT_ALIGN_MAX_CENTER_ERROR = 0.10
+# Alinhamento em dois eixos antes da aproximação. A inclinação corrige o yaw
+# por tanque; o centro corrige somente a posição lateral pelas rodas omni.
+EXIT_ALIGN_MAX_CENTER_ERROR = 0.06
+EXIT_ALIGN_MAX_ANGLE_DEG = 3.0
 EXIT_ALIGN_ANGLE = 180
 EXIT_ALIGN_PWM = 50
 EXIT_ALIGN_SPEED = EXIT_ALIGN_PWM / (120 * 1.2)
 EXIT_ALIGN_SETTLE_S = EXIT_SEARCH_SETTLE_S
+EXIT_ALIGN_YAW_MIN_PULSE_S = 0.06
+EXIT_ALIGN_YAW_MAX_PULSE_S = 0.18
+EXIT_ALIGN_YAW_FULL_ERROR_DEG = 18.0
+EXIT_ALIGN_OMNI_PWM = 50
+EXIT_ALIGN_OMNI_MIN_PULSE_S = 0.07
+EXIT_ALIGN_OMNI_MAX_PULSE_S = 0.18
+EXIT_ALIGN_OMNI_FULL_ERROR = 0.45
+EXIT_ALIGN_MAX_CORRECTIONS = 14
 # Uma falha de segmentação isolada não pode mandar o robô voltar ao giro e
 # ultrapassar uma faixa que já estava centralizada.
 EXIT_ALIGN_LOST_TIMEOUT_S = 0.35

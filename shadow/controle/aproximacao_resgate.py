@@ -19,6 +19,7 @@ class MotionCommand:
     pickup_in_range: bool = False
     pickup_confirmations: int = 0
     target_kind: object = None
+    wheel_speeds: object = None
 
 
 class BallApproachController:

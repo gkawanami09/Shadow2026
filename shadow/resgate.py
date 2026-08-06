@@ -33,6 +33,7 @@ Exemplos::
 
 import argparse
 from collections import deque
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -1819,8 +1820,12 @@ def main():
                         )
                 else:
                     epoca_movimento = arduino.connection_epoch
-                    movimento_enviado = steer(
-                        comando.angle, comando.speed)
+                    if comando.wheel_speeds is not None:
+                        movimento_enviado = arduino.rodas(
+                            *comando.wheel_speeds)
+                    else:
+                        movimento_enviado = steer(
+                            comando.angle, comando.speed)
                     if movimento_enviado is False:
                         raise RuntimeError(
                             "comando de movimento nao foi enviado pela serial")
@@ -2619,6 +2624,38 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.52,
                         (255, 0, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+                    centro_x = int(round(deteccao_saida.center_x))
+                    centro_y = int(round(deteccao_saida.center_y))
+                    comprimento = max(
+                        int(round(deteccao_saida.width / 2)), 20)
+                    angulo_rad = math.radians(deteccao_saida.angle_deg)
+                    dx = int(round(math.cos(angulo_rad) * comprimento))
+                    dy = int(round(math.sin(angulo_rad) * comprimento))
+                    cv2.line(
+                        anotado,
+                        (centro_x - dx, centro_y - dy),
+                        (centro_x + dx, centro_y + dy),
+                        (0, 255, 255),
+                        2,
+                    )
+                    cv2.circle(
+                        anotado,
+                        (largura_saida // 2, centro_y),
+                        5,
+                        (255, 255, 0),
+                        -1,
+                    )
+                    cv2.putText(
+                        anotado,
+                        f"centro={centro_x - largura_saida // 2:+d}px "
+                        f"ang={deteccao_saida.angle_deg:+.1f}",
+                        (8, 64),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.46,
+                        (0, 255, 255),
                         1,
                         cv2.LINE_AA,
                     )

@@ -32,6 +32,10 @@ class ExitPhaseController:
     SEARCH_SETTLE = "EXIT_SEARCH_SETTLE"
     SEARCH_OBSERVE = "EXIT_SEARCH_OBSERVE"
     ALIGN = "EXIT_ALIGN"
+    ALIGN_YAW = "EXIT_ALIGN_YAW"
+    ALIGN_LATERAL = "EXIT_ALIGN_LATERAL"
+    ALIGN_BRAKE = "EXIT_ALIGN_BRAKE"
+    ALIGN_SETTLE = "EXIT_ALIGN_SETTLE"
     CROSS = "EXIT_CROSS"
     DONE = "EXIT_DONE"
     FAILED = "EXIT_FAILED"
@@ -47,6 +51,12 @@ class ExitPhaseController:
         self._cross_started_at = None
         self._cross_finished_at = None
         self._align_last_seen_at = None
+        self._align_frame_after = None
+        self._align_motion_started_at = None
+        self._align_motion_duration_s = 0.0
+        self._align_corrections = 0
+        self._align_wheel_speeds = None
+        self._align_angle = 190
         self._tracking_reset_requested = False
         self.mapped_triangles = {"green": False, "red": False}
 
@@ -74,7 +84,8 @@ class ExitPhaseController:
     def stopped(self):
         return self.state in (
             self.MAP_TRIANGLES, self.SEARCH_BRAKE, self.SEARCH_SETTLE,
-            self.SEARCH_OBSERVE, self.DONE, self.FAILED)
+            self.SEARCH_OBSERVE, self.ALIGN_BRAKE, self.ALIGN_SETTLE,
+            self.DONE, self.FAILED)
 
     def consume_tracking_reset(self):
         requested = self._tracking_reset_requested
@@ -85,11 +96,14 @@ class ExitPhaseController:
         """Imagens feitas durante o giro não confirmam a soleira."""
         if self.state in (
             self.SEARCH_START, self.SEARCH_ROTATE, self.SEARCH_BRAKE,
-            self.SEARCH_SETTLE,
+            self.SEARCH_SETTLE, self.ALIGN_YAW, self.ALIGN_LATERAL,
+            self.ALIGN_BRAKE, self.ALIGN_SETTLE,
         ):
             return False
         if self.state == self.SEARCH_OBSERVE and self._settled_at is not None:
             return float(captured_at) > self._settled_at + 1e-9
+        if self.state == self.ALIGN and self._align_frame_after is not None:
+            return float(captured_at) > self._align_frame_after + 1e-9
         return True
 
     def update(self, exit_detection, frame_shape, mapper=None, now=None):
@@ -128,6 +142,14 @@ class ExitPhaseController:
             return self._on_observe(exit_detection, frame_shape, now)
         if self.state == self.ALIGN:
             return self._on_align(exit_detection, frame_shape, now)
+        if self.state in (self.ALIGN_YAW, self.ALIGN_LATERAL):
+            return self._on_align_motion(now)
+        if self.state == self.ALIGN_BRAKE:
+            return self._stop(
+                self.ALIGN_BRAKE,
+                "fim da correcao; freando antes de medir novamente")
+        if self.state == self.ALIGN_SETTLE:
+            return self._on_align_settle(now)
         if self.state == self.CROSS:
             return self._on_cross(exit_detection, now)
         raise RuntimeError(f"estado de saida desconhecido: {self.state}")
@@ -188,6 +210,8 @@ class ExitPhaseController:
             self.state = self.ALIGN
             self._stopped_at = None
             self._align_last_seen_at = now
+            self._align_frame_after = None
+            self._align_corrections = 0
             return self._align_command(exit_detection, frame_shape)
         if (
             self._settled_at is not None
@@ -224,21 +248,58 @@ class ExitPhaseController:
             return self._tank(
                 self.SEARCH_START, "soleira perdida; retomando a procura")
         self._align_last_seen_at = now
-        if not self.aligned(exit_detection, frame_shape):
-            self._stopped_at = None
-            return self._align_command(exit_detection, frame_shape)
+        erro_centro, erro_angulo = self._alignment_errors(
+            exit_detection, frame_shape)
+        if abs(erro_angulo) > cfg.EXIT_ALIGN_MAX_ANGLE_DEG:
+            return self._start_yaw_correction(erro_angulo)
+        if abs(erro_centro) > cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
+            return self._start_lateral_correction(erro_centro)
         if self._stopped_at is None:
             self._stopped_at = now
             return self._stop(
                 self.ALIGN,
-                "soleira centralizada; freando antes de avancar",
+                "soleira centralizada e perpendicular; "
+                "freando antes de avancar",
             )
         if now - self._stopped_at >= cfg.EXIT_ALIGN_SETTLE_S - 1e-9:
             return self.begin_cross(now=now)
         return self._stop(
             self.ALIGN,
-            "soleira centralizada; aguardando o chassi assentar",
+            "soleira alinhada; aguardando o chassi assentar",
         )
+
+    def _on_align_motion(self, now):
+        if self._align_motion_started_at is None:
+            return self._current_alignment_motion()
+        if (
+            now - self._align_motion_started_at
+            < self._align_motion_duration_s - 1e-9
+        ):
+            return self._current_alignment_motion()
+        self.state = self.ALIGN_BRAKE
+        return self._stop(
+            self.ALIGN_BRAKE,
+            "pulso de alinhamento concluido; freando")
+
+    def _on_align_settle(self, now):
+        if (
+            self._stopped_at is not None
+            and now - self._stopped_at
+            >= cfg.EXIT_ALIGN_SETTLE_S - 1e-9
+        ):
+            self.state = self.ALIGN
+            self._align_frame_after = now
+            self._align_last_seen_at = now
+            self._align_motion_started_at = None
+            self._align_wheel_speeds = None
+            self._align_angle = 190
+            self._stopped_at = None
+            return self._stop(
+                self.ALIGN,
+                "chassi assentado; medindo centro e inclinacao novamente")
+        return self._stop(
+            self.ALIGN_SETTLE,
+            "aguardando vibracao do alinhamento terminar")
 
     def _on_cross(self, exit_detection, now):
         if self._cross_started_at is None:
@@ -282,6 +343,16 @@ class ExitPhaseController:
             return True
         if state == self.ALIGN:
             return False
+        if state in (self.ALIGN_YAW, self.ALIGN_LATERAL):
+            if self._align_motion_started_at is None:
+                self._align_motion_started_at = now
+            return False
+        if state == self.ALIGN_BRAKE:
+            self.state = self.ALIGN_SETTLE
+            self._stopped_at = now
+            self._align_motion_started_at = None
+            self._align_frame_after = None
+            return True
         if state == self.CROSS and self._cross_started_at is None:
             self._cross_started_at = now
             return False
@@ -302,28 +373,124 @@ class ExitPhaseController:
 
     # -- auxiliares ------------------------------------------------------
     def _align_command(self, detection, frame_shape):
-        width = float(frame_shape[1]) if frame_shape is not None else 1.0
-        half = max(width / 2.0, 1.0)
-        error = (float(detection.center_x) - half) / half
-        if abs(error) <= cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
-            return self._stop(
-                self.ALIGN,
-                f"soleira centralizada (erro {error:+.2f}); pronta para cruzar")
-        angle = (
-            cfg.EXIT_ALIGN_ANGLE if error > 0 else -cfg.EXIT_ALIGN_ANGLE)
-        return MotionCommand(
+        erro_centro, erro_angulo = self._alignment_errors(
+            detection, frame_shape)
+        if abs(erro_angulo) > cfg.EXIT_ALIGN_MAX_ANGLE_DEG:
+            return self._start_yaw_correction(erro_angulo)
+        if abs(erro_centro) > cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
+            return self._start_lateral_correction(erro_centro)
+        return self._stop(
             self.ALIGN,
-            angle=angle,
-            speed=cfg.EXIT_ALIGN_SPEED,
-            detail=f"alinhando com a soleira (erro {error:+.2f})")
+            "soleira alinhada "
+            f"(lateral={erro_centro:+.2f}, "
+            f"inclinacao={erro_angulo:+.1f} graus)")
 
     def aligned(self, detection, frame_shape):
         """A soleira está centralizada o bastante para atravessar?"""
         if detection is None or frame_shape is None:
             return False
+        erro_centro, erro_angulo = self._alignment_errors(
+            detection, frame_shape)
+        return (
+            abs(erro_centro) <= cfg.EXIT_ALIGN_MAX_CENTER_ERROR
+            and abs(erro_angulo) <= cfg.EXIT_ALIGN_MAX_ANGLE_DEG
+        )
+
+    @staticmethod
+    def _alignment_errors(detection, frame_shape):
         half = max(float(frame_shape[1]) / 2.0, 1.0)
-        error = (float(detection.center_x) - half) / half
-        return abs(error) <= cfg.EXIT_ALIGN_MAX_CENTER_ERROR
+        erro_centro = (float(detection.center_x) - half) / half
+        erro_angulo = float(getattr(detection, "angle_deg", 0.0))
+        return erro_centro, erro_angulo
+
+    def _start_yaw_correction(self, erro_angulo):
+        if not self._correction_allowed():
+            return self._restart_search_after_alignment()
+        proporcao = min(
+            abs(float(erro_angulo))
+            / max(cfg.EXIT_ALIGN_YAW_FULL_ERROR_DEG, 1e-6),
+            1.0,
+        )
+        self._align_motion_duration_s = self._interpolate(
+            cfg.EXIT_ALIGN_YAW_MIN_PULSE_S,
+            cfg.EXIT_ALIGN_YAW_MAX_PULSE_S,
+            proporcao,
+        )
+        self._align_angle = (
+            cfg.EXIT_ALIGN_ANGLE
+            if erro_angulo > 0.0
+            else -cfg.EXIT_ALIGN_ANGLE
+        )
+        self._align_wheel_speeds = None
+        self._align_motion_started_at = None
+        self._stopped_at = None
+        self.state = self.ALIGN_YAW
+        return self._current_alignment_motion(
+            f"corrigindo inclinacao {erro_angulo:+.1f} graus")
+
+    def _start_lateral_correction(self, erro_centro):
+        if not self._correction_allowed():
+            return self._restart_search_after_alignment()
+        proporcao = min(
+            abs(float(erro_centro))
+            / max(cfg.EXIT_ALIGN_OMNI_FULL_ERROR, 1e-6),
+            1.0,
+        )
+        self._align_motion_duration_s = self._interpolate(
+            cfg.EXIT_ALIGN_OMNI_MIN_PULSE_S,
+            cfg.EXIT_ALIGN_OMNI_MAX_PULSE_S,
+            proporcao,
+        )
+        pwm = int(cfg.EXIT_ALIGN_OMNI_PWM)
+        if erro_centro > 0.0:
+            rodas = (pwm, -pwm, -pwm, pwm)
+            lado = "direita"
+        else:
+            rodas = (-pwm, pwm, pwm, -pwm)
+            lado = "esquerda"
+        self._align_wheel_speeds = rodas
+        self._align_angle = 190
+        self._align_motion_started_at = None
+        self._stopped_at = None
+        self.state = self.ALIGN_LATERAL
+        return self._current_alignment_motion(
+            f"transladando omni para {lado}; erro={erro_centro:+.2f}")
+
+    def _correction_allowed(self):
+        self._align_corrections += 1
+        return self._align_corrections <= cfg.EXIT_ALIGN_MAX_CORRECTIONS
+
+    def _restart_search_after_alignment(self):
+        self._tracking_reset_requested = True
+        self._align_last_seen_at = None
+        self._align_frame_after = None
+        self._align_motion_started_at = None
+        self._align_wheel_speeds = None
+        self.state = self.SEARCH_START
+        return self._tank(
+            self.SEARCH_START,
+            "alinhamento nao convergiu; retomando a procura da soleira")
+
+    def _current_alignment_motion(self, detail=None):
+        if self.state == self.ALIGN_LATERAL:
+            return MotionCommand(
+                self.ALIGN_LATERAL,
+                detail=(
+                    detail
+                    or "executando pulso lateral omni de alinhamento"),
+                wheel_speeds=self._align_wheel_speeds,
+            )
+        return MotionCommand(
+            self.ALIGN_YAW,
+            angle=self._align_angle,
+            speed=cfg.EXIT_ALIGN_SPEED,
+            detail=detail or "executando pulso tanque de alinhamento angular",
+        )
+
+    @staticmethod
+    def _interpolate(minimo, maximo, proporcao):
+        proporcao = min(max(float(proporcao), 0.0), 1.0)
+        return float(minimo + (maximo - minimo) * proporcao)
 
     def _usable(self, detection, now):
         if detection is None:
