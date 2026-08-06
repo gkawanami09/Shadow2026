@@ -20,6 +20,35 @@ from shared.dados_compartilhados import (config_manager, entry_armed,
                                          entry_silver_votes, mission_mode)
 
 
+def _deve_pre_avancar_entrada(
+    *,
+    modo_missao,
+    armada,
+    confirmada,
+    detectada,
+    votos,
+    motivo,
+    linha_adiante,
+):
+    """Reconhece a faixa ainda distante sem transformá-la numa curva.
+
+    ``fina`` só é publicado quando a máscara prata já formou várias linhas
+    horizontais largas, mas ainda não possui espessura suficiente para ser
+    aceita. É justamente a perspectiva mostrada quando a soleira está longe.
+    O estado ``fina`` tem prioridade sobre ``linha_adiante``: quando a entrada
+    ainda está longe, o próprio trecho preto que termina nela ocupa boa parte
+    do corredor central e mantém essa flag verdadeira. Para os demais casos,
+    a linha continuar à frente ainda veta o avanço.
+    """
+    if not modo_missao or not armada or confirmada:
+        return False
+    if str(motivo) == "fina":
+        return True
+    if linha_adiante:
+        return False
+    return bool(detectada or int(votos) > 0)
+
+
 def build_entry_gate():
     """Cria o portão da faixa prata apenas no modo de missão completa."""
     if not mission_mode.value or not config.ENTRY_SILVER_ENABLED:

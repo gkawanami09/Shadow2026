@@ -336,6 +336,15 @@ ENTRY_ADVANCE_SPEED = .40
 ENTRY_ADVANCE_MIN_S = .60
 ENTRY_ADVANCE_TIMEOUT_S = 3.5
 
+# A fita prata aparece muito fina quando ainda está longe. Nesse instante o
+# contorno preto da linha e os reflexos podem parecer uma curva ou um verde.
+# Antes de aceitar qualquer correção, avance reto por um trecho curto para a
+# faixa ganhar espessura e poder fechar a votação normal.
+ENTRY_PRE_APPROACH_SPEED = .40
+ENTRY_PRE_APPROACH_TIME_S = .50
+ENTRY_PRE_APPROACH_SETTLE_S = .12
+ENTRY_PRE_APPROACH_COOLDOWN_S = .80
+
 # ----------------------------------------------------------------------------
 # Cores usadas quando uma chave não existe no config.ini
 # ----------------------------------------------------------------------------

@@ -33,9 +33,11 @@ from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
 from controle.direcao import init_steering, sleep_steering, steer
 from controle.retorno import turn_around
 from comunicacao_serial.arduino import Arduino
+from visao.entrada_missao import _deve_pre_avancar_entrada
 from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                entry_armed, entry_silver_confirmed,
-                               entry_silver_detected, green_candidate,
+                               entry_silver_detected, entry_silver_reason,
+                               entry_silver_votes, green_candidate,
                                last_bottom_point,
                                last_bottom_point_y,
                                line_ahead, line_angle, line_detected,
@@ -137,6 +139,9 @@ def control_loop():
     preferencia_linha_esquerda.value = False
     preferencia_esquerda_inicio = 0.
     preferencia_esquerda_alinhada_desde = None
+    pre_avanco_entrada_ate = 0.
+    pre_avanco_entrada_assentando_ate = 0.
+    pre_avanco_entrada_rearmar_em = 0.
 
     try:
         while not terminate.value:
@@ -306,6 +311,84 @@ def control_loop():
                 _enter_rescue_zone(arduino)
                 rescue_requested.value = True
                 break
+
+            # Quando a faixa ainda está distante ela aparece como uma lâmina
+            # horizontal fina. Corrigir pelo contorno preto ou pelo falso
+            # verde nesse ponto gira o robô para fora da entrada. Um único
+            # pré-aviso inicia um avanço reto limitado; durante ele nenhuma
+            # lógica de curva, pivô ou verde recebe os motores.
+            agora_entrada = time.monotonic()
+
+            if (
+                pre_avanco_entrada_ate > 0.
+                and agora_entrada >= pre_avanco_entrada_ate
+                and pre_avanco_entrada_assentando_ate <= 0.
+            ):
+                steer()
+                pre_avanco_entrada_assentando_ate = (
+                    agora_entrada + config.ENTRY_PRE_APPROACH_SETTLE_S)
+                pre_avanco_entrada_rearmar_em = (
+                    agora_entrada + config.ENTRY_PRE_APPROACH_COOLDOWN_S)
+
+            if (
+                pre_avanco_entrada_assentando_ate > 0.
+                and agora_entrada >= pre_avanco_entrada_assentando_ate
+            ):
+                pre_avanco_entrada_ate = 0.
+                pre_avanco_entrada_assentando_ate = 0.
+
+            pre_avanco_ativo = agora_entrada < pre_avanco_entrada_ate
+            assentando_pre_avanco = (
+                agora_entrada < pre_avanco_entrada_assentando_ate)
+            evidencia_entrada = _deve_pre_avancar_entrada(
+                modo_missao=mission_mode.value,
+                armada=entry_armed.value,
+                confirmada=entry_silver_confirmed.value,
+                detectada=entry_silver_detected.value,
+                votos=entry_silver_votes.value,
+                motivo=entry_silver_reason.value,
+                linha_adiante=line_ahead.value,
+            )
+            if (
+                not pre_avanco_ativo
+                and not assentando_pre_avanco
+                and pre_avanco_entrada_ate <= 0.
+                and evidencia_entrada
+                and agora_entrada >= pre_avanco_entrada_rearmar_em
+            ):
+                pre_avanco_entrada_ate = (
+                    agora_entrada + config.ENTRY_PRE_APPROACH_TIME_S)
+                pre_avanco_ativo = True
+                # Cancela qualquer manobra criada pelo falso verde do mesmo
+                # enquadramento antes de mandar o comando reto.
+                green_direction = None
+                green_turn_started = None
+                green_reverse_until = None
+                green_armed = False
+                green_rearm_after = max(
+                    green_rearm_after,
+                    agora_entrada
+                    + config.ENTRY_PRE_APPROACH_TIME_S
+                    + config.ENTRY_PRE_APPROACH_SETTLE_S
+                    + config.ENTRY_PRE_APPROACH_COOLDOWN_S,
+                )
+                pivot_last_direction = 0
+                pivot_line_lost_since = None
+                print(
+                    "[controle] faixa prata distante; avançando reto antes "
+                    "de permitir correções")
+
+            if pre_avanco_ativo:
+                status.value = (
+                    'Faixa prata distante — avançando reto para confirmar')
+                steer(0, config.ENTRY_PRE_APPROACH_SPEED)
+                continue
+
+            if assentando_pre_avanco:
+                status.value = (
+                    'Faixa prata — aguardando imagem após avanço reto')
+                steer()
+                continue
 
             # Estado normal do segue-linha.
             if line_status.value == "line_detected":

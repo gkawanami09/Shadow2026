@@ -17,6 +17,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config  # noqa: E402
 import config_resgate as cfg  # noqa: E402
 import resgate  # noqa: E402
+from visao.entrada_missao import _deve_pre_avancar_entrada  # noqa: E402
 from mission import (  # noqa: E402
     MissionSystem,
     _tecla_fecha_debug,
@@ -71,6 +72,61 @@ class MissionDebugWindowTests(unittest.TestCase):
 
 
 class MissionEntryAdvanceTests(unittest.TestCase):
+    def test_faixa_fina_distante_pede_avanco_antes_da_correcao(self):
+        self.assertTrue(_deve_pre_avancar_entrada(
+            modo_missao=True,
+            armada=True,
+            confirmada=False,
+            detectada=False,
+            votos=0,
+            motivo="fina",
+            linha_adiante=False,
+        ))
+
+    def test_faixa_fina_avanca_mesmo_com_trecho_preto_ainda_visivel(self):
+        self.assertTrue(_deve_pre_avancar_entrada(
+            modo_missao=True,
+            armada=True,
+            confirmada=False,
+            detectada=False,
+            votos=0,
+            motivo="fina",
+            linha_adiante=True,
+        ))
+
+    def test_linha_continuando_veta_candidato_que_nao_e_faixa_fina(self):
+        self.assertFalse(_deve_pre_avancar_entrada(
+            modo_missao=True,
+            armada=True,
+            confirmada=False,
+            detectada=True,
+            votos=1,
+            motivo="",
+            linha_adiante=True,
+        ))
+
+    def test_candidato_aceito_continua_reto_ate_confirmar(self):
+        self.assertTrue(_deve_pre_avancar_entrada(
+            modo_missao=True,
+            armada=True,
+            confirmada=False,
+            detectada=True,
+            votos=1,
+            motivo="",
+            linha_adiante=False,
+        ))
+
+    def test_main_isolado_nao_muda_comportamento(self):
+        self.assertFalse(_deve_pre_avancar_entrada(
+            modo_missao=False,
+            armada=True,
+            confirmada=False,
+            detectada=True,
+            votos=1,
+            motivo="fina",
+            linha_adiante=False,
+        ))
+
     def test_avanco_da_entrada_tem_um_segundo_e_pwm_80(self):
         self.assertEqual(cfg.MISSION_ENTRY_FORWARD_S, 1.0)
         self.assertEqual(cfg.MISSION_ENTRY_FORWARD_PWM, 80)
