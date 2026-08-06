@@ -680,6 +680,21 @@ def _mover_saida_por_tempo(
         time.sleep(min(0.02, max(prazo - time.monotonic(), 0.0)))
 
 
+def _novo_monitor_corredor_saida():
+    """Cria o monitor de 15 cm usado nas duas etapas da saída."""
+    return MonitorObstaculo(
+        distancia_parada_mm=cfg.EXIT_CLEARANCE_DISTANCE_MM,
+        intervalo_s=cfg.EXIT_CLEARANCE_SAMPLE_INTERVAL_S,
+        timeout_s=cfg.EXIT_CLEARANCE_READ_TIMEOUT_S,
+        confirmacoes=cfg.EXIT_CLEARANCE_NEAR_CONFIRMATIONS,
+        tamanho_historico=cfg.EXIT_CLEARANCE_VALID_READINGS,
+        janela_s=cfg.EXIT_CLEARANCE_TIMEOUT_S,
+        distancia_minima_mm=cfg.EXIT_CLEARANCE_MIN_VALID_MM,
+        distancia_maxima_mm=cfg.EXIT_CLEARANCE_MAX_VALID_MM,
+        distancia_bloqueio_rapido_mm=cfg.EXIT_CLEARANCE_DISTANCE_MM,
+    )
+
+
 def _validar_corredor_saida(
     arduino,
     relogio=time.monotonic,
@@ -692,21 +707,25 @@ def _validar_corredor_saida(
     se o sensor nao responder. Assim uma falha do HC-SR04 nunca vira "livre".
     """
     epoca_serial = arduino.connection_epoch
-    prazo = relogio() + cfg.EXIT_CLEARANCE_TIMEOUT_S
-    monitor = MonitorObstaculo(
-        distancia_parada_mm=cfg.EXIT_CLEARANCE_DISTANCE_MM,
-        intervalo_s=cfg.EXIT_CLEARANCE_SAMPLE_INTERVAL_S,
-        timeout_s=cfg.EXIT_CLEARANCE_READ_TIMEOUT_S,
-        confirmacoes=cfg.EXIT_CLEARANCE_NEAR_CONFIRMATIONS,
-        tamanho_historico=cfg.EXIT_CLEARANCE_VALID_READINGS,
-        janela_s=cfg.EXIT_CLEARANCE_TIMEOUT_S,
-        distancia_minima_mm=cfg.EXIT_CLEARANCE_MIN_VALID_MM,
-        distancia_maxima_mm=cfg.EXIT_CLEARANCE_MAX_VALID_MM,
-        distancia_bloqueio_rapido_mm=cfg.EXIT_CLEARANCE_DISTANCE_MM,
-    )
+    monitor = _novo_monitor_corredor_saida()
     monitor.cancelar(arduino)
 
     try:
+        # A primeira leitura logo depois do PARAR ainda pode carregar vibracao
+        # do chassi. Durante este curto assentamento apenas alimentamos o
+        # watchdog; nenhum eco e usado para autorizar a troca de camera.
+        assentado_em = relogio() + cfg.EXIT_CLEARANCE_SETTLE_S
+        while relogio() < assentado_em:
+            arduino.refresh(fail_closed=True)
+            if (
+                not arduino.connected
+                or arduino.connection_epoch != epoca_serial
+            ):
+                raise RuntimeError(
+                    "serial mudou enquanto o chassi assentava na saida")
+            dormir(min(0.01, max(assentado_em - relogio(), 0.0)))
+
+        prazo = relogio() + cfg.EXIT_CLEARANCE_TIMEOUT_S
         while relogio() < prazo:
             agora = relogio()
             monitor.atualizar(arduino, agora=agora)
@@ -746,35 +765,76 @@ def _validar_corredor_saida(
     )
 
 
-def _confirmar_saida_com_camera_linha(arduino, debug=False):
+def _confirmar_saida_com_camera_linha(
+    arduino,
+    debug=False,
+    recuo_base_s=0.0,
+):
     """Avanca e devolve PRETA, NAO_PRETA, INCONCLUSIVA ou None ao cancelar."""
     from controle.direcao import steer
     from visao.captura import LineCamera
 
     camera = None
+    monitor_corredor = None
     confirmador = ConfirmadorFaixaSaidaLinha()
     epoca_serial = arduino.connection_epoch
     inicio = time.monotonic()
     ultimo_log = 0.0
     ultimo_resumo = None
+    faixa_parada_em = None
+    avanco_camera_iniciado_em = None
+    tempo_avanco_camera_linha = 0.0
+    recuo_base_s = max(float(recuo_base_s), 0.0)
 
     try:
         steer()
         camera = LineCamera()
+        monitor_corredor = _novo_monitor_corredor_saida()
+        monitor_corredor.cancelar(arduino)
         print(
             "[saida] camera do segue-linha aberta; avancando devagar ate "
-            "a faixa entrar no quadro")
+            "a faixa entrar no quadro; ultrassonico continua ativo")
         if steer(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
             raise RuntimeError("nao foi possivel iniciar a aproximacao final")
+        avanco_camera_iniciado_em = time.monotonic()
 
         while True:
             frame = camera.get_frame()
             agora = time.monotonic()
-            decisao, resultado = confirmador.update(
-                frame,
-                timestamp=agora,
-                now=agora,
-            )
+            if faixa_parada_em is None:
+                # Durante o avanço só procuramos a presença da faixa. Votos
+                # feitos aqui seriam perigosos: prata/cinza distante pode
+                # parecer preta antes de o reflexo entrar no quadro.
+                resultado = confirmador.classificador.classificar(
+                    frame, timestamp=agora)
+                decisao = None
+                fase_confirmacao = "aproximando"
+                if resultado.faixa_presente:
+                    steer()
+                    faixa_parada_em = agora
+                    tempo_avanco_camera_linha = max(
+                        agora - avanco_camera_iniciado_em, 0.0)
+                    confirmador = ConfirmadorFaixaSaidaLinha()
+                    fase_confirmacao = "assentando"
+                    print(
+                        "[saida] faixa entrou no quadro; robo parado; "
+                        "zerando votos e aguardando a camera estabilizar")
+            elif (
+                agora - faixa_parada_em
+                < cfg.EXIT_LINE_VERIFY_SETTLE_S
+            ):
+                resultado = confirmador.classificador.classificar(
+                    frame, timestamp=agora)
+                decisao = None
+                fase_confirmacao = "assentando"
+            else:
+                decisao, resultado = confirmador.update(
+                    frame,
+                    timestamp=agora,
+                    now=agora,
+                )
+                fase_confirmacao = "confirmando parado"
+
             arduino.refresh(fail_closed=True)
             if (
                 not arduino.connected
@@ -783,19 +843,50 @@ def _confirmar_saida_com_camera_linha(arduino, debug=False):
                 raise RuntimeError(
                     "serial mudou durante a confirmacao preta/prata")
 
+            # A primeira validacao ocorreu antes de abrir esta camera, mas o
+            # robo voltou a avancar. Portanto o HC-SR04 continua sendo lido
+            # durante toda a aproximacao final. O bloqueio tem prioridade
+            # sobre qualquer voto visual preto.
+            monitor_corredor.atualizar(arduino, agora=agora)
+            if monitor_corredor.parada_confirmada:
+                if faixa_parada_em is None:
+                    tempo_avanco_camera_linha = max(
+                        agora - avanco_camera_iniciado_em, 0.0)
+                recuo_total_s = (
+                    recuo_base_s + tempo_avanco_camera_linha)
+                print(
+                    "[saida] BLOQUEIO ULTRASSONICO durante a camera de linha: "
+                    f"{monitor_corredor.distancia_confirmada_mm / 10.0:.1f} "
+                    f"cm; leituras="
+                    f"{list(monitor_corredor.distancias_validas)}; "
+                    f"recuando {recuo_total_s:.2f} s")
+                steer()
+                if recuo_total_s > 0.0:
+                    _mover_saida_por_tempo(
+                        arduino,
+                        steer,
+                        200,
+                        cfg.EXIT_CLEARANCE_REVERSE_SPEED,
+                        recuo_total_s,
+                        epoca_serial,
+                    )
+                steer()
+                return CORREDOR_BLOQUEADO
+
             resumo = (
+                fase_confirmacao,
                 resultado.classificacao,
                 confirmador.votos_pretos,
                 confirmador.votos_nao_pretos,
             )
             if resumo != ultimo_resumo and agora - ultimo_log >= 0.15:
                 print(
-                    "[saida] confirmando: "
+                    f"[saida] {fase_confirmacao}: "
                     f"{resultado.classificacao}; "
                     f"preta={confirmador.votos_pretos}/"
-                    f"{cfg.EXIT_LINE_VERIFY_VOTES} "
+                    f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} "
                     f"nao-preta={confirmador.votos_nao_pretos}/"
-                    f"{cfg.EXIT_LINE_VERIFY_VOTES} "
+                    f"{cfg.EXIT_LINE_VERIFY_SILVER_VOTES} "
                     f"textura={resultado.textura:.1f}")
                 ultimo_resumo = resumo
                 ultimo_log = agora
@@ -812,7 +903,8 @@ def _confirmar_saida_com_camera_linha(arduino, debug=False):
 
             if decisao == PRETA:
                 print(
-                    "[saida] faixa PRETA confirmada em 3 de 5 frames; "
+                    "[saida] faixa PRETA confirmada em 4 de 5 frames "
+                    "com o robo parado; "
                     "entrando no percurso")
                 _mover_saida_por_tempo(
                     arduino,
@@ -827,7 +919,7 @@ def _confirmar_saida_com_camera_linha(arduino, debug=False):
 
             if decisao == NAO_PRETA:
                 print(
-                    "[saida] faixa rejeitada: assinatura de PRATA; "
+                    "[saida] faixa CINZA/PRATA confirmada em 2 de 5 frames; "
                     "dando re e parando")
                 steer()
                 _mover_saida_por_tempo(
@@ -841,7 +933,11 @@ def _confirmar_saida_com_camera_linha(arduino, debug=False):
                 steer()
                 return NAO_PRETA
 
-            if agora - inicio >= cfg.EXIT_LINE_VERIFY_TIMEOUT_S:
+            inicio_prazo = (
+                inicio if faixa_parada_em is None
+                else faixa_parada_em + cfg.EXIT_LINE_VERIFY_SETTLE_S
+            )
+            if agora - inicio_prazo >= cfg.EXIT_LINE_VERIFY_TIMEOUT_S:
                 print(
                     "[saida] nao foi possivel confirmar preto no prazo; "
                     "dando re e parando por seguranca")
@@ -858,6 +954,8 @@ def _confirmar_saida_com_camera_linha(arduino, debug=False):
                 return INCONCLUSIVA
     finally:
         steer()
+        if monitor_corredor is not None:
+            monitor_corredor.cancelar(arduino)
         if camera is not None:
             camera.close()
 
@@ -2264,6 +2362,7 @@ def main():
                 resultado_verificacao = _confirmar_saida_com_camera_linha(
                     arduino,
                     debug=args.debug,
+                    recuo_base_s=tempo_avanco_saida,
                 )
                 frame_atual = None
                 deteccao_saida = None
@@ -2283,18 +2382,27 @@ def main():
                             "iniciado apos liberar camera e serial"),
                         terminal=True,
                     )
-                elif resultado_verificacao in (NAO_PRETA, INCONCLUSIVA):
-                    # A re de um segundo ja foi executada pela camera de linha.
+                elif resultado_verificacao in (
+                    NAO_PRETA,
+                    INCONCLUSIVA,
+                    CORREDOR_BLOQUEADO,
+                ):
+                    # A re ja foi executada antes de fechar a camera de linha.
                     # Fechada essa camera, a frontal de resgate pode reabrir
                     # com seguranca e voltar aos pulsos de procura.
-                    motivo = (
-                        "faixa prata"
-                        if resultado_verificacao == NAO_PRETA
-                        else "verificacao inconclusiva"
-                    )
+                    if resultado_verificacao == NAO_PRETA:
+                        motivo = "faixa prata; re de 1 segundo concluida"
+                    elif resultado_verificacao == CORREDOR_BLOQUEADO:
+                        motivo = (
+                            "parede abaixo de 15 cm; todo o avanco foi "
+                            "desfeito")
+                    else:
+                        motivo = (
+                            "verificacao inconclusiva; re de 1 segundo "
+                            "concluida")
                     print(
-                        f"[saida] {motivo}; re de 1 segundo concluida; "
-                        "reabrindo a camera de resgate para continuar a busca")
+                        f"[saida] {motivo}; reabrindo a camera de resgate "
+                        "para continuar a busca")
                     from visao.captura_resgate import RescueCamera
 
                     fonte = RescueCamera(args.camera_index)

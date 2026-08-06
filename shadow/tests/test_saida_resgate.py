@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import sys
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -12,6 +13,7 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import config_resgate as cfg  # noqa: E402
+import resgate as resgate_runtime  # noqa: E402
 from controle.saida_resgate import ExitPhaseController  # noqa: E402
 from resgate import (  # noqa: E402
     CORREDOR_BLOQUEADO,
@@ -19,6 +21,7 @@ from resgate import (  # noqa: E402
     CORREDOR_LIVRE,
     _validar_corredor_saida,
 )
+from tests.test_confirmacao_saida_linha import cena_prata  # noqa: E402
 from visao.triangulos_finais import (  # noqa: E402
     annotate_final_triangles,
     dominant_channel,
@@ -246,11 +249,12 @@ class ExitClearanceTests(unittest.TestCase):
             dormir=clock.sleep,
         )
 
-    def test_tres_medidas_acima_de_15_cm_liberam_camera_de_linha(self):
-        state, distance, readings = self._validate([210, 190, 180])
+    def test_cinco_medidas_acima_de_15_cm_liberam_camera_de_linha(self):
+        state, distance, readings = self._validate(
+            [210, 190, 180, 205, 195])
         self.assertEqual(state, CORREDOR_LIVRE)
         self.assertEqual(distance, 180)
-        self.assertEqual(readings, (210, 190, 180))
+        self.assertEqual(readings, (210, 190, 180, 205, 195))
 
     def test_duas_medidas_em_15_cm_bloqueiam_a_tentativa(self):
         state, distance, readings = self._validate([143, 260, 148])
@@ -269,6 +273,130 @@ class ExitClearanceTests(unittest.TestCase):
         self.assertEqual(state, CORREDOR_INCONCLUSIVO)
         self.assertIsNone(distance)
         self.assertEqual(readings, ())
+
+
+class SilverStripeRuntimeTests(unittest.TestCase):
+    class Arduino:
+        def __init__(self, readings=None):
+            self.connected = True
+            self.connection_epoch = 1
+            self.readings = list(
+                [300] * 20 if readings is None else readings)
+            self.ultrasonic_active = False
+
+        def refresh(self, fail_closed=True):
+            return True
+
+        def cancelar_ultrassom(self):
+            self.ultrasonic_active = False
+
+        def iniciar_ultrassom(self, timeout):
+            if self.ultrasonic_active:
+                return False
+            self.ultrasonic_active = True
+            return True
+
+        def poll_ultrassom(self):
+            if not self.ultrasonic_active:
+                return False, None
+            self.ultrasonic_active = False
+            if not self.readings:
+                return True, None
+            return True, self.readings.pop(0)
+
+    class Camera:
+        def __init__(self, clock):
+            self.clock = clock
+            self.closed = False
+
+        def get_frame(self):
+            self.clock.sleep(0.10)
+            return cena_prata()
+
+        def close(self):
+            self.closed = True
+
+    def test_cinza_para_estabiliza_e_da_re_sem_entrar_no_segue_linha(self):
+        clock = FakeClock()
+        camera = self.Camera(clock)
+        commands = []
+
+        def fake_steer(angle=190.0, speed=0.8, **_kwargs):
+            commands.append((angle, speed))
+            return True
+
+        with (
+            patch.object(
+                resgate_runtime.time, "monotonic", side_effect=clock),
+            patch.object(
+                resgate_runtime.time, "sleep", side_effect=clock.sleep),
+            patch("controle.direcao.steer", side_effect=fake_steer),
+            patch("visao.captura.LineCamera", return_value=camera),
+        ):
+            resultado = resgate_runtime._confirmar_saida_com_camera_linha(
+                self.Arduino(),
+                debug=False,
+            )
+
+        self.assertEqual(resultado, resgate_runtime.NAO_PRETA)
+        self.assertTrue(camera.closed)
+        self.assertIn(
+            (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED),
+            commands,
+        )
+        self.assertNotIn(
+            (0, cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED),
+            commands,
+        )
+
+    def test_parede_durante_camera_de_linha_desfaz_todo_avanco(self):
+        clock = FakeClock()
+        camera = self.Camera(clock)
+        arduino = self.Arduino([120, 110, 105])
+        commands = []
+        reverse_durations = []
+
+        def fake_steer(angle=190.0, speed=0.8, **_kwargs):
+            commands.append((angle, speed))
+            return True
+
+        def fake_move(
+            _arduino,
+            _acao,
+            angle,
+            _speed,
+            duration,
+            _epoch,
+        ):
+            self.assertEqual(angle, 200)
+            reverse_durations.append(duration)
+
+        with (
+            patch.object(
+                resgate_runtime.time, "monotonic", side_effect=clock),
+            patch.object(
+                resgate_runtime.time, "sleep", side_effect=clock.sleep),
+            patch("controle.direcao.steer", side_effect=fake_steer),
+            patch("visao.captura.LineCamera", return_value=camera),
+            patch.object(
+                resgate_runtime,
+                "_mover_saida_por_tempo",
+                side_effect=fake_move,
+            ),
+        ):
+            resultado = resgate_runtime._confirmar_saida_com_camera_linha(
+                arduino,
+                debug=False,
+                recuo_base_s=0.60,
+            )
+
+        self.assertEqual(resultado, resgate_runtime.CORREDOR_BLOQUEADO)
+        self.assertEqual(len(reverse_durations), 1)
+        self.assertGreater(reverse_durations[0], 0.60)
+        self.assertNotIn(
+            (0, cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED),
+            commands,
+        )
 
 
 class OverlayColorTests(unittest.TestCase):

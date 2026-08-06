@@ -563,9 +563,10 @@ EXIT_ADVANCE_TIMEOUT_S = 3.5
 # livres sao obrigatorias. Duas medidas proximas confirmam o bloqueio; medida
 # sem eco ou resultado misturado nunca autoriza a troca de camera.
 EXIT_CLEARANCE_DISTANCE_MM = 150
-EXIT_CLEARANCE_VALID_READINGS = 3
+EXIT_CLEARANCE_VALID_READINGS = 5
 EXIT_CLEARANCE_NEAR_CONFIRMATIONS = 2
-EXIT_CLEARANCE_TIMEOUT_S = 0.90
+EXIT_CLEARANCE_SETTLE_S = 0.20
+EXIT_CLEARANCE_TIMEOUT_S = 1.20
 EXIT_CLEARANCE_READ_TIMEOUT_S = 0.08
 EXIT_CLEARANCE_SAMPLE_INTERVAL_S = 0.06
 EXIT_CLEARANCE_MIN_VALID_MM = 1
@@ -587,12 +588,16 @@ EXIT_ALIGN_SPEED = 0.26
 
 # Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
 # aproxima ate deixar de enxergar a soleira. So entao a camera de linha abre e
-# o robo avanca devagar. A decisao exige 3 de 5 frames: um reflexo isolado
-# nunca autoriza a volta ao percurso.
+# o robo avanca devagar. Ao primeiro sinal da faixa ele PARA, espera a
+# autoexposicao assentar e zera os votos. Cinza/prata precisa de apenas dois
+# votos para bloquear; preto precisa de quatro. Assim uma prata escura vista
+# de longe nunca vence a votacao antes de seus reflexos aparecerem.
 EXIT_LINE_VERIFY_SPEED = 0.35
 EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
-EXIT_LINE_VERIFY_VOTES = 3
 EXIT_LINE_VERIFY_WINDOW = 5
+EXIT_LINE_VERIFY_SETTLE_S = 0.25
+EXIT_LINE_VERIFY_BLACK_VOTES = 4
+EXIT_LINE_VERIFY_SILVER_VOTES = 2
 EXIT_LINE_VERIFY_MAX_AGE_S = 0.35
 EXIT_LINE_VERIFY_EDGE_MIN = 18
 EXIT_LINE_VERIFY_EDGE_FILL = 0.48

@@ -10,8 +10,9 @@ As duas evidencias usadas sao independentes:
 * aparencia: preto e escuro e quase liso, enquanto prata tem reflexos e
   textura forte.
 
-Um unico frame nunca decide. O confirmador exige tres votos em cinco imagens
-novas para evitar que um reflexo isolado mande o robo para fora da sala.
+Um unico frame nunca decide. Como o erro perigoso e aceitar prata como preta,
+a votacao e conservadora: dois votos de prata bloqueiam a saida, enquanto
+preto exige quatro votos dentro das cinco imagens novas.
 """
 
 from collections import deque
@@ -246,9 +247,12 @@ class ConfirmadorFaixaSaidaLinha:
             return None, resultado
 
         self._votos.append(resultado.classificacao)
-        if self.votos_pretos >= cfg.EXIT_LINE_VERIFY_VOTES:
+        if self.votos_pretos >= cfg.EXIT_LINE_VERIFY_BLACK_VOTES:
             self._decisao = PRETA
-        elif self.votos_nao_pretos >= cfg.EXIT_LINE_VERIFY_VOTES:
+        elif (
+            self.votos_nao_pretos
+            >= cfg.EXIT_LINE_VERIFY_SILVER_VOTES
+        ):
             self._decisao = NAO_PRETA
         return self._decisao, resultado
 
