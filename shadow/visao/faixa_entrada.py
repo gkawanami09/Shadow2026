@@ -394,7 +394,7 @@ class EntrySilverDetector:
 class EntrySilverGate:
     """Detector + votação temporal. É esta classe que a missão consulta."""
 
-    def __init__(self, detector=None, confirmer=None):
+    def __init__(self, detector=None, confirmer=None, weak_confirmer=None):
         self.detector = (
             EntrySilverDetector() if detector is None else detector)
         self.confirmer = (
@@ -406,19 +406,29 @@ class EntrySilverGate:
             )
             if confirmer is None else confirmer
         )
+        self.weak_confirmer = (
+            StripeConfirmer(
+                votes_needed=config.ENTRY_SILVER_WEAK_VOTES_NEEDED,
+                window=config.ENTRY_SILVER_WEAK_VOTE_WINDOW,
+                max_age_s=config.ENTRY_SILVER_MAX_AGE_S,
+                cooldown_s=config.ENTRY_SILVER_COOLDOWN_S,
+            )
+            if weak_confirmer is None else weak_confirmer
+        )
         self.last_detection = None
 
     @property
     def confirmed(self):
-        return self.confirmer.confirmed
+        return self.confirmer.confirmed or self.weak_confirmer.confirmed
 
     @property
     def votes(self):
-        return self.confirmer.votes
+        return max(self.confirmer.votes, self.weak_confirmer.votes)
 
     def reset(self, now=None):
         """Desarma e inicia o cooldown — usado ao voltar ao segue-linha."""
         self.confirmer.reset(now=now)
+        self.weak_confirmer.reset(now=now)
         self.last_detection = None
 
     def update(self, frame_bgr, line_ahead=None, timestamp=None, now=None,
@@ -444,4 +454,14 @@ class EntrySilverGate:
             timestamp=0.0 if timestamp is None else timestamp,
             now=now,
         )
-        return confirmed, detection
+        motivo = str(getattr(self.detector, "last_reason", ""))
+        evidencia_fraca = (
+            detection is not None
+            or motivo in ("fina", "confianca")
+        )
+        weak_confirmed = self.weak_confirmer.update(
+            evidencia_fraca,
+            timestamp=0.0 if timestamp is None else timestamp,
+            now=now,
+        )
+        return bool(confirmed or weak_confirmed), detection

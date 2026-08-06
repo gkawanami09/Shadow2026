@@ -325,6 +325,11 @@ ENTRY_SILVER_REQUIRE_LINE_END = True
 # reflexo isolado, mas não deixam o robô preso diante da entrada verdadeira.
 ENTRY_SILVER_VOTES_NEEDED = 2
 ENTRY_SILVER_VOTE_WINDOW = 3
+# Evidência fraca ainda precisa repetir em dois frames. Ela aceita somente
+# uma faixa transversal que falhou por estar distante/fina ou por confiança
+# visual baixa; piso, esfera e reflexo pontual continuam fora.
+ENTRY_SILVER_WEAK_VOTES_NEEDED = 2
+ENTRY_SILVER_WEAK_VOTE_WINDOW = 3
 ENTRY_SILVER_MAX_AGE_S = .35
 # Depois de sair da sala o robô volta a ver prata; o cooldown impede
 # reentrada imediata na mesma faixa.

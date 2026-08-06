@@ -364,6 +364,57 @@ class BlackExitGateTests(unittest.TestCase):
         self.assertIsNone(detection)
         self.assertTrue(gate.track_locked)
 
+    def test_depois_do_lock_segunda_leitura_sensivel_recupera_a_faixa(self):
+        class DetectorRigido:
+            def __init__(self):
+                self.chamadas = 0
+
+            def detect(self, _frame, timestamp=None):
+                self.chamadas += 1
+                if self.chamadas > 2:
+                    return None
+                return SimpleNamespace(
+                    center_x=320.0,
+                    center_y=390.0,
+                    span_ratio=0.65,
+                    timestamp=timestamp,
+                )
+
+        class DetectorSensivel:
+            def __init__(self):
+                self.chamadas = 0
+
+            def detect(self, _frame, timestamp=None):
+                self.chamadas += 1
+                return SimpleNamespace(
+                    center_x=328.0,
+                    center_y=392.0,
+                    span_ratio=0.62,
+                    timestamp=timestamp,
+                )
+
+        sensivel = DetectorSensivel()
+        gate = BlackExitGate(
+            detector=DetectorRigido(),
+            locked_detector=sensivel,
+            confirmer=StripeConfirmer(
+                votes_needed=2,
+                window=3,
+                max_age_s=cfg.BALL_FRAME_STALE_S,
+            ),
+        )
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 185)
+        gate.update(frame, timestamp=1.00, now=1.00)
+        gate.update(frame, timestamp=1.05, now=1.05)
+        confirmed, detection = gate.update(
+            frame, timestamp=1.10, now=1.10)
+
+        self.assertTrue(confirmed)
+        self.assertTrue(gate.track_locked)
+        self.assertEqual(sensivel.chamadas, 1)
+        self.assertIsNotNone(detection)
+        self.assertEqual(detection.center_x, 328.0)
+
 
 if __name__ == "__main__":
     unittest.main()

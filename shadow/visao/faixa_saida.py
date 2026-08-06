@@ -83,12 +83,33 @@ def _clip01(value):
 class BlackExitDetector:
     """Encontra a soleira preta de saída em um frame da câmera de resgate."""
 
-    def __init__(self, hsv_min=None, hsv_max=None, geometry=None):
+    def __init__(
+        self,
+        hsv_min=None,
+        hsv_max=None,
+        geometry=None,
+        max_inside_value=None,
+        min_surround_contrast=None,
+        min_confidence=None,
+    ):
         self.hsv_min = tuple(
             cfg.EXIT_BLACK_HSV_MIN if hsv_min is None else hsv_min)
         self.hsv_max = tuple(
             cfg.EXIT_BLACK_HSV_MAX if hsv_max is None else hsv_max)
         self.geometry = default_geometry() if geometry is None else geometry
+        self.max_inside_value = (
+            cfg.EXIT_BLACK_MAX_INSIDE_VALUE
+            if max_inside_value is None else float(max_inside_value)
+        )
+        self.min_surround_contrast = (
+            cfg.EXIT_BLACK_MIN_SURROUND_CONTRAST
+            if min_surround_contrast is None
+            else float(min_surround_contrast)
+        )
+        self.min_confidence = (
+            cfg.EXIT_BLACK_MIN_CONFIDENCE
+            if min_confidence is None else float(min_confidence)
+        )
         self.last_reason = "inicio"
         self.last_mask = None
         self.last_band = None
@@ -143,17 +164,17 @@ class BlackExitDetector:
             return None
 
         inside_value = float(np.median(value[inside]))
-        if inside_value > cfg.EXIT_BLACK_MAX_INSIDE_VALUE:
+        if inside_value > self.max_inside_value:
             self.last_reason = "clara"
             return None
 
         surround_contrast = self._surround_contrast(value, band, inside_value)
-        if surround_contrast < cfg.EXIT_BLACK_MIN_SURROUND_CONTRAST:
+        if surround_contrast < self.min_surround_contrast:
             self.last_reason = "sem_contraste"
             return None
 
         confidence = self._confidence(band, inside_value, surround_contrast)
-        if confidence < cfg.EXIT_BLACK_MIN_CONFIDENCE:
+        if confidence < self.min_confidence:
             self.last_reason = "confianca"
             return None
 
@@ -577,8 +598,38 @@ class BlackExitDetector:
 class BlackExitGate:
     """Detector + votação temporal da soleira de saída."""
 
-    def __init__(self, detector=None, confirmer=None, max_age_s=None):
+    def __init__(
+        self,
+        detector=None,
+        confirmer=None,
+        max_age_s=None,
+        locked_detector=None,
+    ):
         self.detector = BlackExitDetector() if detector is None else detector
+        if locked_detector is not None:
+            self.locked_detector = locked_detector
+        elif detector is None:
+            self.locked_detector = BlackExitDetector(
+                hsv_max=cfg.EXIT_BLACK_LOCK_HSV_MAX,
+                geometry=BandGeometry(
+                    min_row_fill=cfg.EXIT_BLACK_LOCK_MIN_ROW_FILL,
+                    min_span_ratio=cfg.EXIT_BLACK_LOCK_MIN_SPAN_RATIO,
+                    max_span_ratio=cfg.EXIT_BLACK_MAX_SPAN_RATIO,
+                    min_thickness_ratio=(
+                        cfg.EXIT_BLACK_LOCK_MIN_THICKNESS_RATIO),
+                    max_thickness_ratio=(
+                        cfg.EXIT_BLACK_LOCK_MAX_THICKNESS_RATIO),
+                    min_fill_ratio=cfg.EXIT_BLACK_LOCK_MIN_FILL_RATIO,
+                    min_aspect=cfg.EXIT_BLACK_LOCK_MIN_ASPECT,
+                ),
+                max_inside_value=cfg.EXIT_BLACK_LOCK_MAX_INSIDE_VALUE,
+                min_surround_contrast=(
+                    cfg.EXIT_BLACK_LOCK_MIN_SURROUND_CONTRAST),
+                min_confidence=cfg.EXIT_BLACK_LOCK_MIN_CONFIDENCE,
+            )
+        else:
+            # Detectores falsos/externos mantêm a assinatura antiga.
+            self.locked_detector = self.detector
         self.confirmer = (
             StripeConfirmer(
                 votes_needed=cfg.EXIT_BLACK_VOTES_NEEDED,
@@ -626,6 +677,15 @@ class BlackExitGate:
 
     def update(self, frame_bgr, timestamp=None, now=None):
         detection = self.detector.detect(frame_bgr, timestamp=timestamp)
+        if (
+            detection is None
+            and self.track_locked
+            and self.locked_detector is not self.detector
+        ):
+            detection = self.locked_detector.detect(
+                self._locked_search_frame(frame_bgr),
+                timestamp=timestamp,
+            )
         current_reference = None
         if detection is not None:
             height, width = frame_bgr.shape[:2]
@@ -695,3 +755,21 @@ class BlackExitGate:
             and abs(reference[2] - current[2])
             <= cfg.EXIT_BLACK_LOCK_MAX_SPAN_DRIFT_RATIO
         )
+
+    def _locked_search_frame(self, frame_bgr):
+        """Apaga tudo fora da vizinhança da soleira já travada."""
+        height, width = frame_bgr.shape[:2]
+        center_x = self._locked_reference[0] * width
+        center_y = self._locked_reference[1] * height
+        margin_x = max(
+            cfg.EXIT_BLACK_LOCK_SEARCH_X_MARGIN_RATIO * width,
+            self._locked_reference[2] * width,
+        )
+        margin_y = cfg.EXIT_BLACK_LOCK_SEARCH_Y_MARGIN_RATIO * height
+        left = max(int(round(center_x - margin_x)), 0)
+        right = min(int(round(center_x + margin_x)), width)
+        top = max(int(round(center_y - margin_y)), 0)
+        bottom = min(int(round(center_y + margin_y)), height)
+        limitado = np.full_like(frame_bgr, 255)
+        limitado[top:bottom, left:right] = frame_bgr[top:bottom, left:right]
+        return limitado

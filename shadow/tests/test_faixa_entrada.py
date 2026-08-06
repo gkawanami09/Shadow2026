@@ -198,6 +198,45 @@ class EntrySilverGateTests(unittest.TestCase):
                 frame, line_ahead=False, timestamp=timestamp, now=timestamp)
         self.assertFalse(confirmed)
 
+    def test_duas_faixas_finas_confirmam_entrada_sem_apenas_reduzir(self):
+        class DetectorFraco:
+            last_reason = "fina"
+
+            def detect(self, *_args, **_kwargs):
+                self.last_reason = "fina"
+                return None
+
+        gate = EntrySilverGate(detector=DetectorFraco())
+        frame = cs.piso_neutro()
+        primeiro, _ = gate.update(
+            frame, line_ahead=True, timestamp=1.00, now=1.00)
+        segundo, _ = gate.update(
+            frame, line_ahead=True, timestamp=1.05, now=1.05)
+
+        self.assertFalse(primeiro)
+        self.assertTrue(segundo)
+        self.assertTrue(gate.confirmed)
+
+    def test_rejeicao_sem_contraste_nao_usa_confirmacao_fraca(self):
+        class DetectorSemContraste:
+            last_reason = "sem_contraste"
+
+            def detect(self, *_args, **_kwargs):
+                return None
+
+        gate = EntrySilverGate(detector=DetectorSemContraste())
+        frame = cs.piso_neutro()
+        confirmed = False
+        for index in range(4):
+            instante = 1.0 + index * 0.05
+            confirmed, _ = gate.update(
+                frame,
+                line_ahead=False,
+                timestamp=instante,
+                now=instante,
+            )
+        self.assertFalse(confirmed)
+
     def test_cooldown_impede_reentrada_imediata(self):
         gate = self._gate(cooldown=8.0)
         frame = cs.faixa_prata()
