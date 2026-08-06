@@ -577,8 +577,8 @@ EXIT_CLEARANCE_MAX_VALID_MM = 4000
 EXIT_CLEARANCE_REVERSE_SPEED = EXIT_ADVANCE_SPEED
 # Quando o ultrassonico veta um candidato visto pela camera de resgate, um
 # recuo curto e um pequeno giro mudam o ponto de vista antes da nova busca.
-EXIT_CLEARANCE_BLOCKED_REVERSE_S = 0.50
-EXIT_CLEARANCE_ESCAPE_TURN_S = 0.30
+EXIT_CLEARANCE_BLOCKED_REVERSE_S = 0.30
+EXIT_CLEARANCE_ESCAPE_TURN_S = 0.50
 
 # Giro pulsado de procura da saida quando nenhuma faixa esta no campo.
 EXIT_SEARCH_TIMEOUT_S = 60.0
@@ -603,6 +603,11 @@ EXIT_LINE_VERIFY_SPEED = 0.35
 EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
 EXIT_LINE_VERIFY_WINDOW = 5
 EXIT_LINE_VERIFY_SETTLE_S = 0.25
+# Antes de votar preto/prata, a faixa precisa chegar ao meio da imagem da
+# camera de linha. Se passar do centro, o mesmo PWM baixo corrige em re.
+EXIT_LINE_VERIFY_CENTER_Y_RATIO = 0.50
+EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE = 0.10
+EXIT_LINE_VERIFY_CENTER_SPEED = 0.25
 EXIT_LINE_VERIFY_BLACK_VOTES = 4
 EXIT_LINE_VERIFY_SILVER_VOTES = 2
 EXIT_LINE_VERIFY_MAX_AGE_S = 0.35
@@ -616,9 +621,15 @@ EXIT_LINE_VERIFY_DARK_MIN_HEIGHT_RATIO = 0.05
 # 13-21 depois da normalizacao para 448x252. A zona 9.5..11.5 permanece
 # inconclusiva em vez de arriscar classificar prata como preta.
 EXIT_LINE_VERIFY_BLACK_TEXTURE_MAX = 9.5
+# A janela local acompanha a faixa e pode incluir a propria borda. Por isso
+# recebe uma folga pequena; preto ainda exige que a janela global seja lisa.
+EXIT_LINE_VERIFY_BLACK_LOCAL_TEXTURE_MAX = 11.0
 EXIT_LINE_VERIFY_SILVER_TEXTURE_MIN = 11.5
 EXIT_LINE_VERIFY_TEXTURE_ROI_TOP = 0.15
 EXIT_LINE_VERIFY_TEXTURE_ROI_BOTTOM = 0.75
+# Depois de centralizar, a textura e medida a partir da borda da propria
+# faixa, nao mais em uma janela fixa que podia ficar acima dela.
+EXIT_LINE_VERIFY_TEXTURE_BAND_HEIGHT_RATIO = 0.35
 EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED = 0.35
 EXIT_LINE_VERIFY_REJECT_REVERSE_S = 1.0
 EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED = 0.40

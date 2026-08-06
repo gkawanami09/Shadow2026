@@ -77,6 +77,8 @@ from visao.confirmacao_saida_linha import (  # noqa: E402
     PRETA,
     ConfirmadorFaixaSaidaLinha,
     anotar_confirmacao,
+    faixa_centralizada,
+    posicao_vertical_faixa,
 )
 from visao.faixa_saida import BlackExitGate  # noqa: E402
 from visao.marcador_resgate import (  # noqa: E402
@@ -793,7 +795,7 @@ def _confirmar_saida_com_camera_linha(
     debug=False,
     recuo_base_s=0.0,
 ):
-    """Avanca e devolve PRETA, NAO_PRETA, INCONCLUSIVA ou None ao cancelar."""
+    """Centraliza, confirma e devolve PRETA, NAO_PRETA ou INCONCLUSIVA."""
     from controle.direcao import steer
     from visao.captura import LineCamera
 
@@ -816,7 +818,7 @@ def _confirmar_saida_com_camera_linha(
         monitor_corredor.cancelar(arduino)
         print(
             "[saida] camera do segue-linha aberta; avancando devagar ate "
-            "a faixa entrar no quadro; ultrassonico continua ativo")
+            "a faixa ficar no centro; ultrassonico continua ativo")
         if steer(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
             raise RuntimeError("nao foi possivel iniciar a aproximacao final")
         avanco_camera_iniciado_em = time.monotonic()
@@ -831,17 +833,41 @@ def _confirmar_saida_com_camera_linha(
                 resultado = confirmador.classificador.classificar(
                     frame, timestamp=agora)
                 decisao = None
-                fase_confirmacao = "aproximando"
+                fase_confirmacao = "procurando centro"
                 if resultado.faixa_presente:
-                    steer()
-                    faixa_parada_em = agora
-                    tempo_avanco_camera_linha = max(
-                        agora - avanco_camera_iniciado_em, 0.0)
-                    confirmador = ConfirmadorFaixaSaidaLinha()
-                    fase_confirmacao = "assentando"
-                    print(
-                        "[saida] faixa entrou no quadro; robo parado; "
-                        "zerando votos e aguardando a camera estabilizar")
+                    posicao_faixa = posicao_vertical_faixa(resultado)
+                    if faixa_centralizada(resultado):
+                        steer()
+                        faixa_parada_em = agora
+                        tempo_avanco_camera_linha = max(
+                            agora - avanco_camera_iniciado_em, 0.0)
+                        confirmador = ConfirmadorFaixaSaidaLinha()
+                        fase_confirmacao = "assentando"
+                        print(
+                            "[saida] faixa centralizada na camera; "
+                            "robo parado; zerando votos e aguardando "
+                            "a camera estabilizar")
+                    elif (
+                        posicao_faixa is not None
+                        and posicao_faixa
+                        > (
+                            cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO
+                            + cfg.EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE
+                        )
+                    ):
+                        steer(
+                            200,
+                            cfg.EXIT_LINE_VERIFY_CENTER_SPEED,
+                        )
+                        fase_confirmacao = (
+                            f"corrigindo centro em re ({posicao_faixa:.0%})")
+                    else:
+                        steer(0, cfg.EXIT_LINE_VERIFY_SPEED)
+                        fase_confirmacao = (
+                            "levando faixa ao centro"
+                            if posicao_faixa is None
+                            else f"levando ao centro ({posicao_faixa:.0%})"
+                        )
             elif (
                 agora - faixa_parada_em
                 < cfg.EXIT_LINE_VERIFY_SETTLE_S
@@ -926,8 +952,8 @@ def _confirmar_saida_com_camera_linha(
 
             if decisao == PRETA:
                 print(
-                    "[saida] faixa PRETA confirmada em 4 de 5 frames "
-                    "com o robo parado; "
+                    "[saida] faixa PRETA centralizada e confirmada em "
+                    "4 de 5 frames com o robo parado; "
                     "entrando no percurso")
                 _mover_saida_por_tempo(
                     arduino,

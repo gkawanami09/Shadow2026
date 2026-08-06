@@ -290,7 +290,7 @@ class ExitClearanceTests(unittest.TestCase):
         self.assertIsNone(distance)
         self.assertEqual(readings, ())
 
-    def test_bloqueio_recua_500ms_e_gira_antes_de_recomecar(self):
+    def test_bloqueio_recua_300ms_e_gira_500ms_antes_de_recomecar(self):
         movimentos = []
         paradas = []
 
@@ -320,7 +320,7 @@ class ExitClearanceTests(unittest.TestCase):
                 (
                     200,
                     cfg.EXIT_CLEARANCE_REVERSE_SPEED,
-                    0.50,
+                    0.30,
                     7,
                 ),
                 (
@@ -370,7 +370,14 @@ class SilverStripeRuntimeTests(unittest.TestCase):
 
         def get_frame(self):
             self.clock.sleep(0.10)
-            return cena_prata()
+            frame = cena_prata()
+            # Primeiro a faixa aparece alta. No quadro seguinte, o avanco a
+            # trouxe ao centro e so entao a votacao pode comecar.
+            if self.clock.now <= 0.10:
+                return frame
+            deslocado = np.full_like(frame, 205)
+            deslocado[50:] = frame[:-50]
+            return deslocado
 
         def close(self):
             self.closed = True

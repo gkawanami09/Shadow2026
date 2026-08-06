@@ -63,6 +63,29 @@ def _maior_sequencia(flags):
     return melhor_inicio, melhor_fim
 
 
+def posicao_vertical_faixa(resultado):
+    """Centro vertical normalizado da faixa encontrada, ou ``None``."""
+    if resultado is None or not resultado.faixa_presente:
+        return None
+    _x, y, _w, h = resultado.bbox
+    if h <= 0:
+        return None
+    return float(
+        (float(y) + float(h) / 2.0)
+        / max(float(config.camera_y), 1.0)
+    )
+
+
+def faixa_centralizada(resultado):
+    """A faixa ja esta no centro util para comparar preto com prata?"""
+    posicao = posicao_vertical_faixa(resultado)
+    return (
+        posicao is not None
+        and abs(posicao - cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO)
+        <= cfg.EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE
+    )
+
+
 class ClassificadorFaixaSaidaLinha:
     """Diferencia a faixa preta da prata no ponto final da aproximacao."""
 
@@ -92,13 +115,13 @@ class ClassificadorFaixaSaidaLinha:
         maximo = cv2.dilate(valor, kernel)
         minimo = cv2.erode(valor, kernel)
         variacao_local = cv2.subtract(maximo, minimo)
-
-        topo_textura = int(round(
+        topo_textura_global = int(round(
             altura * cfg.EXIT_LINE_VERIFY_TEXTURE_ROI_TOP))
-        base_textura = int(round(
+        base_textura_global = int(round(
             altura * cfg.EXIT_LINE_VERIFY_TEXTURE_ROI_BOTTOM))
-        roi_textura = variacao_local[topo_textura:base_textura, :]
-        textura = float(np.median(roi_textura))
+        roi_textura_global = variacao_local[
+            topo_textura_global:base_textura_global, :]
+        textura_global = float(np.median(roi_textura_global))
 
         # Uma fronteira horizontal extensa mostra que a soleira entrou no
         # quadro. A diferenca usa duas linhas de distancia para nao depender
@@ -119,6 +142,25 @@ class ClassificadorFaixaSaidaLinha:
         else:
             indice_borda = altura // 2
             preenchimento_borda = 0.0
+
+        # Mede a aparencia logo depois da borda transversal encontrada. Isso
+        # acompanha a faixa quando o robo a leva ao centro da imagem. A janela
+        # fixa anterior podia ficar acima da prata e medir apenas piso liso.
+        base_textura = min(
+            indice_borda + max(
+                int(round(
+                    altura * cfg.EXIT_LINE_VERIFY_TEXTURE_BAND_HEIGHT_RATIO
+                )),
+                1,
+            ),
+            altura,
+        )
+        roi_textura = variacao_local[indice_borda:base_textura, :]
+        textura_faixa = (
+            float(np.median(roi_textura))
+            if roi_textura.size else 0.0
+        )
+        textura = max(textura_global, textura_faixa)
 
         # A faixa preta real das fotos ocupa varias linhas vizinhas. Exigir
         # baixa variacao local elimina a prata que ficou escura por reflexo.
@@ -143,11 +185,23 @@ class ClassificadorFaixaSaidaLinha:
             faixa_presente
             and altura_preta_ratio
             >= cfg.EXIT_LINE_VERIFY_DARK_MIN_HEIGHT_RATIO
-            and textura <= cfg.EXIT_LINE_VERIFY_BLACK_TEXTURE_MAX
+            and textura_global <= cfg.EXIT_LINE_VERIFY_BLACK_TEXTURE_MAX
+            and textura_faixa
+            <= cfg.EXIT_LINE_VERIFY_BLACK_LOCAL_TEXTURE_MAX
         )
         prata = bool(
             faixa_presente
-            and textura >= cfg.EXIT_LINE_VERIFY_SILVER_TEXTURE_MIN
+            and (
+                textura_global >= cfg.EXIT_LINE_VERIFY_SILVER_TEXTURE_MIN
+                or textura_faixa >= cfg.EXIT_LINE_VERIFY_SILVER_TEXTURE_MIN
+            )
+        )
+        margem_borda = max(int(round(altura * 0.08)), 1)
+        bbox_borda = (
+            0,
+            max(indice_borda - margem_borda, 0),
+            largura,
+            min(margem_borda * 2 + 1, altura),
         )
 
         if preta:
@@ -177,18 +231,12 @@ class ClassificadorFaixaSaidaLinha:
                 0.0,
                 1.0,
             ))
-            margem = max(int(round(altura * 0.08)), 1)
-            bbox = (
-                0,
-                max(indice_borda - margem, 0),
-                largura,
-                min(margem * 2 + 1, altura),
-            )
+            bbox = bbox_borda
             self.last_reason = "reflexiva_texturizada"
         else:
             classificacao = INCONCLUSIVA
             confianca = 0.0
-            bbox = (0, 0, 0, 0)
+            bbox = bbox_borda if faixa_presente else (0, 0, 0, 0)
             self.last_reason = (
                 "sem_faixa" if not faixa_presente else "zona_inconclusiva")
 
@@ -266,6 +314,25 @@ def anotar_confirmacao(frame_bgr, resultado, decisao=None):
     if w > 0 and h > 0:
         cor = (0, 255, 0) if resultado.classificacao == PRETA else (0, 0, 255)
         cv2.rectangle(canvas, (x, y), (x + w - 1, y + h - 1), cor, 2)
+    altura, largura = canvas.shape[:2]
+    alvo = int(round(
+        altura * cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO))
+    tolerancia = int(round(
+        altura * cfg.EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE))
+    cv2.line(
+        canvas,
+        (0, max(alvo - tolerancia, 0)),
+        (largura - 1, max(alvo - tolerancia, 0)),
+        (255, 255, 0),
+        1,
+    )
+    cv2.line(
+        canvas,
+        (0, min(alvo + tolerancia, altura - 1)),
+        (largura - 1, min(alvo + tolerancia, altura - 1)),
+        (255, 255, 0),
+        1,
+    )
     texto = (
         f"saida={decisao or resultado.classificacao} "
         f"textura={resultado.textura:.1f} "

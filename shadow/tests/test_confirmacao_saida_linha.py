@@ -17,6 +17,8 @@ from visao.confirmacao_saida_linha import (  # noqa: E402
     PRETA,
     ClassificadorFaixaSaidaLinha,
     ConfirmadorFaixaSaidaLinha,
+    faixa_centralizada,
+    posicao_vertical_faixa,
 )
 
 
@@ -54,6 +56,17 @@ class ClassificadorTests(unittest.TestCase):
         resultado = ClassificadorFaixaSaidaLinha().classificar(vazio)
         self.assertEqual(resultado.classificacao, INCONCLUSIVA)
         self.assertFalse(resultado.faixa_presente)
+
+    def test_preto_no_meio_da_tela_esta_centralizado(self):
+        resultado = ClassificadorFaixaSaidaLinha().classificar(cena_preta())
+        self.assertAlmostEqual(
+            posicao_vertical_faixa(resultado), 0.52, delta=0.03)
+        self.assertTrue(faixa_centralizada(resultado))
+
+    def test_prata_alta_ainda_nao_esta_centralizada(self):
+        resultado = ClassificadorFaixaSaidaLinha().classificar(cena_prata())
+        self.assertLess(posicao_vertical_faixa(resultado), 0.40)
+        self.assertFalse(faixa_centralizada(resultado))
 
     def test_as_quatro_fotos_reais_ficam_separadas(self):
         raiz = SHADOW_ROOT / "captures"
