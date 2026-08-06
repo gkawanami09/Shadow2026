@@ -17,6 +17,57 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config  # noqa: E402
 import config_resgate as cfg  # noqa: E402
 import resgate  # noqa: E402
+from mission import (  # noqa: E402
+    MissionSystem,
+    _tecla_fecha_debug,
+    iniciar_debug_linha,
+)
+
+
+class MissionDebugWindowTests(unittest.TestCase):
+    def test_q_e_escape_fecham_o_debug(self):
+        self.assertTrue(_tecla_fecha_debug(ord("q")))
+        self.assertTrue(_tecla_fecha_debug(27))
+
+    def test_outras_teclas_mantem_o_debug(self):
+        self.assertFalse(_tecla_fecha_debug(-1))
+        self.assertFalse(_tecla_fecha_debug(ord("s")))
+
+    def test_modo_debug_inicia_visualizador_separado(self):
+        processos = []
+
+        class ProcessoFalso:
+            def __init__(self, target, args=(), name=None):
+                self.target = target
+                self.args = args
+                self.name = name
+                processos.append(self)
+
+            def start(self):
+                return None
+
+        valor = lambda inicial: SimpleNamespace(value=inicial)
+        compartilhado = SimpleNamespace(
+            terminate=valor(False),
+            rescue_requested=valor(False),
+            red_finished=valor(False),
+            mission_mode=valor(False),
+        )
+        sistema = MissionSystem(
+            compartilhado,
+            motor_lock=None,
+            args=SimpleNamespace(debug=True),
+        )
+
+        with (
+            patch("mission.Process", ProcessoFalso),
+            patch("mission.time.sleep"),
+        ):
+            sistema.start_line_phase()
+
+        self.assertEqual(len(processos), 3)
+        self.assertIs(processos[-1].target, iniciar_debug_linha)
+        self.assertEqual(processos[-1].name, "shadow-debug-linha")
 
 
 class MissionEntryAdvanceTests(unittest.TestCase):

@@ -99,39 +99,43 @@ class ConfirmadorTests(unittest.TestCase):
             cena_preta(), timestamp=1.0, now=1.0)
         self.assertIsNone(decisao)
 
-    def test_preto_exige_quatro_frames_parados(self):
+    def test_preto_exige_tres_frames_parados(self):
         confirmador = ConfirmadorFaixaSaidaLinha()
         decisao = None
-        for indice in range(3):
+        for indice in range(2):
             instante = 1.0 + indice * 0.03
             decisao, _ = confirmador.update(
                 cena_preta(), timestamp=instante, now=instante)
         self.assertIsNone(decisao)
 
-        instante = 1.09
+        instante = 1.06
         decisao, _ = confirmador.update(
             cena_preta(), timestamp=instante, now=instante)
         self.assertEqual(decisao, PRETA)
 
-    def test_dois_frames_prata_rejeitam(self):
+    def test_prata_tambem_exige_tres_frames(self):
         confirmador = ConfirmadorFaixaSaidaLinha()
         decisao = None
         for indice in range(2):
             instante = 1.0 + indice * 0.03
             decisao, _ = confirmador.update(
                 cena_prata(), timestamp=instante, now=instante)
+        self.assertIsNone(decisao)
+        instante = 1.06
+        decisao, _ = confirmador.update(
+            cena_prata(), timestamp=instante, now=instante)
         self.assertEqual(decisao, NAO_PRETA)
 
-    def test_dois_cinzas_bloqueiam_mesmo_apos_tres_votos_pretos(self):
+    def test_maioria_prata_bloqueia_apos_dois_votos_pretos(self):
         confirmador = ConfirmadorFaixaSaidaLinha()
         instante = 1.0
-        for _ in range(3):
+        for _ in range(2):
             decisao, _ = confirmador.update(
                 cena_preta(), timestamp=instante, now=instante)
             instante += 0.03
         self.assertIsNone(decisao)
 
-        for _ in range(2):
+        for _ in range(3):
             decisao, _ = confirmador.update(
                 cena_prata(), timestamp=instante, now=instante)
             instante += 0.03

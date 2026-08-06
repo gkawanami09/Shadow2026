@@ -157,12 +157,6 @@ class ExitPhaseController:
             f"/{cfg.FINAL_TRIANGLE_MAP_FRAMES} frames)")
 
     def _on_rotate(self, exit_detection, now):
-        if self._fresh_preview(exit_detection, now):
-            self.state = self.SEARCH_BRAKE
-            return self._stop(
-                self.SEARCH_BRAKE,
-                "candidato visto durante o giro; freando para confirmar",
-            )
         if (
             self._stopped_at is None
             and self._rotate_started_at is not None
@@ -190,7 +184,9 @@ class ExitPhaseController:
 
     def _on_observe(self, exit_detection, frame_shape, now):
         if self._usable(exit_detection, now):
-            return self.begin_cross(now=now)
+            self.state = self.ALIGN
+            self._stopped_at = None
+            return self._align_command(exit_detection, frame_shape)
         if (
             self._settled_at is not None
             and now - self._settled_at
@@ -210,7 +206,21 @@ class ExitPhaseController:
             self.state = self.SEARCH_START
             return self._tank(
                 self.SEARCH_START, "soleira perdida; retomando a procura")
-        return self._align_command(exit_detection, frame_shape)
+        if not self.aligned(exit_detection, frame_shape):
+            self._stopped_at = None
+            return self._align_command(exit_detection, frame_shape)
+        if self._stopped_at is None:
+            self._stopped_at = now
+            return self._stop(
+                self.ALIGN,
+                "soleira centralizada; freando antes de avancar",
+            )
+        if now - self._stopped_at >= cfg.EXIT_ALIGN_SETTLE_S - 1e-9:
+            return self.begin_cross(now=now)
+        return self._stop(
+            self.ALIGN,
+            "soleira centralizada; aguardando o chassi assentar",
+        )
 
     def _on_cross(self, exit_detection, now):
         if self._cross_started_at is None:

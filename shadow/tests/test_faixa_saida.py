@@ -123,6 +123,14 @@ class BlackExitDetectorTests(unittest.TestCase):
             frame[330:420, 200:440] = cor
             self.assertIsNone(self.detector.detect(frame, timestamp=1.0))
 
+    def test_retangulo_verde_escuro_nao_vira_faixa_preta(self):
+        """Mesmo com V baixo, matiz verde veta a falsa saída."""
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 185)
+        frame[360:420, 100:540] = (0, 60, 0)
+
+        self.assertIsNone(self.detector.detect(frame, timestamp=1.0))
+        self.assertEqual(self.detector.last_reason, "verde")
+
     def test_manchas_e_risco_curto_nao_acionam_fallback(self):
         """Uma região escura local não é uma faixa transversal."""
         frames = []

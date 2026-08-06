@@ -823,7 +823,6 @@ def _validar_corredor_saida(
 def _confirmar_saida_com_camera_linha(
     arduino,
     debug=False,
-    recuo_base_s=0.0,
 ):
     """Centraliza, confirma e devolve PRETA, NAO_PRETA ou INCONCLUSIVA."""
     from controle.direcao import steer
@@ -837,9 +836,6 @@ def _confirmar_saida_com_camera_linha(
     ultimo_log = 0.0
     ultimo_resumo = None
     faixa_parada_em = None
-    avanco_camera_iniciado_em = None
-    tempo_avanco_camera_linha = 0.0
-    recuo_base_s = max(float(recuo_base_s), 0.0)
 
     try:
         steer()
@@ -851,7 +847,6 @@ def _confirmar_saida_com_camera_linha(
             "a faixa ficar no centro; ultrassonico continua ativo")
         if steer(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
             raise RuntimeError("nao foi possivel iniciar a aproximacao final")
-        avanco_camera_iniciado_em = time.monotonic()
 
         while True:
             frame = camera.get_frame()
@@ -869,8 +864,6 @@ def _confirmar_saida_com_camera_linha(
                     if faixa_centralizada(resultado):
                         steer()
                         faixa_parada_em = agora
-                        tempo_avanco_camera_linha = max(
-                            agora - avanco_camera_iniciado_em, 0.0)
                         confirmador = ConfirmadorFaixaSaidaLinha()
                         fase_confirmacao = "assentando"
                         print(
@@ -928,27 +921,22 @@ def _confirmar_saida_com_camera_linha(
             # sobre qualquer voto visual preto.
             monitor_corredor.atualizar(arduino, agora=agora)
             if monitor_corredor.parada_confirmada:
-                if faixa_parada_em is None:
-                    tempo_avanco_camera_linha = max(
-                        agora - avanco_camera_iniciado_em, 0.0)
-                recuo_total_s = (
-                    recuo_base_s + tempo_avanco_camera_linha)
                 print(
                     "[saida] BLOQUEIO ULTRASSONICO durante a camera de linha: "
                     f"{monitor_corredor.distancia_confirmada_mm / 10.0:.1f} "
                     f"cm; leituras="
                     f"{list(monitor_corredor.distancias_validas)}; "
-                    f"recuando {recuo_total_s:.2f} s")
+                    "recuando uma unica vez por "
+                    f"{cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S:.2f} s")
                 steer()
-                if recuo_total_s > 0.0:
-                    _mover_saida_por_tempo(
-                        arduino,
-                        steer,
-                        200,
-                        cfg.EXIT_CLEARANCE_REVERSE_SPEED,
-                        recuo_total_s,
-                        epoca_serial,
-                    )
+                _mover_saida_por_tempo(
+                    arduino,
+                    steer,
+                    200,
+                    cfg.EXIT_CLEARANCE_REVERSE_SPEED,
+                    cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
+                    epoca_serial,
+                )
                 steer()
                 return CORREDOR_BLOQUEADO
 
@@ -983,7 +971,8 @@ def _confirmar_saida_com_camera_linha(
             if decisao == PRETA:
                 print(
                     "[saida] faixa PRETA centralizada e confirmada em "
-                    "4 de 5 frames com o robo parado; "
+                    f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} de "
+                    f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames com o robo parado; "
                     "entrando no percurso")
                 _mover_saida_por_tempo(
                     arduino,
@@ -998,7 +987,9 @@ def _confirmar_saida_com_camera_linha(
 
             if decisao == NAO_PRETA:
                 print(
-                    "[saida] faixa CINZA/PRATA confirmada em 2 de 5 frames; "
+                    "[saida] faixa CINZA/PRATA confirmada em "
+                    f"{cfg.EXIT_LINE_VERIFY_SILVER_VOTES} de "
+                    f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames; "
                     "dando re e parando")
                 steer()
                 _mover_saida_por_tempo(
@@ -1572,12 +1563,6 @@ def main():
                         mapper=None,
                         now=agora,
                     )
-                    if (
-                        comando.state == controlador_saida.ALIGN
-                        and controlador_saida.aligned(
-                            deteccao_saida, forma)
-                    ):
-                        comando = controlador_saida.begin_cross(now=agora)
                     comando_atualizado = True
                     ultimo_controle_ocioso = agora
             elif controlador_verde is not None:
@@ -2379,7 +2364,6 @@ def main():
                 from controle.direcao import steer
 
                 steer()
-                tempo_avanco_saida = controlador_saida.cross_elapsed_s
                 estado_corredor, distancia_corredor_mm, leituras_corredor = (
                     _validar_corredor_saida(arduino)
                 )
@@ -2459,7 +2443,6 @@ def main():
                 resultado_verificacao = _confirmar_saida_com_camera_linha(
                     arduino,
                     debug=args.debug,
-                    recuo_base_s=tempo_avanco_saida,
                 )
                 frame_atual = None
                 deteccao_saida = None

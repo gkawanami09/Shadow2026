@@ -121,6 +121,33 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(observando.state, self.exit.SEARCH_OBSERVE)
         return assentou
 
+    def _ate_comecar_travessia(self, inicio=0.0, center_x=320.0):
+        assentou = self._ate_observar(inicio=inicio)
+        instante = assentou + 0.02
+        soleira = FakeExit(center_x=center_x, timestamp=instante - 0.01)
+        alinhando = self.exit.update(
+            soleira, FRAME_SHAPE, now=instante)
+        self.assertEqual(alinhando.state, self.exit.ALIGN)
+
+        if center_x != 320.0:
+            instante += 0.03
+            soleira = FakeExit(
+                center_x=320.0,
+                timestamp=instante,
+            )
+        instante += 0.03
+        freio = self.exit.update(
+            soleira, FRAME_SHAPE, now=instante)
+        self.assertEqual(freio.state, self.exit.ALIGN)
+        self.assertEqual(freio.angle, 190)
+
+        instante += cfg.EXIT_ALIGN_SETTLE_S
+        soleira = FakeExit(center_x=320.0, timestamp=instante)
+        travessia = self.exit.update(
+            soleira, FRAME_SHAPE, now=instante)
+        self.assertEqual(travessia.state, self.exit.CROSS)
+        return instante, travessia
+
     def test_comeca_mapeando_os_dois_triangulos(self):
         self.assertEqual(self.exit.state, self.exit.MAP_TRIANGLES)
         command = self.exit.update(
@@ -148,19 +175,19 @@ class ExitPhaseTests(unittest.TestCase):
         self.exit.update(None, FRAME_SHAPE, now=0.05)
         self.assertFalse(self.exit.frame_allowed(0.10))
 
-    def test_candidato_durante_giro_freia_antes_do_fim_do_pulso(self):
+    def test_candidato_durante_giro_nao_encurta_o_pulso(self):
         command = self.exit.update(
             None, FRAME_SHAPE, mapper=FakeMapper(both=True), now=0.0)
         self.exit.notify_command_written(command.state, now=0.0)
 
         instante = min(0.05, cfg.EXIT_SEARCH_PULSE_S / 2.0)
         candidato = FakeExit(timestamp=instante)
-        freio = self.exit.update(
+        girando = self.exit.update(
             candidato, FRAME_SHAPE, now=instante)
 
-        self.assertEqual(freio.state, self.exit.SEARCH_BRAKE)
-        self.assertEqual(freio.angle, 190)
-        self.assertEqual(freio.speed, 0.0)
+        self.assertEqual(girando.state, self.exit.SEARCH_ROTATE)
+        self.assertEqual(girando.angle, cfg.EXIT_SEARCH_TANK_ANGLE)
+        self.assertEqual(girando.speed, cfg.EXIT_SEARCH_TANK_SPEED)
         self.assertFalse(self.exit.terminal)
 
     def test_frame_anterior_ao_assentamento_nao_alinha(self):
@@ -170,56 +197,51 @@ class ExitPhaseTests(unittest.TestCase):
             antigo, FRAME_SHAPE, now=assentou + 0.02)
         self.assertEqual(command.state, self.exit.SEARCH_OBSERVE)
 
-    def test_soleira_confirmada_inicia_avanco_reto_imediato(self):
+    def test_soleira_confirmada_para_antes_de_avancar(self):
         assentou = self._ate_observar()
         soleira = FakeExit(center_x=320.0, timestamp=assentou + 0.01)
         command = self.exit.update(
             soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.CROSS)
-        self.assertEqual(command.angle, 0)
-        self.assertEqual(command.speed, cfg.EXIT_ADVANCE_SPEED)
+        self.assertEqual(command.state, self.exit.ALIGN)
+        self.assertEqual(command.angle, 190)
+        self.assertEqual(command.speed, 0.0)
         self.assertEqual(cfg.EXIT_ADVANCE_PWM, 80)
 
     def test_rejeicao_final_da_re_de_um_segundo(self):
         self.assertEqual(cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S, 1.0)
 
-    def test_soleira_deslocada_tambem_inicia_reto_sem_alinhamento_fraco(self):
+    def test_soleira_deslocada_gira_tanque_ate_o_centro(self):
         assentou = self._ate_observar()
         soleira = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
         command = self.exit.update(
             soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.CROSS)
-        self.assertEqual(command.angle, 0)
+        self.assertEqual(command.state, self.exit.ALIGN)
+        self.assertEqual(command.angle, cfg.EXIT_ALIGN_ANGLE)
+        self.assertEqual(command.speed, cfg.EXIT_ALIGN_SPEED)
+        self.assertEqual(cfg.EXIT_ALIGN_PWM, 50)
 
     def test_perda_curta_apos_confirmar_nao_interrompe_o_avanco(self):
-        assentou = self._ate_observar()
-        soleira = FakeExit(timestamp=assentou + 0.01)
-        command = self.exit.update(
-            soleira, FRAME_SHAPE, now=assentou + 0.02)
+        inicio, command = self._ate_comecar_travessia()
         self.exit.notify_command_written(
-            command.state, now=assentou + 0.03)
+            command.state, now=inicio + 0.01)
         command = self.exit.update(
             None,
             FRAME_SHAPE,
-            now=assentou + 0.03 + cfg.EXIT_ADVANCE_MIN_S / 2,
+            now=inicio + 0.01 + cfg.EXIT_ADVANCE_MIN_S / 2,
         )
         self.assertEqual(command.state, self.exit.CROSS)
         self.assertEqual(command.angle, 0)
 
     def test_travessia_termina_quando_a_faixa_passa_para_tras(self):
-        assentou = self._ate_observar()
-        soleira = FakeExit(timestamp=assentou + 0.01)
-        command = self.exit.update(
-            soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.CROSS)
-        self.assertEqual(command.angle, 0)
-        self.exit.notify_command_written(command.state, now=assentou + 0.03)
+        alinhado_em, command = self._ate_comecar_travessia()
+        inicio = alinhado_em + 0.01
+        self.exit.notify_command_written(command.state, now=inicio)
 
-        cedo = assentou + 0.03 + cfg.EXIT_ADVANCE_MIN_S / 2
+        cedo = inicio + cfg.EXIT_ADVANCE_MIN_S / 2
         andando = self.exit.update(None, FRAME_SHAPE, now=cedo)
         self.assertEqual(andando.state, self.exit.CROSS)
 
-        tarde = assentou + 0.03 + cfg.EXIT_ADVANCE_MIN_S + 0.01
+        tarde = inicio + cfg.EXIT_ADVANCE_MIN_S + 0.01
         final = self.exit.update(None, FRAME_SHAPE, now=tarde)
         self.assertEqual(final.state, self.exit.DONE)
         self.assertTrue(final.terminal)
@@ -227,15 +249,12 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertTrue(self.exit.succeeded)
         self.assertAlmostEqual(
             self.exit.cross_elapsed_s,
-            tarde - (assentou + 0.03),
+            tarde - inicio,
         )
 
     def test_travessia_tem_timeout_de_seguranca(self):
-        assentou = self._ate_observar()
-        soleira = FakeExit(timestamp=assentou + 0.01)
-        command = self.exit.update(
-            soleira, FRAME_SHAPE, now=assentou + 0.02)
-        inicio = assentou + 0.03
+        alinhado_em, command = self._ate_comecar_travessia()
+        inicio = alinhado_em + 0.01
         self.exit.notify_command_written(command.state, now=inicio)
         # A faixa continua sendo vista: só o timeout encerra.
         fim = inicio + cfg.EXIT_ADVANCE_TIMEOUT_S
@@ -290,7 +309,7 @@ class ExitClearanceTests(unittest.TestCase):
         self.assertIsNone(distance)
         self.assertEqual(readings, ())
 
-    def test_bloqueio_recua_300ms_e_gira_500ms_antes_de_recomecar(self):
+    def test_bloqueio_recua_300ms_e_gira_um_pulso_antes_de_recomecar(self):
         movimentos = []
         paradas = []
 
@@ -331,8 +350,8 @@ class ExitClearanceTests(unittest.TestCase):
                 ),
             ],
         )
-        self.assertEqual(cfg.EXIT_CLEARANCE_ESCAPE_TURN_S, 0.80)
-        self.assertEqual(cfg.EXIT_SEARCH_PULSE_S, 0.80)
+        self.assertEqual(cfg.EXIT_CLEARANCE_ESCAPE_TURN_S, 0.40)
+        self.assertEqual(cfg.EXIT_SEARCH_PULSE_S, 0.40)
         self.assertEqual(len(paradas), 3)
 
 
@@ -417,7 +436,7 @@ class SilverStripeRuntimeTests(unittest.TestCase):
             commands,
         )
 
-    def test_parede_durante_camera_de_linha_desfaz_todo_avanco(self):
+    def test_parede_durante_camera_de_linha_da_uma_unica_re_curta(self):
         clock = FakeClock()
         camera = self.Camera(clock)
         arduino = self.Arduino([120, 110, 105])
@@ -455,12 +474,13 @@ class SilverStripeRuntimeTests(unittest.TestCase):
             resultado = resgate_runtime._confirmar_saida_com_camera_linha(
                 arduino,
                 debug=False,
-                recuo_base_s=0.60,
             )
 
         self.assertEqual(resultado, resgate_runtime.CORREDOR_BLOQUEADO)
-        self.assertEqual(len(reverse_durations), 1)
-        self.assertGreater(reverse_durations[0], 0.60)
+        self.assertEqual(
+            reverse_durations,
+            [cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S],
+        )
         self.assertNotIn(
             (0, cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED),
             commands,

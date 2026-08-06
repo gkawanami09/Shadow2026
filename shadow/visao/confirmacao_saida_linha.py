@@ -10,9 +10,8 @@ As duas evidencias usadas sao independentes:
 * aparencia: preto e escuro e quase liso, enquanto prata tem reflexos e
   textura forte.
 
-Um unico frame nunca decide. Como o erro perigoso e aceitar prata como preta,
-a votacao e conservadora: dois votos de prata bloqueiam a saida, enquanto
-preto exige quatro votos dentro das cinco imagens novas.
+Um unico frame nunca decide. Preto e prata precisam obter maioria dentro das
+cinco imagens novas; resultados inconclusivos nao contam para nenhum lado.
 """
 
 from collections import deque

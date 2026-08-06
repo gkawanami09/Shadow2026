@@ -523,6 +523,14 @@ EXIT_BLACK_SURROUND_MARGIN_RATIO = 0.06
 EXIT_BLACK_MIN_SURROUND_CONTRAST = 25.0
 EXIT_BLACK_MIN_CONFIDENCE = 0.55
 
+# Um retangulo verde escuro tambem pode cair abaixo de V=70 e entrar na
+# mascara "preta". Antes de aceitar a geometria, vetamos candidatos cuja
+# vizinhanca tenha uma quantidade relevante de verde saturado.
+EXIT_BLACK_GREEN_VETO_HSV_MIN = (40, 80, 35)
+EXIT_BLACK_GREEN_VETO_HSV_MAX = (110, 255, 255)
+EXIT_BLACK_GREEN_VETO_MARGIN_RATIO = 0.06
+EXIT_BLACK_GREEN_VETO_MAX_RATIO = 0.18
+
 EXIT_BLACK_VOTES_NEEDED = 3
 EXIT_BLACK_VOTE_WINDOW = 5
 EXIT_BLACK_COOLDOWN_S = 0.0
@@ -586,24 +594,28 @@ EXIT_CLEARANCE_REVERSE_SPEED = EXIT_ADVANCE_SPEED
 # Quando o ultrassonico veta um candidato visto pela camera de resgate, um
 # recuo curto e um pequeno giro mudam o ponto de vista antes da nova busca.
 EXIT_CLEARANCE_BLOCKED_REVERSE_S = 0.30
-# Usa exatamente o tanque da procura do retangulo vermelho, mas por dois
-# pulsos. Um pulso de 0,40 s mudou pouco o enquadramento no teste real.
-EXIT_CLEARANCE_ESCAPE_TURN_S = DEPOSIT_SEARCH_PULSE_S * 2.0
+# Depois de um bloqueio, muda o enquadramento com exatamente um pulso igual ao
+# usado na procura dos retangulos.
+EXIT_CLEARANCE_ESCAPE_TURN_S = DEPOSIT_SEARCH_PULSE_S
 
 # Giro pulsado de procura da saida quando nenhuma faixa esta no campo.
 EXIT_SEARCH_TIMEOUT_S = 60.0
-# Depois de uma tentativa rejeitada, muda um setor maior. Se a faixa aparecer
-# antes dos 0,80 s, a pre-visualizacao freia o giro imediatamente.
-EXIT_SEARCH_PULSE_S = DEPOSIT_SEARCH_PULSE_S * 2.0
+# Usa o mesmo pulso completo da procura dos retangulos. Um candidato visto
+# durante o movimento nao encurta o giro: a confirmacao so comeca depois de
+# terminar o pulso, frear e assentar o chassi.
+EXIT_SEARCH_PULSE_S = DEPOSIT_SEARCH_PULSE_S
 EXIT_SEARCH_SETTLE_S = BALL_SEARCH_SETTLE_S
 EXIT_SEARCH_OBSERVE_TIMEOUT_S = BALL_SEARCH_OBSERVE_TIMEOUT_S
 EXIT_SEARCH_TANK_ANGLE = DEPOSIT_SEARCH_TANK_ANGLE
 EXIT_SEARCH_TANK_SPEED = RED_DEPOSIT_SEARCH_TANK_SPEED
 
-# Alinhamento com a soleira antes de atravessar. Arco suave, nunca pivo.
-EXIT_ALIGN_MAX_CENTER_ERROR = 0.12
-EXIT_ALIGN_ANGLE = 55
-EXIT_ALIGN_SPEED = 0.26
+# Alinhamento com o centro da soleira antes de qualquer avanco. Tanque com
+# PWM 50 gira o chassi sem se aproximar da faixa enquanto ainda esta torto.
+EXIT_ALIGN_MAX_CENTER_ERROR = 0.10
+EXIT_ALIGN_ANGLE = 180
+EXIT_ALIGN_PWM = 50
+EXIT_ALIGN_SPEED = EXIT_ALIGN_PWM / (120 * 1.2)
+EXIT_ALIGN_SETTLE_S = EXIT_SEARCH_SETTLE_S
 
 # Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
 # aproxima ate deixar de enxergar a soleira. So entao a camera de linha abre e
@@ -620,8 +632,8 @@ EXIT_LINE_VERIFY_SETTLE_S = 0.25
 EXIT_LINE_VERIFY_CENTER_Y_RATIO = 0.50
 EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE = 0.10
 EXIT_LINE_VERIFY_CENTER_SPEED = 0.25
-EXIT_LINE_VERIFY_BLACK_VOTES = 4
-EXIT_LINE_VERIFY_SILVER_VOTES = 2
+EXIT_LINE_VERIFY_BLACK_VOTES = 3
+EXIT_LINE_VERIFY_SILVER_VOTES = 3
 EXIT_LINE_VERIFY_MAX_AGE_S = 0.35
 EXIT_LINE_VERIFY_EDGE_MIN = 18
 EXIT_LINE_VERIFY_EDGE_FILL = 0.48
@@ -632,10 +644,10 @@ EXIT_LINE_VERIFY_DARK_MIN_HEIGHT_RATIO = 0.05
 # Medido nas quatro imagens reais de 05/08: preto ficou em 6-7 e prata em
 # 13-21 depois da normalizacao para 448x252. A zona 9.5..11.5 permanece
 # inconclusiva em vez de arriscar classificar prata como preta.
-EXIT_LINE_VERIFY_BLACK_TEXTURE_MAX = 9.5
+EXIT_LINE_VERIFY_BLACK_TEXTURE_MAX = 10.5
 # A janela local acompanha a faixa e pode incluir a propria borda. Por isso
 # recebe uma folga pequena; preto ainda exige que a janela global seja lisa.
-EXIT_LINE_VERIFY_BLACK_LOCAL_TEXTURE_MAX = 11.0
+EXIT_LINE_VERIFY_BLACK_LOCAL_TEXTURE_MAX = 13.5
 EXIT_LINE_VERIFY_SILVER_TEXTURE_MIN = 11.5
 EXIT_LINE_VERIFY_TEXTURE_ROI_TOP = 0.15
 EXIT_LINE_VERIFY_TEXTURE_ROI_BOTTOM = 0.75

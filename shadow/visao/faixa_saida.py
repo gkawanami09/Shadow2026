@@ -118,6 +118,11 @@ class BlackExitDetector:
             perspectiva = self._detect_perspective_line(
                 frame_bgr, timestamp)
             if perspectiva is not None:
+                if self._green_ratio(frame_bgr, perspectiva.bbox) > (
+                    cfg.EXIT_BLACK_GREEN_VETO_MAX_RATIO
+                ):
+                    self.last_reason = "verde"
+                    return None
                 self.last_reason = ""
                 return perspectiva
             # "compacta" é o motivo devolvido quando uma esfera preta chega
@@ -152,6 +157,12 @@ class BlackExitDetector:
             self.last_reason = "confianca"
             return None
 
+        if self._green_ratio(frame_bgr, band.bbox) > (
+            cfg.EXIT_BLACK_GREEN_VETO_MAX_RATIO
+        ):
+            self.last_reason = "verde"
+            return None
+
         self.last_reason = ""
         return ExitStripeDetection(
             center_x=band.center_x,
@@ -169,6 +180,35 @@ class BlackExitDetector:
             timestamp=timestamp,
             bbox=band.bbox,
         )
+
+    @staticmethod
+    def _green_ratio(frame_bgr, bbox):
+        """Mede verde saturado dentro e ao redor do candidato escuro."""
+        height, width = frame_bgr.shape[:2]
+        x, y, w, h = bbox
+        margin_x = max(
+            int(round(width * cfg.EXIT_BLACK_GREEN_VETO_MARGIN_RATIO)),
+            1,
+        )
+        margin_y = max(
+            int(round(height * cfg.EXIT_BLACK_GREEN_VETO_MARGIN_RATIO)),
+            int(h),
+            1,
+        )
+        left = max(int(x) - margin_x, 0)
+        right = min(int(x + w) + margin_x, width)
+        top = max(int(y) - margin_y, 0)
+        bottom = min(int(y + h) + margin_y, height)
+        roi = frame_bgr[top:bottom, left:right]
+        if roi.size == 0:
+            return 0.0
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        green = cv2.inRange(
+            hsv,
+            np.asarray(cfg.EXIT_BLACK_GREEN_VETO_HSV_MIN, dtype=np.uint8),
+            np.asarray(cfg.EXIT_BLACK_GREEN_VETO_HSV_MAX, dtype=np.uint8),
+        )
+        return float(np.mean(green > 0))
 
     @staticmethod
     def _detect_perspective_line(frame_bgr, timestamp):

@@ -81,6 +81,37 @@ def iniciar_controle():
     control_loop()
 
 
+def _tecla_fecha_debug(tecla):
+    return (tecla & 0xFF) in (ord("q"), 27)
+
+
+def iniciar_debug_linha():
+    """Mostra o frame compartilhado sem inicializar o Qt no supervisor."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    import cv2
+    import numpy as np
+    from shared.dados_compartilhados import terminate
+
+    shm = shared_memory.SharedMemory(name=config.DEBUG_SHM_NAME)
+    frame = np.ndarray(
+        (config.camera_y, config.camera_x, 3),
+        dtype=np.uint8,
+        buffer=shm.buf,
+    )
+    try:
+        while not terminate.value:
+            cv2.imshow(
+                "Shadow2026 - camera de linha",
+                frame.copy(),
+            )
+            if _tecla_fecha_debug(cv2.waitKey(30)):
+                terminate.value = True
+                break
+    finally:
+        cv2.destroyAllWindows()
+        shm.close()
+
+
 class MissionSystem:
     """Liga os passos do handoff às operações reais de processo e trava."""
 
@@ -108,6 +139,13 @@ class MissionSystem:
         control = Process(target=iniciar_controle, name="shadow-controle")
         control.start()
         self.children = [vision, control]
+        if self.args.debug:
+            debug = Process(
+                target=iniciar_debug_linha,
+                name="shadow-debug-linha",
+            )
+            debug.start()
+            self.children.append(debug)
         print("[missão] percurso ativo: câmera 1 e serial com os filhos")
 
     def wait_line_phase(self):
@@ -121,6 +159,8 @@ class MissionSystem:
                 return "rescue"
             if self.shared.red_finished.value:
                 return "finished"
+            if self.shared.terminate.value:
+                return "quit"
             if not all(child.is_alive() for child in self.children):
                 # Um filho caiu: pode ter sido exceção, Ctrl-C ou o próprio
                 # fim normal do controle. Quem decide é o flag já lido acima.
@@ -324,6 +364,11 @@ def main():
         system.start_line_phase()
         while True:
             resultado = system.wait_line_phase()
+
+            if resultado == "quit":
+                print("[missão] debug encerrado pelo usuário.")
+                coordinator.abort("janela de debug encerrada")
+                break
 
             if resultado == "finished":
                 coordinator.on_red_finish()
