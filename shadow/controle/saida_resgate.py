@@ -117,7 +117,7 @@ class ExitPhaseController:
             return self._tank(
                 self.SEARCH_START, "girando para procurar a soleira preta")
         if self.state == self.SEARCH_ROTATE:
-            return self._on_rotate(now)
+            return self._on_rotate(exit_detection, now)
         if self.state == self.SEARCH_BRAKE:
             return self._stop(
                 self.SEARCH_BRAKE, "freando para observar a soleira")
@@ -156,7 +156,13 @@ class ExitPhaseController:
             f"mapeando os dois triangulos ({mapper.frames if mapper else 0}"
             f"/{cfg.FINAL_TRIANGLE_MAP_FRAMES} frames)")
 
-    def _on_rotate(self, now):
+    def _on_rotate(self, exit_detection, now):
+        if self._fresh_preview(exit_detection, now):
+            self.state = self.SEARCH_BRAKE
+            return self._stop(
+                self.SEARCH_BRAKE,
+                "candidato visto durante o giro; freando para confirmar",
+            )
         if (
             self._stopped_at is None
             and self._rotate_started_at is not None
@@ -295,6 +301,14 @@ class ExitPhaseController:
         if detection is None:
             return False
         if not self.frame_allowed(detection.timestamp):
+            return False
+        age = now - float(detection.timestamp)
+        return -0.05 <= age <= cfg.BALL_FRAME_STALE_S
+
+    @staticmethod
+    def _fresh_preview(detection, now):
+        """Aceita a prévia apenas para frear, nunca para confirmar a saída."""
+        if detection is None:
             return False
         age = now - float(detection.timestamp)
         return -0.05 <= age <= cfg.BALL_FRAME_STALE_S

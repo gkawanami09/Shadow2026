@@ -488,7 +488,9 @@ EXIT_BLACK_ENABLED = True
 EXIT_BLACK_HSV_MIN = (0, 0, 0)
 EXIT_BLACK_HSV_MAX = (180, 255, 70)
 
-EXIT_BLACK_ROI_TOP = 0.50
+# A soleira de saída aparece no piso, na parte inferior da câmera. Começar em
+# 72% evita que o reflexo do próprio robô na parede prata vire uma faixa.
+EXIT_BLACK_ROI_TOP = 0.72
 EXIT_BLACK_ROI_BOTTOM = 1.00
 
 EXIT_BLACK_MIN_ROW_FILL = 0.45
@@ -521,7 +523,7 @@ EXIT_BLACK_COOLDOWN_S = 0.0
 # horizontal. Um segmento isolado nao basta: riscos, manchas e quinas da arena
 # tambem produzem linhas no Canny. O detector junta somente trechos colineares
 # e exige uma borda escura continua ocupando quase metade da imagem.
-EXIT_LINE_ROI_TOP = 0.55
+EXIT_LINE_ROI_TOP = 0.72
 EXIT_LINE_ROI_BOTTOM = 0.97
 EXIT_LINE_CANNY_LOW = 40
 EXIT_LINE_CANNY_HIGH = 120

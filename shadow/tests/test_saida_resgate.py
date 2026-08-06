@@ -147,6 +147,21 @@ class ExitPhaseTests(unittest.TestCase):
         self.exit.update(None, FRAME_SHAPE, now=0.05)
         self.assertFalse(self.exit.frame_allowed(0.10))
 
+    def test_candidato_durante_giro_freia_antes_do_fim_do_pulso(self):
+        command = self.exit.update(
+            None, FRAME_SHAPE, mapper=FakeMapper(both=True), now=0.0)
+        self.exit.notify_command_written(command.state, now=0.0)
+
+        instante = min(0.05, cfg.EXIT_SEARCH_PULSE_S / 2.0)
+        candidato = FakeExit(timestamp=instante)
+        freio = self.exit.update(
+            candidato, FRAME_SHAPE, now=instante)
+
+        self.assertEqual(freio.state, self.exit.SEARCH_BRAKE)
+        self.assertEqual(freio.angle, 190)
+        self.assertEqual(freio.speed, 0.0)
+        self.assertFalse(self.exit.terminal)
+
     def test_frame_anterior_ao_assentamento_nao_alinha(self):
         assentou = self._ate_observar()
         antigo = FakeExit(timestamp=assentou - 0.05)

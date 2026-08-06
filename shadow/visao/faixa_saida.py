@@ -501,6 +501,17 @@ class BlackExitGate:
         self.last_detection = None
         self._vote_reference = None
 
+    def preview(self, frame_bgr, timestamp=None):
+        """Detecta durante o giro sem permitir que o frame some um voto.
+
+        A prévia serve somente para mandar frear assim que a faixa entra na
+        imagem. A confirmação continua acontecendo depois que o chassi para,
+        evitando aprovar borrão de movimento ou reflexo passageiro.
+        """
+        detection = self.detector.detect(frame_bgr, timestamp=timestamp)
+        self.last_detection = detection
+        return detection
+
     def update(self, frame_bgr, timestamp=None, now=None):
         detection = self.detector.detect(frame_bgr, timestamp=timestamp)
         self.last_detection = detection

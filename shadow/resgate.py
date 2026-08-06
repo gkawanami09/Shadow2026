@@ -1283,24 +1283,37 @@ def main():
                 controlador_saida is not None
                 and portao_saida is not None
                 and frame_novo
-                and controlador_saida.frame_allowed(pacote.captured_at)
             ):
-                confirmada_saida, candidata_saida = portao_saida.update(
-                    frame_atual,
-                    timestamp=pacote.captured_at,
-                    now=agora,
-                )
-                if controlador_saida.state == controlador_saida.CROSS:
-                    if candidata_saida is None:
-                        faltas_saida += 1
-                        if faltas_saida >= 2:
-                            deteccao_saida = None
-                    else:
-                        faltas_saida = 0
+                if (
+                    controlador_saida.state
+                    == controlador_saida.SEARCH_ROTATE
+                ):
+                    # Durante o giro, a imagem não confirma a faixa. Ela só
+                    # serve para frear imediatamente quando um candidato
+                    # aparece, em vez de completar mais um pulso inteiro.
+                    deteccao_saida = portao_saida.preview(
+                        frame_atual,
+                        timestamp=pacote.captured_at,
+                    )
+                elif controlador_saida.frame_allowed(pacote.captured_at):
+                    confirmada_saida, candidata_saida = portao_saida.update(
+                        frame_atual,
+                        timestamp=pacote.captured_at,
+                        now=agora,
+                    )
+                    if controlador_saida.state == controlador_saida.CROSS:
+                        if candidata_saida is None:
+                            faltas_saida += 1
+                            if faltas_saida >= 2:
+                                deteccao_saida = None
+                        else:
+                            faltas_saida = 0
+                            deteccao_saida = candidata_saida
+                    elif confirmada_saida:
                         deteccao_saida = candidata_saida
-                elif confirmada_saida:
-                    deteccao_saida = candidata_saida
-                    faltas_saida = 0
+                        faltas_saida = 0
+                    else:
+                        deteccao_saida = None
                 else:
                     deteccao_saida = None
 

@@ -61,6 +61,21 @@ class BlackExitDetectorTests(unittest.TestCase):
         frame = cs.piso_neutro(cs.RESCUE_FRAME, 185)
         self.assertIsNone(self.detector.detect(frame, timestamp=1.0))
 
+    def test_reflexo_acima_da_regiao_do_piso_nao_e_faixa(self):
+        """O robô refletido na parede prata fica acima da soleira real."""
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 190)
+        height, width = frame.shape[:2]
+        top = int(height * 0.53)
+        bottom = int(height * 0.67)
+        cv2.rectangle(
+            frame,
+            (0, top),
+            (width - 1, bottom),
+            (20, 20, 20),
+            -1,
+        )
+        self.assertIsNone(self.detector.detect(frame, timestamp=1.0))
+
     def test_triangulos_coloridos_nao_acionam_saida(self):
         """Verde e vermelho saturados não são escuros e não viram soleira."""
         for cor in ((0, 190, 0), (0, 0, 210)):
@@ -129,6 +144,16 @@ class BlackExitGateTests(unittest.TestCase):
             cs.faixa_preta(), timestamp=1.0, now=1.0)
         self.assertFalse(confirmed)
         self.assertIsNotNone(detection)
+
+    def test_previa_do_giro_detecta_mas_nao_soma_voto(self):
+        gate = self._gate()
+        frame = cs.faixa_preta()
+        for index in range(5):
+            detection = gate.preview(
+                frame, timestamp=1.0 + index * 0.05)
+            self.assertIsNotNone(detection)
+        self.assertEqual(gate.votes, 0)
+        self.assertFalse(gate.confirmed)
 
     def test_tres_frames_distintos_confirmam_a_saida(self):
         gate = self._gate()
