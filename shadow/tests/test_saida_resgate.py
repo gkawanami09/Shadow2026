@@ -106,39 +106,47 @@ class ExitPhaseTests(unittest.TestCase):
             antigo, FRAME_SHAPE, now=assentou + 0.02)
         self.assertEqual(command.state, self.exit.SEARCH_OBSERVE)
 
-    def test_soleira_centralizada_autoriza_a_travessia(self):
+    def test_soleira_confirmada_inicia_avanco_reto_imediato(self):
         assentou = self._ate_observar()
         soleira = FakeExit(center_x=320.0, timestamp=assentou + 0.01)
         command = self.exit.update(
             soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.ALIGN)
-        self.assertEqual(command.angle, 190)
-        self.assertTrue(self.exit.aligned(soleira, FRAME_SHAPE))
+        self.assertEqual(command.state, self.exit.CROSS)
+        self.assertEqual(command.angle, 0)
+        self.assertEqual(command.speed, cfg.EXIT_ADVANCE_SPEED)
+        self.assertEqual(cfg.EXIT_ADVANCE_PWM, 80)
 
-    def test_soleira_deslocada_gera_arco_e_nao_pivo(self):
+    def test_rejeicao_final_da_re_de_um_segundo(self):
+        self.assertEqual(cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S, 1.0)
+
+    def test_soleira_deslocada_tambem_inicia_reto_sem_alinhamento_fraco(self):
         assentou = self._ate_observar()
         soleira = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
         command = self.exit.update(
             soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.ALIGN)
-        self.assertGreater(command.angle, 0)
-        # |ângulo| > 110 seria pivô brusco; o alinhamento usa arco suave.
-        self.assertLess(abs(command.angle), 110)
-        self.assertFalse(self.exit.aligned(soleira, FRAME_SHAPE))
+        self.assertEqual(command.state, self.exit.CROSS)
+        self.assertEqual(command.angle, 0)
 
-    def test_perder_a_soleira_para_e_volta_a_procurar(self):
+    def test_perda_curta_apos_confirmar_nao_interrompe_o_avanco(self):
         assentou = self._ate_observar()
         soleira = FakeExit(timestamp=assentou + 0.01)
-        self.exit.update(soleira, FRAME_SHAPE, now=assentou + 0.02)
-        command = self.exit.update(None, FRAME_SHAPE, now=assentou + 0.10)
-        self.assertEqual(command.state, self.exit.SEARCH_START)
-        self.assertTrue(self.exit.consume_tracking_reset())
+        command = self.exit.update(
+            soleira, FRAME_SHAPE, now=assentou + 0.02)
+        self.exit.notify_command_written(
+            command.state, now=assentou + 0.03)
+        command = self.exit.update(
+            None,
+            FRAME_SHAPE,
+            now=assentou + 0.03 + cfg.EXIT_ADVANCE_MIN_S / 2,
+        )
+        self.assertEqual(command.state, self.exit.CROSS)
+        self.assertEqual(command.angle, 0)
 
     def test_travessia_termina_quando_a_faixa_passa_para_tras(self):
         assentou = self._ate_observar()
         soleira = FakeExit(timestamp=assentou + 0.01)
-        self.exit.update(soleira, FRAME_SHAPE, now=assentou + 0.02)
-        command = self.exit.begin_cross()
+        command = self.exit.update(
+            soleira, FRAME_SHAPE, now=assentou + 0.02)
         self.assertEqual(command.state, self.exit.CROSS)
         self.assertEqual(command.angle, 0)
         self.exit.notify_command_written(command.state, now=assentou + 0.03)
@@ -157,13 +165,15 @@ class ExitPhaseTests(unittest.TestCase):
     def test_travessia_tem_timeout_de_seguranca(self):
         assentou = self._ate_observar()
         soleira = FakeExit(timestamp=assentou + 0.01)
-        self.exit.update(soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.exit.begin_cross()
-        self.exit.notify_command_written(self.exit.CROSS, now=0.0)
+        command = self.exit.update(
+            soleira, FRAME_SHAPE, now=assentou + 0.02)
+        inicio = assentou + 0.03
+        self.exit.notify_command_written(command.state, now=inicio)
         # A faixa continua sendo vista: só o timeout encerra.
-        presente = FakeExit(timestamp=cfg.EXIT_ADVANCE_TIMEOUT_S)
+        fim = inicio + cfg.EXIT_ADVANCE_TIMEOUT_S
+        presente = FakeExit(timestamp=fim)
         final = self.exit.update(
-            presente, FRAME_SHAPE, now=cfg.EXIT_ADVANCE_TIMEOUT_S)
+            presente, FRAME_SHAPE, now=fim)
         self.assertEqual(final.state, self.exit.DONE)
         self.assertEqual(final.angle, 190)
 

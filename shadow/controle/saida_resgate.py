@@ -7,12 +7,13 @@ busca era invisível para o robô, passa a ser a única coisa que importa.
 
 Sequência::
 
-    MAP_TRIANGLES → SEARCH(pulsado) → ALIGN → CROSS → DONE
+    MAP_TRIANGLES → SEARCH(pulsado) → CROSS → DONE
 
 A procura reaproveita o mesmo princípio da busca pulsada de vítimas: gira um
 trecho curto, para, e só confirma com frames capturados depois da parada. A
-travessia termina quando a faixa deixa de ser vista (passou por baixo do
-robô), com o tempo servindo apenas de limite de segurança.
+faixa confirmada de longe inicia imediatamente o avanço reto, sem ficar presa
+num alinhamento de baixa potência. A travessia termina quando a faixa deixa de
+ser vista, com o tempo servindo apenas de limite de segurança.
 """
 
 import time
@@ -170,8 +171,7 @@ class ExitPhaseController:
 
     def _on_observe(self, exit_detection, frame_shape, now):
         if self._usable(exit_detection, now):
-            self.state = self.ALIGN
-            return self._align_command(exit_detection, frame_shape)
+            return self.begin_cross(now=now)
         if (
             self._settled_at is not None
             and now - self._settled_at
@@ -239,13 +239,16 @@ class ExitPhaseController:
         return False
 
     def begin_cross(self, now=None):
-        """Autoriza a travessia depois de a soleira estar centralizada."""
-        if self.state != self.ALIGN:
+        """Inicia o avanco reto assim que a soleira distante e confirmada."""
+        if self.state not in (self.SEARCH_OBSERVE, self.ALIGN):
             raise RuntimeError(
-                "travessia so pode comecar a partir do alinhamento")
+                "travessia exige soleira confirmada durante a observacao")
         self.state = self.CROSS
         self._cross_started_at = None
-        return self._forward(self.CROSS, "iniciando a travessia da soleira")
+        return self._forward(
+            self.CROSS,
+            "soleira confirmada de longe; avancando reto imediatamente",
+        )
 
     # -- auxiliares ------------------------------------------------------
     def _align_command(self, detection, frame_shape):

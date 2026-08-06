@@ -533,7 +533,12 @@ EXIT_LINE_MAX_DARK_SIDE_VALUE = 110.0
 
 # Travessia da soleira de saida. Igual a entrada: o tempo e apenas o limite
 # de seguranca; o fim normal e a faixa deixar de ser vista.
-EXIT_ADVANCE_SPEED = 0.35
+# Ao confirmar a faixa distante, o robo precisa vencer o atrito imediatamente.
+# 0.35 equivalia a somente 42 PWM e, no chassi real, podia deixar os motores
+# apenas fazendo ruido. A saida usa o mesmo PWM forte ja validado nos demais
+# movimentos do resgate.
+EXIT_ADVANCE_PWM = 80
+EXIT_ADVANCE_SPEED = EXIT_ADVANCE_PWM / 120.0
 EXIT_ADVANCE_MIN_S = 0.60
 EXIT_ADVANCE_TIMEOUT_S = 3.5
 # Giro pulsado de procura da saida quando nenhuma faixa esta no campo.
@@ -572,7 +577,7 @@ EXIT_LINE_VERIFY_SILVER_TEXTURE_MIN = 11.5
 EXIT_LINE_VERIFY_TEXTURE_ROI_TOP = 0.15
 EXIT_LINE_VERIFY_TEXTURE_ROI_BOTTOM = 0.75
 EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED = 0.35
-EXIT_LINE_VERIFY_REJECT_REVERSE_S = 0.70
+EXIT_LINE_VERIFY_REJECT_REVERSE_S = 1.0
 EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED = 0.40
 EXIT_LINE_VERIFY_BLACK_FORWARD_S = 0.45
 

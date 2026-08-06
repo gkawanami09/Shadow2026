@@ -72,6 +72,7 @@ from controle.retangulo_verde_resgate import (  # noqa: E402
 from controle.saida_resgate import ExitPhaseController  # noqa: E402
 from visao import overlay_resgate  # noqa: E402
 from visao.confirmacao_saida_linha import (  # noqa: E402
+    INCONCLUSIVA,
     NAO_PRETA,
     PRETA,
     ConfirmadorFaixaSaidaLinha,
@@ -676,7 +677,7 @@ def _mover_saida_por_tempo(
 
 
 def _confirmar_saida_com_camera_linha(arduino, debug=False):
-    """Avanca ate a soleira e decide PRETA ou NAO_PRETA em 3 de 5 frames."""
+    """Avanca e devolve PRETA, NAO_PRETA, INCONCLUSIVA ou None ao cancelar."""
     from controle.direcao import steer
     from visao.captura import LineCamera
 
@@ -737,7 +738,7 @@ def _confirmar_saida_com_camera_linha(arduino, debug=False):
                 tecla = cv2.waitKey(1) & 0xFF
                 if tecla in (ord("q"), 27):
                     steer()
-                    return False
+                    return None
 
             if decisao == PRETA:
                 print(
@@ -752,7 +753,7 @@ def _confirmar_saida_com_camera_linha(arduino, debug=False):
                     epoca_serial,
                 )
                 steer()
-                return True
+                return PRETA
 
             if decisao == NAO_PRETA:
                 print(
@@ -768,7 +769,7 @@ def _confirmar_saida_com_camera_linha(arduino, debug=False):
                     epoca_serial,
                 )
                 steer()
-                return False
+                return NAO_PRETA
 
             if agora - inicio >= cfg.EXIT_LINE_VERIFY_TIMEOUT_S:
                 print(
@@ -784,7 +785,7 @@ def _confirmar_saida_com_camera_linha(arduino, debug=False):
                     epoca_serial,
                 )
                 steer()
-                return False
+                return INCONCLUSIVA
     finally:
         steer()
         if camera is not None:
@@ -900,6 +901,7 @@ def main():
     epoca_verde = None
     epoca_deposito_cinza = None
     epoca_saida = None
+    inicio_saida = None
     varreduras_sem_vitima = 0
     vitimas_resgatadas = 0
     vitimas_prata_resgatadas = 0
@@ -1835,7 +1837,9 @@ def main():
                     resultado_atual = None
                     deteccao_atual = None
                     portao.reset()
-                    controlador_saida = ExitPhaseController(start_time=agora)
+                    inicio_saida = agora
+                    controlador_saida = ExitPhaseController(
+                        start_time=inicio_saida)
                     portao_saida = BlackExitGate()
                     deteccao_saida = None
                     faltas_saida = 0
@@ -2122,16 +2126,19 @@ def main():
                     captura = None
                     fonte = None
 
-                confirmou_preta = _confirmar_saida_com_camera_linha(
+                resultado_verificacao = _confirmar_saida_com_camera_linha(
                     arduino,
                     debug=args.debug,
                 )
                 frame_atual = None
-                controlador_saida = None
-                portao_saida = None
                 deteccao_saida = None
-                epoca_saida = None
-                if confirmou_preta:
+                faltas_saida = 0
+
+                if resultado_verificacao == PRETA:
+                    controlador_saida = None
+                    portao_saida = None
+                    epoca_saida = None
+                    inicio_saida = None
                     codigo_saida = EXIT_OK
                     iniciar_segue_linha = True
                     comando = MotionCommand(
@@ -2141,11 +2148,52 @@ def main():
                             "iniciado apos liberar camera e serial"),
                         terminal=True,
                     )
+                elif resultado_verificacao in (NAO_PRETA, INCONCLUSIVA):
+                    # A re de um segundo ja foi executada pela camera de linha.
+                    # Fechada essa camera, a frontal de resgate pode reabrir
+                    # com seguranca e voltar aos pulsos de procura.
+                    motivo = (
+                        "faixa prata"
+                        if resultado_verificacao == NAO_PRETA
+                        else "verificacao inconclusiva"
+                    )
+                    print(
+                        f"[saida] {motivo}; re de 1 segundo concluida; "
+                        "reabrindo a camera de resgate para continuar a busca")
+                    from visao.captura_resgate import RescueCamera
+
+                    fonte = RescueCamera(args.camera_index)
+                    captura = LatestFrameSource(fonte)
+                    sequencia_frame = 0
+                    amostras_captura.clear()
+                    agora_reinicio = time.monotonic()
+                    if inicio_saida is None:
+                        inicio_saida = agora_reinicio
+                    controlador_saida = ExitPhaseController(
+                        start_time=inicio_saida)
+                    portao_saida = BlackExitGate()
+                    epoca_saida = arduino.connection_epoch
+                    forma = (
+                        cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                        cfg.RESCUE_CAMERA_MAX_WIDTH,
+                        3,
+                    )
+                    comando = controlador_saida.update(
+                        None,
+                        forma,
+                        mapper=None,
+                        now=agora_reinicio,
+                    )
+                    ultimo_controle_ocioso = agora_reinicio
                 else:
+                    controlador_saida = None
+                    portao_saida = None
+                    epoca_saida = None
+                    inicio_saida = None
                     codigo_saida = EXIT_INCOMPLETE
                     comando = MotionCommand(
-                        "EXIT_NOT_BLACK",
-                        detail="faixa nao preta; re concluida e robo parado",
+                        "EXIT_CHECK_CANCELLED",
+                        detail="verificacao cancelada; robo parado",
                         terminal=True,
                     )
 
