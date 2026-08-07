@@ -76,8 +76,8 @@ class MissionEntryAdvanceTests(unittest.TestCase):
         self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 2)
         self.assertEqual(config.ENTRY_SILVER_VOTE_WINDOW, 3)
 
-    def test_faixa_fina_distante_pede_avanco_antes_da_correcao(self):
-        self.assertTrue(_deve_pre_avancar_entrada(
+    def test_faixa_fina_distante_sem_deteccao_nao_pede_avanco(self):
+        self.assertFalse(_deve_pre_avancar_entrada(
             modo_missao=True,
             armada=True,
             confirmada=False,
@@ -87,8 +87,8 @@ class MissionEntryAdvanceTests(unittest.TestCase):
             linha_adiante=False,
         ))
 
-    def test_faixa_fina_avanca_mesmo_com_trecho_preto_ainda_visivel(self):
-        self.assertTrue(_deve_pre_avancar_entrada(
+    def test_faixa_fina_com_linha_visivel_nao_pede_avanco(self):
+        self.assertFalse(_deve_pre_avancar_entrada(
             modo_missao=True,
             armada=True,
             confirmada=False,

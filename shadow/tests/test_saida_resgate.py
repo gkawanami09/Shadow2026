@@ -245,6 +245,38 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertFalse(self.exit.frame_allowed(assentado))
         self.assertTrue(self.exit.frame_allowed(assentado + 0.01))
 
+    def test_omni_cruza_o_centro_e_avanca_sem_ping_pong(self):
+        assentou = self._ate_observar()
+        inicio = assentou + 0.02
+        # +0.14 esta fora da zona normal (0.10), mas dentro do envelope de
+        # commit (0.18): inicia uma unica correcao para a direita.
+        direita = FakeExit(
+            center_x=320.0 * 1.14,
+            timestamp=inicio - 0.01,
+        )
+        pulso = self.exit.update(direita, FRAME_SHAPE, now=inicio)
+        self.assertEqual(pulso.state, self.exit.ALIGN_LATERAL)
+        self.exit.notify_command_written(pulso.state, now=inicio)
+
+        fim = inicio + cfg.EXIT_ALIGN_OMNI_MAX_PULSE_S + 0.01
+        freio = self.exit.update(None, FRAME_SHAPE, now=fim)
+        self.assertEqual(freio.state, self.exit.ALIGN_BRAKE)
+        self.exit.notify_command_written(freio.state, now=fim)
+        assentado = fim + cfg.EXIT_ALIGN_SETTLE_S
+        self.exit.update(None, FRAME_SHAPE, now=assentado)
+
+        # A medicao foi um pouco alem do centro. Antes isto iniciava outro
+        # pulso para a esquerda e podia alternar para sempre.
+        esquerda = FakeExit(
+            center_x=320.0 * (1.0 - 0.13),
+            timestamp=assentado + 0.01,
+        )
+        avanco = self.exit.update(
+            esquerda, FRAME_SHAPE, now=assentado + 0.02)
+        self.assertEqual(avanco.state, self.exit.CROSS)
+        self.assertEqual(avanco.angle, 0)
+        self.assertEqual(avanco.speed, cfg.EXIT_ADVANCE_SPEED)
+
     def test_falha_visual_curta_no_alinhamento_nao_reinicia_o_giro(self):
         assentou = self._ate_observar()
         self.exit.state = self.exit.ALIGN

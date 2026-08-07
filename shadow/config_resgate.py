@@ -638,8 +638,17 @@ EXIT_SEARCH_TANK_SPEED = RED_DEPOSIT_SEARCH_TANK_SPEED
 
 # Alinhamento em dois eixos antes da aproximação. A inclinação corrige o yaw
 # por tanque; o centro corrige somente a posição lateral pelas rodas omni.
-EXIT_ALIGN_MAX_CENTER_ERROR = 0.06
-EXIT_ALIGN_MAX_ANGLE_DEG = 3.0
+# Zona em que a soleira ja esta boa o bastante para atravessar. Os limites
+# antigos (0.06 e 3 graus) eram menores que a variacao observada entre frames
+# e faziam o omni ultrapassar o centro alternadamente sem nunca avancar.
+EXIT_ALIGN_MAX_CENTER_ERROR = 0.10
+EXIT_ALIGN_MAX_ANGLE_DEG = 5.0
+# Se uma correcao cruzar o centro/angulo desejado, o alvo convergiu mesmo que
+# o frame seguinte caia pouco alem da zona acima. Trava a decisao e avanca em
+# vez de iniciar um novo pulso no sentido oposto.
+EXIT_ALIGN_COMMIT_CENTER_ERROR = 0.18
+EXIT_ALIGN_COMMIT_ANGLE_DEG = 8.0
+EXIT_ALIGN_COMMIT_AFTER_CORRECTIONS = 4
 EXIT_ALIGN_ANGLE = 180
 EXIT_ALIGN_PWM = 50
 EXIT_ALIGN_SPEED = EXIT_ALIGN_PWM / (120 * 1.2)

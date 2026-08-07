@@ -57,6 +57,7 @@ class ExitPhaseController:
         self._align_corrections = 0
         self._align_wheel_speeds = None
         self._align_angle = 190
+        self._align_previous_errors = None
         self._tracking_reset_requested = False
         self.mapped_triangles = {"green": False, "red": False}
 
@@ -212,6 +213,7 @@ class ExitPhaseController:
             self._align_last_seen_at = now
             self._align_frame_after = None
             self._align_corrections = 0
+            self._align_previous_errors = None
             return self._align_command(exit_detection, frame_shape)
         if (
             self._settled_at is not None
@@ -250,9 +252,15 @@ class ExitPhaseController:
         self._align_last_seen_at = now
         erro_centro, erro_angulo = self._alignment_errors(
             exit_detection, frame_shape)
+        if self._alignment_converged_after_correction(
+            erro_centro, erro_angulo
+        ):
+            return self.begin_cross(now=now)
         if abs(erro_angulo) > cfg.EXIT_ALIGN_MAX_ANGLE_DEG:
+            self._align_previous_errors = (erro_centro, erro_angulo)
             return self._start_yaw_correction(erro_angulo)
         if abs(erro_centro) > cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
+            self._align_previous_errors = (erro_centro, erro_angulo)
             return self._start_lateral_correction(erro_centro)
         # O frame é novo e foi capturado depois da frenagem/estabilização.
         # Esperar uma segunda vez só dá oportunidade para perder o alvo.
@@ -368,10 +376,56 @@ class ExitPhaseController:
         erro_centro, erro_angulo = self._alignment_errors(
             detection, frame_shape)
         if abs(erro_angulo) > cfg.EXIT_ALIGN_MAX_ANGLE_DEG:
+            self._align_previous_errors = (erro_centro, erro_angulo)
             return self._start_yaw_correction(erro_angulo)
         if abs(erro_centro) > cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
+            self._align_previous_errors = (erro_centro, erro_angulo)
             return self._start_lateral_correction(erro_centro)
         return self.begin_cross()
+
+    def _alignment_converged_after_correction(
+        self, erro_centro, erro_angulo
+    ):
+        """Reconhece convergencia sem deixar o omni entrar em ping-pong.
+
+        Se o erro troca de sinal depois de um pulso, o chassi atravessou o
+        ponto desejado. Dentro de um envelope seguro isso e alinhamento, nao
+        motivo para mandar outro pulso inteiro no sentido contrario. Depois
+        de varias correcoes, o mesmo envelope tambem encerra ruido sem troca
+        de sinal perfeitamente observavel.
+        """
+        anterior = self._align_previous_errors
+        if anterior is None or self._align_corrections <= 0:
+            return False
+        centro_anterior, angulo_anterior = anterior
+        centro_no_envelope = (
+            abs(float(centro_anterior))
+            <= cfg.EXIT_ALIGN_COMMIT_CENTER_ERROR
+            and abs(float(erro_centro))
+            <= cfg.EXIT_ALIGN_COMMIT_CENTER_ERROR
+        )
+        angulo_no_envelope = (
+            abs(float(angulo_anterior)) <= cfg.EXIT_ALIGN_COMMIT_ANGLE_DEG
+            and abs(float(erro_angulo)) <= cfg.EXIT_ALIGN_COMMIT_ANGLE_DEG
+        )
+        cruzou_centro = (
+            centro_no_envelope
+            and float(centro_anterior) * float(erro_centro) <= 0.0
+            and abs(float(centro_anterior) - float(erro_centro)) > 1e-6
+        )
+        cruzou_angulo = (
+            angulo_no_envelope
+            and float(angulo_anterior) * float(erro_angulo) <= 0.0
+            and abs(float(angulo_anterior) - float(erro_angulo)) > 1e-6
+        )
+        dentro_do_envelope = centro_no_envelope and angulo_no_envelope
+        insistiu_sem_convergir = (
+            self._align_corrections
+            >= cfg.EXIT_ALIGN_COMMIT_AFTER_CORRECTIONS
+        )
+        return dentro_do_envelope and (
+            cruzou_centro or cruzou_angulo or insistiu_sem_convergir
+        )
 
     def aligned(self, detection, frame_shape):
         """A soleira está centralizada o bastante para atravessar?"""
@@ -454,6 +508,7 @@ class ExitPhaseController:
         self._align_frame_after = None
         self._align_motion_started_at = None
         self._align_wheel_speeds = None
+        self._align_previous_errors = None
         self.state = self.SEARCH_START
         return self._tank(
             self.SEARCH_START,

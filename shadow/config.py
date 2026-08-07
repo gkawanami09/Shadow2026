@@ -277,7 +277,10 @@ ENTRY_SILVER_MIN_THICKNESS_RATIO = .04
 # Em 448×252 isso são ~178 px, muito acima do teto abaixo. Ou seja: nenhuma
 # esfera passa neste filtro, por maior que esteja no quadro.
 ENTRY_SILVER_MAX_THICKNESS_RATIO = .30
-ENTRY_SILVER_MIN_FILL_RATIO = .55
+# A fita real e texturizada/vazada pelo reflexo. 0.50 aceita as duas capturas
+# reais proximas sem fazer nenhuma das curvas/faixas pretas passar pelos
+# demais filtros de geometria e aparencia.
+ENTRY_SILVER_MIN_FILL_RATIO = .50
 ENTRY_SILVER_MIN_ASPECT = 3.5
 
 # Separação por REFLEXO, aplicada na máscara antes da geometria.
