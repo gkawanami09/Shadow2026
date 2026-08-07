@@ -198,7 +198,7 @@ class EntrySilverGateTests(unittest.TestCase):
                 frame, line_ahead=False, timestamp=timestamp, now=timestamp)
         self.assertFalse(confirmed)
 
-    def test_duas_faixas_finas_confirmam_entrada_sem_apenas_reduzir(self):
+    def test_duas_faixas_finas_nao_confirmam_entrada(self):
         class DetectorFraco:
             last_reason = "fina"
 
@@ -214,8 +214,30 @@ class EntrySilverGateTests(unittest.TestCase):
             frame, line_ahead=True, timestamp=1.05, now=1.05)
 
         self.assertFalse(primeiro)
-        self.assertTrue(segundo)
-        self.assertTrue(gate.confirmed)
+        self.assertFalse(segundo)
+        self.assertFalse(gate.confirmed)
+
+    def test_curva_90_rejeitada_nao_vota_nem_gruda_confirmacao(self):
+        class DetectorCurva90:
+            last_reason = "fina"
+
+            def detect(self, *_args, **_kwargs):
+                self.last_reason = "fina"
+                return None
+
+        gate = EntrySilverGate(detector=DetectorCurva90())
+        frame = cs.piso_neutro()
+        for index in range(8):
+            instante = 1.0 + index * 0.05
+            confirmed, detection = gate.update(
+                frame,
+                line_ahead=False,
+                timestamp=instante,
+                now=instante,
+            )
+            self.assertIsNone(detection)
+            self.assertFalse(confirmed)
+        self.assertEqual(gate.votes, 0)
 
     def test_rejeicao_sem_contraste_nao_usa_confirmacao_fraca(self):
         class DetectorSemContraste:

@@ -392,7 +392,12 @@ class EntrySilverDetector:
 
 
 class EntrySilverGate:
-    """Detector + votação temporal. É esta classe que a missão consulta."""
+    """Detector + votação temporal. É esta classe que a missão consulta.
+
+    Somente deteccoes completas votam. Motivos de rejeicao como ``fina`` sao
+    diagnosticos geometricos, nao evidencia de prata: uma curva de 90 graus
+    sobre piso claro produz exatamente essa assinatura.
+    """
 
     def __init__(self, detector=None, confirmer=None, weak_confirmer=None):
         self.detector = (
@@ -454,11 +459,11 @@ class EntrySilverGate:
             timestamp=0.0 if timestamp is None else timestamp,
             now=now,
         )
-        motivo = str(getattr(self.detector, "last_reason", ""))
-        evidencia_fraca = (
-            detection is not None
-            or motivo in ("fina", "confianca")
-        )
+        # O confirmador fraco permanece para compatibilidade com objetos de
+        # teste e estados ja serializados, mas nunca recebe uma rejeicao como
+        # voto positivo. Antes, duas respostas ``fina`` confirmavam a entrada
+        # mesmo com zero deteccoes — causa do falso resgate nas curvas de 90°.
+        evidencia_fraca = detection is not None
         weak_confirmed = self.weak_confirmer.update(
             evidencia_fraca,
             timestamp=0.0 if timestamp is None else timestamp,
