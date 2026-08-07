@@ -249,6 +249,9 @@ class EntrySilverDetector:
         self.last_reason = "inicio"
         self.last_mask = None
         self.last_band = None
+        #: Havia prata plausível no último quadro? É o gatilho do gravador de
+        #: diagnóstico: sem isso ele encheria o cartão com piso vazio.
+        self.last_promising = False
 
     def detect(self, frame_bgr, line_ahead=None, timestamp=None,
                hsv_image=None):
@@ -276,8 +279,16 @@ class EntrySilverDetector:
         timestamp = 0.0 if timestamp is None else float(timestamp)
         deteccao = self._detectar_direto(
             frame_bgr, line_ahead, timestamp, hsv_image)
+        # Vale a pena olhar este quadro? Serve à escada de ângulos abaixo e ao
+        # gravador de diagnóstico, que só guarda quadro com prata plausível.
+        self.last_promising = (
+            self.last_mask is not None
+            and self._pode_haver_faixa(self.last_mask)
+        )
         if deteccao is not None or not config.ENTRY_SILVER_DESKEW_ENABLED:
             return deteccao
+        if not self.last_promising:
+            return None
 
         motivo_torto = self.last_reason
         mask_torta = self.last_mask
@@ -300,7 +311,7 @@ class EntrySilverDetector:
         em que a geometria fechou. Num quadro sem nada, a máscara é vazia e a
         escada inteira custa menos que uma detecção completa.
         """
-        if mask is None or not self._pode_haver_faixa(mask):
+        if mask is None:
             return None
         for graus in escada_de_inclinacao():
             mask_girada, _matriz_mask = _rotacionar(
@@ -378,7 +389,7 @@ class EntrySilverDetector:
             * self.geometry.min_thickness_ratio * altura
             * self.geometry.min_fill_ratio
         )
-        return cv2.countNonZero(mask[topo:base, :]) >= minimo
+        return bool(cv2.countNonZero(mask[topo:base, :]) >= minimo)
 
     def _detectar_direto(self, frame_bgr, line_ahead, timestamp, hsv_image):
         """Busca a faixa neste quadro, exatamente como ele chegou."""
