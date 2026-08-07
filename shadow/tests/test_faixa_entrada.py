@@ -193,6 +193,80 @@ class EntrySilverDetectorTests(unittest.TestCase):
         self.assertIsNone(
             self.detector.detect(frame, line_ahead=False, timestamp=1.0))
 
+    def test_fita_inclinada_e_encontrada(self):
+        """O robô chegando torto na soleira.
+
+        A busca é por linhas horizontais: uma faixa inclinada não preenche
+        linha nenhuma e sumia sem nunca ser julgada. Medido nas capturas
+        reais: até ~9° passava direto, a partir de ~12° falhava.
+        """
+        frame = cs.faixa_prata(topo=.55, espessura=.12, piso=235, base=110,
+                               brilho=180, densidade_brilho=.30)
+        for graus in (12, 18, 25, 30):
+            detection = self.detector.detect(
+                cs.girar(frame, graus), line_ahead=False, timestamp=1.0)
+            self.assertIsNotNone(
+                detection,
+                f"faixa a {graus}° recusada por "
+                f"'{self.detector.last_reason}'")
+            self.assertNotEqual(
+                detection.tilt_deg, 0.0,
+                f"a {graus}° a detecção deveria ter vindo do quadro girado")
+
+    def test_faixa_reta_nao_paga_o_giro(self):
+        """Quem acha direto não gira nada — o custo fica onde precisa ser."""
+        detection = self.detector.detect(
+            cs.faixa_prata(), line_ahead=False, timestamp=1.0)
+        self.assertIsNotNone(detection)
+        self.assertEqual(detection.tilt_deg, 0.0)
+
+    def test_interseccao_inclinada_continua_recusada(self):
+        """O giro não pode virar porta dos fundos para o falso positivo."""
+        for graus in (-25, -12, 12, 25):
+            frame = cs.girar(cs.interseccao(), graus)
+            self.assertIsNone(
+                self.detector.detect(frame, line_ahead=False, timestamp=1.0),
+                f"intersecção a {graus}° virou entrada")
+
+    def test_faixa_preta_inclinada_continua_recusada(self):
+        for graus in (-20, 20):
+            frame = cs.girar(
+                cs.faixa_preta_salpicada(densidade_brilho=0.5), graus)
+            self.assertIsNone(
+                self.detector.detect(frame, line_ahead=False, timestamp=1.0),
+                f"faixa preta a {graus}° virou entrada")
+
+    def test_fita_escura_por_luz_fraca_ainda_passa(self):
+        """O veto de escuro é relativo à cena, não a um número fixo.
+
+        Um limiar absoluto reprovava a fita verdadeira assim que a luz caía:
+        o quadro inteiro escurece e a fita boa desce junto. O que não muda
+        com a lâmpada é a razão entre a fita e o piso.
+        """
+        frame = cs.faixa_prata(topo=.60, espessura=.12, piso=235, base=110,
+                               brilho=180, densidade_brilho=.30)
+        for ganho in (1.0, 0.75, 0.6, 0.5):
+            escuro = np.clip(
+                frame.astype(np.float32) * ganho, 0, 255).astype(np.uint8)
+            self.assertIsNotNone(
+                self.detector.detect(
+                    escuro, line_ahead=False, timestamp=1.0),
+                f"fita com luz a {ganho:.0%} recusada por "
+                f"'{self.detector.last_reason}'")
+
+    def test_escada_de_angulos_cobre_os_dois_lados_sem_vao(self):
+        from visao.faixa_entrada import escada_de_inclinacao
+
+        escada = escada_de_inclinacao()
+        self.assertTrue(escada, "a escada não pode ficar vazia")
+        # Alterna os lados: a chegada torta leve resolve nos primeiros degraus.
+        self.assertEqual(escada[0], -escada[1])
+        # O passo é menor que a tolerância natural do detector (~9°), então
+        # nenhuma inclinação cai num vão entre dois degraus.
+        self.assertLessEqual(config.ENTRY_SILVER_TILT_STEP_DEG, 9.0)
+        self.assertEqual(
+            max(abs(a) for a in escada), config.ENTRY_SILVER_MAX_TILT_DEG)
+
     def test_frame_invalido_gera_erro_explicito(self):
         with self.assertRaises(ValueError):
             self.detector.detect(np.zeros((10, 10), dtype=np.uint8))

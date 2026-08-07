@@ -403,11 +403,19 @@ def vision_loop(debug=False):
                         )
                     motivo_entrada = (
                         entry_gate.detector.last_reason or "candidata")
+                    # Mostrar o giro usado revela na hora se o robô chegou
+                    # torto — sem isso, "achou" e "achou depois de endireitar
+                    # 24°" são indistinguíveis na tela.
+                    torto = (
+                        f" torto={entrada.tilt_deg:+.0f}"
+                        if entrada is not None and entrada.tilt_deg
+                        else ""
+                    )
                     cv2.putText(
                         cv2_img,
                         f"PRATA {entry_gate.votes}/"
                         f"{config.ENTRY_SILVER_VOTE_WINDOW} "
-                        f"{motivo_entrada}",
+                        f"{motivo_entrada}{torto}",
                         (5, 42),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         .35,

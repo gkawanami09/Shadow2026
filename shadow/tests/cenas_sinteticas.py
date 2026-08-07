@@ -140,6 +140,23 @@ def faixa_preta_salpicada(
     return frame
 
 
+def girar(frame, graus):
+    """Gira a cena — o robô chegando torto na soleira.
+
+    Replica a borda em vez de preencher com preto: cantos pretos artificiais
+    disparariam o veto de escuro e o teste passaria a medir um defeito do
+    próprio gerador de cena, não o detector.
+    """
+    import cv2
+
+    altura, largura = frame.shape[:2]
+    matriz = cv2.getRotationMatrix2D(
+        (largura / 2.0, altura / 2.0), graus, 1.0)
+    return cv2.warpAffine(
+        frame, matriz, (largura, altura),
+        flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_REPLICATE)
+
+
 def sombra_ampla(shape=RESCUE_FRAME, piso=60, valor=30):
     """Sombra grande sobre piso já escuro: sem contraste real com o entorno."""
     height, width = shape

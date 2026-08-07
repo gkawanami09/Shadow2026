@@ -353,6 +353,39 @@ ENTRY_SILVER_MIN_LOCAL_RANGE = 18
 ENTRY_SILVER_FALLBACK_LOCAL_RANGE = 12
 ENTRY_SILVER_FALLBACK_MIN_CONFIDENCE = .60
 
+# Faixa INCLINADA — o robô chegando torto na entrada.
+#
+# A busca da faixa é feita por linhas horizontais: conta-se quanto de cada
+# linha da imagem está na máscara. Uma faixa inclinada não preenche linha
+# nenhuma — ela cruza muitas, com um pedaço em cada. Medido girando as duas
+# capturas reais: até ~9° tudo passa; a partir de ~12° o detector cai em
+# "sem_linha_cheia"/"espessa" mesmo com a fita inteira e nítida no quadro.
+# É a mesma coisa que o robô vê quando chega de esguelha na soleira.
+#
+# A correção não mexe em nenhum limiar: quando a busca normal falha, a imagem
+# é girada de volta ao horizontal e a MESMA busca roda outra vez. Todos os
+# testes de forma, cor, reflexo, contraste e escuro rodam iguais — só que num
+# quadro endireitado.
+#
+# Estimar o ângulo a partir da máscara foi tentado e descartado: com a faixa
+# atravessando o quadro inteiro ela fica cortada nas laterais, e tanto o
+# `minAreaRect` quanto os momentos da imagem devolvem quase zero justamente
+# nos casos que mais precisam de correção (medido: 12° reais viravam 3.7°).
+# Em vez de estimar, varre-se uma escada curta de ângulos e deixa-se o próprio
+# detector dizer qual funcionou — não existe erro de estimativa possível.
+#
+# O custo é controlado sondando primeiro só a MÁSCARA (girar 1 canal + somar
+# linhas). O quadro inteiro só é girado no ângulo em que a geometria fechou.
+ENTRY_SILVER_DESKEW_ENABLED = True
+# Passo e alcance da escada: ±8, ±16, ±24, ±32 graus. O passo é menor que a
+# tolerância natural do detector (~9°), então nenhuma inclinação fica num vão
+# entre dois degraus.
+ENTRY_SILVER_TILT_STEP_DEG = 8.
+ENTRY_SILVER_MAX_TILT_DEG = 32.
+# Como no fallback de reflexo: o caminho girado é mais permissivo por
+# construção, então paga com confiança maior.
+ENTRY_SILVER_DESKEW_MIN_CONFIDENCE = .55
+
 # Aparência. Neutralidade + assinatura reflexiva. O papel branco fosco é
 # neutro mas quase não tem faixa dinâmica nem brilho especular concentrado.
 # O teto de saturação acompanha a janela HSV: a fita real chegou a S≈87 nas
@@ -364,12 +397,23 @@ ENTRY_SILVER_MAX_SATURATION = 110.
 # caixa dominada por preto: a máscara pega só a auréola clara da borda, mas a
 # caixa continua majoritariamente escura e o candidato cai aqui. A fita prata,
 # por mais escura que fique de raso, nunca é preta nesse grau.
-# Margem medida: nas duas capturas reais da fita a fração de preto na caixa
-# deu 0.000; uma faixa preta salpicada de reflexo dá 0.34-0.42. O teto abaixo
-# fica no meio, com folga para a linha preta que MORRE na fita (uma coluna de
-# ~11% da largura) e para a sombra da própria borda.
-ENTRY_SILVER_DARK_V = 60
-ENTRY_SILVER_MAX_DARK_FRACTION = .30
+# "Preto" é RELATIVO ao brilho da cena, não um número fixo. Um limiar
+# absoluto foi tentado e reprovou a fita verdadeira assim que a luz caiu: sob
+# iluminação fraca o quadro inteiro escurece, a fita boa desce junto e passa a
+# ser contada como preta. O que não muda com a luz é a RAZÃO — a linha preta
+# reflete uma fração pequena do que o piso reflete, sob qualquer lâmpada.
+#
+# O nível claro é o percentil 75 do brilho na ROI (o piso domina a ROI mesmo
+# com a fita grande no quadro). Margem medida sobre as capturas reais, em
+# giros de 0 a 32° e com a cena escurecida até a metade: a fração de escuro
+# dentro da caixa da fita fica entre 0.00 e 0.06; a faixa PRETA salpicada de
+# reflexo — o negativo mais parecido que existe — fica entre 0.18 e 0.42.
+ENTRY_SILVER_DARK_V_RATIO = .33
+# Grades de segurança para cena estourada ou quase apagada, onde o percentil
+# perde sentido.
+ENTRY_SILVER_DARK_V_MIN = 25
+ENTRY_SILVER_DARK_V_MAX = 90
+ENTRY_SILVER_MAX_DARK_FRACTION = .12
 ENTRY_SILVER_MIN_DYNAMIC_RANGE = 26.
 ENTRY_SILVER_HIGHLIGHT_V = 205
 ENTRY_SILVER_MIN_HIGHLIGHT_FRACTION = .02
