@@ -72,9 +72,16 @@ class MissionDebugWindowTests(unittest.TestCase):
 
 
 class MissionEntryAdvanceTests(unittest.TestCase):
-    def test_entrada_prata_confirma_em_dois_de_tres_frames(self):
+    def test_entrada_prata_exige_dois_frames_distintos(self):
+        """O que não pode mudar é a EVIDÊNCIA: nunca um frame só.
+
+        A janela pode ser alargada para tolerar detecção intermitente com o
+        robô em movimento; o número de votos é que segura o falso positivo.
+        """
         self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 2)
-        self.assertEqual(config.ENTRY_SILVER_VOTE_WINDOW, 3)
+        self.assertGreaterEqual(
+            config.ENTRY_SILVER_VOTE_WINDOW,
+            config.ENTRY_SILVER_VOTES_NEEDED)
 
     def test_faixa_fina_distante_sem_deteccao_nao_pede_avanco(self):
         self.assertFalse(_deve_pre_avancar_entrada(

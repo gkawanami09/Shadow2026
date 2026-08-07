@@ -268,9 +268,20 @@ ENTRY_SILVER_ENABLED = True
 ENTRY_SILVER_MIN_DEFAULT = [0, 0, 55]
 ENTRY_SILVER_MAX_DEFAULT = [180, 110, 255]
 
-# A fita só é procurada na parte inferior da imagem: acima disso aparecem
+# A fita só é procurada na parte de baixo da imagem: acima disso aparecem
 # público, sapatos, cadeiras e o resto do ginásio.
-ENTRY_SILVER_ROI_TOP = .55
+#
+# 0.55 era restritivo DEMAIS e é a causa principal da detecção intermitente.
+# Medido em `captures/linha_prata/...140318`: com o robô se aproximando, a
+# fita ocupa de 19% a 46% da altura do quadro — inteiramente ACIMA do corte
+# antigo. O detector nem chegava a ver a fita; via só o piso adiante dela.
+#
+# Varredura do corte contra 30 cenas positivas (as duas capturas reais mais
+# borrão, escurecimento, ruído e distância) e 18 negativas: 0.55 acertava
+# 19/30, 0.45 acerta 25/30 sem NENHUM falso positivo. Abaixo de 0.30 a
+# plateia entra no quadro e o primeiro falso positivo aparece — por isso o
+# corte para em 0.45, com margem folgada até esse ponto.
+ENTRY_SILVER_ROI_TOP = .45
 ENTRY_SILVER_ROI_BOTTOM = 1.0
 
 # Forma. A fita tem ~250 mm e o campo inferior da câmera é ~80 mm: ela
@@ -358,8 +369,15 @@ ENTRY_SILVER_REQUIRE_LINE_END = True
 
 # Confirmação temporal rápida: dois frames distintos ainda eliminam um
 # reflexo isolado, mas não deixam o robô preso diante da entrada verdadeira.
+#
+# A JANELA foi de 3 para 5 sem mexer nos votos. A evidência exigida é a mesma
+# — duas detecções completas em frames distintos —, o que muda é quantas
+# falhas cabem no meio: 1 antes, 3 agora. Com detecção intermitente (o robô
+# em movimento borra alguns frames), 2-de-3 exige quase acerto seguido;
+# 2-de-5 tolera a alternância. Um reflexo isolado continua incapaz de
+# confirmar sozinho, que é a garantia que importa aqui.
 ENTRY_SILVER_VOTES_NEEDED = 2
-ENTRY_SILVER_VOTE_WINDOW = 3
+ENTRY_SILVER_VOTE_WINDOW = 5
 # Evidência fraca ainda precisa repetir em dois frames. Ela aceita somente
 # uma faixa transversal que falhou por estar distante/fina ou por confiança
 # visual baixa; piso, esfera e reflexo pontual continuam fora.

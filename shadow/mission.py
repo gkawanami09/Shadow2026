@@ -67,6 +67,9 @@ CHILD_JOIN_TIMEOUT_S = 6.0
 #: Códigos de saída do subprocesso de resgate, lidos pelo supervisor.
 RESCUE_EXIT_OK = 0
 RESCUE_EXIT_INCOMPLETE = 3
+#: A câmera de resgate abriu e não viu vítima nem triângulo: a faixa prata
+#: não era a sala. Não é falha — o robô volta ao percurso e segue procurando.
+RESCUE_EXIT_FALSE_ENTRY = 5
 
 
 def iniciar_visao(debug):
@@ -395,6 +398,31 @@ def main():
             coordinator.on_rescue_started()
 
             returncode = system.wait_rescue()
+            if returncode == RESCUE_EXIT_FALSE_ENTRY:
+                # A câmera de resgate não viu vítima nem triângulo: a prata
+                # não era a sala. O robô já recuou; devolvemos o percurso com
+                # a busca da entrada REARMADA, senão ele passaria direto pela
+                # sala verdadeira mais adiante.
+                if coordinator.false_entries >= coordinator.MAX_FALSE_ENTRIES:
+                    print(
+                        "[missão] entrada falsa pela "
+                        f"{coordinator.false_entries + 1}ª vez; o robô está "
+                        "preso na mesma prata. Encerrando por segurança.")
+                    coordinator.abort("entradas falsas consecutivas")
+                    codigo = RESCUE_EXIT_FALSE_ENTRY
+                    break
+                coordinator.on_false_entry()
+                print(
+                    "[missão] entrada falsa "
+                    f"({coordinator.false_entries}/"
+                    f"{coordinator.MAX_FALSE_ENTRIES}); "
+                    "voltando ao percurso e rearmando a faixa prata")
+                shared.entry_armed.value = True
+                shared.entry_false_entry.value = True
+                shared.entry_silver_confirmed.value = False
+                shared.entry_silver_detected.value = False
+                HandoffExecutor(system, HANDOFF_TO_LINE).run()
+                continue
             if returncode == RESCUE_EXIT_OK:
                 print("[missão] resgate concluído; voltando ao percurso")
             else:
