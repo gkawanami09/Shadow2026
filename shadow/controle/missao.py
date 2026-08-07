@@ -138,11 +138,6 @@ class MissionCoordinator:
     #: tentativa de recuperação antes de desistir das vítimas que faltam.
     MAX_EMPTY_SWEEPS = 2
 
-    #: Entradas falsas toleradas antes de desistir. Duas voltas ao percurso
-    #: ainda cabem no tempo de prova; a terceira significa que o robô está
-    #: preso num laço com a mesma prata falsa, e insistir só queima a prova.
-    MAX_FALSE_ENTRIES = 2
-
     def __init__(self, policy=POLICY_NEAREST_VALID, inventory=None):
         if policy not in VALID_POLICIES:
             raise MissionError(f"política de resgate inválida: {policy}")
@@ -155,9 +150,6 @@ class MissionCoordinator:
         self.pending_kind = None
         self.empty_sweeps = 0
         self.entry_count = 0
-        #: Entradas que a câmera de resgate reprovou. Se o robô insistir na
-        #: mesma prata falsa, é este contador que interrompe o laço.
-        self.false_entries = 0
         self.abort_reason = ""
         self.history = [MissionState.FOLLOW_LINE]
 
@@ -266,17 +258,6 @@ class MissionCoordinator:
     def on_rescue_started(self):
         self._require(MissionState.STOP_AND_HANDOFF_TO_RESCUE)
         return self._go(MissionState.RESCUE_SCAN)
-
-    def on_false_entry(self):
-        """A câmera de resgate abriu e não viu vítima nem triângulo.
-
-        Diferente de ``on_entry_rejected``: lá o robô nem chegou a entrar; aqui
-        ele entrou, olhou a sala e ela não existe. Volta ao percurso com o
-        inventário intacto — nada foi resgatado e nada foi perdido.
-        """
-        self._require(MissionState.RESCUE_SCAN)
-        self.false_entries += 1
-        return self._go(MissionState.FOLLOW_LINE)
 
     # -- resgate ---------------------------------------------------------
     def on_target_locked(self, kind):

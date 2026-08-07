@@ -57,12 +57,8 @@ status = manager.Value("i", "Parado")
 mission_mode = Value("b", False)      # supervisor da missão no comando
 entry_armed = Value("b", True)        # procurar a faixa prata agora?
 entry_silver_detected = Value("b", False)   # candidato no frame atual
-entry_silver_confirmed = Value("b", False)  # votação N-de-M fechada
+entry_silver_confirmed = Value("b", False)  # votação 3-de-5 fechada
 entry_silver_votes = Value("i", 0)
-# A câmera de resgate reprovou a última entrada. A visão nasce em cooldown
-# para o robô não reentrar na MESMA prata falsa assim que der ré por cima
-# dela — sem isso a volta ao percurso vira um laço.
-entry_false_entry = Value("b", False)
 entry_silver_reason = manager.Value("i", "")  # motivo da última rejeição
 rescue_requested = Value("b", False)  # controle pediu o handoff
 red_finished = Value("b", False)      # faixa vermelha final cumprida

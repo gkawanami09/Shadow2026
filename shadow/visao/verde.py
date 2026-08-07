@@ -5,44 +5,10 @@ import numpy as np
 from numba import njit
 
 from config import (GREEN_MARKER_MEMORY, GREEN_MIN_AREA, GREEN_ROI_MEAN,
-                    GREEN_ROI_TOP, GREEN_VOTE_THRESHOLD, GREEN_VOTE_WINDOW,
-                    LINE_CROP_GREEN, LINE_CROP_NORMAL, camera_x, camera_y)
+                    GREEN_VOTE_THRESHOLD, GREEN_VOTE_WINDOW, LINE_CROP_GREEN,
+                    LINE_CROP_NORMAL, camera_x, camera_y)
 from shared.dados_compartilhados import (add_time_value, get_time_average, line_crop,
                                timer, turn_dir)
-
-
-def perto_do_robo(contour, altura_frame=None, corte=None):
-    """O contorno alcança a parte de baixo do quadro?
-
-    Mede pela BASE do contorno, não pelo centro: um marcador que está
-    entrando no quadro por baixo já é acionável, e um que ainda está inteiro
-    lá em cima não é. Esta é a única pergunta que separa o marcador verde
-    real do reflexo verde-oliva da fita prata da entrada, que aparece grande
-    e alto no quadro.
-    """
-    altura_frame = camera_y if altura_frame is None else int(altura_frame)
-    corte = GREEN_ROI_TOP if corte is None else float(corte)
-    _x, y, _w, h = cv2.boundingRect(contour)
-    return (y + h) >= altura_frame * corte
-
-
-def filtrar_verdes_proximos(contours_grn, altura_frame=None, corte=None):
-    """Separa os contornos verdes em (aceitos, descartados por estarem longe).
-
-    Devolver também os descartados é de propósito: o overlay de debug os
-    desenha em outra cor, para a tela mostrar "vi verde e ignorei" em vez de
-    simplesmente não mostrar nada — foi a ausência dessa informação que
-    tornou o reflexo da fita prata difícil de diagnosticar.
-    """
-    aceitos = []
-    descartados = []
-    for contour in contours_grn:
-        destino = (
-            aceitos if perto_do_robo(contour, altura_frame, corte)
-            else descartados
-        )
-        destino.append(contour)
-    return aceitos, descartados
 
 
 def check_green(contours_grn, black_image, debug_img=None):

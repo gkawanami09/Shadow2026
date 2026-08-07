@@ -166,24 +166,6 @@ PIVOT_RECOVERY_EXIT_ANGLE = 40
 # ----------------------------------------------------------------------------
 GREEN_MIN_AREA = 2500                     # area minima do marcador
 GREEN_ROI_MEAN = 125                      # "lado e preto" se media > 125
-# O marcador verde so vale PERTO, na parte de baixo do quadro. Um contorno so
-# conta se a BASE dele alcancar esta fracao da altura da imagem.
-#
-# Motivo medido, nao preferencia de estilo: a fita PRATA da entrada reflete o
-# ambiente e cai dentro da faixa HSV do verde (H 30-60). Nas capturas de
-# `captures/linha_prata` ela vira um contorno "verde" de ~7000-10000 px, bem
-# acima de GREEN_MIN_AREA. Com o robo se aproximando, essa mancha aparece na
-# parte de CIMA do quadro, o robo a trata como marcador, dispara o giro verde
-# e nunca chega a confirmar a entrada da sala — foi exatamente o que os
-# prints mostraram.
-#
-# O marcador de verdade fica no chao colado na interseccao: quando o robo
-# esta perto o bastante para agir, ele ja desceu para a metade de baixo. Um
-# marcador ainda alto no quadro esta longe demais para virar manobra, e
-# ignora-lo nao perde nada — ele volta a ser visto alguns frames depois, ja
-# na regiao valida. O veto de "marcador baixo demais" (base > 95% da altura,
-# em `determine_turn_direction`) continua valendo do outro lado.
-GREEN_ROI_TOP = .55
 GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)
@@ -271,35 +253,14 @@ VISION_READY_TIMEOUT = 15                 # s que o controle espera a visao no b
 # medidos na arena real com `tools/calibrar_cores.py` (grupo 7). Nenhum deles
 # foi validado com a fita de verdade sob a iluminação da competição.
 ENTRY_SILVER_ENABLED = True
-# HSV do OpenCV (H 0..180). Prata NÃO é "claro": medido nas capturas reais da
-# câmera de linha (`captures/linha_prata`), a mesma fita aparece com V mediano
-# entre 62 e 190 e S até ~87, enquanto o PISO branco fica em V 200-255 e S<30.
-# Vista de raso, a fita reflete o ambiente e sai mais ESCURA e mais tingida que
-# o piso. A janela antiga (V≥140, S≤70) era, na prática, uma máscara de piso:
-# a fita ficava de fora e o detector morria em "sem_linha_cheia"/"fina" — que é
-# exatamente o que os prints do robô mostram.
-#
-# Por isso a janela aqui é deliberadamente larga: ela só exclui o que é PRETO
-# (linha e intersecção) e o que é COLORIDO (marcador verde/vermelho). Quem
-# separa fita de piso é a TEXTURA da luz (ENTRY_SILVER_MIN_LOCAL_RANGE, ver
-# abaixo), somada à geometria transversal, ao contraste e ao veto de escuro.
-ENTRY_SILVER_MIN_DEFAULT = [0, 0, 55]
-ENTRY_SILVER_MAX_DEFAULT = [180, 110, 255]
+# HSV do OpenCV (H 0..180). Prata é definida por NEUTRALIDADE (S baixo) e
+# BRILHO (V alto), não por matiz — por isso H cobre a faixa inteira.
+ENTRY_SILVER_MIN_DEFAULT = [0, 0, 140]
+ENTRY_SILVER_MAX_DEFAULT = [180, 70, 255]
 
-# A fita só é procurada na parte de baixo da imagem: acima disso aparecem
+# A fita só é procurada na parte inferior da imagem: acima disso aparecem
 # público, sapatos, cadeiras e o resto do ginásio.
-#
-# 0.55 era restritivo DEMAIS e é a causa principal da detecção intermitente.
-# Medido em `captures/linha_prata/...140318`: com o robô se aproximando, a
-# fita ocupa de 19% a 46% da altura do quadro — inteiramente ACIMA do corte
-# antigo. O detector nem chegava a ver a fita; via só o piso adiante dela.
-#
-# Varredura do corte contra 30 cenas positivas (as duas capturas reais mais
-# borrão, escurecimento, ruído e distância) e 18 negativas: 0.55 acertava
-# 19/30, 0.45 acerta 25/30 sem NENHUM falso positivo. Abaixo de 0.30 a
-# plateia entra no quadro e o primeiro falso positivo aparece — por isso o
-# corte para em 0.45, com margem folgada até esse ponto.
-ENTRY_SILVER_ROI_TOP = .45
+ENTRY_SILVER_ROI_TOP = .55
 ENTRY_SILVER_ROI_BOTTOM = 1.0
 
 # Forma. A fita tem ~250 mm e o campo inferior da câmera é ~80 mm: ela
@@ -321,14 +282,6 @@ ENTRY_SILVER_MAX_THICKNESS_RATIO = .30
 # demais filtros de geometria e aparencia.
 ENTRY_SILVER_MIN_FILL_RATIO = .50
 ENTRY_SILVER_MIN_ASPECT = 3.5
-# Com o robô colado na fita ela sobe acima do corte da ROI. Medido na captura
-# `linha_prata/...140307`: a fita ocupa de 24% a 71% da altura e era rejeitada
-# em "cortada_no_topo" — o veto matava a detecção verdadeira justamente no
-# frame mais fácil de todos. A faixa PRETA de saída mantém o veto ligado; lá
-# ele foi calibrado contra seis falsas soleiras. Aqui, quem cobre o risco é o
-# teto de espessura, o veto de escuro e o contraste com a vizinhança. Uma
-# faixa que toca o topo E a base da ROI continua rejeitada nos dois casos.
-ENTRY_SILVER_ALLOW_TOP_TOUCH = True
 
 # Separação por REFLEXO, aplicada na máscara antes da geometria.
 #
@@ -353,67 +306,9 @@ ENTRY_SILVER_MIN_LOCAL_RANGE = 18
 ENTRY_SILVER_FALLBACK_LOCAL_RANGE = 12
 ENTRY_SILVER_FALLBACK_MIN_CONFIDENCE = .60
 
-# Faixa INCLINADA — o robô chegando torto na entrada.
-#
-# A busca da faixa é feita por linhas horizontais: conta-se quanto de cada
-# linha da imagem está na máscara. Uma faixa inclinada não preenche linha
-# nenhuma — ela cruza muitas, com um pedaço em cada. Medido girando as duas
-# capturas reais: até ~9° tudo passa; a partir de ~12° o detector cai em
-# "sem_linha_cheia"/"espessa" mesmo com a fita inteira e nítida no quadro.
-# É a mesma coisa que o robô vê quando chega de esguelha na soleira.
-#
-# A correção não mexe em nenhum limiar: quando a busca normal falha, a imagem
-# é girada de volta ao horizontal e a MESMA busca roda outra vez. Todos os
-# testes de forma, cor, reflexo, contraste e escuro rodam iguais — só que num
-# quadro endireitado.
-#
-# Estimar o ângulo a partir da máscara foi tentado e descartado: com a faixa
-# atravessando o quadro inteiro ela fica cortada nas laterais, e tanto o
-# `minAreaRect` quanto os momentos da imagem devolvem quase zero justamente
-# nos casos que mais precisam de correção (medido: 12° reais viravam 3.7°).
-# Em vez de estimar, varre-se uma escada curta de ângulos e deixa-se o próprio
-# detector dizer qual funcionou — não existe erro de estimativa possível.
-#
-# O custo é controlado sondando primeiro só a MÁSCARA (girar 1 canal + somar
-# linhas). O quadro inteiro só é girado no ângulo em que a geometria fechou.
-ENTRY_SILVER_DESKEW_ENABLED = True
-# Passo e alcance da escada: ±8, ±16, ±24, ±32 graus. O passo é menor que a
-# tolerância natural do detector (~9°), então nenhuma inclinação fica num vão
-# entre dois degraus.
-ENTRY_SILVER_TILT_STEP_DEG = 8.
-ENTRY_SILVER_MAX_TILT_DEG = 32.
-# Como no fallback de reflexo: o caminho girado é mais permissivo por
-# construção, então paga com confiança maior.
-ENTRY_SILVER_DESKEW_MIN_CONFIDENCE = .55
-
 # Aparência. Neutralidade + assinatura reflexiva. O papel branco fosco é
 # neutro mas quase não tem faixa dinâmica nem brilho especular concentrado.
-# O teto de saturação acompanha a janela HSV: a fita real chegou a S≈87 nas
-# capturas, e um marcador verde/vermelho fica bem acima de 110.
-ENTRY_SILVER_MAX_SATURATION = 110.
-# Veto de ESCURO — a contrapartida da janela HSV larga. Mede a fração de
-# pixels realmente pretos DENTRO da caixa da faixa candidata, na imagem crua
-# (não na máscara). Uma intersecção ou uma faixa preta transversal produz uma
-# caixa dominada por preto: a máscara pega só a auréola clara da borda, mas a
-# caixa continua majoritariamente escura e o candidato cai aqui. A fita prata,
-# por mais escura que fique de raso, nunca é preta nesse grau.
-# "Preto" é RELATIVO ao brilho da cena, não um número fixo. Um limiar
-# absoluto foi tentado e reprovou a fita verdadeira assim que a luz caiu: sob
-# iluminação fraca o quadro inteiro escurece, a fita boa desce junto e passa a
-# ser contada como preta. O que não muda com a luz é a RAZÃO — a linha preta
-# reflete uma fração pequena do que o piso reflete, sob qualquer lâmpada.
-#
-# O nível claro é o percentil 75 do brilho na ROI (o piso domina a ROI mesmo
-# com a fita grande no quadro). Margem medida sobre as capturas reais, em
-# giros de 0 a 32° e com a cena escurecida até a metade: a fração de escuro
-# dentro da caixa da fita fica entre 0.00 e 0.06; a faixa PRETA salpicada de
-# reflexo — o negativo mais parecido que existe — fica entre 0.18 e 0.42.
-ENTRY_SILVER_DARK_V_RATIO = .33
-# Grades de segurança para cena estourada ou quase apagada, onde o percentil
-# perde sentido.
-ENTRY_SILVER_DARK_V_MIN = 25
-ENTRY_SILVER_DARK_V_MAX = 90
-ENTRY_SILVER_MAX_DARK_FRACTION = .12
+ENTRY_SILVER_MAX_SATURATION = 70.
 ENTRY_SILVER_MIN_DYNAMIC_RANGE = 26.
 ENTRY_SILVER_HIGHLIGHT_V = 205
 ENTRY_SILVER_MIN_HIGHLIGHT_FRACTION = .02
@@ -431,15 +326,8 @@ ENTRY_SILVER_REQUIRE_LINE_END = True
 
 # Confirmação temporal rápida: dois frames distintos ainda eliminam um
 # reflexo isolado, mas não deixam o robô preso diante da entrada verdadeira.
-#
-# A JANELA foi de 3 para 5 sem mexer nos votos. A evidência exigida é a mesma
-# — duas detecções completas em frames distintos —, o que muda é quantas
-# falhas cabem no meio: 1 antes, 3 agora. Com detecção intermitente (o robô
-# em movimento borra alguns frames), 2-de-3 exige quase acerto seguido;
-# 2-de-5 tolera a alternância. Um reflexo isolado continua incapaz de
-# confirmar sozinho, que é a garantia que importa aqui.
 ENTRY_SILVER_VOTES_NEEDED = 2
-ENTRY_SILVER_VOTE_WINDOW = 5
+ENTRY_SILVER_VOTE_WINDOW = 3
 # Evidência fraca ainda precisa repetir em dois frames. Ela aceita somente
 # uma faixa transversal que falhou por estar distante/fina ou por confiança
 # visual baixa; piso, esfera e reflexo pontual continuam fora.

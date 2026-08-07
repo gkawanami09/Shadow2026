@@ -55,31 +55,6 @@ class TransversalBandTests(unittest.TestCase):
         self.assertIsNone(band)
         self.assertEqual(reason, "cortada_no_topo")
 
-    def test_allow_top_touch_aceita_faixa_que_so_toca_o_topo(self):
-        """Opt-in usado pela entrada prata: fita colada na câmera.
-
-        Ela sobe acima do corte da ROI mas termina antes da base — a borda de
-        baixo ainda é medível, então a faixa continua sendo uma faixa.
-        """
-        mask = _mask(self.shape, rows=(139, 200))
-        geometry = BandGeometry(allow_top_touch=True)
-        band, reason = find_transversal_band(
-            mask, geometry, roi_top_ratio=0.55, roi_bottom_ratio=1.0)
-        self.assertIsNotNone(band, f"rejeitada por '{reason}'")
-
-    def test_allow_top_touch_ainda_veta_quem_toca_topo_e_base(self):
-        """Atravessar a ROI inteira é sombra/parede truncada, não faixa."""
-        mask = _mask(self.shape, rows=(139, 252))
-        geometry = BandGeometry(allow_top_touch=True)
-        band, reason = find_transversal_band(
-            mask, geometry, roi_top_ratio=0.55, roi_bottom_ratio=1.0)
-        self.assertIsNone(band)
-        self.assertEqual(reason, "cortada_no_topo")
-
-    def test_veto_do_topo_continua_ligado_por_padrao(self):
-        """A faixa PRETA de saída depende disso; o default não pode mudar."""
-        self.assertFalse(BandGeometry().allow_top_touch)
-
     def test_banda_grossa_dentro_da_roi_e_rejeitada_como_espessa(self):
         """Sem tocar o topo da ROI, o veto que age é o de espessura."""
         mask = _mask(self.shape, rows=(160, 252))

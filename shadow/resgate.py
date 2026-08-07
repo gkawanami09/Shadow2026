@@ -50,9 +50,6 @@ from controle.aproximacao_resgate import (  # noqa: E402
 )
 from controle.busca_pulsada import make_search_controller  # noqa: E402
 from controle.coleta_resgate import BallPickupSequencer  # noqa: E402
-from controle.confirmacao_entrada import (  # noqa: E402
-    ConfirmacaoEntradaResgate,
-)
 from controle.contador_verde_resgate import (  # noqa: E402
     BUSCA_CONCLUIR,
     BUSCA_REINICIAR,
@@ -111,9 +108,6 @@ TICK_S = 0.005
 EXIT_OK = 0
 EXIT_INCOMPLETE = 3
 EXIT_SEM_MODELO = 4
-#: A camera de resgate abriu e nao viu vitima nem triangulo: a faixa prata
-#: era falsa. Nao e erro — o supervisor devolve o robo ao percurso.
-EXIT_ENTRADA_FALSA = 5
 
 CORREDOR_LIVRE = "livre"
 CORREDOR_BLOQUEADO = "bloqueado"
@@ -719,135 +713,6 @@ def _avancar_entrada_da_missao(args, arduino, acao_direcao):
     return True
 
 
-def _recuar_entrada_falsa(arduino, acao_direcao):
-    """Desfaz o avanco da entrada para o robo reencontrar a linha.
-
-    A re cobre o avanco de ``ciclo.py`` mais o de
-    ``_avancar_entrada_da_missao``, com folga. Se o recuo falhar, o robo fica
-    parado: e melhor perder a volta do que sair andando as cegas.
-    """
-    if arduino is None or acao_direcao is None:
-        return
-    epoca_serial = arduino.connection_epoch
-    print(
-        "[resgate] recuando "
-        f"{cfg.MISSION_ENTRY_RETREAT_S:.1f} s para voltar ao percurso")
-    try:
-        _mover_saida_por_tempo(
-            arduino,
-            acao_direcao,
-            200,
-            cfg.MISSION_ENTRY_RETREAT_SPEED,
-            cfg.MISSION_ENTRY_RETREAT_S,
-            epoca_serial,
-        )
-    finally:
-        acao_direcao()
-
-
-def _confirmar_sala_de_resgate(
-    args,
-    captura,
-    trabalhador,
-    portao,
-    marcadores,
-    arduino,
-    acao_direcao,
-):
-    """Confirma pela camera de resgate que a sala existe. Robo PARADO.
-
-    A faixa prata prova que ha prata a frente; nao prova que ha uma sala.
-    Aqui a segunda camera decide: uma vitima confirmada ou um dos triangulos
-    de deposito confirmado libera o resgate. Nada disso dentro da janela
-    significa entrada falsa — o robo recua e o supervisor o devolve ao
-    percurso.
-
-    Devolve ``True`` para seguir com o resgate e ``False`` para entrada falsa.
-    """
-    if not (
-        args.drive
-        and args.gerenciado_pela_missao
-        and cfg.MISSION_ENTRY_CONFIRM_ENABLED
-    ):
-        return True
-
-    confirmacao = ConfirmacaoEntradaResgate(cfg.MISSION_ENTRY_CONFIRM_S)
-    print(
-        "[resgate] confirmando a sala pela camera: procurando vitima ou "
-        f"triangulo por ate {cfg.MISSION_ENTRY_CONFIRM_S:.1f} s (parado)")
-
-    epoca_serial = arduino.connection_epoch if arduino is not None else None
-    sequencia_frame = 0
-    sequencia_resultado = 0
-    while True:
-        agora = time.monotonic()
-        if arduino is not None:
-            arduino.refresh(fail_closed=True)
-            if (
-                not arduino.connected
-                or arduino.connection_epoch != epoca_serial
-            ):
-                raise RuntimeError(
-                    "serial mudou durante a confirmacao da sala")
-
-        marcadores_atuais = None
-        pacote = captura.poll(sequencia_frame)
-        if pacote is not None:
-            sequencia_frame = pacote.sequence
-            if trabalhador is not None:
-                trabalhador.submit(
-                    pacote.frame,
-                    captured_at=pacote.captured_at,
-                    source_sequence=pacote.sequence,
-                )
-            if marcadores is not None:
-                marcadores_atuais = marcadores.update(
-                    pacote.frame, pacote.captured_at)
-        elif captura.ended:
-            print("[resgate] fonte de imagem terminou durante a confirmacao")
-            break
-
-        vitima = None
-        if trabalhador is not None:
-            if not trabalhador.is_alive:
-                raise RuntimeError(
-                    "detector assincrono encerrou durante a confirmacao")
-            resultado = trabalhador.poll(sequencia_resultado)
-            if resultado is not None:
-                sequencia_resultado = resultado.sequence
-                vitima = portao.accept(resultado.detection)
-
-        if confirmacao.observar(
-            vitima=vitima,
-            marcadores=marcadores_atuais,
-            agora=agora,
-        ):
-            break
-        if confirmacao.expirou(agora):
-            break
-        time.sleep(TICK_S)
-
-    # A janela usou o portao e os marcadores; o resgate comeca com eles
-    # zerados, exatamente como comecaria sem esta etapa.
-    portao.reset()
-    if marcadores is not None:
-        marcadores.reset()
-    if trabalhador is not None:
-        trabalhador.reset_tracking()
-
-    if confirmacao.confirmado:
-        print(
-            f"[resgate] sala CONFIRMADA por {confirmacao.motivo}; "
-            "iniciando a busca das vitimas")
-        return True
-
-    print(
-        "[resgate] ENTRADA FALSA: nenhuma vitima e nenhum triangulo em "
-        f"{cfg.MISSION_ENTRY_CONFIRM_S:.1f} s; a faixa prata nao era a sala")
-    _recuar_entrada_falsa(arduino, acao_direcao)
-    return False
-
-
 def _recuperar_bloqueio_saida(arduino, acao_direcao, epoca_serial):
     """Recua meio segundo e muda o setor visto antes de procurar de novo."""
     acao_direcao()
@@ -1339,21 +1204,6 @@ def main():
             arduino,
             steer if sessao_hardware else None,
         )
-
-        # A faixa prata provou que ha prata; a camera de resgate e quem prova
-        # que ha uma SALA. Sem vitima e sem triangulo, a entrada foi falsa e o
-        # robo volta ao percurso em vez de girar numa sala inexistente.
-        if not _confirmar_sala_de_resgate(
-            args,
-            captura,
-            trabalhador,
-            portao,
-            marcadores,
-            arduino,
-            steer if sessao_hardware else None,
-        ):
-            return EXIT_ENTRADA_FALSA
-
         inicio = time.monotonic()
         armado_em = (
             inicio

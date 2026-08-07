@@ -9,33 +9,22 @@ a entrada por estar calibrado para uma esfera.
 
 A confirmação exige evidência CONJUNTA, nunca um único sinal:
 
-1. região neutra e não-preta na ROI inferior (máscara HSV calibrável);
+1. região neutra e clara na ROI inferior (máscara HSV calibrável);
 2. forma alongada e transversal (``faixa_transversal``);
 3. largura mínima proporcional ao quadro;
-4. caixa não dominada por preto — veto direto contra intersecção e linha
-   transversal, medido na imagem crua;
-5. baixa saturação (neutralidade metálica);
-6. assinatura reflexiva — faixa dinâmica e brilho especular concentrado,
+4. baixa saturação (neutralidade metálica);
+5. assinatura reflexiva — faixa dinâmica e brilho especular concentrado,
    que é o que separa fita refletiva de papel branco fosco;
-7. contraste contra a vizinhança imediata, acima e abaixo da faixa;
-8. fim coerente da linha preta à frente;
-9. votação temporal em frames distintos e recentes, com cooldown.
+6. contraste contra a vizinhança imediata, acima e abaixo da faixa;
+7. fim coerente da linha preta à frente;
+8. votação temporal 3-de-5 em frames distintos e recentes, com cooldown.
 
-O peso da separação NÃO está na janela HSV — ela é larga de propósito, porque
-a fita real muda muito de brilho com o ângulo. Quem separa fita de piso é o
-filtro de textura da luz (``ENTRY_SILVER_MIN_LOCAL_RANGE``); quem separa fita
-de linha/intersecção é o veto de escuro somado à geometria transversal.
-
-A busca é feita por LINHAS horizontais, então uma faixa inclinada — o robô
-chegando torto na soleira — não preenche linha nenhuma e escapa de todos os
-testes acima sem nunca ser julgada. Para isso existe a escada de ângulos: se
-a busca direta falha, o quadro é girado alguns graus por vez e a MESMA busca
-roda de novo. Nenhum limiar é afrouxado; muda só a orientação do quadro.
-
-Os limiares seguem ajustáveis com ``tools/calibrar_cores.py`` (grupo 7).
+Nenhum desses limiares foi validado com a fita real sob a luz da competição.
+Eles são um ponto de partida seguro e existem para ser medidos com
+``tools/calibrar_cores.py`` (grupo 7).
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -66,87 +55,6 @@ class EntryStripeDetection:
     confidence: float
     timestamp: float
     bbox: tuple
-    #: Graus que a imagem precisou girar para a faixa ficar horizontal. Zero
-    #: quando a faixa foi encontrada direto, sem endireitar nada.
-    tilt_deg: float = 0.0
-
-
-def escada_de_inclinacao(passo=None, maximo=None):
-    """Ângulos a tentar, do menos torto para o mais torto.
-
-    Alterna os dois lados (-8, +8, -16, +16…) para que a chegada torta mais
-    provável — a de poucos graus — seja resolvida nos primeiros degraus, sem
-    pagar a escada inteira.
-    """
-    passo = config.ENTRY_SILVER_TILT_STEP_DEG if passo is None else float(
-        passo)
-    maximo = config.ENTRY_SILVER_MAX_TILT_DEG if maximo is None else float(
-        maximo)
-    if passo <= 0 or maximo < passo:
-        return ()
-    angulos = []
-    atual = passo
-    while atual <= maximo + 1e-9:
-        angulos.extend((-atual, atual))
-        atual += passo
-    return tuple(angulos)
-
-
-def _rotacionar(imagem, graus, borda=cv2.BORDER_REPLICATE,
-                interpolacao=cv2.INTER_NEAREST):
-    """Gira em torno do centro do quadro.
-
-    Três escolhas que parecem detalhe e não são:
-
-    * **Sem interpolação.** Girar com ``INTER_LINEAR`` mistura o preto da
-      linha com o branco do piso vizinho e clareia os pixels escuros; uma
-      faixa PRETA inclinada escapava do veto de escuro só por causa disso.
-      ``INTER_NEAREST`` copia o pixel original inteiro. O detector decide por
-      medianas e frações, então o serrilhado não custa nada.
-    * **Borda replicada no quadro.** Cantos pretos artificiais entrariam no
-      veto de escuro e reprovariam uma faixa boa por um defeito que o próprio
-      detector criou.
-    * **Borda zerada na máscara.** Replicar máscara inventaria linhas cheias
-      que não existem — exatamente o falso positivo a evitar.
-    """
-    altura, largura = imagem.shape[:2]
-    matriz = cv2.getRotationMatrix2D(
-        (largura / 2.0, altura / 2.0), graus, 1.0)
-    girada = cv2.warpAffine(
-        imagem,
-        matriz,
-        (largura, altura),
-        flags=interpolacao,
-        borderMode=borda,
-    )
-    return girada, matriz
-
-
-def _bbox_para_o_quadro_original(bbox, matriz):
-    """Traz a caixa achada no quadro girado de volta ao quadro real.
-
-    A caixa volta inclinada; guardamos a caixa alinhada que a contém. É uma
-    aproximação, e ela só alimenta o desenho do HUD — nenhuma decisão do
-    detector usa este valor.
-    """
-    x, y, largura, altura = bbox
-    cantos = np.array(
-        [[x, y],
-         [x + largura - 1, y],
-         [x + largura - 1, y + altura - 1],
-         [x, y + altura - 1]],
-        dtype=np.float32,
-    ).reshape(-1, 1, 2)
-    de_volta = cv2.transform(
-        cantos, cv2.invertAffineTransform(matriz)).reshape(-1, 2)
-    x0, y0 = de_volta.min(axis=0)
-    x1, y1 = de_volta.max(axis=0)
-    return (
-        int(round(x0)),
-        int(round(y0)),
-        int(round(x1 - x0 + 1)),
-        int(round(y1 - y0 + 1)),
-    )
 
 
 def default_geometry():
@@ -158,7 +66,6 @@ def default_geometry():
         max_thickness_ratio=config.ENTRY_SILVER_MAX_THICKNESS_RATIO,
         min_fill_ratio=config.ENTRY_SILVER_MIN_FILL_RATIO,
         min_aspect=config.ENTRY_SILVER_MIN_ASPECT,
-        allow_top_touch=config.ENTRY_SILVER_ALLOW_TOP_TOUCH,
     )
 
 
@@ -249,9 +156,6 @@ class EntrySilverDetector:
         self.last_reason = "inicio"
         self.last_mask = None
         self.last_band = None
-        #: Havia prata plausível no último quadro (usado para decidir se vale
-        #: tentar a escada de ângulos).
-        self.last_promising = False
 
     def detect(self, frame_bgr, line_ahead=None, timestamp=None,
                hsv_image=None):
@@ -261,12 +165,6 @@ class EntrySilverDetector:
         publicada pelo pipeline do segue-linha. Quando ela é ``True`` e a
         configuração exige o fim da linha, o candidato é vetado: um brilho
         sobre a linha não é a entrada da sala.
-
-        Quando a busca direta falha e a mancha na máscara está claramente
-        inclinada, a imagem é girada de volta ao horizontal e a MESMA busca
-        roda outra vez. É o caso do robô chegando torto na soleira: a faixa
-        está inteira e nítida no quadro, mas atravessa as linhas da imagem em
-        diagonal e nenhuma delas fica cheia.
         """
         if (
             frame_bgr is None
@@ -277,121 +175,6 @@ class EntrySilverDetector:
             raise ValueError("EntrySilverDetector exige um frame BGR")
 
         timestamp = 0.0 if timestamp is None else float(timestamp)
-        deteccao = self._detectar_direto(
-            frame_bgr, line_ahead, timestamp, hsv_image)
-        # Vale a pena tentar a escada de ângulos abaixo?
-        self.last_promising = (
-            self.last_mask is not None
-            and self._pode_haver_faixa(self.last_mask)
-        )
-        if deteccao is not None or not config.ENTRY_SILVER_DESKEW_ENABLED:
-            return deteccao
-        if not self.last_promising:
-            return None
-
-        motivo_torto = self.last_reason
-        mask_torta = self.last_mask
-        deteccao = self._procurar_inclinada(
-            frame_bgr, hsv_image, line_ahead, timestamp, mask_torta)
-        if deteccao is None:
-            # Nenhum ângulo funcionou: o diagnóstico útil é o do quadro
-            # original, não o do último degrau tentado.
-            self.last_reason = motivo_torto
-            self.last_mask = mask_torta
-        return deteccao
-
-    def _procurar_inclinada(self, frame_bgr, hsv_image, line_ahead, timestamp,
-                            mask):
-        """Varre a escada de ângulos procurando a faixa endireitada.
-
-        A sonda é barata de propósito: gira só a MÁSCARA e pergunta à
-        geometria se apareceu uma faixa. O quadro inteiro — que custa uma
-        conversão HSV e todos os testes de aparência — só é girado no ângulo
-        em que a geometria fechou. Num quadro sem nada, a máscara é vazia e a
-        escada inteira custa menos que uma detecção completa.
-        """
-        if mask is None:
-            return None
-        for graus in escada_de_inclinacao():
-            mask_girada, _matriz_mask = _rotacionar(
-                mask, graus,
-                borda=cv2.BORDER_CONSTANT,
-                interpolacao=cv2.INTER_NEAREST,
-            )
-            banda, _motivo = find_transversal_band(
-                mask_girada,
-                self.geometry,
-                roi_top_ratio=config.ENTRY_SILVER_ROI_TOP,
-                roi_bottom_ratio=config.ENTRY_SILVER_ROI_BOTTOM,
-            )
-            if banda is None:
-                continue
-
-            girado, matriz = _rotacionar(frame_bgr, graus)
-            hsv_girado = (
-                None if hsv_image is None
-                else _rotacionar(hsv_image, graus)[0]
-            )
-            deteccao = self._detectar_direto(
-                girado, line_ahead, timestamp, hsv_girado)
-            if deteccao is None:
-                continue
-            if deteccao.confidence < config.ENTRY_SILVER_DESKEW_MIN_CONFIDENCE:
-                continue
-
-            self.last_reason = ""
-            return replace(
-                deteccao,
-                tilt_deg=float(graus),
-                bbox=_bbox_para_o_quadro_original(deteccao.bbox, matriz),
-            )
-        return None
-
-    @staticmethod
-    def _limiar_de_escuro(value):
-        """Abaixo de quanto um pixel conta como preto NESTA cena.
-
-        Ancorado no percentil 75 do brilho da ROI — na prática, o piso, que
-        domina a região mesmo quando a fita ocupa boa parte do quadro. Sob luz
-        fraca a âncora desce junto com a cena e a fita continua sendo lida
-        como fita, em vez de virar "preto" por causa da lâmpada.
-        """
-        altura = value.shape[0]
-        topo = int(round(altura * config.ENTRY_SILVER_ROI_TOP))
-        topo = max(0, min(topo, altura - 1))
-        claro = float(np.percentile(value[topo:, :], 75))
-        return float(np.clip(
-            claro * config.ENTRY_SILVER_DARK_V_RATIO,
-            config.ENTRY_SILVER_DARK_V_MIN,
-            config.ENTRY_SILVER_DARK_V_MAX,
-        ))
-
-    def _pode_haver_faixa(self, mask):
-        """Há pixels suficientes na ROI para QUALQUER faixa válida existir?
-
-        Não é um palpite: é a contagem exata de pixels da menor faixa que a
-        geometria aceitaria (largura mínima × espessura mínima × preenchimento
-        mínimo). Girar não cria pixel — só pode perder, nos cantos. Então
-        abaixo desta conta nenhum ângulo da escada teria como dar certo, e
-        pular é seguro por construção, não por tolerância.
-
-        Na prática é isto que mantém o custo baixo: no percurso normal a
-        máscara está praticamente vazia e a escada nem começa.
-        """
-        altura, largura = mask.shape[:2]
-        topo = int(round(altura * config.ENTRY_SILVER_ROI_TOP))
-        base = int(round(altura * config.ENTRY_SILVER_ROI_BOTTOM))
-        topo = max(0, min(topo, altura - 1))
-        base = max(topo + 1, min(base, altura))
-        minimo = (
-            self.geometry.min_span_ratio * largura
-            * self.geometry.min_thickness_ratio * altura
-            * self.geometry.min_fill_ratio
-        )
-        return bool(cv2.countNonZero(mask[topo:base, :]) >= minimo)
-
-    def _detectar_direto(self, frame_bgr, line_ahead, timestamp, hsv_image):
-        """Busca a faixa neste quadro, exatamente como ele chegou."""
         self.last_band = None
 
         mask = silver_mask(
@@ -474,20 +257,6 @@ class EntrySilverDetector:
         inside_saturation = float(np.median(saturation[inside]))
         if inside_saturation > config.ENTRY_SILVER_MAX_SATURATION:
             self.last_reason = "saturada"
-            return None
-
-        # Veto de escuro: a caixa da candidata, medida na imagem CRUA, não pode
-        # ser dominada por preto. Numa intersecção a máscara pega apenas a
-        # auréola clara na borda da linha e a forma até parece uma fita — mas o
-        # miolo da caixa continua preto, e é isso que o teste enxerga. A fita
-        # prata vista de raso fica escura, nunca preta nesse grau.
-        caixa = value[band.top_y:band.bottom_y + 1,
-                      band.left_x:band.right_x + 1]
-        dark_fraction = float(
-            np.count_nonzero(caixa < self._limiar_de_escuro(value))
-            / float(max(caixa.size, 1)))
-        if dark_fraction > config.ENTRY_SILVER_MAX_DARK_FRACTION:
-            self.last_reason = "escura"
             return None
 
         inside_values = value[inside]

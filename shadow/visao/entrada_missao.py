@@ -14,7 +14,6 @@ nada é calculado. Rodar ``shadow/main.py`` isolado custa zero.
 
 import config
 from shared.dados_compartilhados import (config_manager, entry_armed,
-                                         entry_false_entry,
                                          entry_silver_confirmed,
                                          entry_silver_detected,
                                          entry_silver_reason,
@@ -57,20 +56,8 @@ def build_entry_gate():
     print(
         f"[visão] faixa prata de entrada armada — HSV {hsv_min}..{hsv_max} "
         "(perfil da câmera de linha)")
-    gate = EntrySilverGate(
+    return EntrySilverGate(
         detector=EntrySilverDetector(hsv_min=hsv_min, hsv_max=hsv_max))
-    if entry_false_entry.value:
-        # Voltamos de uma entrada reprovada pela câmera de resgate. O robô
-        # deu ré por cima da MESMA fita: sem cooldown ele a reconfirmaria no
-        # primeiro frame e entraria de novo, em laço. O cooldown já existe
-        # para a saída da sala; aqui ele serve exatamente ao mesmo fim.
-        import time
-        gate.reset(now=time.monotonic())
-        entry_false_entry.value = False
-        print(
-            "[visão] entrada anterior reprovada pela câmera de resgate; "
-            f"faixa prata em cooldown por {config.ENTRY_SILVER_COOLDOWN_S:.0f} s")
-    return gate
 
 
 def update_entry_silver(entry_gate, frame, captured_at, line_ahead=False,

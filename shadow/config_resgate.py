@@ -46,25 +46,6 @@ MISSION_ENTRY_FORWARD_S = 1.0
 MISSION_ENTRY_FORWARD_PWM = 80
 MISSION_ENTRY_FORWARD_SPEED = MISSION_ENTRY_FORWARD_PWM / 120.0
 
-# Confirmacao da sala pela CAMERA DE RESGATE, logo depois de atravessar a
-# faixa prata. A faixa sozinha decide "achei prata"; ela nao decide "estou na
-# sala". Quem decide isso e a segunda camera: se a sala e de verdade, ela ve
-# uma vitima ou um dos triangulos de deposito. Se nao ve nada, a entrada foi
-# falsa e o robo volta para o percurso em vez de gastar a prova girando numa
-# sala que nao existe.
-#
-# O robo fica PARADO durante a janela — nenhum motor e acionado. E de
-# proposito: girar aqui exigiria assumir o controle antes de saber se a sala
-# e real, e um giro cego perto da linha atrapalha o retorno ao percurso.
-MISSION_ENTRY_CONFIRM_ENABLED = True
-MISSION_ENTRY_CONFIRM_S = 4.0
-# Recuo quando a sala nao se confirma. Precisa desfazer o avanco da entrada
-# (ciclo.py) mais o avanco de MISSION_ENTRY_FORWARD_S acima, com uma folga
-# para o robo voltar a enxergar a linha.
-MISSION_ENTRY_RETREAT_S = 1.6
-MISSION_ENTRY_RETREAT_PWM = 80
-MISSION_ENTRY_RETREAT_SPEED = MISSION_ENTRY_RETREAT_PWM / 120.0
-
 
 # ---------------------------------------------------------------------------
 # Camada de plausibilidade fisica (visao/plausibilidade.py)

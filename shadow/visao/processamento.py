@@ -29,8 +29,7 @@ from visao.captura import LineCamera
 from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.linha import calculate_angle, determine_correct_line
-from visao.verde import (check_green, filtrar_verdes_proximos,
-                         latch_turn_direction)
+from visao.verde import check_green, latch_turn_direction
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
 
 # Cores carregadas do config.ini (fallback: valores do config.py)
@@ -253,16 +252,7 @@ def vision_loop(debug=False):
             red_detected.value = confirmador_vermelho.atualizar(
                 candidato_vermelho_frame)
 
-            # Procura os marcadores verdes. Antes de qualquer decisão, joga
-            # fora o verde que ainda está longe: a fita PRATA da entrada
-            # reflete verde-oliva e vira um contorno grande no alto do
-            # quadro, que o robô tratava como marcador e respondia com um
-            # giro — sem nunca chegar a confirmar a entrada da sala.
-            contours_grn, verdes_longe = filtrar_verdes_proximos(
-                contours_grn, camera_y)
-            if debug and verdes_longe:
-                # Cinza fino: "vi verde aqui e ignorei por estar longe".
-                cv2.drawContours(cv2_img, verdes_longe, -1, (150, 150, 150), 1)
+            # Procura os marcadores verdes.
             candidato_verde_frame = any(
                 cv2.contourArea(contorno) > config.GREEN_MIN_AREA
                 for contorno in contours_grn
@@ -403,19 +393,11 @@ def vision_loop(debug=False):
                         )
                     motivo_entrada = (
                         entry_gate.detector.last_reason or "candidata")
-                    # Mostrar o giro usado revela na hora se o robô chegou
-                    # torto — sem isso, "achou" e "achou depois de endireitar
-                    # 24°" são indistinguíveis na tela.
-                    torto = (
-                        f" torto={entrada.tilt_deg:+.0f}"
-                        if entrada is not None and entrada.tilt_deg
-                        else ""
-                    )
                     cv2.putText(
                         cv2_img,
                         f"PRATA {entry_gate.votes}/"
                         f"{config.ENTRY_SILVER_VOTE_WINDOW} "
-                        f"{motivo_entrada}{torto}",
+                        f"{motivo_entrada}",
                         (5, 42),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         .35,

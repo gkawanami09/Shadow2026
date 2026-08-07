@@ -47,13 +47,6 @@ class BandGeometry:
     # Alongamento (largura/espessura). Uma esfera fica proxima de 1; uma fita
     # transversal fica muito acima. Este e o veto direto contra a vitima.
     min_aspect: float = 3.0
-    # Aceitar uma faixa que comeca na primeira linha da ROI. Fica desligado por
-    # padrao: foi assim que as seis falsas soleiras de saida foram eliminadas.
-    # A entrada prata liga isso porque, com o robo colado na fita, ela sobe
-    # acima do corte e o veto matava a deteccao verdadeira justamente no
-    # momento mais facil. Mesmo ligado, uma faixa que toca o topo E a base da
-    # ROI continua rejeitada: ai nao existe borda nenhuma para medir.
-    allow_top_touch: bool = False
 
 
 @dataclass(frozen=True)
@@ -153,17 +146,14 @@ def find_transversal_band(
     if first_row < 0:
         return None, "sem_linha_cheia"
 
-    if first_row == 0 and (
-        not geometry.allow_top_touch or last_row >= len(hot_rows) - 1
-    ):
+    if first_row == 0:
         # A faixa encosta no TOPO da ROI: sua extensao real continua acima do
         # corte e nao pode ser medida. Quase sempre e uma regiao grande
         # (roupa escura, sombra, parede) truncada pela ROI, que passa a
         # parecer uma fita fina. Medido nas capturas reais da arena: as seis
         # falsas soleiras de saida comecavam todas exatamente nesta linha.
         # Encostar embaixo continua valido — a fita fica assim quando o robo
-        # chega perto dela. Com ``allow_top_touch``, tocar so o topo passa;
-        # tocar topo e base ao mesmo tempo continua sem borda medivel.
+        # chega perto dela.
         return None, "cortada_no_topo"
 
     row_count = last_row - first_row + 1
