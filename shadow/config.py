@@ -166,6 +166,24 @@ PIVOT_RECOVERY_EXIT_ANGLE = 40
 # ----------------------------------------------------------------------------
 GREEN_MIN_AREA = 2500                     # area minima do marcador
 GREEN_ROI_MEAN = 125                      # "lado e preto" se media > 125
+# O marcador verde so vale PERTO, na parte de baixo do quadro. Um contorno so
+# conta se a BASE dele alcancar esta fracao da altura da imagem.
+#
+# Motivo medido, nao preferencia de estilo: a fita PRATA da entrada reflete o
+# ambiente e cai dentro da faixa HSV do verde (H 30-60). Nas capturas de
+# `captures/linha_prata` ela vira um contorno "verde" de ~7000-10000 px, bem
+# acima de GREEN_MIN_AREA. Com o robo se aproximando, essa mancha aparece na
+# parte de CIMA do quadro, o robo a trata como marcador, dispara o giro verde
+# e nunca chega a confirmar a entrada da sala — foi exatamente o que os
+# prints mostraram.
+#
+# O marcador de verdade fica no chao colado na interseccao: quando o robo
+# esta perto o bastante para agir, ele ja desceu para a metade de baixo. Um
+# marcador ainda alto no quadro esta longe demais para virar manobra, e
+# ignora-lo nao perde nada — ele volta a ser visto alguns frames depois, ja
+# na regiao valida. O veto de "marcador baixo demais" (base > 95% da altura,
+# em `determine_turn_direction`) continua valendo do outro lado.
+GREEN_ROI_TOP = .55
 GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)
