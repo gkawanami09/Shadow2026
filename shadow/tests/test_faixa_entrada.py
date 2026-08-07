@@ -141,6 +141,58 @@ class EntrySilverDetectorTests(unittest.TestCase):
         self.assertIsNone(
             detection, "superfície uniforme não pode virar faixa")
 
+    def test_interseccao_nao_aciona_entrada(self):
+        """O falso positivo mais caro: a transversal tem a forma da fita."""
+        for piso, valor in ((225, 22), (170, 30), (200, 45)):
+            frame = cs.interseccao(piso=piso, valor=valor)
+            self.assertIsNone(
+                self.detector.detect(frame, line_ahead=False, timestamp=1.0),
+                f"interseccao piso={piso} valor={valor} virou entrada")
+
+    def test_faixa_preta_com_reflexo_cai_no_veto_de_escuro(self):
+        """Forma e textura certas, mas a caixa é preta: tem de cair.
+
+        Este é o caso que paga pela janela HSV larga. O salpico claro forma
+        uma faixa transversal impecável na máscara; o que a denuncia é a
+        imagem crua dentro da caixa continuar majoritariamente preta.
+        """
+        frame = cs.faixa_preta_salpicada(densidade_brilho=0.5)
+        self.assertIsNone(
+            self.detector.detect(frame, line_ahead=False, timestamp=1.0))
+        self.assertEqual(self.detector.last_reason, "escura")
+
+    def test_fita_escura_de_raso_ainda_e_aceita(self):
+        """Medido em `captures/linha_prata`: a fita real fica ESCURA de raso.
+
+        V mediano ~90 e S ~60, bem abaixo do piso branco em volta. A janela
+        antiga (V>=140, S<=70) a deixava de fora e o robô parava em
+        "sem_linha_cheia" na frente da entrada verdadeira.
+        """
+        frame = cs.faixa_prata(piso=235, base=95, brilho=150,
+                               densidade_brilho=0.30)
+        self.assertIsNotNone(
+            self.detector.detect(frame, line_ahead=False, timestamp=1.0),
+            f"fita escura recusada por '{self.detector.last_reason}'")
+
+    def test_fita_colada_na_camera_toca_o_topo_da_roi_e_passa(self):
+        """Com o robô em cima da fita ela sobe acima do corte da ROI.
+
+        Antes isso caía em "cortada_no_topo" — o veto matava a detecção
+        verdadeira justamente no frame mais fácil de todos.
+        """
+        frame = cs.faixa_prata(topo=0.30, espessura=0.35, piso=235,
+                               base=110, brilho=180, densidade_brilho=0.30)
+        self.assertIsNotNone(
+            self.detector.detect(frame, line_ahead=False, timestamp=1.0),
+            f"fita colada recusada por '{self.detector.last_reason}'")
+
+    def test_regiao_gigante_que_atravessa_a_roi_inteira_continua_vetada(self):
+        """Tocar topo E base é sombra/parede truncada, não fita."""
+        frame = cs.faixa_prata(topo=0.40, espessura=0.60, piso=235,
+                               base=110, brilho=180, densidade_brilho=0.30)
+        self.assertIsNone(
+            self.detector.detect(frame, line_ahead=False, timestamp=1.0))
+
     def test_frame_invalido_gera_erro_explicito(self):
         with self.assertRaises(ValueError):
             self.detector.detect(np.zeros((10, 10), dtype=np.uint8))

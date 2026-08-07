@@ -253,10 +253,20 @@ VISION_READY_TIMEOUT = 15                 # s que o controle espera a visao no b
 # medidos na arena real com `tools/calibrar_cores.py` (grupo 7). Nenhum deles
 # foi validado com a fita de verdade sob a iluminação da competição.
 ENTRY_SILVER_ENABLED = True
-# HSV do OpenCV (H 0..180). Prata é definida por NEUTRALIDADE (S baixo) e
-# BRILHO (V alto), não por matiz — por isso H cobre a faixa inteira.
-ENTRY_SILVER_MIN_DEFAULT = [0, 0, 140]
-ENTRY_SILVER_MAX_DEFAULT = [180, 70, 255]
+# HSV do OpenCV (H 0..180). Prata NÃO é "claro": medido nas capturas reais da
+# câmera de linha (`captures/linha_prata`), a mesma fita aparece com V mediano
+# entre 62 e 190 e S até ~87, enquanto o PISO branco fica em V 200-255 e S<30.
+# Vista de raso, a fita reflete o ambiente e sai mais ESCURA e mais tingida que
+# o piso. A janela antiga (V≥140, S≤70) era, na prática, uma máscara de piso:
+# a fita ficava de fora e o detector morria em "sem_linha_cheia"/"fina" — que é
+# exatamente o que os prints do robô mostram.
+#
+# Por isso a janela aqui é deliberadamente larga: ela só exclui o que é PRETO
+# (linha e intersecção) e o que é COLORIDO (marcador verde/vermelho). Quem
+# separa fita de piso é a TEXTURA da luz (ENTRY_SILVER_MIN_LOCAL_RANGE, ver
+# abaixo), somada à geometria transversal, ao contraste e ao veto de escuro.
+ENTRY_SILVER_MIN_DEFAULT = [0, 0, 55]
+ENTRY_SILVER_MAX_DEFAULT = [180, 110, 255]
 
 # A fita só é procurada na parte inferior da imagem: acima disso aparecem
 # público, sapatos, cadeiras e o resto do ginásio.
@@ -282,6 +292,14 @@ ENTRY_SILVER_MAX_THICKNESS_RATIO = .30
 # demais filtros de geometria e aparencia.
 ENTRY_SILVER_MIN_FILL_RATIO = .50
 ENTRY_SILVER_MIN_ASPECT = 3.5
+# Com o robô colado na fita ela sobe acima do corte da ROI. Medido na captura
+# `linha_prata/...140307`: a fita ocupa de 24% a 71% da altura e era rejeitada
+# em "cortada_no_topo" — o veto matava a detecção verdadeira justamente no
+# frame mais fácil de todos. A faixa PRETA de saída mantém o veto ligado; lá
+# ele foi calibrado contra seis falsas soleiras. Aqui, quem cobre o risco é o
+# teto de espessura, o veto de escuro e o contraste com a vizinhança. Uma
+# faixa que toca o topo E a base da ROI continua rejeitada nos dois casos.
+ENTRY_SILVER_ALLOW_TOP_TOUCH = True
 
 # Separação por REFLEXO, aplicada na máscara antes da geometria.
 #
@@ -308,7 +326,21 @@ ENTRY_SILVER_FALLBACK_MIN_CONFIDENCE = .60
 
 # Aparência. Neutralidade + assinatura reflexiva. O papel branco fosco é
 # neutro mas quase não tem faixa dinâmica nem brilho especular concentrado.
-ENTRY_SILVER_MAX_SATURATION = 70.
+# O teto de saturação acompanha a janela HSV: a fita real chegou a S≈87 nas
+# capturas, e um marcador verde/vermelho fica bem acima de 110.
+ENTRY_SILVER_MAX_SATURATION = 110.
+# Veto de ESCURO — a contrapartida da janela HSV larga. Mede a fração de
+# pixels realmente pretos DENTRO da caixa da faixa candidata, na imagem crua
+# (não na máscara). Uma intersecção ou uma faixa preta transversal produz uma
+# caixa dominada por preto: a máscara pega só a auréola clara da borda, mas a
+# caixa continua majoritariamente escura e o candidato cai aqui. A fita prata,
+# por mais escura que fique de raso, nunca é preta nesse grau.
+# Margem medida: nas duas capturas reais da fita a fração de preto na caixa
+# deu 0.000; uma faixa preta salpicada de reflexo dá 0.34-0.42. O teto abaixo
+# fica no meio, com folga para a linha preta que MORRE na fita (uma coluna de
+# ~11% da largura) e para a sombra da própria borda.
+ENTRY_SILVER_DARK_V = 60
+ENTRY_SILVER_MAX_DARK_FRACTION = .30
 ENTRY_SILVER_MIN_DYNAMIC_RANGE = 26.
 ENTRY_SILVER_HIGHLIGHT_V = 205
 ENTRY_SILVER_MIN_HIGHLIGHT_FRACTION = .02

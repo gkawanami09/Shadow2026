@@ -9,19 +9,24 @@ a entrada por estar calibrado para uma esfera.
 
 A confirmação exige evidência CONJUNTA, nunca um único sinal:
 
-1. região neutra e clara na ROI inferior (máscara HSV calibrável);
+1. região neutra e não-preta na ROI inferior (máscara HSV calibrável);
 2. forma alongada e transversal (``faixa_transversal``);
 3. largura mínima proporcional ao quadro;
-4. baixa saturação (neutralidade metálica);
-5. assinatura reflexiva — faixa dinâmica e brilho especular concentrado,
+4. caixa não dominada por preto — veto direto contra intersecção e linha
+   transversal, medido na imagem crua;
+5. baixa saturação (neutralidade metálica);
+6. assinatura reflexiva — faixa dinâmica e brilho especular concentrado,
    que é o que separa fita refletiva de papel branco fosco;
-6. contraste contra a vizinhança imediata, acima e abaixo da faixa;
-7. fim coerente da linha preta à frente;
-8. votação temporal 3-de-5 em frames distintos e recentes, com cooldown.
+7. contraste contra a vizinhança imediata, acima e abaixo da faixa;
+8. fim coerente da linha preta à frente;
+9. votação temporal em frames distintos e recentes, com cooldown.
 
-Nenhum desses limiares foi validado com a fita real sob a luz da competição.
-Eles são um ponto de partida seguro e existem para ser medidos com
-``tools/calibrar_cores.py`` (grupo 7).
+O peso da separação NÃO está na janela HSV — ela é larga de propósito, porque
+a fita real muda muito de brilho com o ângulo. Quem separa fita de piso é o
+filtro de textura da luz (``ENTRY_SILVER_MIN_LOCAL_RANGE``); quem separa fita
+de linha/intersecção é o veto de escuro somado à geometria transversal.
+
+Os limiares seguem ajustáveis com ``tools/calibrar_cores.py`` (grupo 7).
 """
 
 from dataclasses import dataclass
@@ -66,6 +71,7 @@ def default_geometry():
         max_thickness_ratio=config.ENTRY_SILVER_MAX_THICKNESS_RATIO,
         min_fill_ratio=config.ENTRY_SILVER_MIN_FILL_RATIO,
         min_aspect=config.ENTRY_SILVER_MIN_ASPECT,
+        allow_top_touch=config.ENTRY_SILVER_ALLOW_TOP_TOUCH,
     )
 
 
@@ -257,6 +263,20 @@ class EntrySilverDetector:
         inside_saturation = float(np.median(saturation[inside]))
         if inside_saturation > config.ENTRY_SILVER_MAX_SATURATION:
             self.last_reason = "saturada"
+            return None
+
+        # Veto de escuro: a caixa da candidata, medida na imagem CRUA, não pode
+        # ser dominada por preto. Numa intersecção a máscara pega apenas a
+        # auréola clara na borda da linha e a forma até parece uma fita — mas o
+        # miolo da caixa continua preto, e é isso que o teste enxerga. A fita
+        # prata vista de raso fica escura, nunca preta nesse grau.
+        caixa = value[band.top_y:band.bottom_y + 1,
+                      band.left_x:band.right_x + 1]
+        dark_fraction = float(
+            np.count_nonzero(caixa < config.ENTRY_SILVER_DARK_V)
+            / float(max(caixa.size, 1)))
+        if dark_fraction > config.ENTRY_SILVER_MAX_DARK_FRACTION:
+            self.last_reason = "escura"
             return None
 
         inside_values = value[inside]
