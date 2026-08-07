@@ -249,8 +249,8 @@ class EntrySilverDetector:
         self.last_reason = "inicio"
         self.last_mask = None
         self.last_band = None
-        #: Havia prata plausível no último quadro? É o gatilho do gravador de
-        #: diagnóstico: sem isso ele encheria o cartão com piso vazio.
+        #: Havia prata plausível no último quadro (usado para decidir se vale
+        #: tentar a escada de ângulos).
         self.last_promising = False
 
     def detect(self, frame_bgr, line_ahead=None, timestamp=None,
@@ -279,8 +279,7 @@ class EntrySilverDetector:
         timestamp = 0.0 if timestamp is None else float(timestamp)
         deteccao = self._detectar_direto(
             frame_bgr, line_ahead, timestamp, hsv_image)
-        # Vale a pena olhar este quadro? Serve à escada de ângulos abaixo e ao
-        # gravador de diagnóstico, que só guarda quadro com prata plausível.
+        # Vale a pena tentar a escada de ângulos abaixo?
         self.last_promising = (
             self.last_mask is not None
             and self._pode_haver_faixa(self.last_mask)

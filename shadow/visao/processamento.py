@@ -26,9 +26,7 @@ from shared.dados_compartilhados import (add_time_value, black_average,
 from visao import linha as line_module
 from visao import verde as green_module
 from visao.captura import LineCamera
-from visao.entrada_missao import (build_entry_gate,
-                                  build_entry_recorder,
-                                  update_entry_silver)
+from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.linha import calculate_angle, determine_correct_line
 from visao.verde import (check_green, filtrar_verdes_proximos,
@@ -97,7 +95,6 @@ def vision_loop(debug=False):
     # compartilhada evita abrir a mesma câmera duas vezes. Sem `mission_mode`
     # ele nunca é construído e o custo é zero.
     entry_gate = build_entry_gate()
-    entry_recorder = build_entry_recorder()
 
     # Matriz usada para reduzir ruídos das máscaras.
     kernal = np.ones((3, 3), np.uint8)
@@ -207,8 +204,7 @@ def vision_loop(debug=False):
             update_entry_silver(
                 entry_gate, cv2_img, frame_captured_at,
                 line_ahead=linha_a_frente_frame,
-                hsv_image=hsv_image,
-                recorder=entry_recorder)
+                hsv_image=hsv_image)
 
             # Recorta partes que não devem participar da decisão.
             if line_status.value == "gap_avoid":

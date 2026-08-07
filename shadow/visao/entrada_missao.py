@@ -73,24 +73,8 @@ def build_entry_gate():
     return gate
 
 
-def build_entry_recorder():
-    """Gravador de diagnóstico da aproximação. ``None`` quando desligado."""
-    if not mission_mode.value or not config.ENTRY_SILVER_RECORD_ENABLED:
-        return None
-    from visao.registro_entrada import RegistradorEntrada
-    print(
-        "[visão] gravando a aproximação da faixa prata em "
-        f"{config.ENTRY_SILVER_RECORD_DIR} "
-        f"(até {config.ENTRY_SILVER_RECORD_MAX_FRAMES} quadros)")
-    return RegistradorEntrada(
-        pasta=config.ENTRY_SILVER_RECORD_DIR,
-        max_quadros=config.ENTRY_SILVER_RECORD_MAX_FRAMES,
-        intervalo_min_s=config.ENTRY_SILVER_RECORD_MIN_INTERVAL_S,
-    )
-
-
 def update_entry_silver(entry_gate, frame, captured_at, line_ahead=False,
-                        hsv_image=None, recorder=None):
+                        hsv_image=None):
     """Publica o estado da faixa prata para o processo de controle."""
     if entry_gate is None:
         return
@@ -108,17 +92,6 @@ def update_entry_silver(entry_gate, frame, captured_at, line_ahead=False,
     entry_silver_detected.value = detection is not None
     entry_silver_votes.value = int(entry_gate.votes)
     entry_silver_reason.value = str(entry_gate.detector.last_reason)
-    if recorder is not None:
-        # O quadro é gravado CRU, antes de qualquer anotação do HUD: assim ele
-        # volta pelo replay exatamente como o detector o viu.
-        recorder.registrar(
-            frame,
-            entry_gate.detector.last_reason,
-            votos=entry_gate.votes,
-            detectou=detection is not None,
-            promissor=getattr(entry_gate.detector, "last_promising", False),
-            agora=captured_at,
-        )
     if confirmed and not entry_silver_confirmed.value:
         print(
             "[visão] faixa PRATA de entrada confirmada "

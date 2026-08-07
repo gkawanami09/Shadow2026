@@ -429,24 +429,6 @@ ENTRY_SILVER_MIN_CONFIDENCE = .45
 # lido como entrada da sala.
 ENTRY_SILVER_REQUIRE_LINE_END = True
 
-# Gravador de diagnóstico da entrada (visao/registro_entrada.py).
-#
-# Todos os limiares acima foram ajustados contra DUAS capturas reais da fita,
-# ambas coladas na câmera e sob a mesma luz; o resto é cena sintética. Quando
-# o robô falha na arena ninguém sabe o que ele viu, e mexer em limiar no
-# escuro tem tanta chance de estragar o que funciona quanto de consertar o que
-# falha. Ligue isto, faça as voltas de teste, e a pasta resultante entra
-# direto em `tools/replay_visao.py --perfil entrada`.
-#
-# Fica DESLIGADO por padrão: numa prova valendo não há motivo para escrever no
-# cartão. Ligue durante os testes.
-ENTRY_SILVER_RECORD_ENABLED = True
-ENTRY_SILVER_RECORD_DIR = "captures/entrada_debug"
-# Uns 10 quadros por segundo bastam para reconstruir a aproximação inteira, e
-# o teto cobre várias tentativas sem risco de encher o cartão.
-ENTRY_SILVER_RECORD_MIN_INTERVAL_S = .10
-ENTRY_SILVER_RECORD_MAX_FRAMES = 600
-
 # Confirmação temporal rápida: dois frames distintos ainda eliminam um
 # reflexo isolado, mas não deixam o robô preso diante da entrada verdadeira.
 #
