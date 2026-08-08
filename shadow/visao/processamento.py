@@ -94,6 +94,7 @@ def vision_loop(debug=False):
     # compartilhada evita abrir a mesma câmera duas vezes. Sem `mission_mode`
     # ele nunca é construído e o custo é zero.
     entry_gate = build_entry_gate()
+    ultimo_alinhamento_entrada = 0.
 
     # Matriz usada para reduzir ruídos das máscaras.
     kernal = np.ones((3, 3), np.uint8)
@@ -333,14 +334,23 @@ def vision_loop(debug=False):
             # mesmo frame em que a linha preta foi encontrada e centralizada.
             linha_alinhada = (
                 linha_detectada_frame
-                and not linha_a_frente_frame
                 and abs(angulo_frame) <= config.ENTRY_LINE_MAX_ANGLE
                 and abs(ponto_inferior_x_frame - camera_x / 2)
                 <= config.ENTRY_LINE_MAX_BOTTOM_ERROR_PX
             )
+            if linha_alinhada:
+                ultimo_alinhamento_entrada = frame_captured_at
+            # A faixa prata naturalmente tapa/termina a linha preta. Assim,
+            # o modelo recebe até 0,5 s após o último alinhamento real, mas
+            # nunca quando o robô já começou uma correção de linha perdida.
+            entrada_alinhada = (
+                not linha_a_frente_frame
+                and frame_captured_at - ultimo_alinhamento_entrada
+                <= config.ENTRY_ALIGNMENT_HOLD_S
+            )
             update_entry_silver(
                 entry_gate, cv2_img, frame_captured_at,
-                line_aligned=linha_alinhada)
+                line_aligned=entrada_alinhada)
 
             processamento_ms = (
                 time.perf_counter() - inicio_processamento
@@ -390,7 +400,7 @@ def vision_loop(debug=False):
                         entry_gate.last_reason or "candidata")
                     cv2.putText(
                         cv2_img,
-                        f"PRATA {entry_gate.votes}/"
+                        f"ONNX PRATA {entry_gate.votes}/"
                         f"{config.ENTRY_SILVER_VOTE_WINDOW} "
                         f"{motivo_entrada}",
                         (5, 42),

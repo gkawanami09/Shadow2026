@@ -167,6 +167,7 @@ existindo com seus testes e volta a ser usado se
 | `ENTRY_SILVER_VOTES_NEEDED/VOTE_WINDOW` | `2` / `3` | confirmação temporal |
 | `ENTRY_LINE_MAX_ANGLE` | `18` | ângulo máximo para entrar alinhado |
 | `ENTRY_LINE_MAX_BOTTOM_ERROR_PX` | `55` | erro máximo do ponto inferior da linha |
+| `ENTRY_ALIGNMENT_HOLD_S` | `.50` | conserva o último alinhamento ao a faixa cobrir a linha |
 
 `config_resgate.py` (câmera de resgate):
 

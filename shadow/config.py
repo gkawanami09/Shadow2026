@@ -260,6 +260,9 @@ ENTRY_SILVER_VOTE_WINDOW = 3
 # centralizada. Isso evita entrar na sala com o robô atravessado na faixa.
 ENTRY_LINE_MAX_ANGLE = 18
 ENTRY_LINE_MAX_BOTTOM_ERROR_PX = 55
+# A faixa pode cobrir o fim da linha no frame seguinte. Conserva o último
+# alinhamento comprovado por este intervalo, sem aceitar uma linha antiga.
+ENTRY_ALIGNMENT_HOLD_S = .50
 
 # ----------------------------------------------------------------------------
 # Cores usadas quando uma chave não existe no config.ini

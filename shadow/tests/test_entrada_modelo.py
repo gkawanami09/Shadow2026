@@ -34,8 +34,15 @@ class _Model:
 
 
 class EntryModelTests(unittest.TestCase):
-    def test_modelo_de_entrada_esta_no_caminho_configurado(self):
-        self.assertTrue((SHADOW_ROOT / config.ENTRY_MODEL_PATH).is_file())
+    def test_modelo_de_entrada_usa_o_caminho_configurado(self):
+        self.assertEqual(
+            EntryModel().path,
+            SHADOW_ROOT / config.ENTRY_MODEL_PATH,
+        )
+
+    def test_alinhamento_recente_tem_janela_curta(self):
+        self.assertGreater(config.ENTRY_ALIGNMENT_HOLD_S, 0)
+        self.assertLess(config.ENTRY_ALIGNMENT_HOLD_S, 1)
 
     def test_saida_yolo_uma_classe_vira_caixa_no_frame(self):
         model = EntryModel(input_size=640, min_confidence=.6)
