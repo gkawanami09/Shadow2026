@@ -12,6 +12,7 @@ from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
 from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
                                          entry_armed,
+                                         entry_model_priority,
                                          green_candidate,
                                          get_time_average, last_bottom_point,
                                          last_bottom_point_y,
@@ -344,13 +345,22 @@ def vision_loop(debug=False):
             # o modelo recebe até 0,5 s após o último alinhamento real, mas
             # nunca quando o robô já começou uma correção de linha perdida.
             entrada_alinhada = (
-                not linha_a_frente_frame
-                and frame_captured_at - ultimo_alinhamento_entrada
+                frame_captured_at - ultimo_alinhamento_entrada
                 <= config.ENTRY_ALIGNMENT_HOLD_S
             )
+            espera_resultado_entrada = (
+                entrada_alinhada
+                and (not linha_a_frente_frame or candidato_verde_frame)
+            )
+            # O HSV pode interpretar a prata como verde. Neste ponto, a
+            # decisão ONNX recebe prioridade antes que o controle consiga
+            # iniciar uma curva `left`/`right` baseada nesse falso marcador.
+            if espera_resultado_entrada:
+                entry_model_priority.value = True
             update_entry_silver(
                 entry_gate, cv2_img, frame_captured_at,
-                line_aligned=entrada_alinhada)
+                line_aligned=entrada_alinhada,
+                wait_for_result=espera_resultado_entrada)
 
             processamento_ms = (
                 time.perf_counter() - inicio_processamento
@@ -398,10 +408,13 @@ def vision_loop(debug=False):
                         )
                     motivo_entrada = (
                         entry_gate.last_reason or "candidata")
+                    confianca_entrada = (
+                        entrada.confidence if entrada is not None else 0.)
                     cv2.putText(
                         cv2_img,
                         f"ONNX PRATA {entry_gate.votes}/"
                         f"{config.ENTRY_SILVER_VOTE_WINDOW} "
+                        f"conf={confianca_entrada:.2f} "
                         f"{motivo_entrada}",
                         (5, 42),
                         cv2.FONT_HERSHEY_SIMPLEX,
@@ -427,6 +440,8 @@ def vision_loop(debug=False):
                 shm_array[:] = cv2_img
 
     finally:
+        if entry_gate is not None:
+            entry_gate.close()
         camera.close()
         if shm is not None:
             shm.close()

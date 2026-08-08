@@ -49,6 +49,7 @@ python3 shadow/resgate.py --camera-index 0 --drive --debug
 python3 -m shadow.tools.calibrar_cores
 python3 -m shadow.tools.visualizar_cameras
 python3 -m shadow.tools.teste_camera
+python3 -m shadow.tools.teste_entrada_onnx
 python3 -m shadow.tools.teste_serial
 python3 -m shadow.tools.teste_direcao
 python3 -m shadow.tools.controle_serial

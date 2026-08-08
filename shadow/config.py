@@ -254,6 +254,8 @@ ENTRY_SILVER_ENABLED = True
 ENTRY_MODEL_PATH = "modelos/entrada.onnx"
 ENTRY_MODEL_INPUT = 640
 ENTRY_MODEL_MIN_CONFIDENCE = .60
+# Reserva núcleos para o pipeline de linha; o ONNX roda em thread separada.
+ENTRY_MODEL_THREADS = 2
 # Um único frame muito seguro não espera a segunda inferência: em velocidade
 # alta a faixa pode ficar no campo de visão por menos de dois ciclos do YOLO.
 ENTRY_MODEL_FAST_CONFIDENCE = .82

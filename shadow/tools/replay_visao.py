@@ -87,13 +87,14 @@ class PerfilEntrada:
     camera = "linha"
 
     def __init__(self):
-        from visao.entrada_missao import EntryGate
+        from visao.entrada_missao import EntryGate, EntryInference, EntryModel
         self.gate = EntryGate()
-        self.gate.model.load()
+        self.model = EntryModel().load()
 
     def processar(self, frame, timestamp):
-        confirmado, deteccao = self.gate.update(
-            frame, timestamp=timestamp, line_aligned=True)
+        deteccao = self.model.detect(frame)
+        confirmado, deteccao = self.gate.update(EntryInference(
+            timestamp, True, deteccao))
         motivo = self.gate.last_reason or "aceita"
         return deteccao is not None, {
             "confirmado": confirmado,

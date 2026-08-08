@@ -12,26 +12,28 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
 from visao.entrada_missao import (  # noqa: E402
-    EntryDetection, EntryGate, EntryModel, update_entry_silver)
+    EntryDetection, EntryGate, EntryInference, EntryModel,
+    update_entry_silver)
 
 
-class _Net:
+class _Session:
     def __init__(self, output):
         self.output = output
 
-    def setInput(self, blob):
-        self.blob = blob
-
-    def forward(self):
-        return self.output
+    def run(self, _outputs, inputs):
+        self.inputs = inputs
+        return [self.output]
 
 
-class _Model:
-    def __init__(self, detections):
-        self.detections = iter(detections)
+class _Pipeline:
+    votes = 0
+    last_reason = "modelo_sem_faixa"
 
-    def detect(self, frame):
-        return next(self.detections)
+    def submit(self, frame, timestamp, line_aligned):
+        self.submitted = (frame, timestamp, line_aligned)
+
+    def poll(self):
+        return False, None
 
 
 class EntryModelTests(unittest.TestCase):
@@ -50,7 +52,8 @@ class EntryModelTests(unittest.TestCase):
         output = np.zeros((1, 5, 6), dtype=np.float32)
         output[0, :, 0] = (320, 320, 200, 100, .91)
         output[0, :, 1] = (10, 10, 10, 10, .2)
-        model.net = _Net(output)
+        model._session = _Session(output)
+        model._input_name = "images"
         detection = model.detect(np.zeros((252, 448, 3), dtype=np.uint8))
         self.assertIsNotNone(detection)
         self.assertAlmostEqual(detection.confidence, .91, places=5)
@@ -66,8 +69,9 @@ class EntryGateTests(unittest.TestCase):
         previous_priority = entry_model_priority.value
         try:
             entry_armed.value = True
-            gate = EntryGate(model=_Model([EntryDetection((1, 2, 3, 4), .7)]))
-            update_entry_silver(gate, None, 1., line_aligned=True)
+            update_entry_silver(
+                _Pipeline(), np.zeros((2, 2, 3), dtype=np.uint8), 1.,
+                line_aligned=True, wait_for_result=True)
             self.assertTrue(entry_model_priority.value)
         finally:
             entry_armed.value = previous_armed
@@ -75,21 +79,21 @@ class EntryGateTests(unittest.TestCase):
 
     def test_uma_deteccao_muito_confiavel_confirma_na_hora(self):
         detection = EntryDetection((1, 2, 3, 4), .95)
-        gate = EntryGate(model=_Model([detection]))
-        confirmed, _ = gate.update(None, 0., line_aligned=True)
+        gate = EntryGate()
+        confirmed, _ = gate.update(EntryInference(0., True, detection))
         self.assertTrue(confirmed)
         self.assertEqual(gate.last_reason, "confirmada_rapida")
 
     def test_dois_frames_alinhados_confirmam(self):
         detection = EntryDetection((1, 2, 3, 4), .7)
-        gate = EntryGate(model=_Model([detection, detection]))
-        self.assertFalse(gate.update(None, 0., line_aligned=True)[0])
-        self.assertTrue(gate.update(None, .03, line_aligned=True)[0])
+        gate = EntryGate()
+        self.assertFalse(gate.update(EntryInference(0., True, detection))[0])
+        self.assertTrue(gate.update(EntryInference(.03, True, detection))[0])
 
     def test_modelo_sem_alinhamento_nao_aciona_resgate(self):
         detection = EntryDetection((1, 2, 3, 4), .7)
-        gate = EntryGate(model=_Model([detection, detection, detection]))
-        self.assertFalse(gate.update(None, 0., line_aligned=False)[0])
-        self.assertFalse(gate.update(None, .03, line_aligned=False)[0])
-        self.assertFalse(gate.update(None, .06, line_aligned=True)[0])
+        gate = EntryGate()
+        self.assertFalse(gate.update(EntryInference(0., False, detection))[0])
+        self.assertFalse(gate.update(EntryInference(.03, False, detection))[0])
+        self.assertFalse(gate.update(EntryInference(.06, True, detection))[0])
         self.assertEqual(gate.last_reason, "votando")
