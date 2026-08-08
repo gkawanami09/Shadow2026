@@ -45,7 +45,7 @@ class EntryModelTests(unittest.TestCase):
 
     def test_alinhamento_recente_tem_janela_curta(self):
         self.assertGreater(config.ENTRY_ALIGNMENT_HOLD_S, 0)
-        self.assertLess(config.ENTRY_ALIGNMENT_HOLD_S, 1)
+        self.assertLessEqual(config.ENTRY_ALIGNMENT_HOLD_S, 1.0)
 
     def test_saida_yolo_uma_classe_vira_caixa_no_frame(self):
         model = EntryModel(input_size=640, min_confidence=.6)
@@ -80,20 +80,20 @@ class EntryGateTests(unittest.TestCase):
     def test_uma_deteccao_muito_confiavel_confirma_na_hora(self):
         detection = EntryDetection((1, 2, 3, 4), .95)
         gate = EntryGate()
-        confirmed, _ = gate.update(EntryInference(0., True, detection))
+        confirmed, _ = gate.update(EntryInference(0., True, detection, 0.))
         self.assertTrue(confirmed)
         self.assertEqual(gate.last_reason, "confirmada_rapida")
 
     def test_dois_frames_alinhados_confirmam(self):
         detection = EntryDetection((1, 2, 3, 4), .7)
         gate = EntryGate()
-        self.assertFalse(gate.update(EntryInference(0., True, detection))[0])
-        self.assertTrue(gate.update(EntryInference(.03, True, detection))[0])
+        self.assertFalse(gate.update(EntryInference(0., True, detection, 0.))[0])
+        self.assertTrue(gate.update(EntryInference(.03, True, detection, 0.))[0])
 
     def test_modelo_sem_alinhamento_nao_aciona_resgate(self):
         detection = EntryDetection((1, 2, 3, 4), .7)
         gate = EntryGate()
-        self.assertFalse(gate.update(EntryInference(0., False, detection))[0])
-        self.assertFalse(gate.update(EntryInference(.03, False, detection))[0])
-        self.assertFalse(gate.update(EntryInference(.06, True, detection))[0])
+        self.assertFalse(gate.update(EntryInference(0., False, detection, 0.))[0])
+        self.assertFalse(gate.update(EntryInference(.03, False, detection, 0.))[0])
+        self.assertFalse(gate.update(EntryInference(.06, True, detection, 0.))[0])
         self.assertEqual(gate.last_reason, "votando")

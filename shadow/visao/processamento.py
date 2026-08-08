@@ -410,6 +410,14 @@ def vision_loop(debug=False):
                         entry_gate.last_reason or "candidata")
                     confianca_entrada = (
                         entrada.confidence if entrada is not None else 0.)
+                    inferencia = entry_gate.last_inference
+                    onnx_info = "aguardando"
+                    if inferencia is not None:
+                        idade_ms = (
+                            time.perf_counter() - inferencia.timestamp) * 1000.
+                        onnx_info = (
+                            f"onnx={inferencia.inference_ms:.0f}ms "
+                            f"idade={idade_ms:.0f}ms")
                     cv2.putText(
                         cv2_img,
                         f"ONNX PRATA {entry_gate.votes}/"
@@ -423,6 +431,10 @@ def vision_loop(debug=False):
                         1,
                         cv2.LINE_AA,
                     )
+                    cv2.putText(
+                        cv2_img, onnx_info, (5, 56),
+                        cv2.FONT_HERSHEY_SIMPLEX, .35, (255, 255, 0), 1,
+                        cv2.LINE_AA)
                 cv2.putText(cv2_img, f"{fps} fps  ang={line_angle.value}  {line_status.value}",
                             (5, camera_y - 8), cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
                 cv2.putText(cv2_img, str(status.value), (5, 14),

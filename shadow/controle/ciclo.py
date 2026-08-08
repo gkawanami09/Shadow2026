@@ -296,8 +296,9 @@ def control_loop():
             # resultado da inferência.
             if (mission_mode.value and entry_armed.value
                     and entry_model_priority.value):
-                status.value = 'Validando faixa prata pelo modelo — parado'
-                steer()
+                status.value = (
+                    'Validando faixa prata pelo modelo — reto devagar')
+                steer(0, config.ENTRY_EVALUATION_SPEED)
                 sleep_steering(.01)
                 continue
 

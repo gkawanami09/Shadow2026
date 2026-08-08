@@ -9,6 +9,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 import threading
+import time
 
 import numpy as np
 
@@ -33,6 +34,7 @@ class EntryInference:
     timestamp: float
     line_aligned: bool
     detection: EntryDetection | None
+    inference_ms: float
 
 
 class EntryModel:
@@ -159,14 +161,16 @@ class EntryModelWorker:
                 frame, timestamp, line_aligned = self._pending
                 self._pending = None
             try:
+                started = time.perf_counter()
                 detection = self.model.detect(frame)
+                inference_ms = (time.perf_counter() - started) * 1000.
             except Exception as error:  # surfaced in the vision process
                 with self._condition:
                     self._error = error
                 return
             with self._condition:
                 self._latest = EntryInference(
-                    timestamp, line_aligned, detection)
+                    timestamp, line_aligned, detection, inference_ms)
 
 
 class EntryGate:
@@ -215,6 +219,7 @@ class EntryPipeline:
         self.model = EntryModel().load()
         self.worker = EntryModelWorker(self.model).start()
         self.gate = EntryGate()
+        self.last_inference = None
 
     @property
     def last_detection(self):
@@ -232,7 +237,10 @@ class EntryPipeline:
         self.worker.submit(frame, timestamp, line_aligned)
 
     def poll(self):
-        return self.gate.update(self.worker.poll())
+        inference = self.worker.poll()
+        if inference is not None:
+            self.last_inference = inference
+        return self.gate.update(inference)
 
     def close(self):
         self.worker.close()

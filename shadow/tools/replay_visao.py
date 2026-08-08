@@ -94,7 +94,7 @@ class PerfilEntrada:
     def processar(self, frame, timestamp):
         deteccao = self.model.detect(frame)
         confirmado, deteccao = self.gate.update(EntryInference(
-            timestamp, True, deteccao))
+            timestamp, True, deteccao, 0.0))
         motivo = self.gate.last_reason or "aceita"
         return deteccao is not None, {
             "confirmado": confirmado,
