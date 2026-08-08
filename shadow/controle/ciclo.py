@@ -36,8 +36,7 @@ from comunicacao_serial.arduino import Arduino
 from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                entry_armed, entry_silver_confirmed,
                                entry_silver_detected, entry_silver_reason,
-                               entry_silver_votes, entry_model_priority,
-                               green_candidate,
+                               entry_silver_votes, green_candidate,
                                last_bottom_point,
                                last_bottom_point_y,
                                line_ahead, line_angle, line_detected,
@@ -57,7 +56,6 @@ def _enter_rescue_zone(arduino):
     # de resgate reafirma o comando assim que abre a serial dele.
     arduino.led("APAGADO")
     entry_armed.value = False
-    entry_model_priority.value = False
     print("[controle] entrada confirmada; PARAR e LED APAGADO — "
           "resgate fará o avanço de 1 s")
 
@@ -289,18 +287,6 @@ def control_loop():
                 _enter_rescue_zone(arduino)
                 rescue_requested.value = True
                 break
-
-            # Fim de linha alinhado: a visão está executando o `entrada.onnx`.
-            # A decisão do modelo tem prioridade sobre qualquer pivô ou busca
-            # de linha; parar aqui mantém a faixa dentro do quadro até sair o
-            # resultado da inferência.
-            if (mission_mode.value and entry_armed.value
-                    and entry_model_priority.value):
-                status.value = (
-                    'Validando faixa prata pelo modelo — reto devagar')
-                steer(0, config.ENTRY_EVALUATION_SPEED)
-                sleep_steering(.01)
-                continue
 
             # Estado normal do segue-linha.
             if line_status.value == "line_detected":
@@ -612,7 +598,6 @@ def control_loop():
 
     finally:
         preferencia_linha_esquerda.value = False
-        entry_model_priority.value = False
         status.value = "Parado"
         try:
             steer()  # PARAR

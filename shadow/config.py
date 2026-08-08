@@ -254,8 +254,8 @@ ENTRY_SILVER_ENABLED = True
 ENTRY_MODEL_PATH = "modelos/entrada.onnx"
 ENTRY_MODEL_INPUT = 640
 ENTRY_MODEL_MIN_CONFIDENCE = .60
-# Reserva um núcleo para o pipeline de linha; o ONNX roda em thread separada.
-ENTRY_MODEL_THREADS = 3
+# Limita o ONNX para não disputar todos os núcleos com o segue-linha.
+ENTRY_MODEL_THREADS = 2
 # Um único frame muito seguro não espera a segunda inferência: em velocidade
 # alta a faixa pode ficar no campo de visão por menos de dois ciclos do YOLO.
 ENTRY_MODEL_FAST_CONFIDENCE = .82
@@ -267,10 +267,7 @@ ENTRY_LINE_MAX_ANGLE = 18
 ENTRY_LINE_MAX_BOTTOM_ERROR_PX = 55
 # A faixa pode cobrir o fim da linha no frame seguinte. Conserva o último
 # alinhamento comprovado por este intervalo, sem aceitar uma linha antiga.
-ENTRY_ALIGNMENT_HOLD_S = 1.0
-# Quando a linha termina alinhada, não para nem pivota: continua reto e lento
-# enquanto o modelo avalia a faixa que acabou de entrar no quadro.
-ENTRY_EVALUATION_SPEED = .25
+ENTRY_ALIGNMENT_HOLD_S = .50
 
 # ----------------------------------------------------------------------------
 # Cores usadas quando uma chave não existe no config.ini

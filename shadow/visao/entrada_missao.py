@@ -15,9 +15,8 @@ import numpy as np
 
 import config
 from shared.dados_compartilhados import (
-    entry_armed, entry_model_priority, entry_silver_confirmed,
-    entry_silver_detected, entry_silver_reason, entry_silver_votes,
-    mission_mode)
+    entry_armed, entry_silver_confirmed, entry_silver_detected,
+    entry_silver_reason, entry_silver_votes, mission_mode)
 
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
@@ -255,35 +254,23 @@ def build_entry_gate():
     return pipeline
 
 
-def update_entry_silver(
-    entry_gate, frame, captured_at, *, line_aligned=False,
-    wait_for_result=False,
-):
+def update_entry_silver(entry_gate, frame, captured_at, *, line_aligned=False):
     """Entrega o frame ao YOLO e publica somente resultados prontos."""
     if entry_gate is None:
         return
     if not entry_armed.value:
         entry_silver_detected.value = False
-        entry_model_priority.value = False
         return
     # A confirmação pertence ao processo de controle. Mantenha-a publicada
     # até ele parar, apagar o LED e solicitar o handoff; não deixe um poll sem
     # resultado apagar o único frame que confirmou a entrada.
     if entry_silver_confirmed.value:
-        entry_model_priority.value = True
         return
     entry_gate.submit(frame, captured_at, line_aligned)
     confirmed, detection = entry_gate.poll()
     entry_silver_detected.value = detection is not None
     entry_silver_votes.value = entry_gate.votes
     entry_silver_reason.value = entry_gate.last_reason
-    # Ao perder uma linha previamente alinhada, espera a inferência pendente.
-    # Se o modelo já encontrou prata, ele também interrompe verde/preto.
-    entry_model_priority.value = bool(
-        wait_for_result
-        or (detection is not None
-            and entry_gate.last_reason != "faixa_sem_linha_alinhada")
-    )
     if confirmed and not entry_silver_confirmed.value:
         print("[visão] faixa PRATA confirmada pelo modelo "
               f"({entry_gate.votes}/{config.ENTRY_SILVER_VOTE_WINDOW} votos)")
