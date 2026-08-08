@@ -1,8 +1,9 @@
-"""Entrada no resgate por ``entrada.onnx``, isolada do segue-linha.
+"""Entrada no resgate pelo modelo de prata, isolada do segue-linha.
 
-O YOLO roda em uma única thread própria e sempre recebe somente o frame mais
-recente. Portanto uma inferência lenta não reduz o FPS da linha, não cria fila
-de imagens velhas e não deixa a lógica verde/preto decidir antes da entrada.
+O worker mantém somente o frame mais recente, sem criar uma fila de imagens
+velhas. Ele não altera comandos de motor: segue-linha, verde e lacuna continuam
+sob responsabilidade exclusiva do controle. Quando instalado, NCNN é usado no
+CPU ARM; o ONNX Runtime permanece como contingência segura.
 """
 
 from collections import deque
@@ -37,13 +38,23 @@ class EntryInference:
 
 
 class EntryModel:
-    """YOLO de uma classe, pelo mesmo ONNX Runtime do modelo de vítimas."""
+    """YOLO de uma classe via NCNN, com contingência para ONNX Runtime."""
 
-    def __init__(self, path=None, input_size=None, min_confidence=None):
+    def __init__(
+        self, path=None, input_size=None, min_confidence=None, *,
+        backend=None, ncnn_path=None,
+    ):
         configured = config.ENTRY_MODEL_PATH if path is None else path
-        self.path = Path(configured)
-        if not self.path.is_absolute():
-            self.path = SHADOW_ROOT / self.path
+        self.path = self._resolve_path(configured)
+        configured_ncnn = (
+            config.ENTRY_NCNN_MODEL_PATH if ncnn_path is None else ncnn_path)
+        self.ncnn_path = self._resolve_path(configured_ncnn)
+        self.backend = (
+            config.ENTRY_MODEL_BACKEND if backend is None else backend).lower()
+        if self.backend not in {"auto", "ncnn", "onnx"}:
+            raise ValueError(
+                "backend da entrada deve ser 'auto', 'ncnn' ou 'onnx'")
+        self._input_size_is_explicit = input_size is not None
         self.input_size = int(
             config.ENTRY_MODEL_INPUT if input_size is None else input_size)
         self.min_confidence = float(
@@ -51,8 +62,67 @@ class EntryModel:
             if min_confidence is None else min_confidence)
         self._session = None
         self._input_name = None
+        self._net = None
+        self._ncnn = None
+        self.active_backend = None
+
+    @staticmethod
+    def _resolve_path(configured):
+        path = Path(configured)
+        return path if path.is_absolute() else SHADOW_ROOT / path
+
+    @property
+    def active_path(self):
+        return self.ncnn_path if self.active_backend == "ncnn" else self.path
 
     def load(self):
+        ncnn_error = None
+        if self.backend in {"auto", "ncnn"}:
+            try:
+                return self._load_ncnn()
+            except RuntimeError as error:
+                ncnn_error = error
+                if self.backend == "ncnn":
+                    raise
+                print(f"[visão] NCNN indisponível ({error}); usando ONNX")
+        if self.backend in {"auto", "onnx"}:
+            try:
+                return self._load_onnx()
+            except RuntimeError as onnx_error:
+                if ncnn_error is not None:
+                    raise RuntimeError(
+                        "não consegui abrir NCNN nem ONNX para a entrada") \
+                        from onnx_error
+                raise
+        raise RuntimeError("backend de entrada não suportado")
+
+    def _load_ncnn(self):
+        self._select_input_size("ncnn")
+        param = self.ncnn_path / "model.ncnn.param"
+        weights = self.ncnn_path / "model.ncnn.bin"
+        if not param.is_file() or not weights.is_file():
+            raise RuntimeError(
+                "modelo NCNN não encontrado: "
+                f"{self.ncnn_path / 'model.ncnn.param'} / "
+                f"{self.ncnn_path / 'model.ncnn.bin'}")
+        try:
+            import ncnn
+        except ImportError as error:
+            raise RuntimeError("pacote Python 'ncnn' não está instalado") from error
+        net = ncnn.Net()
+        net.opt.num_threads = config.ENTRY_MODEL_THREADS
+        net.opt.use_vulkan_compute = False
+        if net.load_param(str(param)) != 0:
+            raise RuntimeError(f"não consegui abrir o parâmetro NCNN: {param}")
+        if net.load_model(str(weights)) != 0:
+            raise RuntimeError(f"não consegui abrir os pesos NCNN: {weights}")
+        self._net = net
+        self._ncnn = ncnn
+        self.active_backend = "ncnn"
+        return self
+
+    def _load_onnx(self):
+        self._select_input_size("onnx")
         if not self.path.is_file():
             raise RuntimeError(f"modelo de entrada não encontrado: {self.path}")
         try:
@@ -67,10 +137,22 @@ class EntryModel:
             str(self.path), sess_options=options,
             providers=["CPUExecutionProvider"])
         self._input_name = self._session.get_inputs()[0].name
+        self.active_backend = "onnx"
         return self
 
+    def _select_input_size(self, backend):
+        if self._input_size_is_explicit:
+            return
+        configured = (
+            config.ENTRY_NCNN_MODEL_INPUT
+            if backend == "ncnn" else config.ENTRY_MODEL_INPUT)
+        self.input_size = int(configured)
+
     def detect(self, frame_bgr):
-        if self._session is None:
+        if self.active_backend == "ncnn":
+            if self._net is None or self._ncnn is None:
+                raise RuntimeError("modelo NCNN de entrada não foi carregado")
+        elif self._session is None:
             raise RuntimeError("modelo de entrada não foi carregado")
         if frame_bgr is None or frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             raise ValueError("frame BGR inválido")
@@ -88,14 +170,18 @@ class EntryModel:
         input_tensor = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
         input_tensor = input_tensor.astype(np.float32) / 255.0
         input_tensor = np.transpose(input_tensor, (2, 0, 1))[None, ...]
-        output = np.squeeze(
-            self._session.run(None, {self._input_name: input_tensor})[0])
+        if self.active_backend == "ncnn":
+            output = self._run_ncnn(input_tensor)
+        else:
+            output = self._session.run(
+                None, {self._input_name: input_tensor})[0]
+        output = np.squeeze(output)
         if output.ndim != 2:
             return None
         if output.shape[0] < output.shape[1]:
             output = output.T
         if output.shape[1] < 5:
-            raise RuntimeError("saída inesperada do modelo entrada.onnx")
+            raise RuntimeError("saída inesperada do modelo de entrada")
         index = int(np.argmax(output[:, 4]))
         confidence = float(output[index, 4])
         if confidence < self.min_confidence:
@@ -106,6 +192,19 @@ class EntryModel:
         return EntryDetection(
             bbox=(x, y, float(box_width) / scale, float(box_height) / scale),
             confidence=confidence)
+
+    def _run_ncnn(self, input_tensor):
+        # O PNNX exportado pelo Ultralytics define NCHW `in0` → `out0`.
+        # `clone()` impede que o NCNN referencie memória reutilizada pelo NumPy.
+        image = np.ascontiguousarray(input_tensor[0])
+        with self._net.create_extractor() as extractor:
+            extractor.set_light_mode(True)
+            if extractor.input("in0", self._ncnn.Mat(image).clone()) != 0:
+                raise RuntimeError("não consegui enviar imagem para o NCNN")
+            result, output = extractor.extract("out0")
+        if result != 0:
+            raise RuntimeError("não consegui obter resultado do NCNN")
+        return np.array(output)
 
 
 class EntryModelWorker:
@@ -120,7 +219,7 @@ class EntryModelWorker:
         self._error = None
         self._stopping = False
         self._thread = threading.Thread(
-            target=self._run, name="shadow-entrada-onnx", daemon=True)
+            target=self._run, name="shadow-entrada-modelo", daemon=True)
 
     def start(self):
         self._thread.start()
@@ -250,7 +349,8 @@ def build_entry_gate():
     if not mission_mode.value or not config.ENTRY_SILVER_ENABLED:
         return None
     pipeline = EntryPipeline()
-    print(f"[visão] modelo de entrada armado: {pipeline.model.path.name}")
+    print("[visão] modelo de entrada armado: "
+          f"{pipeline.model.active_path.name} ({pipeline.model.active_backend})")
     return pipeline
 
 

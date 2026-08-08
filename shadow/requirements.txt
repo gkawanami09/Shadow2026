@@ -5,3 +5,6 @@ opencv-python
 numba
 pyserial
 onnxruntime
+# Runtime leve para o `entrada_ncnn_model` no Raspberry Pi 64-bit. Em Pi
+# 32-bit, a dependência é ignorada e a missão volta automaticamente ao ONNX.
+ncnn; platform_machine == "aarch64"

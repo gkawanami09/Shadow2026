@@ -252,9 +252,14 @@ VISION_READY_TIMEOUT = 15                 # s que o controle espera a visao no b
 ENTRY_SILVER_ENABLED = True
 # `entrada.onnx` é um YOLO de uma classe, exportado em 640×640.
 ENTRY_MODEL_PATH = "modelos/entrada.onnx"
+# Export NCNN 416×416 do mesmo `entrada.pt`. No Pi, NCNN é mais adequado ao
+# CPU ARM. O modo `auto` tenta NCNN primeiro e mantém o ONNX como contingência.
+ENTRY_MODEL_BACKEND = "auto"
+ENTRY_NCNN_MODEL_PATH = "modelos/entrada_416_ncnn_model"
 ENTRY_MODEL_INPUT = 640
+ENTRY_NCNN_MODEL_INPUT = 416
 ENTRY_MODEL_MIN_CONFIDENCE = .60
-# Limita o ONNX para não disputar todos os núcleos com o segue-linha.
+# Limita o runtime do modelo para não disputar todos os núcleos com a linha.
 ENTRY_MODEL_THREADS = 2
 # Um único frame muito seguro não espera a segunda inferência: em velocidade
 # alta a faixa pode ficar no campo de visão por menos de dois ciclos do YOLO.

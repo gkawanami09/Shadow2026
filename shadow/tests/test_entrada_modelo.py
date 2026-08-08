@@ -1,4 +1,4 @@
-"""Entrada da sala: modelo ONNX + alinhamento obrigatório da linha."""
+"""Entrada da sala: modelo de prata + alinhamento obrigatório da linha."""
 
 import sys
 from pathlib import Path
@@ -12,8 +12,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
 from visao.entrada_missao import (  # noqa: E402
-    EntryDetection, EntryGate, EntryInference, EntryModel,
-    update_entry_silver)
+    EntryDetection, EntryGate, EntryInference, EntryModel)
 
 
 class _Session:
@@ -23,17 +22,6 @@ class _Session:
     def run(self, _outputs, inputs):
         self.inputs = inputs
         return [self.output]
-
-
-class _Pipeline:
-    votes = 0
-    last_reason = "modelo_sem_faixa"
-
-    def submit(self, frame, timestamp, line_aligned):
-        self.submitted = (frame, timestamp, line_aligned)
-
-    def poll(self):
-        return False, None
 
 
 class EntryModelTests(unittest.TestCase):
@@ -48,7 +36,8 @@ class EntryModelTests(unittest.TestCase):
         self.assertLessEqual(config.ENTRY_ALIGNMENT_HOLD_S, 1.0)
 
     def test_saida_yolo_uma_classe_vira_caixa_no_frame(self):
-        model = EntryModel(input_size=640, min_confidence=.6)
+        model = EntryModel(
+            backend="onnx", input_size=640, min_confidence=.6)
         output = np.zeros((1, 5, 6), dtype=np.float32)
         output[0, :, 0] = (320, 320, 200, 100, .91)
         output[0, :, 1] = (10, 10, 10, 10, .2)
