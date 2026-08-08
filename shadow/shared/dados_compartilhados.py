@@ -56,6 +56,7 @@ status = manager.Value("i", "Parado")
 # permanecem em falso e o segue-linha se comporta exatamente como antes.
 mission_mode = Value("b", False)      # supervisor da missão no comando
 entry_armed = Value("b", True)        # procurar a faixa prata agora?
+entry_model_priority = Value("b", False)  # espera o ONNX antes de corrigir
 entry_silver_detected = Value("b", False)   # candidato no frame atual
 entry_silver_confirmed = Value("b", False)  # votação 3-de-5 fechada
 entry_silver_votes = Value("i", 0)

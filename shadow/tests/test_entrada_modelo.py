@@ -11,7 +11,8 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
-from visao.entrada_missao import EntryDetection, EntryGate, EntryModel  # noqa: E402
+from visao.entrada_missao import (  # noqa: E402
+    EntryDetection, EntryGate, EntryModel, update_entry_silver)
 
 
 class _Net:
@@ -58,6 +59,20 @@ class EntryModelTests(unittest.TestCase):
 
 
 class EntryGateTests(unittest.TestCase):
+    def test_inicio_da_inferencia_da_prioridade_ao_modelo(self):
+        from shared.dados_compartilhados import (
+            entry_armed, entry_model_priority)
+        previous_armed = entry_armed.value
+        previous_priority = entry_model_priority.value
+        try:
+            entry_armed.value = True
+            gate = EntryGate(model=_Model([EntryDetection((1, 2, 3, 4), .7)]))
+            update_entry_silver(gate, None, 1., line_aligned=True)
+            self.assertTrue(entry_model_priority.value)
+        finally:
+            entry_armed.value = previous_armed
+            entry_model_priority.value = previous_priority
+
     def test_uma_deteccao_muito_confiavel_confirma_na_hora(self):
         detection = EntryDetection((1, 2, 3, 4), .95)
         gate = EntryGate(model=_Model([detection]))

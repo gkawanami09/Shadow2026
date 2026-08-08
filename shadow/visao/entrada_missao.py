@@ -13,7 +13,8 @@ import numpy as np
 import config
 from shared.dados_compartilhados import (
     entry_armed, entry_silver_confirmed, entry_silver_detected,
-    entry_silver_reason, entry_silver_votes, mission_mode)
+    entry_model_priority, entry_silver_reason, entry_silver_votes,
+    mission_mode)
 
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
@@ -150,7 +151,12 @@ def update_entry_silver(entry_gate, frame, captured_at, *, line_aligned=False):
         return
     if not entry_armed.value:
         entry_silver_detected.value = False
+        entry_model_priority.value = False
         return
+    # Publicado ANTES da inferência: o processo de controle para no máximo em
+    # uma iteração, em vez de começar o pivô de linha perdida enquanto o YOLO
+    # ainda está analisando o frame.
+    entry_model_priority.value = bool(line_aligned)
     confirmed, detection = entry_gate.update(frame, captured_at, line_aligned)
     entry_silver_detected.value = detection is not None
     entry_silver_votes.value = entry_gate.votes
