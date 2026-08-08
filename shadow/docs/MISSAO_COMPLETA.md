@@ -123,29 +123,15 @@ Roda dentro do processo de visão (o único que possui a câmera 1) e publica o
 resultado por memória compartilhada. Sem `mission_mode` o detector nem é
 construído — rodar `main.py` sozinho tem custo zero.
 
-Evidência conjunta exigida (`visao/faixa_entrada.py`):
+Evidência conjunta exigida (`visao/entrada_missao.py`):
 
-1. região neutra e clara na ROI inferior (máscara HSV calibrável);
-2. forma alongada e transversal (`visao/faixa_transversal.py`);
-3. largura mínima proporcional ao quadro;
-4. saturação baixa — neutralidade metálica;
-5. assinatura reflexiva: faixa dinâmica **ou** brilho especular concentrado —
-   é isto que separa fita refletiva de papel branco fosco;
-6. contraste contra a vizinhança imediata, acima e abaixo da faixa;
-7. `line_ahead` falso — a linha preta precisa estar terminando;
-8. votação 3-de-5 em frames **distintos e recentes**, com histerese e
-   cooldown de 8 s.
+1. `entrada.onnx` encontra a faixa prata com confiança mínima configurada;
+2. dois frames distintos confirmam o resultado;
+3. em ambos, a linha preta está detectada, centralizada e com ângulo pequeno.
 
-Por que uma esfera nunca aciona a entrada: para um disco de raio `r`, as
-linhas com preenchimento ≥ 0,45 formam espessura `2·√(r² − (0,225·W)²)`, e
-alcançar largura ≥ 0,60·W exige `r ≥ 0,30·W`, o que já impõe espessura
-≥ 0,397·W — muito acima do teto de 0,30. Largura e espessura são
-incompatíveis para qualquer círculo. Isso é testado por varredura de raios em
-`tests/test_faixa_transversal.py`.
-
-A entrada na sala avança com velocidade e tempo configuráveis, mas **o tempo
-não é a evidência**: o avanço termina quando a faixa deixa de ser vista (ela
-passou por baixo do robô) e o timeout é apenas limite de segurança.
+Após a confirmação, o processo de percurso para e libera câmera/serial. O
+processo `resgate.py` então faz o avanço reto já calibrado de 1 s e inicia os
+giros de busca. O modelo de entrada não roda durante o resgate.
 
 ## 5. Busca pulsada
 
@@ -175,19 +161,12 @@ existindo com seus testes e volta a ser usado se
 | Parâmetro | Padrão | Papel |
 |---|---|---|
 | `ENTRY_SILVER_ENABLED` | `True` | liga a detecção da entrada |
-| `ENTRY_SILVER_MIN/MAX_DEFAULT` | `[0,0,140]` / `[180,70,255]` | HSV, sobrescrito por `config.ini` |
-| `ENTRY_SILVER_ROI_TOP/BOTTOM` | `.55` / `1.0` | região onde a fita é procurada |
-| `ENTRY_SILVER_MIN_SPAN_RATIO` | `.70` | largura mínima atravessada |
-| `ENTRY_SILVER_MAX_THICKNESS_RATIO` | `.30` | separa fita de piso branco; exclui círculos |
-| `ENTRY_SILVER_MIN_ASPECT` | `3.5` | veto direto contra a vítima esférica |
-| `ENTRY_SILVER_MAX_SATURATION` | `70` | neutralidade metálica |
-| `ENTRY_SILVER_MIN_DYNAMIC_RANGE` | `26` | assinatura reflexiva |
-| `ENTRY_SILVER_MIN_HIGHLIGHT_FRACTION` | `.02` | brilho especular |
-| `ENTRY_SILVER_MIN_SURROUND_CONTRAST` | `12` | a fita precisa se destacar do piso |
-| `ENTRY_SILVER_REQUIRE_LINE_END` | `True` | exige a linha preta terminando |
-| `ENTRY_SILVER_VOTES_NEEDED/VOTE_WINDOW` | `3` / `5` | votação temporal |
-| `ENTRY_SILVER_COOLDOWN_S` | `8.0` | impede reentrada imediata |
-| `ENTRY_ADVANCE_SPEED/MIN_S/TIMEOUT_S` | `.40` / `.60` / `3.5` | entrada na sala |
+| `ENTRY_MODEL_PATH` | `modelos/entrada.onnx` | modelo da faixa prata |
+| `ENTRY_MODEL_INPUT` | `640` | tamanho de entrada do modelo |
+| `ENTRY_MODEL_MIN_CONFIDENCE` | `.60` | confiança mínima aceita |
+| `ENTRY_SILVER_VOTES_NEEDED/VOTE_WINDOW` | `2` / `3` | confirmação temporal |
+| `ENTRY_LINE_MAX_ANGLE` | `18` | ângulo máximo para entrar alinhado |
+| `ENTRY_LINE_MAX_BOTTOM_ERROR_PX` | `55` | erro máximo do ponto inferior da linha |
 
 `config_resgate.py` (câmera de resgate):
 

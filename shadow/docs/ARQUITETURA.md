@@ -89,8 +89,8 @@ mission.py
 
 - `controle/missao.py`: máquina de estados, inventário das três vítimas e a
   ordem declarada do handoff;
-- `visao/faixa_entrada.py`: faixa prata de entrada, executada dentro do
-  processo de visão do percurso;
+- `visao/entrada_missao.py`: modelo `entrada.onnx` para a faixa prata,
+  executado somente no processo de visão do percurso durante a missão;
 - `visao/faixa_transversal.py`: geometria comum às duas faixas e a votação
   temporal com histerese e cooldown.
 

@@ -242,117 +242,24 @@ VISION_MAX_FRAMES = 90                    # teto de processamento
 VISION_READY_TIMEOUT = 15                 # s que o controle espera a visao no boot
 
 # ----------------------------------------------------------------------------
-# Faixa PRATA de entrada da sala de resgate — CÂMERA DE LINHA
+# Entrada da sala de resgate por modelo ONNX — CÂMERA DE LINHA
 # ----------------------------------------------------------------------------
 # Este perfil pertence exclusivamente à câmera de linha (índice 1). Ele NÃO
 # compartilha limites com a esfera prateada da vítima: aquela é vista pela
 # câmera de resgate, de outro ângulo, com outra iluminação e outro tamanho
 # aparente. Misturar os dois perfis foi explicitamente evitado.
 #
-# Os limiares abaixo são um ponto de partida conservador. Eles precisam ser
-# medidos na arena real com `tools/calibrar_cores.py` (grupo 7). Nenhum deles
-# foi validado com a fita de verdade sob a iluminação da competição.
 ENTRY_SILVER_ENABLED = True
-# HSV do OpenCV (H 0..180). Prata é definida por NEUTRALIDADE (S baixo) e
-# BRILHO (V alto), não por matiz — por isso H cobre a faixa inteira.
-ENTRY_SILVER_MIN_DEFAULT = [0, 0, 140]
-ENTRY_SILVER_MAX_DEFAULT = [180, 70, 255]
-
-# A fita só é procurada na parte inferior da imagem: acima disso aparecem
-# público, sapatos, cadeiras e o resto do ginásio.
-ENTRY_SILVER_ROI_TOP = .55
-ENTRY_SILVER_ROI_BOTTOM = 1.0
-
-# Forma. A fita tem ~250 mm e o campo inferior da câmera é ~80 mm: ela
-# atravessa a imagem inteira. Exigir isso elimina de uma vez parafuso, reflexo
-# de LED, fita brilhante pequena e a própria vítima prateada.
-ENTRY_SILVER_MIN_ROW_FILL = .45
-ENTRY_SILVER_MIN_SPAN_RATIO = .70
-ENTRY_SILVER_MAX_SPAN_RATIO = 1.0
-ENTRY_SILVER_MIN_THICKNESS_RATIO = .04
-# Teto de espessura: é ele que separa a fita de um PISO BRANCO inteiro, e
-# junto com o piso mínimo de largura elimina QUALQUER círculo. Para um disco
-# de raio r as linhas com preenchimento ≥ .45 têm espessura 2·√(r²−(.225·W)²);
-# atingir largura ≥ .60·W exige r ≥ .30·W, o que já força espessura ≥ .397·W.
-# Em 448×252 isso são ~178 px, muito acima do teto abaixo. Ou seja: nenhuma
-# esfera passa neste filtro, por maior que esteja no quadro.
-ENTRY_SILVER_MAX_THICKNESS_RATIO = .30
-# A fita real e texturizada/vazada pelo reflexo. 0.50 aceita as duas capturas
-# reais proximas sem fazer nenhuma das curvas/faixas pretas passar pelos
-# demais filtros de geometria e aparencia.
-ENTRY_SILVER_MIN_FILL_RATIO = .50
-ENTRY_SILVER_MIN_ASPECT = 3.5
-
-# Separação por REFLEXO, aplicada na máscara antes da geometria.
-#
-# Medido na arena real: o piso cinza e a fita prata chegam ao mesmo brilho
-# (V≈216-226) e à mesma neutralidade (S≈20-24). Nesse caso HSV sozinho não
-# separa os dois, a máscara engole o piso inteiro e o candidato morre em
-# "espessa" antes de qualquer teste de aparência.
-#
-# O que continua diferente é a TEXTURA da luz: metal amassado/refletivo
-# concentra brilho em pontos e tem variação local alta; piso fosco é
-# uniforme, por mais claro que seja. A faixa local (máx − mín numa janela
-# pequena) mede exatamente isso e custa duas operações de morfologia.
-#
-# Ajuste `ENTRY_SILVER_MIN_LOCAL_RANGE` no calibrador (grupo 7): suba até o
-# piso sair da máscara e só a fita continuar. Zero desliga o filtro.
-ENTRY_SILVER_LOCAL_WINDOW_PX = 7
-ENTRY_SILVER_MIN_LOCAL_RANGE = 18
-# A fita real perde parte do reflexo quando chega muito perto da câmera. Se a
-# máscara principal não formar uma faixa, o detector tenta uma segunda vez
-# com este limite, mas exige confiança maior depois. O piso liso continua sem
-# textura suficiente e não passa pela geometria transversal.
-ENTRY_SILVER_FALLBACK_LOCAL_RANGE = 12
-ENTRY_SILVER_FALLBACK_MIN_CONFIDENCE = .60
-
-# Aparência. Neutralidade + assinatura reflexiva. O papel branco fosco é
-# neutro mas quase não tem faixa dinâmica nem brilho especular concentrado.
-ENTRY_SILVER_MAX_SATURATION = 70.
-ENTRY_SILVER_MIN_DYNAMIC_RANGE = 26.
-ENTRY_SILVER_HIGHLIGHT_V = 205
-ENTRY_SILVER_MIN_HIGHLIGHT_FRACTION = .02
-# Contraste contra a vizinhança imediata (acima e abaixo da faixa). O sinal
-# pode ser de qualquer polaridade: dependendo do ângulo, a fita reflexiva fica
-# mais clara OU mais escura que o piso. O que não pode é ser igual ao piso.
-ENTRY_SILVER_SURROUND_MARGIN_RATIO = .06
-ENTRY_SILVER_MIN_SURROUND_CONTRAST = 12.
-ENTRY_SILVER_MIN_CONFIDENCE = .45
-
-# Evidência de contexto: a linha preta termina antes da entrada. Exigir isso
-# impede que um brilho sobre a linha, com a linha continuando à frente, seja
-# lido como entrada da sala.
-ENTRY_SILVER_REQUIRE_LINE_END = True
-
-# Confirmação temporal rápida: dois frames distintos ainda eliminam um
-# reflexo isolado, mas não deixam o robô preso diante da entrada verdadeira.
+# `entrada.onnx` é um YOLO de uma classe, exportado em 640×640.
+ENTRY_MODEL_PATH = "modelos/entrada.onnx"
+ENTRY_MODEL_INPUT = 640
+ENTRY_MODEL_MIN_CONFIDENCE = .60
 ENTRY_SILVER_VOTES_NEEDED = 2
 ENTRY_SILVER_VOTE_WINDOW = 3
-# Evidência fraca ainda precisa repetir em dois frames. Ela aceita somente
-# uma faixa transversal que falhou por estar distante/fina ou por confiança
-# visual baixa; piso, esfera e reflexo pontual continuam fora.
-ENTRY_SILVER_WEAK_VOTES_NEEDED = 2
-ENTRY_SILVER_WEAK_VOTE_WINDOW = 3
-ENTRY_SILVER_MAX_AGE_S = .35
-# Depois de sair da sala o robô volta a ver prata; o cooldown impede
-# reentrada imediata na mesma faixa.
-ENTRY_SILVER_COOLDOWN_S = 8.
-
-# Entrada na sala depois da confirmação. O tempo NÃO é a única evidência: o
-# avanço termina quando a faixa deixa de ser vista (passou por baixo do robô)
-# e o timeout é apenas o limite de segurança.
-ENTRY_ADVANCE_SPEED = .40
-ENTRY_ADVANCE_MIN_S = .60
-ENTRY_ADVANCE_TIMEOUT_S = 3.5
-
-# A fita prata aparece muito fina quando ainda está longe. Nesse instante o
-# contorno preto da linha e os reflexos podem parecer uma curva ou um verde.
-# Antes de aceitar qualquer correção, avance reto por um trecho curto para a
-# faixa ganhar espessura e poder fechar a votação normal.
-ENTRY_PRE_APPROACH_SPEED = .40
-ENTRY_PRE_APPROACH_TIME_S = .50
-ENTRY_PRE_APPROACH_SETTLE_S = .12
-ENTRY_PRE_APPROACH_COOLDOWN_S = .80
+# Além do modelo, todos os votos precisam ter a linha preta rastreada e
+# centralizada. Isso evita entrar na sala com o robô atravessado na faixa.
+ENTRY_LINE_MAX_ANGLE = 18
+ENTRY_LINE_MAX_BOTTOM_ERROR_PX = 55
 
 # ----------------------------------------------------------------------------
 # Cores usadas quando uma chave não existe no config.ini

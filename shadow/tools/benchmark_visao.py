@@ -127,17 +127,16 @@ def medir(detector_fn, frames, aquecimento=3):
 
 def benchmark_offline(frames_linha, frames_resgate):
     from visao.vitima_yolo import VictimDetector as BallDetector
-    from visao.faixa_entrada import EntrySilverDetector
+    from visao.entrada_missao import EntryModel
     from visao.faixa_saida import BlackExitDetector
     from visao.marcador_resgate import MarkerDetector
     from visao.triangulos_finais import FinalTriangleMapper
 
     resultados = {}
 
-    entrada = EntrySilverDetector()
+    entrada = EntryModel().load()
     resultados["faixa prata (linha)"] = _estatisticas(medir(
-        lambda frame, ts: entrada.detect(
-            frame, line_ahead=False, timestamp=ts),
+        lambda frame, ts: entrada.detect(frame),
         frames_linha))
 
     saida = BlackExitDetector()

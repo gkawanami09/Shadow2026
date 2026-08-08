@@ -17,7 +17,6 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config  # noqa: E402
 import config_resgate as cfg  # noqa: E402
 import resgate  # noqa: E402
-from visao.entrada_missao import _deve_pre_avancar_entrada  # noqa: E402
 from mission import (  # noqa: E402
     MissionSystem,
     _tecla_fecha_debug,
@@ -75,61 +74,6 @@ class MissionEntryAdvanceTests(unittest.TestCase):
     def test_entrada_prata_confirma_em_dois_de_tres_frames(self):
         self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 2)
         self.assertEqual(config.ENTRY_SILVER_VOTE_WINDOW, 3)
-
-    def test_faixa_fina_distante_sem_deteccao_nao_pede_avanco(self):
-        self.assertFalse(_deve_pre_avancar_entrada(
-            modo_missao=True,
-            armada=True,
-            confirmada=False,
-            detectada=False,
-            votos=0,
-            motivo="fina",
-            linha_adiante=False,
-        ))
-
-    def test_faixa_fina_com_linha_visivel_nao_pede_avanco(self):
-        self.assertFalse(_deve_pre_avancar_entrada(
-            modo_missao=True,
-            armada=True,
-            confirmada=False,
-            detectada=False,
-            votos=0,
-            motivo="fina",
-            linha_adiante=True,
-        ))
-
-    def test_linha_continuando_veta_candidato_que_nao_e_faixa_fina(self):
-        self.assertFalse(_deve_pre_avancar_entrada(
-            modo_missao=True,
-            armada=True,
-            confirmada=False,
-            detectada=True,
-            votos=1,
-            motivo="",
-            linha_adiante=True,
-        ))
-
-    def test_candidato_aceito_continua_reto_ate_confirmar(self):
-        self.assertTrue(_deve_pre_avancar_entrada(
-            modo_missao=True,
-            armada=True,
-            confirmada=False,
-            detectada=True,
-            votos=1,
-            motivo="",
-            linha_adiante=False,
-        ))
-
-    def test_main_isolado_nao_muda_comportamento(self):
-        self.assertFalse(_deve_pre_avancar_entrada(
-            modo_missao=False,
-            armada=True,
-            confirmada=False,
-            detectada=True,
-            votos=1,
-            motivo="fina",
-            linha_adiante=False,
-        ))
 
     def test_avanco_da_entrada_tem_um_segundo_e_pwm_80(self):
         self.assertEqual(cfg.MISSION_ENTRY_FORWARD_S, 1.0)
@@ -196,25 +140,20 @@ class MissionEntryAdvanceTests(unittest.TestCase):
 class ConfigProfileSeparationTests(unittest.TestCase):
     """Perfis de câmera diferentes não podem se sobrepor."""
 
-    def test_faixa_prata_pertence_a_camera_de_linha(self):
-        self.assertTrue(hasattr(config, "ENTRY_SILVER_MIN_DEFAULT"))
-        self.assertTrue(hasattr(config, "ENTRY_SILVER_MAX_DEFAULT"))
+    def test_modelo_de_entrada_pertence_a_camera_de_linha(self):
+        self.assertTrue(hasattr(config, "ENTRY_MODEL_PATH"))
+        self.assertTrue(hasattr(config, "ENTRY_MODEL_MIN_CONFIDENCE"))
         # E não vaza para o módulo do resgate.
-        self.assertFalse(hasattr(cfg, "ENTRY_SILVER_MIN_DEFAULT"))
+        self.assertFalse(hasattr(cfg, "ENTRY_MODEL_PATH"))
 
     def test_faixa_preta_pertence_a_camera_de_resgate(self):
         self.assertTrue(hasattr(cfg, "EXIT_BLACK_HSV_MIN"))
         self.assertFalse(hasattr(config, "EXIT_BLACK_HSV_MIN"))
 
-    def test_vitima_e_entrada_tem_limiares_independentes(self):
-        """Prata da vítima e prata da entrada não compartilham constantes."""
-        self.assertNotEqual(
-            id(config.ENTRY_SILVER_MAX_SATURATION),
-            id(cfg.BALL_SILVER_S_MAX))
-        # A entrada é calibrada em HSV; a vítima usa uma bateria própria de
-        # assinaturas (lisa, amassada, clara, tingida). São modelos distintos.
+    def test_vitima_e_entrada_usam_modelos_independentes(self):
+        self.assertNotEqual(config.ENTRY_MODEL_PATH, cfg.VICTIM_MODEL_PATH)
         self.assertTrue(hasattr(cfg, "BALL_SILVER_SMOOTH_INNER_V_MIN"))
-        self.assertFalse(hasattr(config, "BALL_SILVER_SMOOTH_INNER_V_MIN"))
+        self.assertFalse(hasattr(config, "VICTIM_MODEL_PATH"))
 
 
 class LineFollowerUnchangedTests(unittest.TestCase):

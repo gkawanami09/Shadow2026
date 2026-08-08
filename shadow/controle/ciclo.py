@@ -33,7 +33,6 @@ from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
 from controle.direcao import init_steering, sleep_steering, steer
 from controle.retorno import turn_around
 from comunicacao_serial.arduino import Arduino
-from visao.entrada_missao import _deve_pre_avancar_entrada
 from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                entry_armed, entry_silver_confirmed,
                                entry_silver_detected, entry_silver_reason,
@@ -51,36 +50,14 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
 
 
 def _enter_rescue_zone(arduino):
-    """Atravessa a soleira prata e entrega o robô parado, com o LED apagado.
-
-    O tempo NÃO é a única evidência: o avanço termina assim que a faixa deixa
-    de ser vista (ela passou por baixo do robô). O timeout existe apenas como
-    limite de segurança para o caso de a faixa continuar visível por erro de
-    detecção — sem ele o robô atravessaria a sala inteira em linha reta.
-    """
-    started = time.monotonic()
-    steer(0, config.ENTRY_ADVANCE_SPEED)
-    motivo = "timeout"
-    while True:
-        elapsed = time.monotonic() - started
-        if elapsed >= config.ENTRY_ADVANCE_TIMEOUT_S:
-            break
-        if (
-            elapsed >= config.ENTRY_ADVANCE_MIN_S
-            and not entry_silver_detected.value
-        ):
-            motivo = "faixa passou para trás"
-            break
-        sleep_steering(.02)
-
-    steer()  # PARAR antes de qualquer outra coisa
+    """Entrega a câmera/serial ao resgate, que faz seu avanço de 1 segundo."""
+    steer()
     # O LED só pode ser apagado enquanto esta serial ainda existe. O processo
     # de resgate reafirma o comando assim que abre a serial dele.
     arduino.led("APAGADO")
     entry_armed.value = False
-    print(
-        f"[controle] entrada concluída ({motivo}, {elapsed:.2f} s); "
-        "PARAR enviado e LED APAGADO — liberando a serial para o resgate")
+    print("[controle] entrada confirmada; PARAR e LED APAGADO — "
+          "resgate fará o avanço de 1 s")
 
 
 def control_loop():
@@ -139,9 +116,6 @@ def control_loop():
     preferencia_linha_esquerda.value = False
     preferencia_esquerda_inicio = 0.
     preferencia_esquerda_alinhada_desde = None
-    pre_avanco_entrada_ate = 0.
-    pre_avanco_entrada_assentando_ate = 0.
-    pre_avanco_entrada_rearmar_em = 0.
 
     try:
         while not terminate.value:
@@ -308,87 +282,11 @@ def control_loop():
                     and entry_silver_confirmed.value):
                 status.value = 'Faixa prata confirmada — entrando na sala'
                 print("[controle] faixa PRATA confirmada; entrando na sala")
+                # Para a inferência do modelo imediatamente. O subprocesso
+                # resgate só é aberto depois de a câmera de linha fechar.
                 _enter_rescue_zone(arduino)
                 rescue_requested.value = True
                 break
-
-            # Quando a faixa ainda está distante ela aparece como uma lâmina
-            # horizontal fina. Corrigir pelo contorno preto ou pelo falso
-            # verde nesse ponto gira o robô para fora da entrada. Um único
-            # pré-aviso inicia um avanço reto limitado; durante ele nenhuma
-            # lógica de curva, pivô ou verde recebe os motores.
-            agora_entrada = time.monotonic()
-
-            if (
-                pre_avanco_entrada_ate > 0.
-                and agora_entrada >= pre_avanco_entrada_ate
-                and pre_avanco_entrada_assentando_ate <= 0.
-            ):
-                steer()
-                pre_avanco_entrada_assentando_ate = (
-                    agora_entrada + config.ENTRY_PRE_APPROACH_SETTLE_S)
-                pre_avanco_entrada_rearmar_em = (
-                    agora_entrada + config.ENTRY_PRE_APPROACH_COOLDOWN_S)
-
-            if (
-                pre_avanco_entrada_assentando_ate > 0.
-                and agora_entrada >= pre_avanco_entrada_assentando_ate
-            ):
-                pre_avanco_entrada_ate = 0.
-                pre_avanco_entrada_assentando_ate = 0.
-
-            pre_avanco_ativo = agora_entrada < pre_avanco_entrada_ate
-            assentando_pre_avanco = (
-                agora_entrada < pre_avanco_entrada_assentando_ate)
-            evidencia_entrada = _deve_pre_avancar_entrada(
-                modo_missao=mission_mode.value,
-                armada=entry_armed.value,
-                confirmada=entry_silver_confirmed.value,
-                detectada=entry_silver_detected.value,
-                votos=entry_silver_votes.value,
-                motivo=entry_silver_reason.value,
-                linha_adiante=line_ahead.value,
-            )
-            if (
-                not pre_avanco_ativo
-                and not assentando_pre_avanco
-                and pre_avanco_entrada_ate <= 0.
-                and evidencia_entrada
-                and agora_entrada >= pre_avanco_entrada_rearmar_em
-            ):
-                pre_avanco_entrada_ate = (
-                    agora_entrada + config.ENTRY_PRE_APPROACH_TIME_S)
-                pre_avanco_ativo = True
-                # Cancela qualquer manobra criada pelo falso verde do mesmo
-                # enquadramento antes de mandar o comando reto.
-                green_direction = None
-                green_turn_started = None
-                green_reverse_until = None
-                green_armed = False
-                green_rearm_after = max(
-                    green_rearm_after,
-                    agora_entrada
-                    + config.ENTRY_PRE_APPROACH_TIME_S
-                    + config.ENTRY_PRE_APPROACH_SETTLE_S
-                    + config.ENTRY_PRE_APPROACH_COOLDOWN_S,
-                )
-                pivot_last_direction = 0
-                pivot_line_lost_since = None
-                print(
-                    "[controle] faixa prata distante; avançando reto antes "
-                    "de permitir correções")
-
-            if pre_avanco_ativo:
-                status.value = (
-                    'Faixa prata distante — avançando reto para confirmar')
-                steer(0, config.ENTRY_PRE_APPROACH_SPEED)
-                continue
-
-            if assentando_pre_avanco:
-                status.value = (
-                    'Faixa prata — aguardando imagem após avanço reto')
-                steer()
-                continue
 
             # Estado normal do segue-linha.
             if line_status.value == "line_detected":

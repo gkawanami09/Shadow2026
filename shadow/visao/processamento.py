@@ -197,14 +197,6 @@ def vision_loop(debug=False):
                 linha_a_frente_frame = False
             line_ahead.value = linha_a_frente_frame
 
-            # Faixa prata de entrada. Roda aqui porque precisa de `line_ahead`
-            # (a linha preta precisa estar terminando) e porque o frame ainda
-            # não recebeu nenhuma anotação dentro da ROI inferior.
-            update_entry_silver(
-                entry_gate, cv2_img, frame_captured_at,
-                line_ahead=linha_a_frente_frame,
-                hsv_image=hsv_image)
-
             # Recorta partes que não devem participar da decisão.
             if line_status.value == "gap_avoid":
                 apply_gap_avoid_mask(black_image)
@@ -337,6 +329,19 @@ def vision_loop(debug=False):
                 line_angle_y.value = -1
                 reset_gap_values()
 
+            # O modelo da entrada só roda na missão. Cada voto precisa do
+            # mesmo frame em que a linha preta foi encontrada e centralizada.
+            linha_alinhada = (
+                linha_detectada_frame
+                and not linha_a_frente_frame
+                and abs(angulo_frame) <= config.ENTRY_LINE_MAX_ANGLE
+                and abs(ponto_inferior_x_frame - camera_x / 2)
+                <= config.ENTRY_LINE_MAX_BOTTOM_ERROR_PX
+            )
+            update_entry_silver(
+                entry_gate, cv2_img, frame_captured_at,
+                line_aligned=linha_alinhada)
+
             processamento_ms = (
                 time.perf_counter() - inicio_processamento
             ) * 1000.
@@ -372,7 +377,6 @@ def vision_loop(debug=False):
                 # errado.
                 if entry_gate is not None and entry_armed.value:
                     entrada = entry_gate.last_detection
-                    banda = entry_gate.detector.last_band
                     if entrada is not None:
                         x, y, w, h = entrada.bbox
                         cv2.rectangle(
@@ -382,17 +386,8 @@ def vision_loop(debug=False):
                             (255, 255, 0),
                             2,
                         )
-                    elif banda is not None:
-                        x, y, w, h = banda.bbox
-                        cv2.rectangle(
-                            cv2_img,
-                            (int(x), int(y)),
-                            (int(x + w - 1), int(y + h - 1)),
-                            (0, 165, 255),
-                            1,
-                        )
                     motivo_entrada = (
-                        entry_gate.detector.last_reason or "candidata")
+                        entry_gate.last_reason or "candidata")
                     cv2.putText(
                         cv2_img,
                         f"PRATA {entry_gate.votes}/"

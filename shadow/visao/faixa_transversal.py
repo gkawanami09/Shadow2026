@@ -7,7 +7,7 @@ a *forma*: uma barra alongada que atravessa o campo de visao perto da base.
 Este modulo isola somente essa parte comum. Ele nao conhece cor, nao le
 configuracao e nao decide nada sobre a missao: recebe uma mascara binaria ja
 pronta e responde "existe uma barra transversal aqui?". Os detectores
-especificos (``faixa_entrada`` e ``faixa_saida``) aplicam suas proprias cores,
+específicos (como ``faixa_saida``) aplicam suas próprias cores,
 seus proprios limiares e suas proprias evidencias de contexto.
 
 Motivo de existir separado: a analise por perfil de linhas abaixo e o unico
