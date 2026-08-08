@@ -254,6 +254,9 @@ ENTRY_SILVER_ENABLED = True
 ENTRY_MODEL_PATH = "modelos/entrada.onnx"
 ENTRY_MODEL_INPUT = 640
 ENTRY_MODEL_MIN_CONFIDENCE = .60
+# Um único frame muito seguro não espera a segunda inferência: em velocidade
+# alta a faixa pode ficar no campo de visão por menos de dois ciclos do YOLO.
+ENTRY_MODEL_FAST_CONFIDENCE = .82
 ENTRY_SILVER_VOTES_NEEDED = 2
 ENTRY_SILVER_VOTE_WINDOW = 3
 # Além do modelo, todos os votos precisam ter a linha preta rastreada e

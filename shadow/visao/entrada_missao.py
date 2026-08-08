@@ -125,8 +125,13 @@ class EntryGate:
             self.last_reason = "modelo_sem_faixa"
             return False, None
         self._hits.append(True)
-        self.last_reason = "confirmada" if self.votes >= config.ENTRY_SILVER_VOTES_NEEDED else "votando"
-        return self.votes >= config.ENTRY_SILVER_VOTES_NEEDED, detection
+        fast = detection.confidence >= config.ENTRY_MODEL_FAST_CONFIDENCE
+        confirmed = fast or self.votes >= config.ENTRY_SILVER_VOTES_NEEDED
+        if fast:
+            self.last_reason = "confirmada_rapida"
+        else:
+            self.last_reason = "confirmada" if confirmed else "votando"
+        return confirmed, detection
 
 
 def build_entry_gate():

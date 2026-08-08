@@ -58,14 +58,21 @@ class EntryModelTests(unittest.TestCase):
 
 
 class EntryGateTests(unittest.TestCase):
+    def test_uma_deteccao_muito_confiavel_confirma_na_hora(self):
+        detection = EntryDetection((1, 2, 3, 4), .95)
+        gate = EntryGate(model=_Model([detection]))
+        confirmed, _ = gate.update(None, 0., line_aligned=True)
+        self.assertTrue(confirmed)
+        self.assertEqual(gate.last_reason, "confirmada_rapida")
+
     def test_dois_frames_alinhados_confirmam(self):
-        detection = EntryDetection((1, 2, 3, 4), .9)
+        detection = EntryDetection((1, 2, 3, 4), .7)
         gate = EntryGate(model=_Model([detection, detection]))
         self.assertFalse(gate.update(None, 0., line_aligned=True)[0])
         self.assertTrue(gate.update(None, .03, line_aligned=True)[0])
 
     def test_modelo_sem_alinhamento_nao_aciona_resgate(self):
-        detection = EntryDetection((1, 2, 3, 4), .9)
+        detection = EntryDetection((1, 2, 3, 4), .7)
         gate = EntryGate(model=_Model([detection, detection, detection]))
         self.assertFalse(gate.update(None, 0., line_aligned=False)[0])
         self.assertFalse(gate.update(None, .03, line_aligned=False)[0])
