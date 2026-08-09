@@ -171,8 +171,9 @@ def control_loop():
 
             # Segurança frontal independente da visão. Duas de três leituras
             # ultrassônicas precisam confirmar até 5 cm. Depois disso a
-            # confirmação executa o desvio, procura novamente a linha e força
-            # a primeira retomada para a esquerda.
+            # confirmação desloca o robô para a esquerda, avança pelo
+            # obstáculo, retorna a mesma distância à direita e só retoma
+            # quando a linha estiver novamente centralizada.
             if (
                 config.OBSTACLE_STOP_ENABLED
                 and not preferencia_linha_esquerda.value
@@ -188,9 +189,8 @@ def control_loop():
                     "[controle] obstáculo confirmado a "
                     f"{distancia_cm:.1f} cm; esquerda por "
                     f"{config.OBSTACLE_LATERAL_TIME_S:.1f} s e frente por "
-                    f"{config.OBSTACLE_FORWARD_TIME_S:.1f} s; giro tanque "
-                    f"à direita por "
-                    f"{config.OBSTACLE_TANK_RIGHT_TIME_S:.1f} s")
+                    f"{config.OBSTACLE_FORWARD_TIME_S:.1f} s; retorno "
+                    "lateral à direita pelo mesmo tempo")
                 try:
                     desviar_obstaculo(
                         arduino,
@@ -199,10 +199,10 @@ def control_loop():
                     if terminate.value:
                         break
 
-                    status.value = 'Procurando linha — avançando'
+                    status.value = 'Procurando linha — avançando ao centro'
                     print(
-                        "[controle] giro à direita concluído; "
-                        "avançando até a linha chegar perto")
+                        "[controle] retorno lateral concluído; avançando "
+                        "até a linha chegar centralizada")
                     encontrou_linha = avancar_ate_linha(
                         arduino,
                         linha_proxima=lambda: (
@@ -210,6 +210,8 @@ def control_loop():
                             and last_bottom_point_y.value
                             >= camera_y
                             * config.OBSTACLE_LINE_NEAR_BOTTOM_RATIO
+                            and abs(last_bottom_point.value - camera_x / 2)
+                            <= config.OBSTACLE_LINE_CENTER_TOLERANCE_PX
                         ),
                         deve_encerrar=lambda: terminate.value,
                     )
@@ -219,29 +221,10 @@ def control_loop():
                         raise RuntimeError(
                             "linha não encontrada dentro do limite seguro")
 
-                    status.value = (
-                        'Linha encontrada — preferência para a esquerda')
+                    status.value = 'Linha encontrada e centralizada'
                     print(
-                        "[controle] linha encontrada; ativando peso visual "
-                        "para o ramo esquerdo")
-                    preferencia_linha_esquerda.value = True
-                    preferencia_esquerda_inicio = time.monotonic()
-                    preferencia_esquerda_alinhada_desde = None
-
-                    # Permanece parado por poucos frames para a visão publicar
-                    # o primeiro ângulo já calculado com o novo desempate.
-                    fim_armar_preferencia = (
-                        preferencia_esquerda_inicio
-                        + config.OBSTACLE_LEFT_PREFERENCE_ARM_TIME_S
-                    )
-                    while (
-                        not terminate.value
-                        and time.monotonic() < fim_armar_preferencia
-                    ):
-                        arduino.refresh(fail_closed=True)
-                        time.sleep(.01)
-                    if terminate.value:
-                        break
+                        "[controle] linha encontrada no centro; "
+                        "retomando segue-linha normal")
                 except RuntimeError as erro:
                     status.value = 'Falha no desvio do obstáculo — PARADO'
                     print(f"[controle] falha no desvio do obstáculo: {erro}")
@@ -251,8 +234,6 @@ def control_loop():
                     break
 
                 # Descarta o eco antigo e devolve o movimento ao segue-linha.
-                # A preferência compartilhada muda apenas o desempate visual;
-                # quem vira o robô continua sendo o controle proporcional.
                 arduino.cancelar_ultrassom()
                 monitor_obstaculo.reiniciar()
                 obstaculo_retry_after = (
@@ -277,9 +258,8 @@ def control_loop():
                 green_turn_target.value = 0
                 green_armed = False
                 green_rearm_after = obstaculo_retry_after
-                status.value = 'Seguindo linha com preferência à esquerda'
-                print(
-                    "[controle] retomando segue-linha com peso à esquerda")
+                status.value = 'Seguindo linha'
+                print("[controle] retomando segue-linha normal")
                 continue
 
             # Faixa prata de entrada. Só existe no modo de missão completa;

@@ -22,8 +22,6 @@ from config import (
     OBSTACLE_READ_TIMEOUT_S,
     OBSTACLE_SAMPLE_INTERVAL_S,
     OBSTACLE_STOP_DISTANCE_MM,
-    OBSTACLE_TANK_RIGHT_PWM,
-    OBSTACLE_TANK_RIGHT_TIME_S,
 )
 
 
@@ -165,37 +163,29 @@ def desviar_obstaculo(
     duracao_lateral_s=OBSTACLE_LATERAL_TIME_S,
     pwm_avanco=OBSTACLE_FORWARD_PWM,
     duracao_avanco_s=OBSTACLE_FORWARD_TIME_S,
-    pwm_giro=OBSTACLE_TANK_RIGHT_PWM,
-    duracao_giro_s=OBSTACLE_TANK_RIGHT_TIME_S,
     deve_encerrar=None,
     relogio=time.monotonic,
     dormir=time.sleep,
 ):
-    """Desliza à esquerda, avança, gira tanque à direita e para.
+    """Desliza à esquerda, avança, volta à direita e para.
 
-    A primeira etapa usa as rodas omnidirecionais em X, sem pivô. A última
-    usa os dois lados em sentidos opostos para realizar o giro tanque.
+    As duas etapas laterais usam as rodas omnidirecionais em X e têm a mesma
+    duração, preservando a orientação do robô durante todo o desvio.
     """
     pwm_lateral = int(round(pwm_lateral))
     pwm_avanco = int(round(pwm_avanco))
-    pwm_giro = int(round(pwm_giro))
     duracao_lateral_s = float(duracao_lateral_s)
     duracao_avanco_s = float(duracao_avanco_s)
-    duracao_giro_s = float(duracao_giro_s)
     deve_encerrar = deve_encerrar or (lambda: False)
 
     if not 1 <= pwm_lateral <= MAX_PWM:
         raise ValueError(f"PWM lateral deve ficar entre 1 e {MAX_PWM}")
     if not 1 <= pwm_avanco <= MAX_PWM:
         raise ValueError(f"PWM de avanço deve ficar entre 1 e {MAX_PWM}")
-    if not 1 <= pwm_giro <= MAX_PWM:
-        raise ValueError(f"PWM de giro deve ficar entre 1 e {MAX_PWM}")
     if duracao_lateral_s <= 0:
         raise ValueError("duracao lateral deve ser positiva")
     if duracao_avanco_s <= 0:
         raise ValueError("duracao de avanço deve ser positiva")
-    if duracao_giro_s <= 0:
-        raise ValueError("duracao de giro deve ser positiva")
 
     # Não deixa o último comando do segue-linha se misturar com o desvio.
     if arduino.parar() is False:
@@ -246,9 +236,14 @@ def desviar_obstaculo(
             )
         if not deve_encerrar():
             movimentar(
-                lambda: arduino.lado(pwm_giro, -pwm_giro),
-                duracao_giro_s,
-                "o giro tanque à direita",
+                lambda: arduino.rodas(
+                    pwm_lateral,
+                    -pwm_lateral,
+                    -pwm_lateral,
+                    pwm_lateral,
+                ),
+                duracao_lateral_s,
+                "o retorno lateral à direita",
             )
     finally:
         # Garante PARAR tanto no fim normal quanto em Ctrl+C ou falha serial.
@@ -322,7 +317,7 @@ def avancar_ate_linha(
     relogio=time.monotonic,
     dormir=time.sleep,
 ):
-    """Avança até a linha chegar perto da parte inferior da câmera."""
+    """Avança até a linha estar próxima e centralizada pela função recebida."""
     pwm = int(round(pwm))
     if not 1 <= pwm <= MAX_PWM:
         raise ValueError(f"PWM de busca deve ficar entre 1 e {MAX_PWM}")

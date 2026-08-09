@@ -244,7 +244,7 @@ class MonitorObstaculoTests(unittest.TestCase):
 
 
 class DesvioObstaculoTests(unittest.TestCase):
-    def test_lateral_avanco_e_giro_tanque_direita(self):
+    def test_lateral_avanco_e_retorno_lateral_direita(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
@@ -264,18 +264,13 @@ class DesvioObstaculoTests(unittest.TestCase):
             [
                 ("rodas", -60, 60, 60, -60),
                 ("rodas", 60, 60, 60, 60),
+                ("rodas", 60, -60, -60, 60),
             ],
         )
-        self.assertEqual(
-            [
-                comando
-                for comando in arduino.comandos
-                if comando[0] == "lado"
-            ],
-            [("lado", 60, -60)],
-        )
+        self.assertEqual([], [comando for comando in arduino.comandos
+                              if comando[0] == "lado"])
         self.assertEqual(arduino.comandos[-1], ("parar",))
-        self.assertAlmostEqual(relogio.tempo, 4.8)
+        self.assertAlmostEqual(relogio.tempo, 5.0)
         self.assertTrue(
             all(
                 comando[0] in ("parar", "rodas", "lado", "refresh")

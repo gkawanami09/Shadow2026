@@ -43,12 +43,11 @@ OBSTACLE_LATERAL_PWM = 60                  # translação com rodas omnidirecion
 OBSTACLE_LATERAL_TIME_S = 1.5              # s deslizando para a esquerda
 OBSTACLE_FORWARD_PWM = 60
 OBSTACLE_FORWARD_TIME_S = 2.0              # s avançando depois do lateral
-OBSTACLE_TANK_RIGHT_PWM = 60
-OBSTACLE_TANK_RIGHT_TIME_S = 1.3            # s girando tanque à direita
-# Depois do desvio, aproxima até a linha realmente chegar perto da câmera.
+# Depois de voltar lateralmente, aproxima até a linha chegar centralizada.
 OBSTACLE_LINE_SEARCH_PWM = 60
 OBSTACLE_LINE_SEARCH_TIMEOUT_S = 4.0
 OBSTACLE_LINE_NEAR_BOTTOM_RATIO = .85
+OBSTACLE_LINE_CENTER_TOLERANCE_PX = 35
 OBSTACLE_LINE_CONFIRM_TIME_S = .10
 # Ao encontrar uma linha transversal, o segue-linha recebe preferência
 # temporária pelo ramo esquerdo, sem executar um giro tanque separado.
