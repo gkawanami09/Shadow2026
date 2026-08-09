@@ -13,6 +13,7 @@ from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
                                          entry_armed,
                                          green_candidate,
+                                         green_turn_target,
                                          get_time_average, last_bottom_point,
                                          last_bottom_point_y,
                                          line_ahead, line_angle, line_angle_y,
@@ -264,9 +265,18 @@ def vision_loop(debug=False):
                 linha_detectada_frame = True
                 line_detected.value = True
                 preferir_esquerda = bool(preferencia_linha_esquerda.value)
+                alvo_verde = green_turn_target.value
+                direcao_marcada = (
+                    "left" if alvo_verde < 0 else
+                    "right" if alvo_verde > 0 else turn_dir.value
+                )
+                direcao_geometria = (
+                    "straight" if preferir_esquerda else direcao_marcada
+                )
                 blackline, black_line_crop = determine_correct_line(
                     contours_blk,
                     preferir_esquerda=preferir_esquerda,
+                    turn_direction=direcao_geometria,
                 )
                 area_linha_frame = float(cv2.contourArea(blackline))
                 line_size.value = area_linha_frame
@@ -284,7 +294,7 @@ def vision_loop(debug=False):
                 line_angle.value, poi, bottom_point = calculate_angle(
                     blackline, black_line_crop,
                     float(get_time_average(time_line_angle, .3)),
-                    "straight" if preferir_esquerda else turn_dir.value,
+                    direcao_geometria,
                     last_bottom_point_x,
                     last_average_line_point,
                     preferir_esquerda=preferir_esquerda,

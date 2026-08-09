@@ -22,7 +22,9 @@ def init_tracker():
     multiple_bottom_side = camera_x / 2
 
 
-def determine_correct_line(contours_blk, preferir_esquerda=False):
+def determine_correct_line(contours_blk, preferir_esquerda=False,
+                           turn_direction=None):
+    """Escolhe o contorno mantendo, se houver, o ramo verde ja marcado."""
     global x_last, y_last
     candidates = np.zeros((len(contours_blk), 5), dtype=np.int32)
     off_bottom = 0
@@ -53,9 +55,9 @@ def determine_correct_line(contours_blk, preferir_esquerda=False):
         # ordem de giro: contornos mais à esquerda ficam mais próximos do
         # histórico e vencem apenas quando houver ambiguidade.
         x_last = np.clip(candidates[0][3] - 150, 0, camera_x)
-    elif turn_dir.value == "left":
+    elif (turn_direction or turn_dir.value) == "left":
         x_last = np.clip(candidates[0][3] - 150, 0, camera_x)
-    elif turn_dir.value == "right":
+    elif (turn_direction or turn_dir.value) == "right":
         x_last = np.clip(candidates[0][3] + 150, 0, camera_x)
     else:
         x_last = candidates[0][3]

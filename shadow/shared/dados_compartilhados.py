@@ -38,6 +38,10 @@ red_detected = Value("b", False)
 green_candidate = Value("b", False)
 red_candidate = Value("b", False)
 turn_dir = manager.Value("i", "straight")  # "straight"; "left"; "right"; "turn_around"
+# Direcao que o controle ja armou para a manobra verde: -1 esquerda, 0 nenhuma,
+# 1 direita. E Value real (nao Manager) para a visao preservar rapidamente o
+# ramo escolhido durante a aproximacao e o giro.
+green_turn_target = Value("b", 0)
 black_average = Value("d", 0.)
 
 last_bottom_point = Value("d", config.camera_x / 2)

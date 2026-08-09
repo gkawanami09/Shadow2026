@@ -8,9 +8,10 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
                     GREEN_APPROACH_SPEED, GREEN_APPROACH_TIME,
-                    GREEN_TURN_EXIT_ANGLE,
                     GREEN_REVERSE_SPEED, GREEN_REVERSE_TIME,
-                    GREEN_TURN_MIN_TIME, GREEN_TURN_SPEED, LINE_FOLLOW_SPEED,
+                    GREEN_TURN_BLIND_TIME, GREEN_TURN_CENTER_TOLERANCE_PX,
+                    GREEN_TURN_SIDE_MIN_ERROR_PX, GREEN_TURN_SPEED,
+                    GREEN_TURN_TIMEOUT, LINE_FOLLOW_SPEED,
                     LINE_LOSS_STEER_HOLD, MIN_LINE_SIZE_DEFAULT,
                     PIVOT_BOTTOM_MIN_ERROR_PX,
                     PIVOT_RECOVERY_ASSIST_RAMP,
@@ -37,6 +38,7 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                entry_armed, entry_silver_confirmed,
                                entry_silver_detected, entry_silver_reason,
                                entry_silver_votes, green_candidate,
+                               green_turn_target,
                                last_bottom_point,
                                last_bottom_point_y,
                                line_ahead, line_angle, line_detected,
@@ -103,6 +105,8 @@ def control_loop():
     green_approach_until = 0.
     green_turn_started = None
     green_reverse_until = None
+    green_turn_deadline = 0.
+    green_target_seen = False
     green_armed = True
     green_rearm_after = 0.
     monitor_obstaculo = MonitorObstaculo()
@@ -114,6 +118,7 @@ def control_loop():
     modo_rapido_anterior = False
     obstaculo_retry_after = 0.
     preferencia_linha_esquerda.value = False
+    green_turn_target.value = 0
     preferencia_esquerda_inicio = 0.
     preferencia_esquerda_alinhada_desde = None
 
@@ -269,6 +274,9 @@ def control_loop():
                 green_direction = None
                 green_turn_started = None
                 green_reverse_until = None
+                green_turn_deadline = 0.
+                green_target_seen = False
+                green_turn_target.value = 0
                 green_armed = False
                 green_rearm_after = obstaculo_retry_after
                 status.value = 'Seguindo linha com preferência à esquerda'
@@ -323,6 +331,9 @@ def control_loop():
                     green_direction = None
                     green_turn_started = None
                     green_reverse_until = None
+                    green_turn_deadline = 0.
+                    green_target_seen = False
+                    green_turn_target.value = 0
                     green_armed = False
                     green_rearm_after = (
                         time.monotonic() + TURN_AROUND_GREEN_COOLDOWN)
@@ -349,6 +360,10 @@ def control_loop():
                     green_approach_until = now + GREEN_APPROACH_TIME
                     green_turn_started = None
                     green_reverse_until = None
+                    green_turn_deadline = 0.
+                    green_target_seen = False
+                    green_turn_target.value = (
+                        -1 if direcao_visual == "left" else 1)
                     green_armed = False
 
                 if green_direction is not None:
@@ -436,6 +451,9 @@ def control_loop():
                         green_direction = None
                         green_turn_started = None
                         green_reverse_until = None
+                        green_turn_deadline = 0.
+                        green_target_seen = False
+                        green_turn_target.value = 0
                         angle = line_angle.value if line_detected.value else 190
                         last_rear_pivot_enabled = True
                 elif green_direction is not None and now < green_approach_until:
@@ -448,20 +466,65 @@ def control_loop():
                 elif green_direction is not None:
                     if green_turn_started is None:
                         green_turn_started = now
+                        green_turn_deadline = now + GREEN_TURN_TIMEOUT
+                        green_target_seen = False
                     angle = -180 if green_direction == "left" else 180
                     command_speed = GREEN_TURN_SPEED
                     last_rear_pivot_enabled = False
-                    status.value = f'Verde {green_direction} — girando tanque'
 
-                    if (now - green_turn_started >= GREEN_TURN_MIN_TIME
-                            and direcao_visual == "straight"
-                            and line_detected.value
-                            and abs(line_angle.value) <= GREEN_TURN_EXIT_ANGLE):
+                    elapsed_turn = now - green_turn_started
+                    erro_inferior = last_bottom_point.value - camera_x / 2
+                    lado_esperado = -1 if green_direction == "left" else 1
+
+                    if elapsed_turn < GREEN_TURN_BLIND_TIME:
+                        # A linha que ainda estava sob o robo nao pode encerrar
+                        # a manobra: por este intervalo o giro e cego.
+                        status.value = (
+                            f'Verde {green_direction} — giro cego '
+                            f'({GREEN_TURN_BLIND_TIME:.1f} s)')
+                    elif now >= green_turn_deadline:
+                        # Sem esta trava um falso contorno poderia deixar o
+                        # tanque girando indefinidamente. Nao da re, pois o
+                        # ramo esperado nunca foi confirmado.
+                        green_direction = None
+                        green_turn_started = None
+                        green_reverse_until = None
+                        green_turn_deadline = 0.
+                        green_target_seen = False
+                        green_turn_target.value = 0
+                        green_armed = False
+                        green_rearm_after = now + TURN_AROUND_GREEN_COOLDOWN
+                        angle = 190
+                        status.value = (
+                            'Verde — ramo marcado nao foi encontrado; '
+                            'parada de seguranca')
+                    elif not green_target_seen:
+                        # Aceita a linha apenas depois de ela aparecer no lado
+                        # que o marcador escolheu. Isso evita capturar o ramo
+                        # anterior que ainda cruza o campo da camera.
+                        if (line_detected.value
+                                and lado_esperado * erro_inferior
+                                >= GREEN_TURN_SIDE_MIN_ERROR_PX):
+                            green_target_seen = True
+                            status.value = (
+                                f'Verde {green_direction} — ramo apareceu '
+                                'no lado marcado')
+                        else:
+                            status.value = (
+                                f'Verde {green_direction} — procurando '
+                                'ramo no lado marcado')
+                    elif (line_detected.value
+                            and abs(erro_inferior)
+                            <= GREEN_TURN_CENTER_TOLERANCE_PX):
                         green_reverse_until = now + GREEN_REVERSE_TIME
                         angle = 200
                         command_speed = GREEN_REVERSE_SPEED
                         last_rear_pivot_enabled = False
                         status.value = 'Verde concluido — dando re curta'
+                    else:
+                        status.value = (
+                            f'Verde {green_direction} — trazendo ramo '
+                            'para o centro')
                 elif line_detected.value:
                     angle = last_follow_angle
                 elif pivot_last_direction != 0:
@@ -598,6 +661,7 @@ def control_loop():
 
     finally:
         preferencia_linha_esquerda.value = False
+        green_turn_target.value = 0
         status.value = "Parado"
         try:
             steer()  # PARAR
