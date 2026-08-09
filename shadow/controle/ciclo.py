@@ -314,7 +314,7 @@ def control_loop():
                     not preferencia_linha_esquerda.value
                     and direcao_visual == "turn_around"
                 ):
-                    status.value = f'Girando 180° para a {"direita" if last_turn_dir == "r" else "esquerda"}'
+                    status.value = 'Girando 180° para a direita'
 
                     last_turn_dir = turn_around(last_turn_dir)
                     # O filtro visual pode degradar "dois verdes" para apenas

@@ -222,6 +222,7 @@ T_SWEEP_RIGHT = .35                       # s — varredura direita na busca do 
 SWEEP_SPEED = .6                          # velocidade da varredura temporizada
 LINE_SEARCH_CREEP = 1.2                   # avanco final procurando linha
 T_180 = .82                               # s — teste mostrou .70 s ~= 90°; inicia perto de 105°
+T_180_BLIND_EXTRA = .30                   # s extras girando à direita sem procurar linha
 T_180_SPEED = .7                          # velocidade do pivot de 180°
 T_180_TEST_STOP = False                   # True isola e para definitivamente apos o giro cego
 T_180_SEARCH_SPEED = .4                   # procura devagar para nao atravessar a linha entre frames
@@ -229,8 +230,8 @@ T_180_SEARCH_TIMEOUT = 1.5                # s — complemento visual maximo
 T_180_EXIT_BOTTOM_PX = 30                 # px — tolerancia ao redor da bolinha inferior central
 T_180_CONFIRM_TIME = .10                  # s — evita parar por um frame isolado
 TURN_AROUND_PREROLL = .55                 # avanca sobre o marcador
-TURN_AROUND_REVERSE = .3                  # re-aquisicao da linha
-TURN_AROUND_REVERSE_EXTRA = .4            # extra se line_size < 5500
+TURN_AROUND_REVERSE = .15                 # metade da ré após re-aquisitar a linha
+TURN_AROUND_REVERSE_EXTRA = .20           # metade do extra se line_size < 5500
 TURN_AROUND_SMALL_LINE = 5500
 TURN_AROUND_GREEN_COOLDOWN = 1.0          # ignora memoria residual dos dois verdes
 
