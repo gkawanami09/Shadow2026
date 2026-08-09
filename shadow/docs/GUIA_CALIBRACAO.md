@@ -30,12 +30,9 @@ Com o robô SOBRE a pista, na iluminação real da sala:
    cima** da imagem, sem o piso virar branco.
 2. **Grupo 2 — `black_max_normal_bottom`** (faixa próxima, 40-100 %): idem
    para a metade de baixo. É a região mais crítica — o POI vem daqui.
-3. **Grupo 3 — `black_max_ramp_down_top`**: teto BEM escuro. Só é usado quando
-   o detector "escuro à frente" dispara. Ajuste apontando a câmera para fora
-   da pista (chão escuro): a máscara deve separar linha de piso.
-4. **Grupo 4 — verde**: marcador verde sólido branco na máscara, resto preto.
+3. **Grupo 4 — verde**: marcador verde sólido branco na máscara, resto preto.
    Valide nas 4 posições de marcador.
-5. **Grupos 5/6 — vermelho**: as duas bandas de hue (0-10 e 170-180). A faixa
+4. **Grupos 5/6 — vermelho**: as duas bandas de hue (0-10 e 170-180). A faixa
    vermelha da pista deve encher a máscara; um objeto vermelho pequeno pode
    aparecer — não é problema (o gatilho exige 15000 px²).
 
@@ -135,7 +132,6 @@ têm a mesma cor, e é a geometria que as separa.
 
 | Constante | Onde | Sintoma se errada |
 |---|---|---|
-| `RAMP_SWAP_TRIGGER` (90) | config.py | Chão fora da pista no campo de visão dispara `ramp_ahead` → robô lento sem motivo. Suba para 110-130 se o `--debug` mostrar o círculo preto no canto sem rampa |
 | `min_line_size` (3000) | config.py | Linha fina/distante ignorada (suba a câmera nos testes) ou ruído aceito. Com fish-eye a linha próxima fica GRANDE — se contornos de ruído passarem, suba |
 | `GAP_NOT_A_STUB_SIZE` (17000) | config.py | Com a linha maior no near-field, um toco de gap pode passar de 17000 e abortar a orientação → suba proporcionalmente ao que `line_size` mostra no `--debug` |
 | `RED_MIN_CONTOUR` (15000) | config.py | Vermelho nunca dispara (fish-eye encolhe a faixa no topo) → desça; especks disparam → suba |

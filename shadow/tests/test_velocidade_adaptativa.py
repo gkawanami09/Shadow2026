@@ -37,7 +37,6 @@ def resultado_reto(sequencia, publicado_em, **alteracoes):
         "area_linha": 9000.,
         "candidato_verde": False,
         "candidato_vermelho": False,
-        "rampa": False,
     }
     dados.update(alteracoes)
     return SimpleNamespace(**dados)
@@ -172,7 +171,6 @@ class VelocidadeAdaptativaTests(unittest.TestCase):
             "direcao": ({"direcao": "left"}, {}),
             "verde": ({}, {"candidato_verde": True}),
             "vermelho": ({}, {"candidato_vermelho": True}),
-            "rampa": ({}, {"rampa": True}),
             "sem_linha": ({}, {"linha_detectada": False}),
             "sem_continuacao": ({}, {"linha_a_frente": False}),
             "angulo": ({}, {

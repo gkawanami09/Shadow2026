@@ -94,10 +94,6 @@ right_correction = 1
 LINE_FOLLOW_PWM = 80
 LINE_FOLLOW_SPEED = LINE_FOLLOW_PWM / MAX_PWM
 LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair brevemente da imagem
-RAMP_AHEAD_HOLD = 2                       # s segurando velocidade reduzida
-RAMP_AHEAD_SPEED_PIVOT = .65
-RAMP_AHEAD_SPEED_ARC = .4
-RAMP_AHEAD_SPEED_STRAIGHT = .3
 
 # O segue-linha usa PWM 80 diretamente. O controlador adaptativo permanece no
 # projeto para uma calibração futura, mas não participa dos comandos atuais.
@@ -119,8 +115,6 @@ PASSO_VELOCIDADE_RETA_RAPIDA = .01
 # Detecção de linha
 # ----------------------------------------------------------------------------
 MIN_LINE_SIZE_DEFAULT = 3000              # area minima do contorno
-RAMP_SWAP_TRIGGER = 90                    # media da banda 25% superior
-RAMP_SWAP_MARGIN = 30                     # melhora minima p/ trocar teto
 BLACK_AVG_SIDE_MASK = 21                  # mascara lateral se imagem limpa
 LINE_CROP_INITIAL = .6
 LINE_CROP_NORMAL = .6
@@ -283,7 +277,6 @@ ENTRY_ALIGNMENT_HOLD_S = .50
 BLACK_MIN_DEFAULT = [0, 0, 0]
 BLACK_MAX_NORMAL_TOP_DEFAULT = [82, 83, 84]         # BGR
 BLACK_MAX_NORMAL_BOTTOM_DEFAULT = [133, 133, 135]   # BGR
-BLACK_MAX_RAMP_DOWN_TOP_DEFAULT = [27, 27, 26]      # BGR
 # Matizes MIGRADOS quando a troca R<->B da câmera de linha foi corrigida
 # (ver visao/captura.py). A conversão é exata: H_correto = 120 − H_trocado.
 # Antes: 58..98 na imagem trocada. Depois: 22..62 na imagem correta.

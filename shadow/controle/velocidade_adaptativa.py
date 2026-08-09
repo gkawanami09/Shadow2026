@@ -118,7 +118,6 @@ class ControladorVelocidadeAdaptativa:
             and resultado.linha_a_frente
             and not resultado.candidato_verde
             and not resultado.candidato_vermelho
-            and not resultado.rampa
             and 0 <= idade <= IDADE_MAXIMA_VISAO_RAPIDA_S
             and abs(resultado.angulo) <= ANGULO_MAXIMO_RETA_RAPIDA
             and abs(resultado.ponto_inferior_x - camera_x / 2)

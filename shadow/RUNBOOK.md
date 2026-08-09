@@ -113,7 +113,6 @@ Com o robô sobre a pista, na iluminação real (precisa de monitor ou X11):
 - **Teclas 1/2** — tetos BGR do preto (faixa distante 0-40 % / próxima
   40-100 % da imagem). "Bom" = linha branca sólida
   na máscara, fundo totalmente preto.
-- **Tecla 3** — teto de rampa (bem escuro; usado só quando "escuro à frente").
 - **Tecla 4** — HSV do verde: marcador branco sólido, resto preto.
 - **Teclas 5/6** — HSV do vermelho (duas bandas de hue: 0-10 e 170-180).
 - **`s` salva o grupo atual** em `shadow/config.ini`; `q` sai.
@@ -215,8 +214,6 @@ journalctl -u shadow-line -f                      # logs
 | Motores param sozinhos andando | Watchdog disparando → loop Python travado/lento | Veja o terminal; reporte — não deveria ocorrer com `sleep_steering` |
 | Câmera não encontrada | Cabo CSI; picamera2 ausente | `python3 -m shadow.tools.teste_camera`; seção 3 |
 | Linha não detectada (máscara vazia) | Tetos de preto baixos | `calibrar_cores` grupos 1/2 |
-| Robô lento sem motivo, círculo preto no canto do --debug | `ramp_ahead` disparando com chão fora da pista (fish-eye) | Suba `RAMP_SWAP_TRIGGER` (90 → 110-130) em `config.py` |
-| "Perde" a linha na descida de rampa | Teto de rampa errado | `calibrar_cores` grupo 3 |
 | Robô pivota para o lado errado no verde | Marcador validado com a linha errada — máscara verde suja ou preta fraca | `calibrar_cores` grupos 1/2/4; confira no `--debug` |
 | Verde ignorado | Área < 2500 px² ou vizinhança preta não bate | `GREEN_MIN_AREA`; recalibre preto+verde |
 | 180° passa/falta do alvo | `T_180` fora | Cronometre e ajuste `T_180` em `config.py` |
@@ -236,5 +233,4 @@ Herdado da lista do dossiê (Seção 8) — pontos de extensão futuros:
 - Obstáculos e sensores IR de distância; gangorra (seesaw)
 - Garra/servos, kit de resgate, LEDs, GUI touchscreen
 
-O comportamento nas rampas é apenas o ramo de câmera (`ramp_ahead`); giros de
-90°/180° são por visão/tempo, sem giroscópio.
+Giros de 90°/180° são por visão/tempo, sem giroscópio.

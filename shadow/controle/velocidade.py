@@ -1,21 +1,7 @@
-"""Escolhe a velocidade do segue-linha de acordo com a curva."""
+"""Mantém a velocidade normal do segue-linha."""
 
-from config import (LINE_FOLLOW_SPEED, RAMP_AHEAD_HOLD, RAMP_AHEAD_SPEED_ARC,
-                    RAMP_AHEAD_SPEED_PIVOT, RAMP_AHEAD_SPEED_STRAIGHT,
-                    max_turn_angle)
-from shared.dados_compartilhados import ramp_ahead, timer
+from config import LINE_FOLLOW_SPEED
 
 
-def get_speed(angle):
-    if ramp_ahead.value or not timer.get_timer("ramp_ahead"):
-        if ramp_ahead.value:
-            timer.set_timer("ramp_ahead", RAMP_AHEAD_HOLD)
-
-        if abs(angle) > max_turn_angle:
-            return RAMP_AHEAD_SPEED_PIVOT
-        elif abs(angle) > max_turn_angle / 2:
-            return RAMP_AHEAD_SPEED_ARC
-        else:
-            return RAMP_AHEAD_SPEED_STRAIGHT
-
+def get_speed(_angle):
     return LINE_FOLLOW_SPEED

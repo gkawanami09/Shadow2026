@@ -59,7 +59,6 @@ class ResultadoVisaoRapidaTests(unittest.TestCase):
             area_linha=8123,
             candidato_verde=False,
             candidato_vermelho=True,
-            rampa=False,
         )
         resultado = ler_resultado_visao_rapida()
 
@@ -74,7 +73,6 @@ class ResultadoVisaoRapidaTests(unittest.TestCase):
         self.assertEqual(resultado.area_linha, 8123)
         self.assertFalse(resultado.candidato_verde)
         self.assertTrue(resultado.candidato_vermelho)
-        self.assertFalse(resultado.rampa)
 
 
 if __name__ == "__main__":

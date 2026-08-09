@@ -33,7 +33,6 @@ gap_angle = Value("d", 0.)
 gap_center_x = Value("d", -180.)
 gap_center_y = Value("d", -1.)
 gap_end_width = Value("d", -1.)
-ramp_ahead = Value("b", False)
 red_detected = Value("b", False)
 green_candidate = Value("b", False)
 red_candidate = Value("b", False)
@@ -84,12 +83,11 @@ class ResultadoVisaoRapida(NamedTuple):
     area_linha: float
     candidato_verde: bool
     candidato_vermelho: bool
-    rampa: bool
 
 
 # Um único bloqueio publica todos os campos. O controle nunca usa uma mistura
 # do ângulo de um frame com o ponto inferior do frame seguinte.
-_resultado_visao_rapida = Array("d", 12, lock=True)
+_resultado_visao_rapida = Array("d", 11, lock=True)
 
 
 def publicar_resultado_visao_rapida(
@@ -104,7 +102,6 @@ def publicar_resultado_visao_rapida(
     area_linha,
     candidato_verde,
     candidato_vermelho,
-    rampa,
 ):
     with _resultado_visao_rapida.get_lock():
         dados = _resultado_visao_rapida.get_obj()
@@ -119,7 +116,6 @@ def publicar_resultado_visao_rapida(
         dados[8] = float(area_linha)
         dados[9] = bool(candidato_verde)
         dados[10] = bool(candidato_vermelho)
-        dados[11] = bool(rampa)
 
 
 def ler_resultado_visao_rapida():
@@ -137,7 +133,6 @@ def ler_resultado_visao_rapida():
         area_linha=dados[8],
         candidato_verde=bool(dados[9]),
         candidato_vermelho=bool(dados[10]),
-        rampa=bool(dados[11]),
     )
 
 

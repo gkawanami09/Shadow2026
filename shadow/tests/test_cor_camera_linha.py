@@ -97,8 +97,7 @@ class FaixasCalibradasTests(unittest.TestCase):
     def test_preto_e_praticamente_simetrico_entre_canais(self):
         """O preto quase não sente a troca; por isso não foi migrado."""
         for teto in (config.BLACK_MAX_NORMAL_TOP_DEFAULT,
-                     config.BLACK_MAX_NORMAL_BOTTOM_DEFAULT,
-                     config.BLACK_MAX_RAMP_DOWN_TOP_DEFAULT):
+                     config.BLACK_MAX_NORMAL_BOTTOM_DEFAULT):
             self.assertLessEqual(
                 abs(teto[0] - teto[2]), 4,
                 f"teto de preto {teto} nao e simetrico entre B e R")

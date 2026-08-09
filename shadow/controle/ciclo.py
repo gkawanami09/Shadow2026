@@ -44,7 +44,7 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                line_ahead, line_angle, line_detected,
                                line_size, line_status, min_line_size,
                                mission_mode,
-                               preferencia_linha_esquerda, ramp_ahead,
+                               preferencia_linha_esquerda,
                                red_candidate, red_detected, red_finished,
                                rescue_requested, status, terminate,
                                ler_resultado_visao_rapida, timer, turn_dir,
@@ -72,8 +72,6 @@ def control_loop():
     last_turn_dir = "l"
 
     time_last_angles = empty_time_arr()
-
-    timer.set_timer("ramp_ahead", .01)
 
     # espera a visao publicar o primeiro frame processado
     wait_start = time.perf_counter()
@@ -301,7 +299,7 @@ def control_loop():
 
                 gap_allowed = GAP_ENABLED and time.monotonic() >= gap_retry_after
                 if (gap_allowed and not line_detected.value
-                        and not line_ahead.value and not ramp_ahead.value):
+                        and not line_ahead.value):
                     if line_missing_since is None:
                         line_missing_since = time.monotonic()
                     elif time.monotonic() - line_missing_since >= GAP_MISSING_CONFIRM_TIME:
@@ -409,7 +407,6 @@ def control_loop():
                         and not green_candidate.value
                         and not red_candidate.value
                         and not red_detected.value
-                        and not ramp_ahead.value
                         and not entry_silver_detected.value
                         and not entry_silver_confirmed.value
                         and not monitor_obstaculo.bloqueia_velocidade_rapida

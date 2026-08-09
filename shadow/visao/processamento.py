@@ -7,8 +7,8 @@ import cv2
 import numpy as np
 
 import config
-from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, RAMP_SWAP_MARGIN,
-                    RAMP_SWAP_TRIGGER, VISION_MAX_FRAMES, camera_x, camera_y)
+from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, VISION_MAX_FRAMES,
+                    camera_x, camera_y)
 from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
                                          entry_armed,
@@ -18,7 +18,7 @@ from shared.dados_compartilhados import (add_time_value, black_average,
                                          last_bottom_point_y,
                                          line_ahead, line_angle, line_angle_y,
                                          line_crop, line_detected, line_size,
-                                         line_status, min_line_size, ramp_ahead,
+                                         line_status, min_line_size,
                                          publicar_resultado_visao_rapida,
                                          preferencia_linha_esquerda,
                                          red_candidate, red_detected, status,
@@ -37,7 +37,6 @@ from visao.vermelho import ConfirmadorVermelho, check_contour_size
 black_min = np.array(config.BLACK_MIN_DEFAULT)
 black_max_normal_top = np.array(config.BLACK_MAX_NORMAL_TOP_DEFAULT)
 black_max_normal_bottom = np.array(config.BLACK_MAX_NORMAL_BOTTOM_DEFAULT)
-black_max_ramp_down_top = np.array(config.BLACK_MAX_RAMP_DOWN_TOP_DEFAULT)
 green_min = np.array(config.GREEN_MIN_DEFAULT)
 green_max = np.array(config.GREEN_MAX_DEFAULT)
 red_min_1 = np.array(config.RED_MIN_1_DEFAULT)
@@ -47,8 +46,8 @@ red_max_2 = np.array(config.RED_MAX_2_DEFAULT)
 
 
 def update_color_values():
-    global black_max_normal_top, black_max_normal_bottom, black_max_ramp_down_top, \
-        green_min, green_max, red_min_1, red_max_1, red_min_2, red_max_2
+    global black_max_normal_top, black_max_normal_bottom, green_min, green_max, \
+        red_min_1, red_max_1, red_min_2, red_max_2
 
     def read(name, fallback):
         value = config_manager.read_variable('color_values_line', name)
@@ -56,7 +55,6 @@ def update_color_values():
 
     black_max_normal_top = read('black_max_normal_top', config.BLACK_MAX_NORMAL_TOP_DEFAULT)
     black_max_normal_bottom = read('black_max_normal_bottom', config.BLACK_MAX_NORMAL_BOTTOM_DEFAULT)
-    black_max_ramp_down_top = read('black_max_ramp_down_top', config.BLACK_MAX_RAMP_DOWN_TOP_DEFAULT)
 
     green_min = read('green_min', config.GREEN_MIN_DEFAULT)
     green_max = read('green_max', config.GREEN_MAX_DEFAULT)
@@ -152,32 +150,6 @@ def vision_loop(debug=False):
                 black_image,
                 cv2.bitwise_not(green_image),
             )
-
-            # Usa outro limite de preto quando a parte superior está escura.
-            dark_ahead = False
-            black_mean = round(np.mean(black_image[0:int(camera_y * .25), 0:camera_x]), 2)
-            if black_mean > RAMP_SWAP_TRIGGER:
-                black_image_2_top = cv2.inRange(
-                    cv2_img[:limite_topo],
-                    black_min,
-                    black_max_ramp_down_top,
-                )
-                black_image_2_top = cv2.bitwise_and(
-                    black_image_2_top,
-                    cv2.bitwise_not(green_image[:limite_topo]),
-                )
-
-                black_mean_2 = round(
-                    np.mean(black_image_2_top[:int(camera_y * .25)]),
-                    2,
-                )
-
-                if black_mean_2 + RAMP_SWAP_MARGIN < black_mean:
-                    cv2.circle(cv2_img, (10, 10), 5, (0, 0, 0), -1, cv2.LINE_AA)
-                    black_image[:limite_topo] = black_image_2_top
-                    dark_ahead = True
-
-            ramp_ahead.value = dark_ahead
 
             media_preto = float(np.mean(black_image))
             black_average.value = media_preto
@@ -375,7 +347,6 @@ def vision_loop(debug=False):
                 area_linha=area_linha_frame,
                 candidato_verde=candidato_verde_frame,
                 candidato_vermelho=candidato_vermelho_frame,
-                rampa=dark_ahead,
             )
 
             if not vision_ready.value:
