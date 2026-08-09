@@ -25,7 +25,6 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
 from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
-    avancar_ate_linha,
     desviar_obstaculo,
 )
 from controle.parada_vermelho import stop_for_red
@@ -172,8 +171,8 @@ def control_loop():
             # Segurança frontal independente da visão. Duas de três leituras
             # ultrassônicas precisam confirmar até 5 cm. Depois disso a
             # confirmação desloca o robô para a esquerda, avança pelo
-            # obstáculo, retorna a mesma distância à direita e só retoma
-            # quando a linha estiver novamente centralizada.
+            # obstáculo e retorna a mesma distância à direita. Ao terminar,
+            # o laço volta diretamente ao segue-linha normal.
             if (
                 config.OBSTACLE_STOP_ENABLED
                 and not preferencia_linha_esquerda.value
@@ -199,31 +198,9 @@ def control_loop():
                     if terminate.value:
                         break
 
-                    status.value = 'Procurando linha — avançando ao centro'
+                    status.value = 'Desvio concluído — segue-linha normal'
                     print(
-                        "[controle] retorno lateral concluído; avançando "
-                        "até a linha chegar centralizada")
-                    encontrou_linha = avancar_ate_linha(
-                        arduino,
-                        linha_proxima=lambda: (
-                            line_detected.value
-                            and last_bottom_point_y.value
-                            >= camera_y
-                            * config.OBSTACLE_LINE_NEAR_BOTTOM_RATIO
-                            and abs(last_bottom_point.value - camera_x / 2)
-                            <= config.OBSTACLE_LINE_CENTER_TOLERANCE_PX
-                        ),
-                        deve_encerrar=lambda: terminate.value,
-                    )
-                    if terminate.value:
-                        break
-                    if not encontrou_linha:
-                        raise RuntimeError(
-                            "linha não encontrada dentro do limite seguro")
-
-                    status.value = 'Linha encontrada e centralizada'
-                    print(
-                        "[controle] linha encontrada no centro; "
+                        "[controle] retorno lateral concluído; "
                         "retomando segue-linha normal")
                 except RuntimeError as erro:
                     status.value = 'Falha no desvio do obstáculo — PARADO'
