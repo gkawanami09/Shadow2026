@@ -88,6 +88,23 @@ VICTIM_MODEL_NMS_IOU = 0.45
 # Ordem das classes no modelo. Precisa bater com o data.yaml do treino.
 VICTIM_MODEL_CLASSES = ("black", "silver")
 
+# ---------------------------------------------------------------------------
+# Detector treinado da faixa de saída
+# ---------------------------------------------------------------------------
+# O modelo só é carregado e executado depois do depósito vermelho, durante a
+# busca da saída. NCNN é a rota preferida no Pi; ONNX é contingência.
+EXIT_MODEL_ENABLED = True
+EXIT_MODEL_PATH = "modelos/saida.onnx"
+EXIT_NCNN_MODEL_PATH = "modelos/saida_ncnn_model"
+EXIT_MODEL_BACKEND = "auto"
+EXIT_MODEL_INPUT = 416
+EXIT_NCNN_MODEL_INPUT = 416
+EXIT_MODEL_MIN_CONFIDENCE = .60
+EXIT_MODEL_THREADS = 2
+# A caixa YOLO indica qual faixa é a saída. O detector geométrico só pode
+# contribuir com ângulo se o seu candidato estiver nesta margem da caixa.
+EXIT_MODEL_GEOMETRY_MARGIN_RATIO = .25
+
 # Confirmacao temporal e rastreamento do alvo unico.
 VICTIM_ACQUIRE_HITS = 3
 VICTIM_MAX_TRACK_MISSES = 2

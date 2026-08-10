@@ -671,7 +671,12 @@ class BlackExitGate:
         imagem. A confirmação continua acontecendo depois que o chassi para,
         evitando aprovar borrão de movimento ou reflexo passageiro.
         """
-        detection = self.detector.detect(frame_bgr, timestamp=timestamp)
+        preview = getattr(self.detector, "preview", None)
+        detection = (
+            preview(frame_bgr, timestamp=timestamp)
+            if callable(preview)
+            else self.detector.detect(frame_bgr, timestamp=timestamp)
+        )
         self.last_detection = detection
         return detection
 

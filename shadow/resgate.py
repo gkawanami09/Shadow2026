@@ -82,6 +82,10 @@ from visao.confirmacao_saida_linha import (  # noqa: E402
     posicao_vertical_faixa,
 )
 from visao.faixa_saida import BlackExitGate  # noqa: E402
+from visao.saida_yolo import (  # noqa: E402
+    ExitModel,
+    ModelGuidedExitDetector,
+)
 from visao.marcador_resgate import (  # noqa: E402
     GreenRectangleDetector,
     MarkerDetector,
@@ -1107,6 +1111,20 @@ def preparar_detector_de_vitimas(args):
     return VictimDetector(model=modelo, target_kind=args.target)
 
 
+def novo_portao_saida(modelo_saida=None):
+    """Cria o gate da saída somente quando essa fase realmente começa."""
+    if not cfg.EXIT_MODEL_ENABLED:
+        return BlackExitGate(), modelo_saida
+    if modelo_saida is None:
+        modelo_saida = ExitModel().load()
+        print(
+            "[saida] modelo carregado: "
+            f"{modelo_saida.active_path.name} "
+            f"({modelo_saida.active_backend})")
+    detector = ModelGuidedExitDetector(modelo_saida)
+    return BlackExitGate(detector=detector), modelo_saida
+
+
 def main():
     args = parse_args()
     fonte = None
@@ -1121,6 +1139,7 @@ def main():
     deposito_cinza = None
     controlador_saida = None
     portao_saida = None
+    modelo_saida = None
     deteccao_saida = None
     faltas_saida = 0
     verificador_parede = None
@@ -2094,11 +2113,18 @@ def main():
                     monitor_chegada_verde = None
                     resultado_atual = None
                     deteccao_atual = None
+                    # Não haverá mais vítimas nesta execução. Fechar o worker
+                    # agora libera CPU antes de armar o modelo NCNN da saída.
+                    if trabalhador is not None:
+                        trabalhador.close(
+                            timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
+                        trabalhador = None
                     portao.reset()
                     inicio_saida = agora
                     controlador_saida = ExitPhaseController(
                         start_time=inicio_saida)
-                    portao_saida = BlackExitGate()
+                    portao_saida, modelo_saida = novo_portao_saida(
+                        modelo_saida)
                     deteccao_saida = None
                     faltas_saida = 0
                     epoca_saida = arduino.connection_epoch
@@ -2403,7 +2429,8 @@ def main():
                             else agora_reinicio
                         )
                     )
-                    portao_saida = BlackExitGate()
+                    portao_saida, modelo_saida = novo_portao_saida(
+                        modelo_saida)
                     epoca_saida = arduino.connection_epoch
                     deteccao_saida = None
                     faltas_saida = 0
@@ -2499,7 +2526,8 @@ def main():
                         inicio_saida = agora_reinicio
                     controlador_saida = ExitPhaseController(
                         start_time=inicio_saida)
-                    portao_saida = BlackExitGate()
+                    portao_saida, modelo_saida = novo_portao_saida(
+                        modelo_saida)
                     epoca_saida = arduino.connection_epoch
                     forma = (
                         cfg.RESCUE_CAMERA_MAX_HEIGHT,
