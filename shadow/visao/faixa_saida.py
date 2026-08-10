@@ -644,6 +644,7 @@ class BlackExitGate:
         self.last_detection = None
         self._vote_reference = None
         self._locked_reference = None
+        self._just_locked = False
 
     @property
     def confirmed(self):
@@ -658,11 +659,17 @@ class BlackExitGate:
     def votes(self):
         return self.confirmer.votes
 
+    @property
+    def just_locked(self):
+        """Verdadeiro somente no frame que confirmou a saída."""
+        return self._just_locked
+
     def reset(self, now=None):
         self.confirmer.reset(now=now)
         self.last_detection = None
         self._vote_reference = None
         self._locked_reference = None
+        self._just_locked = False
 
     def preview(self, frame_bgr, timestamp=None):
         """Detecta durante o giro sem permitir que o frame some um voto.
@@ -681,6 +688,7 @@ class BlackExitGate:
         return detection
 
     def update(self, frame_bgr, timestamp=None, now=None):
+        self._just_locked = False
         detection = self.detector.detect(frame_bgr, timestamp=timestamp)
         if (
             detection is None
@@ -728,13 +736,22 @@ class BlackExitGate:
             return True, None
 
         self.last_detection = detection
-        confirmed = self.confirmer.update(
-            detection is not None,
-            timestamp=0.0 if timestamp is None else timestamp,
-            now=now,
+        fast_lock_confidence = getattr(
+            self.detector, "fast_lock_confidence", None)
+        confirmed = bool(
+            detection is not None
+            and fast_lock_confidence is not None
+            and float(detection.confidence) >= float(fast_lock_confidence)
         )
+        if not confirmed:
+            confirmed = self.confirmer.update(
+                detection is not None,
+                timestamp=0.0 if timestamp is None else timestamp,
+                now=now,
+            )
         if confirmed and detection is not None:
             self._locked_reference = current_reference
+            self._just_locked = True
         if detection is None and self.confirmer.votes == 0:
             self._vote_reference = None
         return confirmed, detection

@@ -215,6 +215,7 @@ class ModelGuidedExitDetector:
             else geometry_detector)
         self.last_model_detection = None
         self.last_geometry_detection = None
+        self.fast_lock_confidence = float(cfg.EXIT_MODEL_FAST_LOCK_CONFIDENCE)
 
     def detect(self, frame_bgr, timestamp=None):
         model_detection = self.model.detect(frame_bgr)

@@ -58,6 +58,8 @@ class ExitPhaseController:
         self._align_wheel_speeds = None
         self._align_angle = 190
         self._align_previous_errors = None
+        self._align_target = None
+        self._align_memory_corrections = 0
         self._tracking_reset_requested = False
         self.mapped_triangles = {"green": False, "red": False}
 
@@ -182,6 +184,16 @@ class ExitPhaseController:
 
     def _on_rotate(self, exit_detection, now):
         if (
+            self._fresh_preview(exit_detection, now)
+            and float(getattr(exit_detection, "confidence", 0.0))
+            >= cfg.EXIT_MODEL_FAST_LOCK_CONFIDENCE
+        ):
+            self.state = self.SEARCH_BRAKE
+            return self._stop(
+                self.SEARCH_BRAKE,
+                "modelo viu a saida com alta confianca; freando para confirmar",
+            )
+        if (
             self._stopped_at is None
             and self._rotate_started_at is not None
             and now - self._rotate_started_at
@@ -210,7 +222,7 @@ class ExitPhaseController:
         if self._usable(exit_detection, now):
             self.state = self.ALIGN
             self._stopped_at = None
-            self._align_last_seen_at = now
+            self._remember_alignment_target(exit_detection, now)
             self._align_frame_after = None
             self._align_corrections = 0
             self._align_previous_errors = None
@@ -244,12 +256,40 @@ class ExitPhaseController:
                     "parado aguardando reaparecer",
                 )
             # Perda persistente: voltar a procurar sem avançar às cegas.
+            if (
+                self._align_target is not None
+                and perdida_por < cfg.EXIT_ALIGN_LOCK_HOLD_S - 1e-9
+            ):
+                if (
+                    self._align_memory_corrections
+                    < cfg.EXIT_ALIGN_MEMORY_MAX_CORRECTIONS
+                ):
+                    self._align_memory_corrections += 1
+                    erro_centro, erro_angulo = self._alignment_errors(
+                        self._align_target, frame_shape)
+                    self._align_previous_errors = (erro_centro, erro_angulo)
+                    if abs(erro_angulo) > cfg.EXIT_ALIGN_MAX_ANGLE_DEG:
+                        return self._start_yaw_correction(
+                            erro_angulo,
+                            detalhe=(
+                                "modelo oculto; mantendo giro do alvo travado"),
+                        )
+                    if abs(erro_centro) > cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
+                        return self._start_lateral_correction(
+                            erro_centro,
+                            detalhe=(
+                                "modelo oculto; mantendo lateral do alvo travado"),
+                        )
+                return self._stop(
+                    self.ALIGN,
+                    "alvo de saida travado; aguardando o modelo reaparecer",
+                )
             self._tracking_reset_requested = True
             self.state = self.SEARCH_START
             self._align_last_seen_at = None
             return self._tank(
                 self.SEARCH_START, "soleira perdida; retomando a procura")
-        self._align_last_seen_at = now
+        self._remember_alignment_target(exit_detection, now)
         erro_centro, erro_angulo = self._alignment_errors(
             exit_detection, frame_shape)
         if self._alignment_converged_after_correction(
@@ -445,7 +485,7 @@ class ExitPhaseController:
         erro_angulo = float(getattr(detection, "angle_deg", 0.0))
         return erro_centro, erro_angulo
 
-    def _start_yaw_correction(self, erro_angulo):
+    def _start_yaw_correction(self, erro_angulo, detalhe=None):
         if not self._correction_allowed():
             return self._restart_search_after_alignment()
         proporcao = min(
@@ -468,9 +508,9 @@ class ExitPhaseController:
         self._stopped_at = None
         self.state = self.ALIGN_YAW
         return self._current_alignment_motion(
-            f"corrigindo inclinacao {erro_angulo:+.1f} graus")
+            detalhe or f"corrigindo inclinacao {erro_angulo:+.1f} graus")
 
-    def _start_lateral_correction(self, erro_centro):
+    def _start_lateral_correction(self, erro_centro, detalhe=None):
         if not self._correction_allowed():
             return self._restart_search_after_alignment()
         proporcao = min(
@@ -485,18 +525,23 @@ class ExitPhaseController:
         )
         pwm = int(cfg.EXIT_ALIGN_OMNI_PWM)
         if erro_centro > 0.0:
-            rodas = (pwm, -pwm, -pwm, pwm)
-            lado = "direita"
-        else:
             rodas = (-pwm, pwm, pwm, -pwm)
             lado = "esquerda"
+        else:
+            rodas = (pwm, -pwm, -pwm, pwm)
+            lado = "direita"
         self._align_wheel_speeds = rodas
         self._align_angle = 190
         self._align_motion_started_at = None
         self._stopped_at = None
         self.state = self.ALIGN_LATERAL
         return self._current_alignment_motion(
-            f"transladando omni para {lado}; erro={erro_centro:+.2f}")
+            detalhe or f"transladando omni para {lado}; erro={erro_centro:+.2f}")
+
+    def _remember_alignment_target(self, detection, now):
+        self._align_target = detection
+        self._align_last_seen_at = now
+        self._align_memory_corrections = 0
 
     def _correction_allowed(self):
         self._align_corrections += 1

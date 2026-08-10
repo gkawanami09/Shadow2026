@@ -100,6 +100,7 @@ EXIT_MODEL_BACKEND = "auto"
 EXIT_MODEL_INPUT = 416
 EXIT_NCNN_MODEL_INPUT = 416
 EXIT_MODEL_MIN_CONFIDENCE = .60
+EXIT_MODEL_FAST_LOCK_CONFIDENCE = .82
 EXIT_MODEL_THREADS = 2
 # A caixa YOLO indica qual faixa é a saída. O detector geométrico só pode
 # contribuir com ângulo se o seu candidato estiver nesta margem da caixa.
@@ -673,7 +674,7 @@ EXIT_ALIGN_SETTLE_S = EXIT_SEARCH_SETTLE_S
 EXIT_ALIGN_YAW_MIN_PULSE_S = 0.06
 EXIT_ALIGN_YAW_MAX_PULSE_S = 0.18
 EXIT_ALIGN_YAW_FULL_ERROR_DEG = 18.0
-EXIT_ALIGN_OMNI_PWM = 50
+EXIT_ALIGN_OMNI_PWM = 60
 EXIT_ALIGN_OMNI_MIN_PULSE_S = 0.07
 EXIT_ALIGN_OMNI_MAX_PULSE_S = 0.18
 EXIT_ALIGN_OMNI_FULL_ERROR = 0.45
@@ -681,6 +682,8 @@ EXIT_ALIGN_MAX_CORRECTIONS = 14
 # Uma falha de segmentação isolada não pode mandar o robô voltar ao giro e
 # ultrapassar uma faixa que já estava centralizada.
 EXIT_ALIGN_LOST_TIMEOUT_S = 0.35
+EXIT_ALIGN_LOCK_HOLD_S = 1.50
+EXIT_ALIGN_MEMORY_MAX_CORRECTIONS = 2
 
 # Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
 # aproxima ate deixar de enxergar a soleira. So entao a camera de linha abre e

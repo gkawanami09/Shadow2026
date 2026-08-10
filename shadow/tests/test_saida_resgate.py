@@ -38,6 +38,7 @@ class FakeExit:
     center_x: float = 320.0
     timestamp: float = 0.0
     angle_deg: float = 0.0
+    confidence: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -173,6 +174,19 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(girando.speed, cfg.EXIT_SEARCH_TANK_SPEED)
         self.assertFalse(self.exit.terminal)
 
+    def test_previa_muito_confiavel_freia_para_confirmar(self):
+        command = self.exit.update(
+            None, FRAME_SHAPE, mapper=FakeMapper(both=True), now=0.0)
+        self.exit.notify_command_written(command.state, now=0.0)
+        preview = FakeExit(
+            timestamp=0.05,
+            confidence=cfg.EXIT_MODEL_FAST_LOCK_CONFIDENCE,
+        )
+
+        freio = self.exit.update(preview, FRAME_SHAPE, now=0.05)
+
+        self.assertEqual(freio.state, self.exit.SEARCH_BRAKE)
+
     def test_frame_anterior_ao_assentamento_nao_alinha(self):
         assentou = self._ate_observar()
         antigo = FakeExit(timestamp=assentou - 0.05)
@@ -199,7 +213,7 @@ class ExitPhaseTests(unittest.TestCase):
             soleira, FRAME_SHAPE, now=assentou + 0.02)
         pwm = cfg.EXIT_ALIGN_OMNI_PWM
         self.assertEqual(command.state, self.exit.ALIGN_LATERAL)
-        self.assertEqual(command.wheel_speeds, (pwm, -pwm, -pwm, pwm))
+        self.assertEqual(command.wheel_speeds, (-pwm, pwm, pwm, -pwm))
         self.assertEqual(command.angle, 190)
 
     def test_soleira_a_esquerda_translada_omni_para_esquerda(self):
@@ -209,7 +223,7 @@ class ExitPhaseTests(unittest.TestCase):
             soleira, FRAME_SHAPE, now=assentou + 0.02)
         pwm = cfg.EXIT_ALIGN_OMNI_PWM
         self.assertEqual(command.state, self.exit.ALIGN_LATERAL)
-        self.assertEqual(command.wheel_speeds, (-pwm, pwm, pwm, -pwm))
+        self.assertEqual(command.wheel_speeds, (pwm, -pwm, -pwm, pwm))
 
     def test_inclinacao_e_corrigida_por_tanque_antes_do_lateral(self):
         assentou = self._ate_observar()
@@ -305,6 +319,37 @@ class ExitPhaseTests(unittest.TestCase):
 
         self.assertEqual(falha_longa.state, self.exit.SEARCH_START)
         self.assertEqual(falha_longa.angle, cfg.EXIT_SEARCH_TANK_ANGLE)
+
+    def test_alvo_travado_mantem_um_pulso_lateral_apos_perda_curta(self):
+        assentou = self._ate_observar()
+        alvo = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
+        self.exit.state = self.exit.ALIGN
+        self.exit._remember_alignment_target(alvo, assentou)
+
+        comando = self.exit.update(
+            None,
+            FRAME_SHAPE,
+            now=assentou + cfg.EXIT_ALIGN_LOST_TIMEOUT_S + 0.05,
+        )
+
+        pwm = cfg.EXIT_ALIGN_OMNI_PWM
+        self.assertEqual(comando.state, self.exit.ALIGN_LATERAL)
+        self.assertEqual(comando.wheel_speeds, (-pwm, pwm, pwm, -pwm))
+        self.assertIn("alvo travado", comando.detail)
+
+    def test_alvo_travado_so_volta_a_buscar_apos_hold_seguro(self):
+        assentou = self._ate_observar()
+        alvo = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
+        self.exit.state = self.exit.ALIGN
+        self.exit._remember_alignment_target(alvo, assentou)
+
+        comando = self.exit.update(
+            None,
+            FRAME_SHAPE,
+            now=assentou + cfg.EXIT_ALIGN_LOCK_HOLD_S + 0.01,
+        )
+
+        self.assertEqual(comando.state, self.exit.SEARCH_START)
 
     def test_perda_curta_apos_confirmar_nao_interrompe_o_avanco(self):
         inicio, command = self._ate_comecar_travessia()

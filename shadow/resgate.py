@@ -1399,6 +1399,11 @@ def main():
                         timestamp=pacote.captured_at,
                         now=agora,
                     )
+                    if portao_saida.just_locked and candidata_saida is not None:
+                        print(
+                            "[saida] alvo TRAVADO pelo modelo: "
+                            f"confianca={candidata_saida.confidence:.0%}; "
+                            "iniciando alinhamento")
                     if controlador_saida.state == controlador_saida.CROSS:
                         if candidata_saida is None:
                             faltas_saida += 1
@@ -2647,7 +2652,7 @@ def main():
                     )
                     cv2.putText(
                         anotado,
-                        "candidata a faixa de saida",
+                        f"saida modelo={deteccao_saida.confidence:.0%}",
                         (8, 44),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.52,
