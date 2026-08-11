@@ -335,8 +335,8 @@ def avancar_ate_linha(
     )
 
 
-def continuacao_saida_valida(resultado, ponto_destino_y, agora=None):
-    """Rejeita a faixa transversal e aceita uma continuacao longitudinal."""
+def continuacao_saida_valida(resultado, agora=None):
+    """Confirma quando a ponta distante do trajeto aponta para a frente."""
     import config
 
     agora = time.monotonic() if agora is None else float(agora)
@@ -345,27 +345,19 @@ def continuacao_saida_valida(resultado, ponto_destino_y, agora=None):
     idade = agora - float(getattr(resultado, "publicado_em", 0.0))
     if not -0.05 <= idade <= config.EXIT_LINE_CONTINUATION_MAX_AGE_S:
         return False
-    if not (
-        bool(getattr(resultado, "linha_detectada", False))
-        and bool(getattr(resultado, "linha_a_frente", False))
-    ):
+    if not bool(getattr(resultado, "continuacao_saida_detectada", False)):
         return False
 
-    ponto_inferior_x = float(getattr(resultado, "ponto_inferior_x", -1.0))
-    ponto_inferior_y = float(getattr(resultado, "ponto_inferior_y", -1.0))
-    ponto_destino_y = float(ponto_destino_y)
-    altura = max(float(config.camera_y), 1.0)
-    extensao_vertical = (ponto_inferior_y - ponto_destino_y) / altura
+    alvo_x = float(getattr(resultado, "continuacao_saida_x", -1.0))
+    alvo_y = float(getattr(resultado, "continuacao_saida_y", -1.0))
+    distancia = float(getattr(
+        resultado, "continuacao_saida_distancia", 0.0))
     return (
-        abs(float(getattr(resultado, "angulo", 180.0)))
-        <= config.EXIT_LINE_CONTINUATION_MAX_ANGLE
-        and abs(ponto_inferior_x - config.camera_x / 2)
-        <= config.EXIT_LINE_CONTINUATION_BOTTOM_ERROR_PX
-        and ponto_inferior_y
-        >= altura * config.EXIT_LINE_CONTINUATION_MIN_BOTTOM_Y_RATIO
-        and ponto_destino_y >= 0.0
-        and extensao_vertical
-        >= config.EXIT_LINE_CONTINUATION_MIN_VERTICAL_SPAN_RATIO
+        distancia >= config.EXIT_CONTINUATION_MIN_TARGET_DISTANCE_RATIO
+        and abs(alvo_x - config.camera_x / 2)
+        <= config.camera_x * config.EXIT_CONTINUATION_ALIGN_X_TOLERANCE_RATIO
+        and 0.0 <= alvo_y
+        <= config.camera_y * config.EXIT_CONTINUATION_ALIGN_MAX_TARGET_Y_RATIO
     )
 
 
@@ -383,8 +375,8 @@ def procurar_continuacao_saida_tanque(
     """Procura com giro tanque a linha de percurso depois da saida preta.
 
     A propria faixa transversal tambem e preta, portanto ``linha_a_frente``
-    deve validar continuidade longitudinal, e nao a presenca generica de um
-    contorno preto. Retorna ``"centro"``,
+    deve validar a extremidade distante do trajeto apontando para a frente,
+    e nao a presenca generica de um contorno preto. Retorna ``"centro"``,
     ``"esquerda"``, ``"direita"`` ou ``None`` se os dois lados falharem.
     """
     import config

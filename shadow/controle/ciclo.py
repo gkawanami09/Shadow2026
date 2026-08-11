@@ -43,7 +43,7 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                exit_line_search_pending,
                                last_bottom_point,
                                last_bottom_point_y,
-                               line_ahead, line_angle, line_angle_y,
+                               line_ahead, line_angle,
                                line_detected,
                                line_size, line_status, min_line_size,
                                mission_mode,
@@ -135,7 +135,6 @@ def control_loop():
                     arduino,
                     linha_a_frente=lambda: continuacao_saida_valida(
                         ler_resultado_visao_rapida(),
-                        line_angle_y.value,
                     ),
                     deve_encerrar=lambda: bool(terminate.value),
                 )

@@ -344,32 +344,39 @@ class DesvioObstaculoTests(unittest.TestCase):
         dados = dict(
             sequencia=1,
             publicado_em=10.0,
-            linha_detectada=True,
-            linha_a_frente=True,
-            angulo=0.0,
-            ponto_inferior_x=config.camera_x / 2,
-            ponto_inferior_y=config.camera_y * .90,
+            continuacao_saida_detectada=True,
+            continuacao_saida_x=config.camera_x / 2,
+            continuacao_saida_y=config.camera_y * .20,
+            continuacao_saida_distancia=.70,
         )
         dados.update(alteracoes)
         return SimpleNamespace(**dados)
 
-    def test_geometria_vertical_confirma_continuacao_real(self):
+    def test_ponta_distante_central_confirma_continuacao_real(self):
         resultado = self._resultado_continuacao()
 
         self.assertTrue(continuacao_saida_valida(
             resultado,
-            ponto_destino_y=config.camera_y * .10,
             agora=10.05,
         ))
 
-    def test_faixa_transversal_grossa_nao_vira_continuacao(self):
+    def test_ponta_distante_lateral_ainda_nao_libera_segue_linha(self):
         resultado = self._resultado_continuacao(
-            ponto_inferior_y=config.camera_y * .80,
+            continuacao_saida_x=config.camera_x * .85,
         )
 
         self.assertFalse(continuacao_saida_valida(
             resultado,
-            ponto_destino_y=config.camera_y * .55,
+            agora=10.05,
+        ))
+
+    def test_ausencia_de_alvo_nao_libera_segue_linha(self):
+        resultado = self._resultado_continuacao(
+            continuacao_saida_detectada=False,
+        )
+
+        self.assertFalse(continuacao_saida_valida(
+            resultado,
             agora=10.05,
         ))
 
@@ -378,7 +385,6 @@ class DesvioObstaculoTests(unittest.TestCase):
 
         self.assertFalse(continuacao_saida_valida(
             resultado,
-            ponto_destino_y=config.camera_y * .10,
             agora=10.0,
         ))
 

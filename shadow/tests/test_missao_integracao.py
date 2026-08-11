@@ -4,7 +4,6 @@ Aqui não há câmera, serial nem motores: apenas as decisões que ``resgate.py`
 e ``mission.py`` tomam com base no inventário e na fase de saída.
 """
 
-import ast
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -72,20 +71,6 @@ class MissionDebugWindowTests(unittest.TestCase):
 
 
 class MissionStraightResumeTests(unittest.TestCase):
-    def test_controle_importa_ponto_vertical_usado_na_busca_pos_saida(self):
-        arvore = ast.parse(
-            (SHADOW_ROOT / "controle" / "ciclo.py").read_text(
-                encoding="utf-8"))
-        importados = {
-            alias.name
-            for no in ast.walk(arvore)
-            if isinstance(no, ast.ImportFrom)
-            and no.module == "shared.dados_compartilhados"
-            for alias in no.names
-        }
-
-        self.assertIn("line_angle_y", importados)
-
     def test_retomada_apaga_memoria_lateral_e_prefere_ramo_reto(self):
         valor = lambda inicial: SimpleNamespace(value=inicial)
         compartilhado = SimpleNamespace(
