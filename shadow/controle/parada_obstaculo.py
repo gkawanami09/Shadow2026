@@ -335,7 +335,41 @@ def avancar_ate_linha(
     )
 
 
-def procurar_continuacao_saida_lateral(
+def continuacao_saida_valida(resultado, ponto_destino_y, agora=None):
+    """Rejeita a faixa transversal e aceita uma continuacao longitudinal."""
+    import config
+
+    agora = time.monotonic() if agora is None else float(agora)
+    if resultado is None or int(getattr(resultado, "sequencia", 0)) <= 0:
+        return False
+    idade = agora - float(getattr(resultado, "publicado_em", 0.0))
+    if not -0.05 <= idade <= config.EXIT_LINE_CONTINUATION_MAX_AGE_S:
+        return False
+    if not (
+        bool(getattr(resultado, "linha_detectada", False))
+        and bool(getattr(resultado, "linha_a_frente", False))
+    ):
+        return False
+
+    ponto_inferior_x = float(getattr(resultado, "ponto_inferior_x", -1.0))
+    ponto_inferior_y = float(getattr(resultado, "ponto_inferior_y", -1.0))
+    ponto_destino_y = float(ponto_destino_y)
+    altura = max(float(config.camera_y), 1.0)
+    extensao_vertical = (ponto_inferior_y - ponto_destino_y) / altura
+    return (
+        abs(float(getattr(resultado, "angulo", 180.0)))
+        <= config.EXIT_LINE_CONTINUATION_MAX_ANGLE
+        and abs(ponto_inferior_x - config.camera_x / 2)
+        <= config.EXIT_LINE_CONTINUATION_BOTTOM_ERROR_PX
+        and ponto_inferior_y
+        >= altura * config.EXIT_LINE_CONTINUATION_MIN_BOTTOM_Y_RATIO
+        and ponto_destino_y >= 0.0
+        and extensao_vertical
+        >= config.EXIT_LINE_CONTINUATION_MIN_VERTICAL_SPAN_RATIO
+    )
+
+
+def procurar_continuacao_saida_tanque(
     arduino,
     linha_a_frente,
     pwm=None,
@@ -346,25 +380,25 @@ def procurar_continuacao_saida_lateral(
     relogio=time.monotonic,
     dormir=time.sleep,
 ):
-    """Procura lateralmente a linha de percurso depois da saida preta.
+    """Procura com giro tanque a linha de percurso depois da saida preta.
 
     A propria faixa transversal tambem e preta, portanto ``linha_a_frente``
-    deve representar continuidade longitudinal (``line_ahead``), e nao a
-    presenca generica de algum contorno preto. Retorna ``"centro"``,
+    deve validar continuidade longitudinal, e nao a presenca generica de um
+    contorno preto. Retorna ``"centro"``,
     ``"esquerda"``, ``"direita"`` ou ``None`` se os dois lados falharem.
     """
     import config
 
     pwm = int(round(
-        config.EXIT_LINE_LATERAL_SEARCH_PWM if pwm is None else pwm))
+        config.EXIT_LINE_TANK_SEARCH_PWM if pwm is None else pwm))
     duracao_esquerda_s = float(
-        config.EXIT_LINE_LATERAL_SEARCH_LEFT_S
+        config.EXIT_LINE_TANK_SEARCH_LEFT_S
         if duracao_esquerda_s is None else duracao_esquerda_s)
     duracao_direita_s = float(
-        config.EXIT_LINE_LATERAL_SEARCH_RIGHT_S
+        config.EXIT_LINE_TANK_SEARCH_RIGHT_S
         if duracao_direita_s is None else duracao_direita_s)
     confirmacao_s = float(
-        config.EXIT_LINE_LATERAL_SEARCH_CONFIRM_S
+        config.EXIT_LINE_TANK_SEARCH_CONFIRM_S
         if confirmacao_s is None else confirmacao_s)
     deve_encerrar = deve_encerrar or (lambda: False)
 
@@ -373,48 +407,93 @@ def procurar_continuacao_saida_lateral(
     if duracao_esquerda_s <= 0 or duracao_direita_s <= 0:
         raise ValueError("duracoes da busca lateral devem ser positivas")
 
-    # Confirma primeiro com o robo parado. Assim uma continuacao que ja esta
-    # no centro nao provoca nem mesmo um pequeno deslocamento desnecessario.
-    if _movimentar_ate_confirmar(
-        arduino,
-        arduino.parar,
-        linha_a_frente,
-        confirmacao_s + .05,
-        confirmacao_s,
-        "a confirmacao central da linha de saida",
-        deve_encerrar,
-        relogio,
-        dormir,
-    ):
-        return "centro"
-    if deve_encerrar():
-        return None
+    if confirmacao_s < 0:
+        raise ValueError("tempo de confirmacao nao pode ser negativo")
+    if arduino.parar() is False:
+        raise RuntimeError("nao foi possivel parar antes da busca da saida")
 
-    encontrou = _movimentar_ate_confirmar(
-        arduino,
-        lambda: arduino.rodas(-pwm, pwm, pwm, -pwm),
-        linha_a_frente,
-        duracao_esquerda_s,
-        confirmacao_s,
-        "a busca lateral esquerda da linha de saida",
-        deve_encerrar,
-        relogio,
-        dormir,
-    )
-    if encontrou:
-        return "esquerda"
-    if deve_encerrar():
-        return None
+    epoca_serial = arduino.connection_epoch
 
-    encontrou = _movimentar_ate_confirmar(
-        arduino,
-        lambda: arduino.rodas(pwm, -pwm, -pwm, pwm),
-        linha_a_frente,
-        duracao_direita_s,
-        confirmacao_s,
-        "a busca lateral direita da linha de saida",
-        deve_encerrar,
-        relogio,
-        dormir,
-    )
-    return "direita" if encontrou else None
+    def atualizar_serial():
+        arduino.refresh(fail_closed=True)
+        if (
+            not arduino.connected
+            or arduino.connection_epoch != epoca_serial
+        ):
+            raise RuntimeError(
+                "conexao serial mudou durante a busca tanque da saida")
+
+    def confirmar_parado():
+        if not linha_a_frente():
+            return False
+        inicio_confirmacao = relogio()
+        while not deve_encerrar():
+            if not linha_a_frente():
+                return False
+            restante = confirmacao_s - (relogio() - inicio_confirmacao)
+            if restante <= 1e-9:
+                return True
+            atualizar_serial()
+            dormir(min(.025, restante))
+        return False
+
+    def varrer(enviar_comando, duracao_s, etapa):
+        movimento_acumulado = 0.0
+        inicio_movimento = None
+        try:
+            if enviar_comando() is False:
+                raise RuntimeError(f"nao foi possivel iniciar {etapa}")
+            inicio_movimento = relogio()
+
+            while not deve_encerrar():
+                agora = relogio()
+                movimento_atual = agora - inicio_movimento
+                if linha_a_frente():
+                    movimento_acumulado += movimento_atual
+                    inicio_movimento = None
+                    if arduino.parar() is False:
+                        raise RuntimeError(
+                            f"nao foi possivel frear durante {etapa}")
+                    if confirmar_parado():
+                        return True
+                    if movimento_acumulado >= duracao_s - 1e-9:
+                        return False
+                    if enviar_comando() is False:
+                        raise RuntimeError(
+                            f"nao foi possivel retomar {etapa}")
+                    inicio_movimento = relogio()
+                    continue
+
+                restante = duracao_s - movimento_acumulado - movimento_atual
+                if restante <= 1e-9:
+                    return False
+                atualizar_serial()
+                dormir(min(.025, restante))
+            return False
+        finally:
+            arduino.parar()
+
+    try:
+        if confirmar_parado():
+            return "centro"
+        if deve_encerrar():
+            return None
+
+        if varrer(
+            lambda: arduino.lado(-pwm, pwm),
+            duracao_esquerda_s,
+            "o giro tanque esquerdo da linha de saida",
+        ):
+            return "esquerda"
+        if deve_encerrar():
+            return None
+
+        if varrer(
+            lambda: arduino.lado(pwm, -pwm),
+            duracao_direita_s,
+            "o giro tanque direito da linha de saida",
+        ):
+            return "direita"
+        return None
+    finally:
+        arduino.parar()

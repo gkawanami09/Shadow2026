@@ -2,16 +2,19 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
+import config  # noqa: E402
 from controle.parada_obstaculo import (  # noqa: E402
     MonitorObstaculo,
     avancar_ate_linha,
     desviar_obstaculo,
-    procurar_continuacao_saida_lateral,
+    continuacao_saida_valida,
+    procurar_continuacao_saida_tanque,
 )
 
 
@@ -336,16 +339,63 @@ class DesvioObstaculoTests(unittest.TestCase):
         self.assertEqual(arduino.comandos[-1], ("parar",))
         self.assertGreaterEqual(relogio.tempo, .30)
 
-    def test_saida_com_continuacao_no_centro_nao_move_lateralmente(self):
+    @staticmethod
+    def _resultado_continuacao(**alteracoes):
+        dados = dict(
+            sequencia=1,
+            publicado_em=10.0,
+            linha_detectada=True,
+            linha_a_frente=True,
+            angulo=0.0,
+            ponto_inferior_x=config.camera_x / 2,
+            ponto_inferior_y=config.camera_y * .90,
+        )
+        dados.update(alteracoes)
+        return SimpleNamespace(**dados)
+
+    def test_geometria_vertical_confirma_continuacao_real(self):
+        resultado = self._resultado_continuacao()
+
+        self.assertTrue(continuacao_saida_valida(
+            resultado,
+            ponto_destino_y=config.camera_y * .10,
+            agora=10.05,
+        ))
+
+    def test_faixa_transversal_grossa_nao_vira_continuacao(self):
+        resultado = self._resultado_continuacao(
+            ponto_inferior_y=config.camera_y * .80,
+        )
+
+        self.assertFalse(continuacao_saida_valida(
+            resultado,
+            ponto_destino_y=config.camera_y * .55,
+            agora=10.05,
+        ))
+
+    def test_resultado_antigo_nao_inicia_segue_linha(self):
+        resultado = self._resultado_continuacao(publicado_em=9.0)
+
+        self.assertFalse(continuacao_saida_valida(
+            resultado,
+            ponto_destino_y=config.camera_y * .10,
+            agora=10.0,
+        ))
+
+    def test_tempos_da_busca_tanque_pos_resgate(self):
+        self.assertEqual(config.EXIT_LINE_TANK_SEARCH_LEFT_S, .50)
+        self.assertEqual(config.EXIT_LINE_TANK_SEARCH_RIGHT_S, 1.00)
+
+    def test_saida_com_continuacao_no_centro_nao_gira(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
-        lado = procurar_continuacao_saida_lateral(
+        lado = procurar_continuacao_saida_tanque(
             arduino,
             linha_a_frente=lambda: True,
             pwm=60,
-            duracao_esquerda_s=.30,
-            duracao_direita_s=.60,
+            duracao_esquerda_s=.50,
+            duracao_direita_s=1.00,
             confirmacao_s=.10,
             relogio=relogio.monotonic,
             dormir=relogio.sleep,
@@ -353,39 +403,39 @@ class DesvioObstaculoTests(unittest.TestCase):
 
         self.assertEqual(lado, "centro")
         self.assertFalse(any(
-            comando[0] == "rodas" for comando in arduino.comandos))
+            comando[0] in ("rodas", "lado") for comando in arduino.comandos))
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
     def test_saida_encontrada_durante_busca_esquerda_para_imediatamente(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
-        lado = procurar_continuacao_saida_lateral(
+        lado = procurar_continuacao_saida_tanque(
             arduino,
             linha_a_frente=lambda: relogio.tempo >= .20,
             pwm=60,
-            duracao_esquerda_s=.30,
-            duracao_direita_s=.60,
+            duracao_esquerda_s=.50,
+            duracao_direita_s=1.00,
             confirmacao_s=.10,
             relogio=relogio.monotonic,
             dormir=relogio.sleep,
         )
 
         self.assertEqual(lado, "esquerda")
-        self.assertIn(("rodas", -60, 60, 60, -60), arduino.comandos)
-        self.assertNotIn(("rodas", 60, -60, -60, 60), arduino.comandos)
+        self.assertIn(("lado", -60, 60), arduino.comandos)
+        self.assertNotIn(("lado", 60, -60), arduino.comandos)
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
     def test_saida_varre_esquerda_e_direita_antes_de_desistir(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
-        lado = procurar_continuacao_saida_lateral(
+        lado = procurar_continuacao_saida_tanque(
             arduino,
             linha_a_frente=lambda: False,
             pwm=60,
-            duracao_esquerda_s=.30,
-            duracao_direita_s=.60,
+            duracao_esquerda_s=.50,
+            duracao_direita_s=1.00,
             confirmacao_s=.10,
             relogio=relogio.monotonic,
             dormir=relogio.sleep,
@@ -394,10 +444,10 @@ class DesvioObstaculoTests(unittest.TestCase):
         self.assertIsNone(lado)
         self.assertEqual(
             [comando for comando in arduino.comandos
-             if comando[0] == "rodas"],
+             if comando[0] == "lado"],
             [
-                ("rodas", -60, 60, 60, -60),
-                ("rodas", 60, -60, -60, 60),
+                ("lado", -60, 60),
+                ("lado", 60, -60),
             ],
         )
         self.assertEqual(arduino.comandos[-1], ("parar",))
@@ -405,7 +455,7 @@ class DesvioObstaculoTests(unittest.TestCase):
     def test_saida_encontrada_durante_busca_direita_para_imediatamente(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
-        comando_direita = ("rodas", 60, -60, -60, 60)
+        comando_direita = ("lado", 60, -60)
 
         def linha_apareceu_a_direita():
             return (
@@ -413,19 +463,19 @@ class DesvioObstaculoTests(unittest.TestCase):
                 and relogio.tempo >= .60
             )
 
-        lado = procurar_continuacao_saida_lateral(
+        lado = procurar_continuacao_saida_tanque(
             arduino,
             linha_a_frente=linha_apareceu_a_direita,
             pwm=60,
-            duracao_esquerda_s=.30,
-            duracao_direita_s=.60,
+            duracao_esquerda_s=.50,
+            duracao_direita_s=1.00,
             confirmacao_s=.10,
             relogio=relogio.monotonic,
             dormir=relogio.sleep,
         )
 
         self.assertEqual(lado, "direita")
-        self.assertIn(("rodas", -60, 60, 60, -60), arduino.comandos)
+        self.assertIn(("lado", -60, 60), arduino.comandos)
         self.assertIn(comando_direita, arduino.comandos)
         self.assertEqual(arduino.comandos[-1], ("parar",))
 

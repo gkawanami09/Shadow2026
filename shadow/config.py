@@ -60,13 +60,18 @@ OBSTACLE_LEFT_PREFERENCE_ARM_TIME_S = .08
 OBSTACLE_LEFT_PREFERENCE_CONFIRM_TIME_S = .12
 OBSTACLE_RETRY_COOLDOWN_S = 1.0
 
-# Busca da continuacao da linha depois da faixa PRETA de saida. A primeira
-# passada vai 0,3 s para a esquerda; a segunda percorre 0,6 s para a direita,
-# cruzando o ponto inicial e cobrindo os dois lados sem girar o chassi.
-EXIT_LINE_LATERAL_SEARCH_PWM = OBSTACLE_LATERAL_PWM
-EXIT_LINE_LATERAL_SEARCH_LEFT_S = .30
-EXIT_LINE_LATERAL_SEARCH_RIGHT_S = .60
-EXIT_LINE_LATERAL_SEARCH_CONFIRM_S = .10
+# Busca da continuacao da linha depois da faixa PRETA de saida. O primeiro
+# giro tanque procura 0,5 s para a esquerda; o segundo volta 1,0 s para a
+# direita, cruza a orientacao inicial e cobre os dois lados.
+EXIT_LINE_TANK_SEARCH_PWM = OBSTACLE_LATERAL_PWM
+EXIT_LINE_TANK_SEARCH_LEFT_S = .50
+EXIT_LINE_TANK_SEARCH_RIGHT_S = 1.00
+EXIT_LINE_TANK_SEARCH_CONFIRM_S = .10
+EXIT_LINE_CONTINUATION_MAX_AGE_S = .15
+EXIT_LINE_CONTINUATION_MAX_ANGLE = 25
+EXIT_LINE_CONTINUATION_BOTTOM_ERROR_PX = 65
+EXIT_LINE_CONTINUATION_MIN_BOTTOM_Y_RATIO = .70
+EXIT_LINE_CONTINUATION_MIN_VERTICAL_SPAN_RATIO = .45
 
 # ----------------------------------------------------------------------------
 # Câmera: captura 640×480 e processamento em 448×252

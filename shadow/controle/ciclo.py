@@ -26,7 +26,8 @@ from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
     desviar_obstaculo,
-    procurar_continuacao_saida_lateral,
+    continuacao_saida_valida,
+    procurar_continuacao_saida_tanque,
 )
 from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
@@ -126,18 +127,21 @@ def control_loop():
             status.value = 'Procurando continuacao da linha apos a saida'
             print(
                 "[controle] faixa PRETA ja confirmada; procurando "
-                "continuacao: esquerda por 0.3 s e depois direita por "
-                "0.6 s")
+                "continuacao com giro tanque: esquerda por 0.5 s e depois "
+                "direita por 1.0 s")
             try:
-                lado_encontrado = procurar_continuacao_saida_lateral(
+                lado_encontrado = procurar_continuacao_saida_tanque(
                     arduino,
-                    linha_a_frente=lambda: bool(line_ahead.value),
+                    linha_a_frente=lambda: continuacao_saida_valida(
+                        ler_resultado_visao_rapida(),
+                        line_angle_y.value,
+                    ),
                     deve_encerrar=lambda: bool(terminate.value),
                 )
             except RuntimeError as erro:
                 lado_encontrado = None
                 print(
-                    "[controle] falha na busca lateral pos-resgate: "
+                    "[controle] falha na busca tanque pos-resgate: "
                     f"{erro}")
             finally:
                 # A manobra e exclusiva da primeira retomada apos o resgate.
