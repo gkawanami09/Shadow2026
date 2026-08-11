@@ -840,7 +840,8 @@ def _confirmar_saida_com_camera_linha(
     inicio = time.monotonic()
     ultimo_log = 0.0
     ultimo_resumo = None
-    confirmacao_em_movimento_desde = None
+    faixa_travada_em = None
+    tempo_avanco_acumulado = 0.0
     manter_led_aceso = False
 
     try:
@@ -851,23 +852,22 @@ def _confirmar_saida_com_camera_linha(
         monitor_corredor = _novo_monitor_corredor_saida()
         monitor_corredor.cancelar(arduino)
         print(
-            "[saida] camera do segue-linha aberta; mantendo avanco reto em "
-            f"PWM {cfg.EXIT_LINE_VERIFY_PWM} ate a faixa ficar no centro; "
+            "[saida] camera do segue-linha aberta com o robo PARADO; "
+            f"avancando em passos de {cfg.EXIT_LINE_VERIFY_STEP_S:.2f} s "
+            f"a PWM {cfg.EXIT_LINE_VERIFY_PWM} e observando entre eles; "
             "ultrassonico continua ativo")
-        if steer(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
-            raise RuntimeError("nao foi possivel iniciar a aproximacao final")
 
         while True:
             frame = camera.get_frame()
             agora = time.monotonic()
-            if confirmacao_em_movimento_desde is None:
+            if faixa_travada_em is None:
                 # Durante o avanço só procuramos a presença da faixa. Votos
                 # feitos aqui seriam perigosos: prata/cinza distante pode
                 # parecer preta antes de o reflexo entrar no quadro.
                 resultado = confirmador.classificador.classificar(
                     frame, timestamp=agora)
                 decisao = None
-                fase_confirmacao = "procurando centro"
+                fase_confirmacao = "procurando faixa entre passos"
                 if resultado.faixa_presente:
                     posicao_faixa = posicao_vertical_faixa(resultado)
                     if (
@@ -875,25 +875,25 @@ def _confirmar_saida_com_camera_linha(
                         and posicao_faixa
                         >= cfg.EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO
                     ):
+                        if steer() is False:
+                            raise RuntimeError(
+                                "nao foi possivel travar ao avistar a faixa")
                         confirmador = ConfirmadorFaixaSaidaLinha()
-                        confirmacao_em_movimento_desde = agora
+                        faixa_travada_em = agora
                         decisao, resultado = confirmador.update(
                             frame,
                             timestamp=agora,
                             now=agora,
                         )
-                        fase_confirmacao = "confirmando em movimento"
+                        fase_confirmacao = "faixa travada; confirmando parado"
                         print(
-                            "[saida] faixa chegou ao centro da camera; "
-                            f"mantendo avanco reto em PWM "
-                            f"{cfg.EXIT_LINE_VERIFY_PWM} enquanto confirma "
-                            "preto/prata")
+                            "[saida] faixa entrou na zona de decisao; "
+                            "AVANCO TRAVADO enquanto confirma preto/prata")
                     else:
-                        steer(0, cfg.EXIT_LINE_VERIFY_SPEED)
                         fase_confirmacao = (
-                            "levando faixa ao centro"
+                            "aproximando faixa em passos"
                             if posicao_faixa is None
-                            else f"levando ao centro ({posicao_faixa:.0%})"
+                            else f"aproximando faixa ({posicao_faixa:.0%})"
                         )
             else:
                 decisao, resultado = confirmador.update(
@@ -901,10 +901,7 @@ def _confirmar_saida_com_camera_linha(
                     timestamp=agora,
                     now=agora,
                 )
-                fase_confirmacao = "confirmando em movimento"
-                if steer(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
-                    raise RuntimeError(
-                        "nao foi possivel manter o avanco da saida")
+                fase_confirmacao = "faixa travada; confirmando parado"
 
             arduino.refresh(fail_closed=True)
             if (
@@ -915,9 +912,9 @@ def _confirmar_saida_com_camera_linha(
                     "serial mudou durante a confirmacao preta/prata")
 
             # A primeira validacao ocorreu antes de abrir esta camera, mas o
-            # robo voltou a avancar. Portanto o HC-SR04 continua sendo lido
-            # durante toda a aproximacao final. O bloqueio tem prioridade
-            # sobre qualquer voto visual preto.
+            # robo voltou a avancar em passos. O HC-SR04 continua sendo lido
+            # entre todos eles e durante a confirmacao parada. O bloqueio tem
+            # prioridade sobre qualquer voto visual preto.
             monitor_corredor.atualizar(arduino, agora=agora)
             if monitor_corredor.parada_confirmada:
                 print(
@@ -970,7 +967,7 @@ def _confirmar_saida_com_camera_linha(
             if decisao == PRETA:
                 manter_led_aceso = True
                 print(
-                    "[saida] faixa PRETA confirmada em movimento em "
+                    "[saida] faixa PRETA confirmada com o robo parado em "
                     f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} de "
                     f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames; entregando "
                     "a camera de linha; o primeiro ciclo pulsado mapeara a "
@@ -996,30 +993,53 @@ def _confirmar_saida_com_camera_linha(
                 return NAO_PRETA
 
             esgotou_aproximacao = (
-                confirmacao_em_movimento_desde is None
+                faixa_travada_em is None
                 and agora - inicio >= cfg.EXIT_LINE_VERIFY_TIMEOUT_S
             )
             esgotou_confirmacao = (
-                confirmacao_em_movimento_desde is not None
-                and agora - confirmacao_em_movimento_desde
+                faixa_travada_em is not None
+                and agora - faixa_travada_em
                 >= cfg.EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S
             )
             if esgotou_aproximacao or esgotou_confirmacao:
+                duracao_retorno = max(
+                    cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
+                    tempo_avanco_acumulado
+                    + cfg.EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S,
+                )
                 print(
                     "[saida] nao foi possivel confirmar preto/prata em "
-                    "movimento no prazo; "
-                    "dando re e parando por seguranca")
+                    "passos parados no prazo; "
+                    f"desfazendo todo o avanco por {duracao_retorno:.2f} s")
                 steer()
                 _mover_saida_por_tempo(
                     arduino,
                     steer,
                     200,
                     cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED,
-                    cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
+                    duracao_retorno,
                     epoca_serial,
                 )
                 steer()
                 return INCONCLUSIVA
+
+            if faixa_travada_em is None:
+                # Avanca pouco e volta a parar antes de pedir outro frame.
+                # Com queue=False na LineCamera, a proxima imagem e posterior
+                # a parada; a faixa nao atravessa tres votos em movimento.
+                _mover_saida_por_tempo(
+                    arduino,
+                    steer,
+                    0,
+                    cfg.EXIT_LINE_VERIFY_SPEED,
+                    cfg.EXIT_LINE_VERIFY_STEP_S,
+                    epoca_serial,
+                )
+                tempo_avanco_acumulado += cfg.EXIT_LINE_VERIFY_STEP_S
+                if steer() is False:
+                    raise RuntimeError(
+                        "nao foi possivel frear o passo da faixa de saida")
+                time.sleep(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S)
     finally:
         steer()
         if monitor_corredor is not None:

@@ -684,17 +684,17 @@ EXIT_ALIGN_MAX_CORRECTIONS = 14
 EXIT_ALIGN_LOST_TIMEOUT_S = 0.35
 
 # Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
-# aproxima ate deixar de enxergar a soleira. So entao a camera de linha abre e
-# o robo avanca a PWM 60, mantendo a camera ativa durante todo o trecho.
-# A votacao preto/prata so comeca quando a faixa transversal chega ao meio da
-# imagem, mas os motores continuam em frente. Prata para e recua; preto passa
-# o controle para a leitura dedicada da ramificacao. Se ela ainda nao estiver
-# visivel, a retomada gira somente as rodas dianteiras para encontra-la.
+# aproxima ate deixar de enxergar a soleira. A camera de linha abre com o robo
+# parado e avanca em passos curtos a PWM 60. Depois de cada passo ele freia,
+# assenta e captura um frame novo. Ao avistar a faixa na zona util, o avanco
+# fica travado ate decidir: prata recua; preto entrega para a ramificacao.
 EXIT_LINE_VERIFY_PWM = 60
 EXIT_LINE_VERIFY_SPEED = EXIT_LINE_VERIFY_PWM / 120.0
 EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
 EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S = 0.60
-EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO = 0.45
+EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO = 0.35
+EXIT_LINE_VERIFY_STEP_S = 0.08
+EXIT_LINE_VERIFY_STEP_SETTLE_S = 0.04
 EXIT_LINE_VERIFY_WINDOW = 5
 # Antes de votar preto/prata, a faixa precisa chegar ao meio da imagem da
 # camera de linha. Uma prata distante nunca pode acumular voto como preta.
@@ -724,6 +724,10 @@ EXIT_LINE_VERIFY_TEXTURE_ROI_BOTTOM = 0.75
 EXIT_LINE_VERIFY_TEXTURE_BAND_HEIGHT_RATIO = 0.35
 EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED = 0.35
 EXIT_LINE_VERIFY_REJECT_REVERSE_S = 1.0
+# Se nenhuma cor fechar a votacao, desfaz TODOS os passos dados pela camera
+# de linha e acrescenta esta margem. Assim uma faixa perdida nao deixa o robo
+# continuar a busca ja do lado de fora da sala.
+EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S = 0.10
 
 # Mapeamento final dos DOIS triangulos, so para diagnostico e para provar que
 # a sala foi compreendida. Nenhum deles comanda o robo nesta fase.

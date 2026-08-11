@@ -230,16 +230,22 @@ class ExitPhaseTests(unittest.TestCase):
     def test_rejeicao_final_da_re_de_um_segundo(self):
         self.assertEqual(cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S, 1.0)
 
-    def test_camera_de_linha_confirma_em_movimento_a_pwm_60(self):
+    def test_camera_de_linha_confirma_parado_entre_passos_a_pwm_60(self):
         self.assertEqual(cfg.EXIT_LINE_VERIFY_PWM, 60)
         self.assertEqual(cfg.EXIT_LINE_VERIFY_SPEED, 0.5)
+        self.assertEqual(cfg.EXIT_LINE_VERIFY_STEP_S, 0.08)
+        self.assertEqual(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S, 0.04)
         self.assertEqual(
             cfg.EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S,
             0.60,
         )
         self.assertEqual(
             cfg.EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO,
-            0.45,
+            0.35,
+        )
+        self.assertEqual(
+            cfg.EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S,
+            0.10,
         )
         self.assertFalse(hasattr(cfg, "EXIT_LINE_HANDOFF_VOTES"))
         self.assertFalse(hasattr(cfg, "EXIT_LINE_VERIFY_BLACK_FORWARD_S"))
@@ -610,7 +616,7 @@ class SilverStripeRuntimeTests(unittest.TestCase):
         def close(self):
             self.closed = True
 
-    def test_preto_confirma_sem_parar_e_entrega_ao_segue_linha(self):
+    def test_preto_trava_avanco_e_entrega_ao_segue_linha(self):
         clock = FakeClock()
         camera = self.CameraPreta(clock)
         commands = []
@@ -636,19 +642,19 @@ class SilverStripeRuntimeTests(unittest.TestCase):
         self.assertEqual(resultado, resgate_runtime.PRETA)
         self.assertTrue(camera.closed)
         self.assertEqual(camera.frames, 4)
-        # Primeiro comando e a parada anterior a abertura; o ultimo e a
-        # parada segura do handoff. Entre eles o robo so anda reto a PWM 60.
-        self.assertTrue(all(
-            comando == (0, cfg.EXIT_LINE_VERIFY_SPEED)
-            for comando in commands[1:-1]
-        ))
+        # O primeiro quadro ainda esta longe: existe exatamente um passo.
+        # Assim que o preto entra na zona, nao ha outro comando de avanco.
+        self.assertEqual(
+            commands.count((0, cfg.EXIT_LINE_VERIFY_SPEED)),
+            1,
+        )
         self.assertNotIn(
             (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED),
             commands,
         )
         self.assertEqual(arduino.led_modes, ["ACESO"])
 
-    def test_prata_confirma_em_movimento_e_da_re(self):
+    def test_prata_trava_avanco_confirma_parada_e_da_re(self):
         clock = FakeClock()
         camera = self.Camera(clock)
         commands = []
@@ -679,12 +685,12 @@ class SilverStripeRuntimeTests(unittest.TestCase):
         )
         indice_re = commands.index(
             (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED))
-        # Ate a parada imediatamente anterior a re, todo comando de movimento
-        # foi reto a PWM 60; nao houve a antiga parada para estabilizacao.
-        self.assertTrue(all(
-            comando == (0, cfg.EXIT_LINE_VERIFY_SPEED)
-            for comando in commands[1:indice_re - 1]
-        ))
+        # Nenhum avanco e permitido depois da decisao de prata.
+        ultimo_avanco = max(
+            indice for indice, comando in enumerate(commands)
+            if comando == (0, cfg.EXIT_LINE_VERIFY_SPEED)
+        )
+        self.assertLess(ultimo_avanco, indice_re)
         self.assertEqual(arduino.led_modes, ["ACESO", "APAGADO"])
 
     def test_parede_durante_camera_de_linha_da_uma_unica_re_curta(self):
@@ -706,8 +712,11 @@ class SilverStripeRuntimeTests(unittest.TestCase):
             duration,
             _epoch,
         ):
-            self.assertEqual(angle, 200)
-            reverse_durations.append(duration)
+            if angle == 200:
+                reverse_durations.append(duration)
+            else:
+                self.assertEqual(angle, 0)
+                self.assertEqual(duration, cfg.EXIT_LINE_VERIFY_STEP_S)
 
         with (
             patch.object(
@@ -735,6 +744,60 @@ class SilverStripeRuntimeTests(unittest.TestCase):
         self.assertEqual(arduino.led_modes, ["ACESO", "APAGADO"])
         # O bloqueio aconteceu ainda na aproximacao; o retorno e a unica re
         # curta acima provam que a travessia visual nao foi concluida.
+
+    def test_inconclusiva_desfaz_todos_os_passos_antes_de_reabrir_resgate(self):
+        clock = FakeClock()
+        commands = []
+        movimentos = []
+
+        class CameraVazia:
+            def get_frame(self):
+                clock.sleep(.10)
+                return np.full((252, 448, 3), 205, dtype=np.uint8)
+
+            def close(self):
+                pass
+
+        def fake_steer(angle=190.0, speed=0.8, **_kwargs):
+            commands.append((angle, speed))
+            return True
+
+        def fake_move(
+            _arduino, _acao, angle, _speed, duration, _epoch,
+        ):
+            movimentos.append((angle, duration))
+            clock.sleep(duration)
+
+        with (
+            patch.object(
+                resgate_runtime.time, "monotonic", side_effect=clock),
+            patch.object(
+                resgate_runtime.time, "sleep", side_effect=clock.sleep),
+            patch.object(cfg, "EXIT_LINE_VERIFY_TIMEOUT_S", .35),
+            patch.object(cfg, "EXIT_LINE_VERIFY_REJECT_REVERSE_S", .10),
+            patch("controle.direcao.steer", side_effect=fake_steer),
+            patch("visao.captura.LineCamera", return_value=CameraVazia()),
+            patch.object(
+                resgate_runtime,
+                "_mover_saida_por_tempo",
+                side_effect=fake_move,
+            ),
+        ):
+            resultado = resgate_runtime._confirmar_saida_com_camera_linha(
+                self.Arduino(),
+                debug=False,
+            )
+
+        self.assertEqual(resultado, resgate_runtime.INCONCLUSIVA)
+        passos = [duracao for angulo, duracao in movimentos if angulo == 0]
+        retornos = [
+            duracao for angulo, duracao in movimentos if angulo == 200]
+        self.assertEqual(passos, [cfg.EXIT_LINE_VERIFY_STEP_S] * 2)
+        self.assertEqual(len(retornos), 1)
+        self.assertAlmostEqual(
+            retornos[0],
+            sum(passos) + cfg.EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S,
+        )
 
 
 class OverlayColorTests(unittest.TestCase):
