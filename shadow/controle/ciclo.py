@@ -27,7 +27,8 @@ from controle.parada_obstaculo import (
     MonitorObstaculo,
     desviar_obstaculo,
     orientacao_continuacao_saida,
-    procurar_continuacao_saida_pivo_dianteiro,
+    procurar_continuacao_saida_pulsada,
+    avancar_ate_linha,
 )
 from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
@@ -141,11 +142,11 @@ def control_loop():
             status.value = 'Procurando continuacao da linha apos a saida'
             print(
                 "[controle] faixa PRETA ja confirmada; procurando "
-                "ramificacao com pivo dianteiro obrigatorio: esquerda por "
-                "0.5 s e depois direita por 1.0 s; somente o ramo no "
-                "centro libera o segue-linha")
+                "ramificacao por pulsos obrigatorios: 2 a esquerda e 4 a "
+                "direita; somente a ponta distante centralizada libera o "
+                "segue-linha")
             try:
-                lado_encontrado = procurar_continuacao_saida_pivo_dianteiro(
+                lado_encontrado = procurar_continuacao_saida_pulsada(
                     arduino,
                     orientacao_ramificacao=lambda: orientacao_continuacao_saida(
                         ler_resultado_visao_rapida(),
@@ -155,7 +156,7 @@ def control_loop():
             except RuntimeError as erro:
                 lado_encontrado = None
                 print(
-                    "[controle] falha no pivo dianteiro pos-resgate: "
+                    "[controle] falha na busca pulsada pos-resgate: "
                     f"{erro}")
             finally:
                 # A manobra e exclusiva da primeira retomada apos o resgate.
@@ -165,15 +166,39 @@ def control_loop():
             if terminate.value:
                 return
             if lado_encontrado is None:
-                status.value = (
-                    'Continuacao da saida nao encontrada - PARADO')
+                status.value = 'Reaproximando a linha apos a saida'
                 print(
-                    "[controle] continuacao nao encontrada nos dois lados; "
-                    "PARADO por seguranca")
-                while not terminate.value:
-                    arduino.refresh(fail_closed=True)
-                    time.sleep(.05)
-                return
+                    "[controle] pulsos nao encontraram a continuacao; "
+                    "re maior concluida, reaproximando em frente pela "
+                    "camera do segue-linha")
+                try:
+                    lado_encontrado = (
+                        "centro" if avancar_ate_linha(
+                            arduino,
+                            linha_proxima=lambda: (
+                                orientacao_continuacao_saida(
+                                    ler_resultado_visao_rapida())
+                                == "centro"
+                            ),
+                            timeout_s=config.EXIT_LINE_REAPPROACH_TIMEOUT_S,
+                            deve_encerrar=lambda: bool(terminate.value),
+                        ) else None
+                    )
+                except RuntimeError as erro:
+                    lado_encontrado = None
+                    print(
+                        "[controle] falha na reaproximacao pos-resgate: "
+                        f"{erro}")
+                if lado_encontrado is None:
+                    status.value = (
+                        'Continuacao da saida nao encontrada - PARADO')
+                    print(
+                        "[controle] continuacao nao encontrada apos "
+                        "pulsos e reaproximacao; PARADO por seguranca")
+                    while not terminate.value:
+                        arduino.refresh(fail_closed=True)
+                        time.sleep(.05)
+                    return
 
             line_status.value = "line_detected"
             status.value = 'Continuacao encontrada - seguindo linha'

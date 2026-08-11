@@ -62,17 +62,26 @@ OBSTACLE_LEFT_PREFERENCE_ARM_TIME_S = .08
 OBSTACLE_LEFT_PREFERENCE_CONFIRM_TIME_S = .12
 OBSTACLE_RETRY_COOLDOWN_S = 1.0
 
-# Busca da continuacao da linha depois da faixa PRETA de saida. E o inverso
-# do pivo forte usado no segue-linha: as traseiras ficam paradas e apenas as
-# dianteiras, em sentidos opostos, varrem a frente do robo. Primeiro procura
-# 0,5 s para o lado onde a ramificacao apareceu (esquerda quando ainda nao ha
-# alvo); depois cruza a orientacao inicial por 1,0 s no sentido oposto. As
-# duas passagens sao obrigatorias: so a ponta distante centralizada confirma
-# que e o ramo do percurso, e nao a faixa transversal de saida.
-EXIT_LINE_FRONT_PIVOT_PWM = OBSTACLE_LATERAL_PWM
-EXIT_LINE_FRONT_PIVOT_FIRST_S = .50
-EXIT_LINE_FRONT_PIVOT_CROSS_S = 1.00
-EXIT_LINE_FRONT_PIVOT_CONFIRM_S = .10
+# Busca da continuacao da linha depois da faixa PRETA de saida. A faixa
+# transversal tambem e preta, portanto o robo se afasta um pouco e faz uma
+# varredura parada entre pulsos, como na busca de bolinhas: dois pulsos de
+# tanque para a esquerda e quatro para a direita. So uma ponta distante que
+# fica centralizada enquanto o chassi esta parado vale como continuacao.
+# Depois da varredura, o robo retorna ao pulso em que essa ponta apareceu.
+EXIT_LINE_PULSE_PWM = 80
+EXIT_LINE_PULSE_S = .40
+EXIT_LINE_PULSE_SETTLE_S = .12
+EXIT_LINE_PULSE_OBSERVE_S = .25
+EXIT_LINE_PULSE_CONFIRM_S = .10
+EXIT_LINE_PULSES_LEFT = 2
+EXIT_LINE_PULSES_RIGHT = 4
+EXIT_LINE_INITIAL_REVERSE_PWM = 60
+EXIT_LINE_INITIAL_REVERSE_S = .20
+EXIT_LINE_RETRY_FORWARD_PWM = 60
+EXIT_LINE_RETRY_FORWARD_S = .45
+EXIT_LINE_FINAL_REVERSE_PWM = 60
+EXIT_LINE_FINAL_REVERSE_S = 1.00
+EXIT_LINE_REAPPROACH_TIMEOUT_S = 4.0
 EXIT_LINE_CONTINUATION_MAX_AGE_S = .15
 EXIT_CONTINUATION_MIN_AREA_RATIO = .002
 EXIT_CONTINUATION_MIN_TARGET_DISTANCE_RATIO = .30

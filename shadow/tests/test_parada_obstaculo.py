@@ -14,7 +14,7 @@ from controle.parada_obstaculo import (  # noqa: E402
     avancar_ate_linha,
     desviar_obstaculo,
     orientacao_continuacao_saida,
-    procurar_continuacao_saida_pivo_dianteiro,
+    procurar_continuacao_saida_pulsada,
 )
 
 
@@ -394,137 +394,66 @@ class DesvioObstaculoTests(unittest.TestCase):
         self.assertIsNone(
             orientacao_continuacao_saida(resultado, agora=10.0))
 
-    def test_tempos_do_pivo_dianteiro_pos_resgate(self):
-        self.assertEqual(config.EXIT_LINE_FRONT_PIVOT_FIRST_S, .50)
-        self.assertEqual(config.EXIT_LINE_FRONT_PIVOT_CROSS_S, 1.00)
+    def test_configura_busca_pulsada_pos_resgate(self):
+        self.assertEqual(config.EXIT_LINE_PULSES_LEFT, 2)
+        self.assertEqual(config.EXIT_LINE_PULSES_RIGHT, 4)
+        self.assertEqual(config.EXIT_LINE_PULSE_S, .40)
 
-    def test_saida_com_continuacao_no_centro_varre_os_dois_lados(self):
+    def test_saida_com_continuacao_no_centro_mapeia_e_retorna_ao_ramo(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
-        lado = procurar_continuacao_saida_pivo_dianteiro(
+        lado = procurar_continuacao_saida_pulsada(
             arduino,
             orientacao_ramificacao=lambda: "centro",
             pwm=60,
-            duracao_primeira_s=.50,
-            duracao_cruzada_s=1.00,
-            confirmacao_s=.10,
+            duracao_pulso_s=.05,
+            pausa_assentamento_s=.02,
+            observacao_s=.05,
+            confirmacao_s=.025,
+            pulsos_esquerda=2,
+            pulsos_direita=4,
+            re_inicial_s=.05,
+            avanco_tentativa_s=.05,
+            re_final_s=.05,
             relogio=relogio.monotonic,
             dormir=relogio.sleep,
         )
 
         self.assertEqual(lado, "centro")
-        self.assertEqual(
-            [comando for comando in arduino.comandos
-             if comando[0] == "rodas"],
-            [
-                ("rodas", -60, 0, 60, 0),
-                ("rodas", 60, 0, -60, 0),
-            ],
-        )
+        comandos_tanque = [
+            comando for comando in arduino.comandos
+            if comando == ("rodas", -60, -60, 60, 60)
+            or comando == ("rodas", 60, 60, -60, -60)
+        ]
+        self.assertGreaterEqual(len(comandos_tanque), 6)
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
-    def test_primeira_passagem_e_cega_antes_da_confirmacao(self):
+    def test_saida_so_aceita_ramo_centralizado_com_robo_parado(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
-        lado = procurar_continuacao_saida_pivo_dianteiro(
-            arduino,
-            orientacao_ramificacao=lambda: (
-                "centro" if relogio.tempo >= .20 else None),
-            pwm=60,
-            duracao_primeira_s=.50,
-            duracao_cruzada_s=1.00,
-            confirmacao_s=.10,
-            relogio=relogio.monotonic,
-            dormir=relogio.sleep,
-        )
-
-        self.assertEqual(lado, "centro")
-        self.assertIn(("rodas", -60, 0, 60, 0), arduino.comandos)
-        self.assertIn(("rodas", 60, 0, -60, 0), arduino.comandos)
-        self.assertEqual(arduino.comandos[-1], ("parar",))
-
-    def test_saida_varre_esquerda_e_direita_antes_de_desistir(self):
-        arduino = ArduinoMovimentoFalso()
-        relogio = RelogioFalso()
-
-        lado = procurar_continuacao_saida_pivo_dianteiro(
-            arduino,
-            orientacao_ramificacao=lambda: None,
-            pwm=60,
-            duracao_primeira_s=.50,
-            duracao_cruzada_s=1.00,
-            confirmacao_s=.10,
-            relogio=relogio.monotonic,
-            dormir=relogio.sleep,
-        )
-
-        self.assertIsNone(lado)
-        self.assertEqual(
-            [comando for comando in arduino.comandos
-             if comando[0] == "rodas"],
-            [
-                ("rodas", -60, 0, 60, 0),
-                ("rodas", 60, 0, -60, 0),
-            ],
-        )
-        self.assertFalse(any(
-            comando[0] == "lado" for comando in arduino.comandos))
-        self.assertEqual(arduino.comandos[-1], ("parar",))
-
-    def test_saida_encontrada_durante_busca_direita_para_imediatamente(self):
-        arduino = ArduinoMovimentoFalso()
-        relogio = RelogioFalso()
-        comando_direita = ("rodas", 60, 0, -60, 0)
-
-        def linha_apareceu_a_direita():
-            alinhada = (
-                comando_direita in arduino.comandos
-                and relogio.tempo >= .60
-            )
-            return "centro" if alinhada else None
-
-        lado = procurar_continuacao_saida_pivo_dianteiro(
-            arduino,
-            orientacao_ramificacao=linha_apareceu_a_direita,
-            pwm=60,
-            duracao_primeira_s=.50,
-            duracao_cruzada_s=1.00,
-            confirmacao_s=.10,
-            relogio=relogio.monotonic,
-            dormir=relogio.sleep,
-        )
-
-        self.assertEqual(lado, "centro")
-        self.assertIn(("rodas", -60, 0, 60, 0), arduino.comandos)
-        self.assertIn(comando_direita, arduino.comandos)
-        self.assertEqual(arduino.comandos[-1], ("parar",))
-
-    def test_ramificacao_lateral_nao_libera_sem_centralizar(self):
-        arduino = ArduinoMovimentoFalso()
-        relogio = RelogioFalso()
-
-        lado = procurar_continuacao_saida_pivo_dianteiro(
+        lado = procurar_continuacao_saida_pulsada(
             arduino,
             orientacao_ramificacao=lambda: "direita",
             pwm=60,
-            duracao_primeira_s=.50,
-            duracao_cruzada_s=1.00,
-            confirmacao_s=.10,
+            duracao_pulso_s=.05,
+            pausa_assentamento_s=.02,
+            observacao_s=.05,
+            confirmacao_s=.025,
+            pulsos_esquerda=2,
+            pulsos_direita=4,
+            re_inicial_s=.05,
+            avanco_tentativa_s=.05,
+            re_final_s=.05,
             relogio=relogio.monotonic,
             dormir=relogio.sleep,
         )
 
         self.assertIsNone(lado)
-        self.assertEqual(
-            [comando for comando in arduino.comandos
-             if comando[0] == "rodas"],
-            [
-                ("rodas", -60, 0, 60, 0),
-                ("rodas", 60, 0, -60, 0),
-            ],
-        )
+        self.assertIn(("rodas", -60, -60, 60, 60), arduino.comandos)
+        self.assertIn(("rodas", 60, 60, -60, -60), arduino.comandos)
+        self.assertIn(("rodas", -60, -60, -60, -60), arduino.comandos)
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
     def test_busca_para_no_timeout_sem_linha(self):

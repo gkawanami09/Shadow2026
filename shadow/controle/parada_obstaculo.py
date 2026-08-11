@@ -366,53 +366,78 @@ def orientacao_continuacao_saida(resultado, agora=None):
         return "centro"
     return "esquerda" if erro_x < 0 else "direita"
 
-def procurar_continuacao_saida_pivo_dianteiro(
+def procurar_continuacao_saida_pulsada(
     arduino,
     orientacao_ramificacao,
     pwm=None,
-    duracao_primeira_s=None,
-    duracao_cruzada_s=None,
+    duracao_pulso_s=None,
+    pausa_assentamento_s=None,
+    observacao_s=None,
     confirmacao_s=None,
+    pulsos_esquerda=None,
+    pulsos_direita=None,
+    re_inicial_s=None,
+    avanco_tentativa_s=None,
+    re_final_s=None,
     deve_encerrar=None,
     relogio=time.monotonic,
     dormir=time.sleep,
 ):
-    """Procura a linha pos-resgate girando somente as rodas dianteiras.
+    """Encontra a continuacao apos a saida por pulsos de tanque parados.
 
-    A propria faixa transversal tambem e preta, portanto
-    ``orientacao_ramificacao`` deve devolver esquerda, centro, direita ou
-    ``None`` usando a extremidade distante do trajeto, e nao a presenca
-    generica de um contorno preto. Para nao confundir a faixa transversal com
-    o percurso, a varredura esquerda-direita e sempre executada e somente a
-    ponta distante centralizada confirma o ramo correto. Retorna ``"centro"``
-    ou ``None`` se os dois lados falharem.
+    A sequencia e propositalmente igual ao principio da busca pulsada de
+    bolinhas: mover por pouco tempo, parar, deixar o chassi assentar e so
+    entao olhar. A primeira varredura faz dois pulsos para a esquerda e
+    quatro para a direita. Cada ponta distante centralizada e mapeada pela
+    posicao do pulso; ao fim, o robo volta ao melhor ponto mapeado e o
+    confirma parado. Assim a barra preta transversal nunca vence apenas por
+    estar no quadro.
 
-    O movimento inverte o pivo de 90 graus do segue-linha: TE e TD ficam em
-    zero, enquanto FE e FD giram em sentidos opostos. Isso mantem a traseira
-    como apoio e desloca a frente ate a ramificacao correta cruzar o centro
-    da camera.
+    Se a primeira passagem falhar, retorna ao rumo de inicio, avanca um pouco
+    e repete. Depois da segunda falha, executa a re maior e devolve ``None``:
+    o chamador reaproxima em frente com a propria camera de segue-linha.
     """
     import config
 
     pwm = int(round(
-        config.EXIT_LINE_FRONT_PIVOT_PWM if pwm is None else pwm))
-    duracao_primeira_s = float(
-        config.EXIT_LINE_FRONT_PIVOT_FIRST_S
-        if duracao_primeira_s is None else duracao_primeira_s)
-    duracao_cruzada_s = float(
-        config.EXIT_LINE_FRONT_PIVOT_CROSS_S
-        if duracao_cruzada_s is None else duracao_cruzada_s)
+        config.EXIT_LINE_PULSE_PWM if pwm is None else pwm))
+    duracao_pulso_s = float(
+        config.EXIT_LINE_PULSE_S
+        if duracao_pulso_s is None else duracao_pulso_s)
+    pausa_assentamento_s = float(
+        config.EXIT_LINE_PULSE_SETTLE_S
+        if pausa_assentamento_s is None else pausa_assentamento_s)
+    observacao_s = float(
+        config.EXIT_LINE_PULSE_OBSERVE_S
+        if observacao_s is None else observacao_s)
     confirmacao_s = float(
-        config.EXIT_LINE_FRONT_PIVOT_CONFIRM_S
+        config.EXIT_LINE_PULSE_CONFIRM_S
         if confirmacao_s is None else confirmacao_s)
+    pulsos_esquerda = int(
+        config.EXIT_LINE_PULSES_LEFT
+        if pulsos_esquerda is None else pulsos_esquerda)
+    pulsos_direita = int(
+        config.EXIT_LINE_PULSES_RIGHT
+        if pulsos_direita is None else pulsos_direita)
+    re_inicial_s = float(
+        config.EXIT_LINE_INITIAL_REVERSE_S
+        if re_inicial_s is None else re_inicial_s)
+    avanco_tentativa_s = float(
+        config.EXIT_LINE_RETRY_FORWARD_S
+        if avanco_tentativa_s is None else avanco_tentativa_s)
+    re_final_s = float(
+        config.EXIT_LINE_FINAL_REVERSE_S
+        if re_final_s is None else re_final_s)
     deve_encerrar = deve_encerrar or (lambda: False)
 
     if not 1 <= pwm <= MAX_PWM:
-        raise ValueError(
-            f"PWM do pivo dianteiro deve ficar entre 1 e {MAX_PWM}")
-    if duracao_primeira_s <= 0 or duracao_cruzada_s <= 0:
-        raise ValueError("duracoes do pivo dianteiro devem ser positivas")
-
+        raise ValueError(f"PWM dos pulsos deve ficar entre 1 e {MAX_PWM}")
+    if min(duracao_pulso_s, pausa_assentamento_s, observacao_s) <= 0:
+        raise ValueError("duracoes da busca pulsada devem ser positivas")
+    if min(pulsos_esquerda, pulsos_direita) < 1:
+        raise ValueError("a busca precisa de pelo menos um pulso por lado")
+    if min(re_inicial_s, avanco_tentativa_s, re_final_s) <= 0:
+        raise ValueError("movimentos de re/aproximacao devem ser positivos")
     if confirmacao_s < 0:
         raise ValueError("tempo de confirmacao nao pode ser negativo")
     if arduino.parar() is False:
@@ -427,7 +452,7 @@ def procurar_continuacao_saida_pivo_dianteiro(
             or arduino.connection_epoch != epoca_serial
         ):
             raise RuntimeError(
-                "conexao serial mudou durante o pivo dianteiro da saida")
+                "conexao serial mudou durante a busca pulsada da saida")
 
     def ler_orientacao():
         orientacao = orientacao_ramificacao()
@@ -435,90 +460,143 @@ def procurar_continuacao_saida_pivo_dianteiro(
             return orientacao
         return None
 
-    def confirmar_ramo_centralizado():
-        if ler_orientacao() != "centro":
-            return None
-        inicio_confirmacao = relogio()
-        while not deve_encerrar():
-            orientacao_atual = ler_orientacao()
-            if orientacao_atual != "centro":
-                return None
-            restante = confirmacao_s - (relogio() - inicio_confirmacao)
-            if restante <= 1e-9:
-                return "centro"
-            atualizar_serial()
-            dormir(min(.025, restante))
-        return None
-
-    def varrer(enviar_comando, duracao_s, etapa, procurar=True):
-        movimento_acumulado = 0.0
-        inicio_movimento = None
+    def mover(enviar_comando, duracao_s, etapa):
+        if enviar_comando() is False:
+            raise RuntimeError(f"nao foi possivel iniciar {etapa}")
+        inicio = relogio()
         try:
-            if enviar_comando() is False:
-                raise RuntimeError(f"nao foi possivel iniciar {etapa}")
-            inicio_movimento = relogio()
-
             while not deve_encerrar():
-                agora = relogio()
-                movimento_atual = agora - inicio_movimento
-                if procurar and ler_orientacao() == "centro":
-                    movimento_acumulado += movimento_atual
-                    inicio_movimento = None
-                    if arduino.parar() is False:
-                        raise RuntimeError(
-                            f"nao foi possivel frear durante {etapa}")
-                    orientacao_confirmada = confirmar_ramo_centralizado()
-                    if orientacao_confirmada is not None:
-                        return orientacao_confirmada
-                    if movimento_acumulado >= duracao_s - 1e-9:
-                        return None
-                    if enviar_comando() is False:
-                        raise RuntimeError(
-                            f"nao foi possivel retomar {etapa}")
-                    inicio_movimento = relogio()
-                    continue
-
-                restante = duracao_s - movimento_acumulado - movimento_atual
+                restante = duracao_s - (relogio() - inicio)
                 if restante <= 1e-9:
-                    return None
+                    return True
                 atualizar_serial()
                 dormir(min(.025, restante))
-            return None
+            return False
         finally:
             arduino.parar()
+
+    def observar_parado(mapa, posicao):
+        """Le apenas apos o settle e exige centro por tempo continuo."""
+        inicio = relogio()
+        centro_desde = None
+        while not deve_encerrar():
+            agora = relogio()
+            orientacao = ler_orientacao()
+            if orientacao is not None:
+                mapa.append((posicao, orientacao))
+            if orientacao == "centro":
+                if centro_desde is None:
+                    centro_desde = agora
+                if agora - centro_desde >= confirmacao_s - 1e-9:
+                    return True
+            else:
+                centro_desde = None
+            restante = observacao_s - (agora - inicio)
+            if restante <= 1e-9:
+                return False
+            atualizar_serial()
+            dormir(min(.025, restante))
+        return False
+
+    comandos = {
+        "esquerda": lambda: arduino.rodas(-pwm, -pwm, pwm, pwm),
+        "direita": lambda: arduino.rodas(pwm, pwm, -pwm, -pwm),
+    }
+
+    def pulso(lado, mapa, posicao):
+        if not mover(comandos[lado], duracao_pulso_s, f"pulso {lado}"):
+            return None
+        # Nao usa imagens durante o giro nem logo apos frear. Esta e a mesma
+        # separacao giro -> parar -> settle -> observar da busca da bolinha.
+        if not mover(lambda: arduino.parar(), pausa_assentamento_s,
+                     "assentamento do pulso"):
+            return None
+        return observar_parado(mapa, posicao)
+
+    def varrer_e_voltar():
+        """Varre esquerda/direita e volta ao pulso com ramo centralizado."""
+        posicao = 0
+        posicao_candidata = None
+        mapa = []
+
+        for _ in range(pulsos_esquerda):
+            posicao -= 1
+            if pulso("esquerda", mapa, posicao):
+                posicao_candidata = posicao
+
+        for _ in range(pulsos_direita):
+            posicao += 1
+            if pulso("direita", mapa, posicao):
+                # A ultima confirmacao e a mais confiavel: foi vista depois
+                # de a camera percorrer os dois lados da faixa.
+                posicao_candidata = posicao
+
+        destino = posicao_candidata if posicao_candidata is not None else 0
+        while posicao != destino and not deve_encerrar():
+            lado = "esquerda" if destino < posicao else "direita"
+            if not mover(comandos[lado], duracao_pulso_s,
+                          f"retorno ao ramo {lado}"):
+                return None
+            posicao += -1 if lado == "esquerda" else 1
+
+        if deve_encerrar() or posicao_candidata is None:
+            return False
+        if not mover(lambda: arduino.parar(), pausa_assentamento_s,
+                     "assentamento da confirmacao final"):
+            return None
+        confirmado = observar_parado(mapa, posicao)
+        if mapa:
+            resumo = ", ".join(
+                f"p{indice}:{lado}" for indice, lado in mapa[-12:])
+            print(f"[controle] mapa da saida: {resumo}")
+        return confirmado
 
     try:
         if deve_encerrar():
             return None
 
-        # A faixa preta ainda ocupa boa parte da imagem no primeiro frame.
-        # Fazer as duas passagens, mesmo vendo algo lateral, obriga o ramo do
-        # trajeto a atravessar o centro antes de ser escolhido.
-        primeiro_lado = "esquerda"
-        segundo_lado = "direita"
-        comandos = {
-            "esquerda": lambda: arduino.rodas(-pwm, 0, pwm, 0),
-            "direita": lambda: arduino.rodas(pwm, 0, -pwm, 0),
-        }
-
-        orientacao_confirmada = varrer(
-            comandos[primeiro_lado],
-            duracao_primeira_s,
-            f"o pivo dianteiro {primeiro_lado} da linha de saida",
-            procurar=False,
-        )
-        if orientacao_confirmada is not None:
-            return orientacao_confirmada
+        if not mover(
+            lambda: arduino.rodas(
+                -config.EXIT_LINE_INITIAL_REVERSE_PWM,
+                -config.EXIT_LINE_INITIAL_REVERSE_PWM,
+                -config.EXIT_LINE_INITIAL_REVERSE_PWM,
+                -config.EXIT_LINE_INITIAL_REVERSE_PWM,
+            ),
+            re_inicial_s,
+            "a re curta antes da varredura",
+        ):
+            return None
+        if varrer_e_voltar():
+            return "centro"
         if deve_encerrar():
             return None
 
-        orientacao_confirmada = varrer(
-            comandos[segundo_lado],
-            duracao_cruzada_s,
-            f"o pivo dianteiro {segundo_lado} da linha de saida",
+        if not mover(
+            lambda: arduino.rodas(
+                config.EXIT_LINE_RETRY_FORWARD_PWM,
+                config.EXIT_LINE_RETRY_FORWARD_PWM,
+                config.EXIT_LINE_RETRY_FORWARD_PWM,
+                config.EXIT_LINE_RETRY_FORWARD_PWM,
+            ),
+            avanco_tentativa_s,
+            "o avanco para a segunda varredura",
+        ):
+            return None
+        if varrer_e_voltar():
+            return "centro"
+        if deve_encerrar():
+            return None
+
+        mover(
+            lambda: arduino.rodas(
+                -config.EXIT_LINE_FINAL_REVERSE_PWM,
+                -config.EXIT_LINE_FINAL_REVERSE_PWM,
+                -config.EXIT_LINE_FINAL_REVERSE_PWM,
+                -config.EXIT_LINE_FINAL_REVERSE_PWM,
+            ),
+            re_final_s,
+            "a re maior antes da reaproximacao",
         )
-        if orientacao_confirmada is not None:
-            return orientacao_confirmada
         return None
     finally:
         arduino.parar()

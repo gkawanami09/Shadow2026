@@ -973,8 +973,9 @@ def _confirmar_saida_com_camera_linha(
                     "[saida] faixa PRETA confirmada em movimento em "
                     f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} de "
                     f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames; entregando "
-                    "a camera de linha; o pivo dianteiro varrera esquerda "
-                    "e direita e so o ramo centralizado sera seguido")
+                    "a camera de linha; a busca pulsada varrera 2 vezes "
+                    "a esquerda e 4 a direita, e so o ramo centralizado "
+                    "sera seguido")
                 return PRETA
 
             if decisao == NAO_PRETA:
