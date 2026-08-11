@@ -60,16 +60,17 @@ class SaidaYoloTests(unittest.TestCase):
     def setUp(self):
         self.frame = np.zeros((480, 640, 3), dtype=np.uint8)
 
-    def test_geometria_da_mesma_caixa_preserva_angulo(self):
+    def test_modelo_puro_nao_exige_angulo_do_opencv(self):
         modelo = ModeloFalso(ExitModelDetection((140, 190, 360, 100), .91))
-        detector = ModelGuidedExitDetector(
-            modelo, GeometriaFalsa(faixa(320, 240, -7.0)))
+        geometria = GeometriaFalsa(faixa(320, 240, -7.0))
+        detector = ModelGuidedExitDetector(modelo, geometria)
 
         detection = detector.detect(self.frame, timestamp=1.0)
 
-        self.assertEqual(detection.angle_deg, -7.0)
+        self.assertEqual(detection.angle_deg, 0.0)
         self.assertEqual(detection.confidence, .91)
-        self.assertIsNotNone(detector.last_geometry_detection)
+        self.assertIsNone(detector.last_geometry_detection)
+        self.assertEqual(geometria.calls, 0)
 
     def test_geometria_fora_da_caixa_nao_rouba_o_alvo_do_modelo(self):
         modelo = ModeloFalso(ExitModelDetection((60, 180, 160, 100), .88))

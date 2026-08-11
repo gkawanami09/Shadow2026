@@ -9,6 +9,7 @@ detecção do modelo commande o robô.
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+import time
 
 import numpy as np
 
@@ -64,6 +65,9 @@ class ExitModel:
         self._session = None
         self._input_name = None
         self.active_backend = None
+        self.last_raw_confidence = 0.0
+        self.last_raw_detection = None
+        self.last_inference_ms = 0.0
 
     @staticmethod
     def _resolve(configured):
@@ -149,6 +153,7 @@ class ExitModel:
             raise ExitModelError("modelo de saída não foi carregado")
         if frame_bgr is None or frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             raise ValueError("frame BGR inválido para o modelo de saída")
+        started = time.perf_counter()
         import cv2
 
         height, width = frame_bgr.shape[:2]
@@ -168,10 +173,15 @@ class ExitModel:
             if self.active_backend == "ncnn"
             else self._session.run(None, {self._input_name: tensor})[0]
         )
-        return self._decode(output, scale, offset_x, offset_y, width, height)
+        detection = self._decode(
+            output, scale, offset_x, offset_y, width, height)
+        self.last_inference_ms = (time.perf_counter() - started) * 1000.0
+        return detection
 
     def _decode(self, output, scale, offset_x, offset_y, width, height):
         predictions = np.squeeze(output)
+        self.last_raw_confidence = 0.0
+        self.last_raw_detection = None
         if predictions.ndim != 2:
             return None
         if predictions.shape[0] < predictions.shape[1]:
@@ -180,8 +190,7 @@ class ExitModel:
             raise ExitModelError("saída inesperada do modelo de saída")
         index = int(np.argmax(predictions[:, 4]))
         confidence = float(predictions[index, 4])
-        if confidence < self.min_confidence:
-            return None
+        self.last_raw_confidence = confidence
         center_x, center_y, box_width, box_height = predictions[index, :4]
         x = (float(center_x) - float(box_width) / 2.0 - offset_x) / scale
         y = (float(center_y) - float(box_height) / 2.0 - offset_y) / scale
@@ -191,7 +200,10 @@ class ExitModel:
         box_height = min(max(float(box_height) / scale, 0.0), float(height) - y)
         if box_width <= 0.0 or box_height <= 0.0:
             return None
-        return ExitModelDetection((x, y, box_width, box_height), confidence)
+        detection = ExitModelDetection(
+            (x, y, box_width, box_height), confidence)
+        self.last_raw_detection = detection
+        return detection if confidence >= self.min_confidence else None
 
     def _run_ncnn(self, tensor):
         image = np.ascontiguousarray(tensor[0])
@@ -224,14 +236,15 @@ class ModelGuidedExitDetector:
         if model_detection is None:
             return None
 
-        geometry = self.geometry_detector.detect(frame_bgr, timestamp=timestamp)
-        if geometry is not None and self._geometry_matches_model(
-            geometry, model_detection, frame_bgr.shape
-        ):
-            self.last_geometry_detection = geometry
-            # A confiança que conta para a presença é a do modelo treinado;
-            # os dados geométricos (inclusive ângulo) seguem preservados.
-            return replace(geometry, confidence=model_detection.confidence)
+        if cfg.EXIT_MODEL_USE_GEOMETRY:
+            geometry = self.geometry_detector.detect(
+                frame_bgr, timestamp=timestamp)
+            if geometry is not None and self._geometry_matches_model(
+                geometry, model_detection, frame_bgr.shape
+            ):
+                self.last_geometry_detection = geometry
+                return replace(
+                    geometry, confidence=model_detection.confidence)
         return self._from_model(model_detection, frame_bgr.shape, timestamp)
 
     def preview(self, frame_bgr, timestamp=None):

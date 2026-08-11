@@ -1120,7 +1120,8 @@ def novo_portao_saida(modelo_saida=None):
         print(
             "[saida] modelo carregado: "
             f"{modelo_saida.active_path.name} "
-            f"({modelo_saida.active_backend})")
+            f"({modelo_saida.active_backend}, "
+            f"{modelo_saida.input_size}x{modelo_saida.input_size})")
     detector = ModelGuidedExitDetector(modelo_saida)
     return BlackExitGate(detector=detector), modelo_saida
 
@@ -1151,6 +1152,7 @@ def main():
     ultimo_estado = None
     ultimo_detalhe = None
     ultimo_log = 0.0
+    ultimo_log_modelo_saida = 0.0
     ultimo_controle_ocioso = 0.0
     proxima_atualizacao_ultrassom_verde = 0.0
     epoca_busca = None
@@ -1419,6 +1421,23 @@ def main():
                         deteccao_saida = None
                 else:
                     deteccao_saida = None
+
+                if (
+                    args.debug
+                    and modelo_saida is not None
+                    and agora - ultimo_log_modelo_saida >= 0.50
+                ):
+                    aceito = (
+                        modelo_saida.last_raw_confidence
+                        >= modelo_saida.min_confidence)
+                    print(
+                        "[saida/modelo] "
+                        f"raw={modelo_saida.last_raw_confidence:.0%} "
+                        f"limiar={modelo_saida.min_confidence:.0%} "
+                        f"aceito={'sim' if aceito else 'nao'} "
+                        f"lock={'sim' if portao_saida.track_locked else 'nao'} "
+                        f"{modelo_saida.last_inference_ms:.0f}ms")
+                    ultimo_log_modelo_saida = agora
 
             resultado = None
             if trabalhador is not None:
@@ -2633,7 +2652,7 @@ def main():
                     )
                     cv2.putText(
                         anotado,
-                        "PROCURANDO FAIXA SOMENTE RENTE AO CHAO",
+                        "SAIDA: MODELO YOLO 640",
                         (8, max(topo_saida - 7, 18)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.46,
@@ -2641,6 +2660,33 @@ def main():
                         1,
                         cv2.LINE_AA,
                     )
+                    if modelo_saida is not None:
+                        raw = modelo_saida.last_raw_detection
+                        if raw is not None:
+                            raw_x, raw_y, raw_w, raw_h = raw.bbox
+                            cv2.rectangle(
+                                anotado,
+                                (int(raw_x), int(raw_y)),
+                                (int(raw_x + raw_w - 1),
+                                 int(raw_y + raw_h - 1)),
+                                (0, 165, 255),
+                                1,
+                            )
+                        cv2.putText(
+                            anotado,
+                            "NCNN raw="
+                            f"{modelo_saida.last_raw_confidence:.0%} "
+                            f"lim={modelo_saida.min_confidence:.0%} "
+                            f"{modelo_saida.last_inference_ms:.0f}ms "
+                            "lock="
+                            f"{'SIM' if portao_saida.track_locked else 'NAO'}",
+                            (8, 84),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.46,
+                            (0, 165, 255),
+                            1,
+                            cv2.LINE_AA,
+                        )
                 if deteccao_saida is not None:
                     x, y, w, h = deteccao_saida.bbox
                     cv2.rectangle(

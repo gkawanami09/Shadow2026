@@ -94,14 +94,18 @@ VICTIM_MODEL_CLASSES = ("black", "silver")
 # O modelo só é carregado e executado depois do depósito vermelho, durante a
 # busca da saída. NCNN é a rota preferida no Pi; ONNX é contingência.
 EXIT_MODEL_ENABLED = True
-EXIT_MODEL_PATH = "modelos/saida.onnx"
-EXIT_NCNN_MODEL_PATH = "modelos/saida_ncnn_model"
+EXIT_MODEL_PATH = "modelos/saida_640.onnx"
+EXIT_NCNN_MODEL_PATH = "modelos/saida_640_ncnn_model"
 EXIT_MODEL_BACKEND = "auto"
-EXIT_MODEL_INPUT = 416
-EXIT_NCNN_MODEL_INPUT = 416
-EXIT_MODEL_MIN_CONFIDENCE = .60
-EXIT_MODEL_FAST_LOCK_CONFIDENCE = .82
+EXIT_MODEL_INPUT = 640
+EXIT_NCNN_MODEL_INPUT = 640
+EXIT_MODEL_MIN_CONFIDENCE = .45
+EXIT_MODEL_FAST_LOCK_CONFIDENCE = .75
 EXIT_MODEL_THREADS = 2
+# O modelo treinado decide presença e centro. A geometria antiga por OpenCV
+# fica fora desta rota: ela adicionava Hough/ângulo a uma tarefa em que o robô
+# pode chegar levemente torto e a câmera de linha fará a confirmação final.
+EXIT_MODEL_USE_GEOMETRY = False
 # A caixa YOLO indica qual faixa é a saída. O detector geométrico só pode
 # contribuir com ângulo se o seu candidato estiver nesta margem da caixa.
 EXIT_MODEL_GEOMETRY_MARGIN_RATIO = .25
@@ -659,13 +663,13 @@ EXIT_SEARCH_TANK_SPEED = RED_DEPOSIT_SEARCH_TANK_SPEED
 # Zona em que a soleira ja esta boa o bastante para atravessar. Os limites
 # antigos (0.06 e 3 graus) eram menores que a variacao observada entre frames
 # e faziam o omni ultrapassar o centro alternadamente sem nunca avancar.
-EXIT_ALIGN_MAX_CENTER_ERROR = 0.10
-EXIT_ALIGN_MAX_ANGLE_DEG = 5.0
+EXIT_ALIGN_MAX_CENTER_ERROR = 0.22
+EXIT_ALIGN_MAX_ANGLE_DEG = 15.0
 # Se uma correcao cruzar o centro/angulo desejado, o alvo convergiu mesmo que
 # o frame seguinte caia pouco alem da zona acima. Trava a decisao e avanca em
 # vez de iniciar um novo pulso no sentido oposto.
-EXIT_ALIGN_COMMIT_CENTER_ERROR = 0.18
-EXIT_ALIGN_COMMIT_ANGLE_DEG = 8.0
+EXIT_ALIGN_COMMIT_CENTER_ERROR = 0.28
+EXIT_ALIGN_COMMIT_ANGLE_DEG = 18.0
 EXIT_ALIGN_COMMIT_AFTER_CORRECTIONS = 4
 EXIT_ALIGN_ANGLE = 180
 EXIT_ALIGN_PWM = 50
@@ -674,6 +678,9 @@ EXIT_ALIGN_SETTLE_S = EXIT_SEARCH_SETTLE_S
 EXIT_ALIGN_YAW_MIN_PULSE_S = 0.06
 EXIT_ALIGN_YAW_MAX_PULSE_S = 0.18
 EXIT_ALIGN_YAW_FULL_ERROR_DEG = 18.0
+# Durante a correção horizontal, soma avanço ao movimento lateral. Com ambos
+# em 60, duas rodas recebem 120 e duas recebem 0: diagonal limpa, sem ré.
+EXIT_ALIGN_FORWARD_PWM = 60
 EXIT_ALIGN_OMNI_PWM = 60
 EXIT_ALIGN_OMNI_MIN_PULSE_S = 0.07
 EXIT_ALIGN_OMNI_MAX_PULSE_S = 0.18

@@ -523,20 +523,33 @@ class ExitPhaseController:
             cfg.EXIT_ALIGN_OMNI_MAX_PULSE_S,
             proporcao,
         )
-        pwm = int(cfg.EXIT_ALIGN_OMNI_PWM)
+        lateral = int(cfg.EXIT_ALIGN_OMNI_PWM)
+        frente = int(cfg.EXIT_ALIGN_FORWARD_PWM)
         if erro_centro > 0.0:
-            rodas = (-pwm, pwm, pwm, -pwm)
+            rodas = (
+                frente - lateral,
+                frente + lateral,
+                frente + lateral,
+                frente - lateral,
+            )
             lado = "esquerda"
         else:
-            rodas = (pwm, -pwm, -pwm, pwm)
+            rodas = (
+                frente + lateral,
+                frente - lateral,
+                frente - lateral,
+                frente + lateral,
+            )
             lado = "direita"
+        rodas = tuple(max(min(valor, 120), -120) for valor in rodas)
         self._align_wheel_speeds = rodas
         self._align_angle = 190
         self._align_motion_started_at = None
         self._stopped_at = None
         self.state = self.ALIGN_LATERAL
         return self._current_alignment_motion(
-            detalhe or f"transladando omni para {lado}; erro={erro_centro:+.2f}")
+            detalhe or (
+                f"avancando diagonal para {lado}; erro={erro_centro:+.2f}"))
 
     def _remember_alignment_target(self, detection, now):
         self._align_target = detection
