@@ -686,20 +686,20 @@ EXIT_ALIGN_LOST_TIMEOUT_S = 0.35
 # Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
 # aproxima ate deixar de enxergar a soleira. So entao a camera de linha abre e
 # o robo avanca a PWM 60, mantendo a camera ativa durante todo o trecho.
-# Ao primeiro sinal da faixa ele PARA, espera a
-# autoexposicao assentar e zera os votos. Cinza/prata precisa de apenas dois
-# votos para bloquear; preto precisa de quatro. Assim uma prata escura vista
-# de longe nunca vence a votacao antes de seus reflexos aparecerem.
+# A votacao preto/prata so comeca quando a faixa transversal chega ao meio da
+# imagem, mas os motores continuam em frente. Prata para e recua; preto passa
+# imediatamente o controle ao segue-linha, que preserva o ramo reto alinhado
+# com o robo no cruzamento de 90 graus.
 EXIT_LINE_VERIFY_PWM = 60
 EXIT_LINE_VERIFY_SPEED = EXIT_LINE_VERIFY_PWM / 120.0
 EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
+EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S = 0.60
+EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO = 0.45
 EXIT_LINE_VERIFY_WINDOW = 5
-EXIT_LINE_VERIFY_SETTLE_S = 0.25
 # Antes de votar preto/prata, a faixa precisa chegar ao meio da imagem da
-# camera de linha. Se passar do centro, o mesmo PWM baixo corrige em re.
+# camera de linha. Uma prata distante nunca pode acumular voto como preta.
 EXIT_LINE_VERIFY_CENTER_Y_RATIO = 0.50
 EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE = 0.10
-EXIT_LINE_VERIFY_CENTER_SPEED = 0.25
 EXIT_LINE_VERIFY_BLACK_VOTES = 3
 EXIT_LINE_VERIFY_SILVER_VOTES = 3
 EXIT_LINE_VERIFY_MAX_AGE_S = 0.35
@@ -724,24 +724,6 @@ EXIT_LINE_VERIFY_TEXTURE_ROI_BOTTOM = 0.75
 EXIT_LINE_VERIFY_TEXTURE_BAND_HEIGHT_RATIO = 0.35
 EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED = 0.35
 EXIT_LINE_VERIFY_REJECT_REVERSE_S = 1.0
-# Depois de confirmar preto, a camera continua sendo processada enquanto o
-# robo atravessa a soleira. O tempo abaixo e apenas um limite de seguranca: o
-# fim normal acontece quando a linha longitudinal cruza o meio da imagem em
-# dois frames novos. Sem essa confirmacao o robo para e recua, nunca segue
-# reto indefinidamente.
-EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED = EXIT_LINE_VERIFY_SPEED
-EXIT_LINE_VERIFY_BLACK_FORWARD_S = 1.00
-EXIT_LINE_HANDOFF_MIN_FORWARD_S = 0.10
-EXIT_LINE_HANDOFF_VOTES = 2
-EXIT_LINE_HANDOFF_CENTER_X_TOLERANCE_RATIO = 0.18
-EXIT_LINE_HANDOFF_MID_Y_RATIO = 0.50
-EXIT_LINE_HANDOFF_MID_BAND_RATIO = 0.10
-EXIT_LINE_HANDOFF_MIN_AREA = 1500
-EXIT_LINE_HANDOFF_MIN_VERTICAL_SPAN_RATIO = 0.30
-# Aceita a linha inclinada porque o segue-linha fara a correcao logo depois.
-# A soleira horizontal ainda ocupa quase 100% da largura e continua vetada.
-EXIT_LINE_HANDOFF_MAX_WIDTH_RATIO = 0.65
-EXIT_LINE_HANDOFF_MIN_ASPECT = 0.65
 
 # Mapeamento final dos DOIS triangulos, so para diagnostico e para provar que
 # a sala foi compreendida. Nenhum deles comanda o robo nesta fase.

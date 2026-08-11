@@ -23,7 +23,6 @@ from resgate import (  # noqa: E402
     _validar_corredor_saida,
 )
 from tests.test_confirmacao_saida_linha import (  # noqa: E402
-    cena_linha_percurso,
     cena_preta,
     cena_prata,
 )
@@ -231,15 +230,19 @@ class ExitPhaseTests(unittest.TestCase):
     def test_rejeicao_final_da_re_de_um_segundo(self):
         self.assertEqual(cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S, 1.0)
 
-    def test_camera_de_linha_avanca_a_pwm_60_com_limite_visual(self):
+    def test_camera_de_linha_confirma_em_movimento_a_pwm_60(self):
         self.assertEqual(cfg.EXIT_LINE_VERIFY_PWM, 60)
         self.assertEqual(cfg.EXIT_LINE_VERIFY_SPEED, 0.5)
         self.assertEqual(
-            cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED,
-            cfg.EXIT_LINE_VERIFY_SPEED,
+            cfg.EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S,
+            0.60,
         )
-        self.assertEqual(cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_S, 1.0)
-        self.assertEqual(cfg.EXIT_LINE_HANDOFF_VOTES, 2)
+        self.assertEqual(
+            cfg.EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO,
+            0.45,
+        )
+        self.assertFalse(hasattr(cfg, "EXIT_LINE_HANDOFF_VOTES"))
+        self.assertFalse(hasattr(cfg, "EXIT_LINE_VERIFY_BLACK_FORWARD_S"))
 
     def test_soleira_a_direita_curva_como_na_aproximacao_da_bolinha(self):
         assentou = self._ate_observar()
@@ -594,30 +597,19 @@ class SilverStripeRuntimeTests(unittest.TestCase):
         def get_frame(self):
             self.clock.sleep(0.10)
             self.frames += 1
-            # A faixa em T continua visivel no primeiro frame da travessia.
-            # Somente depois surge a linha longitudinal isolada no centro.
-            if self.frames <= 7:
-                return cena_preta()
-            return cena_linha_percurso()
+            frame = cena_preta()
+            # O primeiro quadro ainda ve a faixa longe. Ele nao pode votar;
+            # os tres seguintes ja a mostram perto do centro.
+            if self.frames == 1:
+                distante = np.full_like(frame, 205)
+                distante[:-50] = frame[50:]
+                return distante
+            return frame
 
         def close(self):
             self.closed = True
 
-    class CameraSemLinha:
-        def __init__(self, clock):
-            self.clock = clock
-            self.closed = False
-            self.frames = 0
-
-        def get_frame(self):
-            self.clock.sleep(0.10)
-            self.frames += 1
-            return cena_preta()
-
-        def close(self):
-            self.closed = True
-
-    def test_preto_avanca_lendo_frames_e_para_na_linha_central(self):
+    def test_preto_confirma_sem_parar_e_entrega_ao_segue_linha(self):
         clock = FakeClock()
         camera = self.CameraPreta(clock)
         commands = []
@@ -641,46 +633,19 @@ class SilverStripeRuntimeTests(unittest.TestCase):
 
         self.assertEqual(resultado, resgate_runtime.PRETA)
         self.assertTrue(camera.closed)
-        self.assertGreaterEqual(camera.frames, 9)
-        self.assertIn(
-            (0, cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED),
-            commands,
-        )
+        self.assertEqual(camera.frames, 4)
+        # Primeiro comando e a parada anterior a abertura; o ultimo e a
+        # parada segura do handoff. Entre eles o robo so anda reto a PWM 60.
+        self.assertTrue(all(
+            comando == (0, cfg.EXIT_LINE_VERIFY_SPEED)
+            for comando in commands[1:-1]
+        ))
         self.assertNotIn(
             (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED),
             commands,
         )
 
-    def test_sem_linha_central_para_no_limite_e_recua(self):
-        clock = FakeClock()
-        camera = self.CameraSemLinha(clock)
-        commands = []
-
-        def fake_steer(angle=190.0, speed=0.8, **_kwargs):
-            commands.append((angle, speed))
-            return True
-
-        with (
-            patch.object(
-                resgate_runtime.time, "monotonic", side_effect=clock),
-            patch.object(
-                resgate_runtime.time, "sleep", side_effect=clock.sleep),
-            patch("controle.direcao.steer", side_effect=fake_steer),
-            patch("visao.captura.LineCamera", return_value=camera),
-        ):
-            resultado = resgate_runtime._confirmar_saida_com_camera_linha(
-                self.Arduino(),
-                debug=False,
-            )
-
-        self.assertEqual(resultado, resgate_runtime.INCONCLUSIVA)
-        self.assertTrue(camera.closed)
-        self.assertIn(
-            (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED),
-            commands,
-        )
-
-    def test_cinza_para_estabiliza_e_da_re_sem_entrar_no_segue_linha(self):
+    def test_prata_confirma_em_movimento_e_da_re(self):
         clock = FakeClock()
         camera = self.Camera(clock)
         commands = []
@@ -708,8 +673,14 @@ class SilverStripeRuntimeTests(unittest.TestCase):
             (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED),
             commands,
         )
-        # O PWM da aproximacao e da travessia agora e o mesmo. A garantia de
-        # que prata nao liberou vem do retorno NAO_PRETA e da re acima.
+        indice_re = commands.index(
+            (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED))
+        # Ate a parada imediatamente anterior a re, todo comando de movimento
+        # foi reto a PWM 60; nao houve a antiga parada para estabilizacao.
+        self.assertTrue(all(
+            comando == (0, cfg.EXIT_LINE_VERIFY_SPEED)
+            for comando in commands[1:indice_re - 1]
+        ))
 
     def test_parede_durante_camera_de_linha_da_uma_unica_re_curta(self):
         clock = FakeClock()

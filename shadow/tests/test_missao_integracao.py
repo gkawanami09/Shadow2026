@@ -70,6 +70,44 @@ class MissionDebugWindowTests(unittest.TestCase):
         self.assertEqual(processos[-1].name, "shadow-debug-linha")
 
 
+class MissionStraightResumeTests(unittest.TestCase):
+    def test_retomada_apaga_memoria_lateral_e_prefere_ramo_reto(self):
+        valor = lambda inicial: SimpleNamespace(value=inicial)
+        compartilhado = SimpleNamespace(
+            vision_ready=valor(True),
+            line_detected=valor(True),
+            line_angle=valor(90),
+            line_angle_y=valor(200),
+            line_size=valor(9000.0),
+            last_bottom_point=valor(30),
+            last_bottom_point_y=valor(250),
+            line_status=valor("gap_avoid"),
+            turn_dir=valor("left"),
+            green_turn_target=valor(-1),
+            preferencia_linha_esquerda=valor(True),
+            line_crop=valor(config.LINE_CROP_GREEN),
+            min_line_size=valor(9000),
+        )
+        sistema = MissionSystem(
+            compartilhado,
+            motor_lock=None,
+            args=SimpleNamespace(debug=False),
+        )
+
+        with patch.object(sistema, "start_line_phase") as iniciar:
+            sistema.reacquire_line()
+
+        iniciar.assert_called_once_with()
+        self.assertFalse(compartilhado.vision_ready.value)
+        self.assertFalse(compartilhado.line_detected.value)
+        self.assertEqual(compartilhado.line_angle.value, 0)
+        self.assertEqual(compartilhado.last_bottom_point.value, 224)
+        self.assertEqual(compartilhado.line_status.value, "line_detected")
+        self.assertEqual(compartilhado.turn_dir.value, "straight")
+        self.assertEqual(compartilhado.green_turn_target.value, 0)
+        self.assertFalse(compartilhado.preferencia_linha_esquerda.value)
+
+
 class MissionEntryAdvanceTests(unittest.TestCase):
     def test_entrada_prata_confirma_em_dois_de_tres_frames(self):
         self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 2)

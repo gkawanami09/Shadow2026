@@ -91,6 +91,37 @@ class PreferenciaLinhaTests(unittest.TestCase):
         self.assertAlmostEqual(ponto[0], 224, delta=1)
         self.assertAlmostEqual(angulo, 0, delta=1)
 
+    def test_cruzamento_de_90_graus_preserva_o_ramo_reto_central(self):
+        # Cruz visto nos desenhos: o ramo longitudinal passa pelo centro do
+        # robo e a outra linha o atravessa a 90 graus. Sem memoria verde ou
+        # lateral, o POI precisa continuar no ramo longitudinal.
+        contorno = np.array(
+            [
+                [[200, 0]], [[248, 0]], [[248, 105]],
+                [[447, 105]], [[447, 145]], [[248, 145]],
+                [[248, 251]], [[200, 251]], [[200, 145]],
+                [[0, 145]], [[0, 105]], [[200, 105]],
+            ],
+            dtype=np.int32,
+        )
+        recorte = contorno[
+            contorno[:, 0, 1] > 151
+        ].reshape(-1, 1, 2)
+
+        angulo, ponto, inferior = calculate_angle(
+            contorno,
+            recorte,
+            average_line_angle=0,
+            turn_direction="straight",
+            last_bottom_point=224,
+            average_line_point=224,
+            preferir_esquerda=False,
+        )
+
+        self.assertAlmostEqual(ponto[0], 224, delta=1)
+        self.assertAlmostEqual(inferior[0], 224, delta=1)
+        self.assertAlmostEqual(angulo, 0, delta=1)
+
     def test_linha_transversal_torta_tambem_recebe_peso_esquerdo(self):
         contorno = np.array(
             [[[80, 110]], [[380, 110]], [[360, 150]], [[100, 150]]],

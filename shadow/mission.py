@@ -288,7 +288,30 @@ class MissionSystem:
         """``ciclo.py`` envia LED ACESO ao assumir a serial."""
         return True
 
+    def _preparar_retomada_reta(self):
+        """Apaga decisoes antigas antes do primeiro frame pos-resgate.
+
+        O cruzamento da saida tem um ramo alinhado com o robo e outro a 90
+        graus. O rastreador visual ja nasce no centro; zerar qualquer memoria
+        verde/lateral garante que o primeiro contorno seja resolvido pela
+        continuidade reta mostrada nos desenhos da pista.
+        """
+        self.shared.vision_ready.value = False
+        self.shared.line_detected.value = False
+        self.shared.line_angle.value = 0
+        self.shared.line_angle_y.value = -1
+        self.shared.line_size.value = 0.0
+        self.shared.last_bottom_point.value = config.camera_x / 2
+        self.shared.last_bottom_point_y.value = 0
+        self.shared.line_status.value = "line_detected"
+        self.shared.turn_dir.value = "straight"
+        self.shared.green_turn_target.value = 0
+        self.shared.preferencia_linha_esquerda.value = False
+        self.shared.line_crop.value = config.LINE_CROP_NORMAL
+        self.shared.min_line_size.value = config.MIN_LINE_SIZE_DEFAULT
+
     def reacquire_line(self):
+        self._preparar_retomada_reta()
         self.start_line_phase()
 
     # -- encerramento ----------------------------------------------------

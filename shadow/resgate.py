@@ -77,10 +77,7 @@ from visao.confirmacao_saida_linha import (  # noqa: E402
     NAO_PRETA,
     PRETA,
     ConfirmadorFaixaSaidaLinha,
-    DetectorLinhaPercurso,
     anotar_confirmacao,
-    anotar_linha_percurso,
-    faixa_centralizada,
     posicao_vertical_faixa,
 )
 from visao.faixa_saida import BlackExitGate  # noqa: E402
@@ -843,7 +840,7 @@ def _confirmar_saida_com_camera_linha(
     inicio = time.monotonic()
     ultimo_log = 0.0
     ultimo_resumo = None
-    faixa_parada_em = None
+    confirmacao_em_movimento_desde = None
 
     try:
         steer()
@@ -860,7 +857,7 @@ def _confirmar_saida_com_camera_linha(
         while True:
             frame = camera.get_frame()
             agora = time.monotonic()
-            if faixa_parada_em is None:
+            if confirmacao_em_movimento_desde is None:
                 # Durante o avanço só procuramos a presença da faixa. Votos
                 # feitos aqui seriam perigosos: prata/cinza distante pode
                 # parecer preta antes de o reflexo entrar no quadro.
@@ -870,29 +867,24 @@ def _confirmar_saida_com_camera_linha(
                 fase_confirmacao = "procurando centro"
                 if resultado.faixa_presente:
                     posicao_faixa = posicao_vertical_faixa(resultado)
-                    if faixa_centralizada(resultado):
-                        steer()
-                        faixa_parada_em = agora
-                        confirmador = ConfirmadorFaixaSaidaLinha()
-                        fase_confirmacao = "assentando"
-                        print(
-                            "[saida] faixa centralizada na camera; "
-                            "robo parado; zerando votos e aguardando "
-                            "a camera estabilizar")
-                    elif (
+                    if (
                         posicao_faixa is not None
                         and posicao_faixa
-                        > (
-                            cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO
-                            + cfg.EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE
-                        )
+                        >= cfg.EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO
                     ):
-                        steer(
-                            200,
-                            cfg.EXIT_LINE_VERIFY_CENTER_SPEED,
+                        confirmador = ConfirmadorFaixaSaidaLinha()
+                        confirmacao_em_movimento_desde = agora
+                        decisao, resultado = confirmador.update(
+                            frame,
+                            timestamp=agora,
+                            now=agora,
                         )
-                        fase_confirmacao = (
-                            f"corrigindo centro em re ({posicao_faixa:.0%})")
+                        fase_confirmacao = "confirmando em movimento"
+                        print(
+                            "[saida] faixa chegou ao centro da camera; "
+                            f"mantendo avanco reto em PWM "
+                            f"{cfg.EXIT_LINE_VERIFY_PWM} enquanto confirma "
+                            "preto/prata")
                     else:
                         steer(0, cfg.EXIT_LINE_VERIFY_SPEED)
                         fase_confirmacao = (
@@ -900,21 +892,16 @@ def _confirmar_saida_com_camera_linha(
                             if posicao_faixa is None
                             else f"levando ao centro ({posicao_faixa:.0%})"
                         )
-            elif (
-                agora - faixa_parada_em
-                < cfg.EXIT_LINE_VERIFY_SETTLE_S
-            ):
-                resultado = confirmador.classificador.classificar(
-                    frame, timestamp=agora)
-                decisao = None
-                fase_confirmacao = "assentando"
             else:
                 decisao, resultado = confirmador.update(
                     frame,
                     timestamp=agora,
                     now=agora,
                 )
-                fase_confirmacao = "confirmando parado"
+                fase_confirmacao = "confirmando em movimento"
+                if steer(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
+                    raise RuntimeError(
+                        "nao foi possivel manter o avanco da saida")
 
             arduino.refresh(fail_closed=True)
             if (
@@ -979,128 +966,12 @@ def _confirmar_saida_com_camera_linha(
 
             if decisao == PRETA:
                 print(
-                    "[saida] faixa PRETA centralizada e confirmada em "
+                    "[saida] faixa PRETA confirmada em movimento em "
                     f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} de "
-                    f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames com o robo parado; "
-                    f"avancando visualmente em PWM "
-                    f"{cfg.EXIT_LINE_VERIFY_PWM} ate a linha do percurso "
-                    "cruzar o centro da camera")
-                detector_linha = DetectorLinhaPercurso()
-                votos_linha = 0
-                inicio_travessia = time.monotonic()
-                ultimo_estado_linha = None
-                if steer(
-                    0,
-                    cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED,
-                ) is False:
-                    raise RuntimeError(
-                        "nao foi possivel iniciar a travessia visual")
-
-                while True:
-                    frame_linha = camera.get_frame()
-                    agora_linha = time.monotonic()
-                    decorrido = agora_linha - inicio_travessia
-                    linha_percurso = detector_linha.detectar(frame_linha)
-                    if (
-                        decorrido >= cfg.EXIT_LINE_HANDOFF_MIN_FORWARD_S
-                        and linha_percurso.centralizada
-                    ):
-                        votos_linha += 1
-                    else:
-                        votos_linha = 0
-
-                    arduino.refresh(fail_closed=True)
-                    if (
-                        not arduino.connected
-                        or arduino.connection_epoch != epoca_serial
-                    ):
-                        raise RuntimeError(
-                            "serial mudou durante a busca visual da linha")
-
-                    monitor_corredor.atualizar(
-                        arduino,
-                        agora=agora_linha,
-                    )
-                    if monitor_corredor.parada_confirmada:
-                        print(
-                            "[saida] BLOQUEIO ULTRASSONICO durante a "
-                            "travessia visual; parando e recuando")
-                        steer()
-                        _mover_saida_por_tempo(
-                            arduino,
-                            steer,
-                            200,
-                            cfg.EXIT_CLEARANCE_REVERSE_SPEED,
-                            cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
-                            epoca_serial,
-                        )
-                        steer()
-                        return CORREDOR_BLOQUEADO
-
-                    estado_linha = (
-                        linha_percurso.centralizada,
-                        linha_percurso.encontrada,
-                        votos_linha,
-                    )
-                    if estado_linha != ultimo_estado_linha:
-                        if linha_percurso.centralizada:
-                            descricao_linha = (
-                                "central "
-                                f"({linha_percurso.centro_x_ratio:.0%})")
-                        elif linha_percurso.encontrada:
-                            descricao_linha = (
-                                "lateral "
-                                f"({linha_percurso.centro_x_ratio:.0%})")
-                        else:
-                            descricao_linha = "ainda nao apareceu"
-                        print(
-                            f"[saida] linha do percurso {descricao_linha}; "
-                            f"votos={votos_linha}/"
-                            f"{cfg.EXIT_LINE_HANDOFF_VOTES}; "
-                            f"avanco={decorrido:.2f}s")
-                        ultimo_estado_linha = estado_linha
-
-                    if debug:
-                        cv2.imshow(
-                            JANELA,
-                            anotar_linha_percurso(
-                                frame_linha,
-                                linha_percurso,
-                                votos=votos_linha,
-                            ),
-                        )
-                        tecla = cv2.waitKey(1) & 0xFF
-                        if tecla in (ord("q"), 27):
-                            steer()
-                            return None
-
-                    if votos_linha >= cfg.EXIT_LINE_HANDOFF_VOTES:
-                        steer()
-                        print(
-                            "[saida] linha preta longitudinal confirmada "
-                            "no centro da camera; parando o avanco e "
-                            "entregando ao segue-linha")
-                        return PRETA
-
-                    if (
-                        decorrido
-                        >= cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_S
-                    ):
-                        steer()
-                        print(
-                            "[saida] limite seguro da travessia atingido "
-                            "sem a linha central; recuando em vez de "
-                            "continuar ate a lateral")
-                        _mover_saida_por_tempo(
-                            arduino,
-                            steer,
-                            200,
-                            cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED,
-                            cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
-                            epoca_serial,
-                        )
-                        steer()
-                        return INCONCLUSIVA
+                    f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames; entregando "
+                    "imediatamente ao segue-linha com preferencia pelo "
+                    "ramo reto alinhado ao robo")
+                return PRETA
 
             if decisao == NAO_PRETA:
                 print(
@@ -1120,13 +991,19 @@ def _confirmar_saida_com_camera_linha(
                 steer()
                 return NAO_PRETA
 
-            inicio_prazo = (
-                inicio if faixa_parada_em is None
-                else faixa_parada_em + cfg.EXIT_LINE_VERIFY_SETTLE_S
+            esgotou_aproximacao = (
+                confirmacao_em_movimento_desde is None
+                and agora - inicio >= cfg.EXIT_LINE_VERIFY_TIMEOUT_S
             )
-            if agora - inicio_prazo >= cfg.EXIT_LINE_VERIFY_TIMEOUT_S:
+            esgotou_confirmacao = (
+                confirmacao_em_movimento_desde is not None
+                and agora - confirmacao_em_movimento_desde
+                >= cfg.EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S
+            )
+            if esgotou_aproximacao or esgotou_confirmacao:
                 print(
-                    "[saida] nao foi possivel confirmar preto no prazo; "
+                    "[saida] nao foi possivel confirmar preto/prata em "
+                    "movimento no prazo; "
                     "dando re e parando por seguranca")
                 steer()
                 _mover_saida_por_tempo(
