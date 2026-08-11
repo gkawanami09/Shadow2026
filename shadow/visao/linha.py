@@ -5,11 +5,12 @@ import numpy as np
 from numba import njit
 
 from config import (BOTTOM_CENTER_CONTROL, BOTTOM_CENTER_MIN_Y,
-                     BOTTOM_CENTER_WEIGHT,
-                     EXIT_CONTINUATION_ANGLE_TARGET_WEIGHT,
-                     EXIT_CONTINUATION_CONTOUR_TARGET_WEIGHT,
-                     OBSTACLE_LEFT_PREFERENCE_MIN_SPAN_RATIO,
-                     camera_x, camera_y)
+                    BOTTOM_CENTER_WEIGHT,
+                    EXIT_CONTINUATION_ANGLE_TARGET_WEIGHT,
+                    EXIT_CONTINUATION_CONTOUR_TARGET_WEIGHT,
+                    GREEN_BRANCH_TRACKER_OFFSET_PX,
+                    OBSTACLE_LEFT_PREFERENCE_MIN_SPAN_RATIO,
+                    camera_x, camera_y)
 from shared.dados_compartilhados import line_crop, timer, turn_dir
 
 x_last = camera_x / 2
@@ -38,6 +39,21 @@ def determine_correct_line(contours_blk, preferir_esquerda=False,
     if alvo is not None and alvo.shape != (2,):
         raise ValueError("o alvo da saida deve conter x e y")
 
+    # A intencao do verde precisa participar da escolha deste quadro. Antes,
+    # o deslocamento era aplicado apenas ao ``x_last`` depois de selecionar o
+    # contorno; em uma intersecao, a correcao/historico podia vencer e o robo
+    # seguir reto. A visao ja confirmou o marcador neste ponto, portanto o
+    # mesmo deslocamento passa a ser a referencia da pontuacao atual.
+    direcao_marcada = turn_direction or turn_dir.value
+    x_referencia = x_last
+    if alvo is None:
+        if direcao_marcada == "left":
+            x_referencia = np.clip(
+                x_last - GREEN_BRANCH_TRACKER_OFFSET_PX, 0, camera_x)
+        elif direcao_marcada == "right":
+            x_referencia = np.clip(
+                x_last + GREEN_BRANCH_TRACKER_OFFSET_PX, 0, camera_x)
+
     for i, contour in enumerate(contours_blk):
         box = cv2.boxPoints(cv2.minAreaRect(contour))
         box = box[box[:, 1].argsort()[::-1]]  # Sort them by their y values and reverse
@@ -49,7 +65,7 @@ def determine_correct_line(contours_blk, preferir_esquerda=False,
 
         box = box[box[:, 0].argsort()]
         x_mean = (np.clip(box[0][0], 0, camera_x) + np.clip(box[3][0], 0, camera_x)) / 2
-        x_y_distance = abs(x_last - x_mean) + abs(y_last - y_mean)  # Distance between the last x/y and current x/y
+        x_y_distance = abs(x_referencia - x_mean) + abs(y_last - y_mean)  # Distance between the last x/y and current x/y
 
         candidates[i] = i, bottom_y, x_y_distance, x_mean, y_mean
         if alvo is not None:
@@ -80,11 +96,14 @@ def determine_correct_line(contours_blk, preferir_esquerda=False,
         # Peso para o próximo quadro sem transformar a preferência em uma
         # ordem de giro: contornos mais à esquerda ficam mais próximos do
         # histórico e vencem apenas quando houver ambiguidade.
-        x_last = np.clip(candidates[0][3] - 150, 0, camera_x)
-    elif (turn_direction or turn_dir.value) == "left":
-        x_last = np.clip(candidates[0][3] - 150, 0, camera_x)
-    elif (turn_direction or turn_dir.value) == "right":
-        x_last = np.clip(candidates[0][3] + 150, 0, camera_x)
+        x_last = np.clip(
+            candidates[0][3] - GREEN_BRANCH_TRACKER_OFFSET_PX, 0, camera_x)
+    elif direcao_marcada == "left":
+        x_last = np.clip(
+            candidates[0][3] - GREEN_BRANCH_TRACKER_OFFSET_PX, 0, camera_x)
+    elif direcao_marcada == "right":
+        x_last = np.clip(
+            candidates[0][3] + GREEN_BRANCH_TRACKER_OFFSET_PX, 0, camera_x)
     else:
         x_last = candidates[0][3]
 

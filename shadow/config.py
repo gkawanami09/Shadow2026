@@ -202,6 +202,10 @@ GREEN_TURN_TIMEOUT = 2.0                   # s — para com seguranca se nao ree
 GREEN_TURN_SPEED = .5                     # base PWM 60, preserva o giro
 GREEN_REVERSE_TIME = .5
 GREEN_REVERSE_SPEED = .4                  # PWM 48
+# Quando um verde confirmado indica uma curva, desloca o historico usado
+# para escolher entre ramos concorrentes. Isso faz o ramo indicado vencer a
+# correcao da linha que o robo vinha seguindo no mesmo frame.
+GREEN_BRANCH_TRACKER_OFFSET_PX = 150
 
 
 # ----------------------------------------------------------------------------
