@@ -685,12 +685,13 @@ EXIT_ALIGN_LOST_TIMEOUT_S = 0.35
 
 # Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
 # aproxima ate deixar de enxergar a soleira. So entao a camera de linha abre e
-# o robo avanca com o mesmo PWM 80 que ja venceu o atrito na aproximacao.
+# o robo avanca a PWM 60, mantendo a camera ativa durante todo o trecho.
 # Ao primeiro sinal da faixa ele PARA, espera a
 # autoexposicao assentar e zera os votos. Cinza/prata precisa de apenas dois
 # votos para bloquear; preto precisa de quatro. Assim uma prata escura vista
 # de longe nunca vence a votacao antes de seus reflexos aparecerem.
-EXIT_LINE_VERIFY_SPEED = EXIT_ADVANCE_SPEED
+EXIT_LINE_VERIFY_PWM = 60
+EXIT_LINE_VERIFY_SPEED = EXIT_LINE_VERIFY_PWM / 120.0
 EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
 EXIT_LINE_VERIFY_WINDOW = 5
 EXIT_LINE_VERIFY_SETTLE_S = 0.25
@@ -723,11 +724,24 @@ EXIT_LINE_VERIFY_TEXTURE_ROI_BOTTOM = 0.75
 EXIT_LINE_VERIFY_TEXTURE_BAND_HEIGHT_RATIO = 0.35
 EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED = 0.35
 EXIT_LINE_VERIFY_REJECT_REVERSE_S = 1.0
-# Depois de confirmar preto, atravessa a faixa sem voltar ao PWM fraco. Um
-# segundo e o mesmo trecho reto ja validado na entrada da sala; assim a linha
-# seguinte chega ao campo da camera antes do handoff para o segue-linha.
-EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED = EXIT_ADVANCE_SPEED
+# Depois de confirmar preto, a camera continua sendo processada enquanto o
+# robo atravessa a soleira. O tempo abaixo e apenas um limite de seguranca: o
+# fim normal acontece quando a linha longitudinal cruza o meio da imagem em
+# dois frames novos. Sem essa confirmacao o robo para e recua, nunca segue
+# reto indefinidamente.
+EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED = EXIT_LINE_VERIFY_SPEED
 EXIT_LINE_VERIFY_BLACK_FORWARD_S = 1.00
+EXIT_LINE_HANDOFF_MIN_FORWARD_S = 0.10
+EXIT_LINE_HANDOFF_VOTES = 2
+EXIT_LINE_HANDOFF_CENTER_X_TOLERANCE_RATIO = 0.18
+EXIT_LINE_HANDOFF_MID_Y_RATIO = 0.50
+EXIT_LINE_HANDOFF_MID_BAND_RATIO = 0.10
+EXIT_LINE_HANDOFF_MIN_AREA = 1500
+EXIT_LINE_HANDOFF_MIN_VERTICAL_SPAN_RATIO = 0.30
+# Aceita a linha inclinada porque o segue-linha fara a correcao logo depois.
+# A soleira horizontal ainda ocupa quase 100% da largura e continua vetada.
+EXIT_LINE_HANDOFF_MAX_WIDTH_RATIO = 0.65
+EXIT_LINE_HANDOFF_MIN_ASPECT = 0.65
 
 # Mapeamento final dos DOIS triangulos, so para diagnostico e para provar que
 # a sala foi compreendida. Nenhum deles comanda o robo nesta fase.

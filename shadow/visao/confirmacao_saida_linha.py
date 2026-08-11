@@ -41,6 +41,19 @@ class ResultadoFaixaSaidaLinha:
     timestamp: float
 
 
+@dataclass(frozen=True)
+class ResultadoLinhaPercurso:
+    """Geometria da linha longitudinal usada no handoff ao segue-linha."""
+
+    encontrada: bool
+    centralizada: bool
+    centro_x_ratio: float
+    alcance_vertical_ratio: float
+    aspecto: float
+    area: float
+    bbox: tuple
+
+
 def _maior_sequencia(flags):
     melhor_inicio = -1
     melhor_fim = -1
@@ -251,6 +264,163 @@ class ClassificadorFaixaSaidaLinha:
         )
 
 
+class DetectorLinhaPercurso:
+    """Encontra a linha longitudinal sem aceitar a soleira transversal.
+
+    Usa os mesmos limites BGR calibrados do segue-linha. A forma precisa
+    atravessar a metade vertical da imagem, ter forma predominantemente
+    longitudinal e estar no corredor central. Assim a faixa preta horizontal
+    que acabou de ser confirmada nao encerra o avanco antes de o robo
+    realmente atravessa-la.
+    """
+
+    def __init__(self):
+        from shared.gerenciadores import ConfigManager
+
+        configuracao = ConfigManager(str(config.CONFIG_INI_PATH))
+
+        def ler(nome, fallback):
+            valor = configuracao.read_variable("color_values_line", nome)
+            return np.asarray(
+                fallback if valor is None else valor,
+                dtype=np.uint8,
+            )
+
+        self.preto_min = np.asarray(
+            config.BLACK_MIN_DEFAULT,
+            dtype=np.uint8,
+        )
+        self.preto_max_topo = ler(
+            "black_max_normal_top",
+            config.BLACK_MAX_NORMAL_TOP_DEFAULT,
+        )
+        self.preto_max_base = ler(
+            "black_max_normal_bottom",
+            config.BLACK_MAX_NORMAL_BOTTOM_DEFAULT,
+        )
+
+    def detectar(self, frame_bgr):
+        if (
+            frame_bgr is None
+            or not isinstance(frame_bgr, np.ndarray)
+            or frame_bgr.ndim != 3
+            or frame_bgr.shape[2] != 3
+        ):
+            raise ValueError("a deteccao da linha exige um frame BGR")
+
+        frame = cv2.resize(
+            frame_bgr,
+            (config.camera_x, config.camera_y),
+            interpolation=cv2.INTER_AREA,
+        )
+        altura, largura = frame.shape[:2]
+        mascara = cv2.inRange(
+            frame,
+            self.preto_min,
+            self.preto_max_base,
+        )
+        limite_topo = int(round(altura * 0.40))
+        mascara[:limite_topo] = cv2.inRange(
+            frame[:limite_topo],
+            self.preto_min,
+            self.preto_max_topo,
+        )
+
+        # Fecha pequenas falhas de iluminacao sem unir uma linha lateral a
+        # outra forma distante.
+        nucleo = np.ones((3, 3), dtype=np.uint8)
+        mascara = cv2.morphologyEx(
+            mascara,
+            cv2.MORPH_CLOSE,
+            nucleo,
+            iterations=2,
+        )
+        contornos, _ = cv2.findContours(
+            mascara,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+
+        meio_y = int(round(altura * cfg.EXIT_LINE_HANDOFF_MID_Y_RATIO))
+        meia_faixa = max(int(round(
+            altura * cfg.EXIT_LINE_HANDOFF_MID_BAND_RATIO / 2.0
+        )), 1)
+        topo_faixa = max(meio_y - meia_faixa, 0)
+        base_faixa = min(meio_y + meia_faixa + 1, altura)
+        melhor = None
+        melhor_pontuacao = float("-inf")
+
+        for contorno in contornos:
+            area = float(cv2.contourArea(contorno))
+            if area < cfg.EXIT_LINE_HANDOFF_MIN_AREA:
+                continue
+            x, y, w, h = cv2.boundingRect(contorno)
+            alcance_vertical = h / max(float(altura), 1.0)
+            largura_ratio = w / max(float(largura), 1.0)
+            aspecto = h / max(float(w), 1.0)
+            if (
+                alcance_vertical
+                < cfg.EXIT_LINE_HANDOFF_MIN_VERTICAL_SPAN_RATIO
+                or largura_ratio > cfg.EXIT_LINE_HANDOFF_MAX_WIDTH_RATIO
+                or aspecto < cfg.EXIT_LINE_HANDOFF_MIN_ASPECT
+                or y > topo_faixa
+                or y + h < base_faixa
+            ):
+                continue
+
+            mascara_contorno = np.zeros_like(mascara)
+            cv2.drawContours(
+                mascara_contorno,
+                [contorno],
+                -1,
+                255,
+                thickness=-1,
+            )
+            _ys, xs = np.nonzero(
+                mascara_contorno[topo_faixa:base_faixa, :])
+            if xs.size == 0:
+                continue
+            centro_x_ratio = float(np.median(xs)) / max(
+                float(largura - 1), 1.0)
+            centralizada = bool(
+                abs(centro_x_ratio - 0.50)
+                <= cfg.EXIT_LINE_HANDOFF_CENTER_X_TOLERANCE_RATIO
+            )
+            pontuacao = (
+                alcance_vertical
+                + min(area / max(float(altura * largura), 1.0), 1.0)
+                - abs(centro_x_ratio - 0.50)
+            )
+            if pontuacao > melhor_pontuacao:
+                melhor_pontuacao = pontuacao
+                melhor = ResultadoLinhaPercurso(
+                    encontrada=True,
+                    centralizada=centralizada,
+                    centro_x_ratio=centro_x_ratio,
+                    alcance_vertical_ratio=alcance_vertical,
+                    aspecto=aspecto,
+                    area=area,
+                    bbox=(x, y, w, h),
+                )
+
+        if melhor is not None:
+            return melhor
+        return ResultadoLinhaPercurso(
+            encontrada=False,
+            centralizada=False,
+            centro_x_ratio=-1.0,
+            alcance_vertical_ratio=0.0,
+            aspecto=0.0,
+            area=0.0,
+            bbox=(0, 0, 0, 0),
+        )
+
+
+def detectar_linha_percurso(frame_bgr):
+    """Atalho sem estado para ferramentas e testes."""
+    return DetectorLinhaPercurso().detectar(frame_bgr)
+
+
 class ConfirmadorFaixaSaidaLinha:
     """Votacao temporal que trava em PRETA ou NAO_PRETA."""
 
@@ -340,4 +510,45 @@ def anotar_confirmacao(frame_bgr, resultado, decisao=None):
     cv2.putText(
         canvas, texto, (8, 22), cv2.FONT_HERSHEY_SIMPLEX,
         0.52, (0, 255, 255), 1, cv2.LINE_AA)
+    return canvas
+
+
+def anotar_linha_percurso(frame_bgr, resultado, votos=0):
+    """Mostra a decisao visual usada no ultimo avanco da saida."""
+    canvas = frame_bgr.copy()
+    altura, largura = canvas.shape[:2]
+    meio_y = int(round(altura * cfg.EXIT_LINE_HANDOFF_MID_Y_RATIO))
+    meia_faixa = max(int(round(
+        altura * cfg.EXIT_LINE_HANDOFF_MID_BAND_RATIO / 2.0
+    )), 1)
+    tolerancia_x = int(round(
+        largura * cfg.EXIT_LINE_HANDOFF_CENTER_X_TOLERANCE_RATIO))
+    centro_x = largura // 2
+    cv2.rectangle(
+        canvas,
+        (max(centro_x - tolerancia_x, 0), max(meio_y - meia_faixa, 0)),
+        (min(centro_x + tolerancia_x, largura - 1),
+         min(meio_y + meia_faixa, altura - 1)),
+        (255, 255, 0),
+        1,
+    )
+    x, y, w, h = resultado.bbox
+    if w > 0 and h > 0:
+        cor = (0, 255, 0) if resultado.centralizada else (0, 165, 255)
+        cv2.rectangle(canvas, (x, y), (x + w - 1, y + h - 1), cor, 2)
+    estado = (
+        "CENTRAL" if resultado.centralizada
+        else "LATERAL" if resultado.encontrada
+        else "PROCURANDO"
+    )
+    cv2.putText(
+        canvas,
+        f"linha={estado} votos={votos}/{cfg.EXIT_LINE_HANDOFF_VOTES}",
+        (8, 22),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (0, 255, 255),
+        1,
+        cv2.LINE_AA,
+    )
     return canvas

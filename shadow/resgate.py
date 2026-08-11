@@ -77,7 +77,9 @@ from visao.confirmacao_saida_linha import (  # noqa: E402
     NAO_PRETA,
     PRETA,
     ConfirmadorFaixaSaidaLinha,
+    DetectorLinhaPercurso,
     anotar_confirmacao,
+    anotar_linha_percurso,
     faixa_centralizada,
     posicao_vertical_faixa,
 )
@@ -850,7 +852,7 @@ def _confirmar_saida_com_camera_linha(
         monitor_corredor.cancelar(arduino)
         print(
             "[saida] camera do segue-linha aberta; mantendo avanco reto em "
-            f"PWM {cfg.EXIT_ADVANCE_PWM} ate a faixa ficar no centro; "
+            f"PWM {cfg.EXIT_LINE_VERIFY_PWM} ate a faixa ficar no centro; "
             "ultrassonico continua ativo")
         if steer(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
             raise RuntimeError("nao foi possivel iniciar a aproximacao final")
@@ -980,19 +982,125 @@ def _confirmar_saida_com_camera_linha(
                     "[saida] faixa PRETA centralizada e confirmada em "
                     f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} de "
                     f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames com o robo parado; "
-                    "continuando reto por "
-                    f"{cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_S:.2f} s para "
-                    "colocar a linha seguinte na camera")
-                _mover_saida_por_tempo(
-                    arduino,
-                    steer,
+                    f"avancando visualmente em PWM "
+                    f"{cfg.EXIT_LINE_VERIFY_PWM} ate a linha do percurso "
+                    "cruzar o centro da camera")
+                detector_linha = DetectorLinhaPercurso()
+                votos_linha = 0
+                inicio_travessia = time.monotonic()
+                ultimo_estado_linha = None
+                if steer(
                     0,
                     cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED,
-                    cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_S,
-                    epoca_serial,
-                )
-                steer()
-                return PRETA
+                ) is False:
+                    raise RuntimeError(
+                        "nao foi possivel iniciar a travessia visual")
+
+                while True:
+                    frame_linha = camera.get_frame()
+                    agora_linha = time.monotonic()
+                    decorrido = agora_linha - inicio_travessia
+                    linha_percurso = detector_linha.detectar(frame_linha)
+                    if (
+                        decorrido >= cfg.EXIT_LINE_HANDOFF_MIN_FORWARD_S
+                        and linha_percurso.centralizada
+                    ):
+                        votos_linha += 1
+                    else:
+                        votos_linha = 0
+
+                    arduino.refresh(fail_closed=True)
+                    if (
+                        not arduino.connected
+                        or arduino.connection_epoch != epoca_serial
+                    ):
+                        raise RuntimeError(
+                            "serial mudou durante a busca visual da linha")
+
+                    monitor_corredor.atualizar(
+                        arduino,
+                        agora=agora_linha,
+                    )
+                    if monitor_corredor.parada_confirmada:
+                        print(
+                            "[saida] BLOQUEIO ULTRASSONICO durante a "
+                            "travessia visual; parando e recuando")
+                        steer()
+                        _mover_saida_por_tempo(
+                            arduino,
+                            steer,
+                            200,
+                            cfg.EXIT_CLEARANCE_REVERSE_SPEED,
+                            cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
+                            epoca_serial,
+                        )
+                        steer()
+                        return CORREDOR_BLOQUEADO
+
+                    estado_linha = (
+                        linha_percurso.centralizada,
+                        linha_percurso.encontrada,
+                        votos_linha,
+                    )
+                    if estado_linha != ultimo_estado_linha:
+                        if linha_percurso.centralizada:
+                            descricao_linha = (
+                                "central "
+                                f"({linha_percurso.centro_x_ratio:.0%})")
+                        elif linha_percurso.encontrada:
+                            descricao_linha = (
+                                "lateral "
+                                f"({linha_percurso.centro_x_ratio:.0%})")
+                        else:
+                            descricao_linha = "ainda nao apareceu"
+                        print(
+                            f"[saida] linha do percurso {descricao_linha}; "
+                            f"votos={votos_linha}/"
+                            f"{cfg.EXIT_LINE_HANDOFF_VOTES}; "
+                            f"avanco={decorrido:.2f}s")
+                        ultimo_estado_linha = estado_linha
+
+                    if debug:
+                        cv2.imshow(
+                            JANELA,
+                            anotar_linha_percurso(
+                                frame_linha,
+                                linha_percurso,
+                                votos=votos_linha,
+                            ),
+                        )
+                        tecla = cv2.waitKey(1) & 0xFF
+                        if tecla in (ord("q"), 27):
+                            steer()
+                            return None
+
+                    if votos_linha >= cfg.EXIT_LINE_HANDOFF_VOTES:
+                        steer()
+                        print(
+                            "[saida] linha preta longitudinal confirmada "
+                            "no centro da camera; parando o avanco e "
+                            "entregando ao segue-linha")
+                        return PRETA
+
+                    if (
+                        decorrido
+                        >= cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_S
+                    ):
+                        steer()
+                        print(
+                            "[saida] limite seguro da travessia atingido "
+                            "sem a linha central; recuando em vez de "
+                            "continuar ate a lateral")
+                        _mover_saida_por_tempo(
+                            arduino,
+                            steer,
+                            200,
+                            cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED,
+                            cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
+                            epoca_serial,
+                        )
+                        steer()
+                        return INCONCLUSIVA
 
             if decisao == NAO_PRETA:
                 print(

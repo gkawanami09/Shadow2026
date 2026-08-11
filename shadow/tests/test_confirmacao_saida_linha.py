@@ -17,6 +17,7 @@ from visao.confirmacao_saida_linha import (  # noqa: E402
     PRETA,
     ClassificadorFaixaSaidaLinha,
     ConfirmadorFaixaSaidaLinha,
+    DetectorLinhaPercurso,
     faixa_centralizada,
     posicao_vertical_faixa,
 )
@@ -37,6 +38,26 @@ def cena_prata():
     frame[80:170, :, 0] = textura
     frame[80:170, :, 1] = textura
     frame[80:170, :, 2] = textura
+    return frame
+
+
+def cena_linha_percurso(centro_x=224):
+    frame = np.full((252, 448, 3), 205, dtype=np.uint8)
+    esquerda = max(int(centro_x) - 24, 0)
+    direita = min(int(centro_x) + 24, frame.shape[1])
+    frame[20:, esquerda:direita] = 35
+    return frame
+
+
+def cena_so_faixa_transversal():
+    frame = np.full((252, 448, 3), 205, dtype=np.uint8)
+    frame[95:165, :] = 35
+    return frame
+
+
+def cena_linha_percurso_inclinada():
+    frame = np.full((252, 448, 3), 205, dtype=np.uint8)
+    cv2.line(frame, (100, 20), (320, 251), (35, 35, 35), 40)
     return frame
 
 
@@ -148,6 +169,39 @@ class ConfirmadorTests(unittest.TestCase):
                 cena_preta(), timestamp=1.0, now=1.0)
         self.assertIsNone(decisao)
         self.assertEqual(confirmador.votos_pretos, 1)
+
+
+class DetectorLinhaPercursoTests(unittest.TestCase):
+    def setUp(self):
+        self.detector = DetectorLinhaPercurso()
+
+    def test_linha_longitudinal_no_meio_libera_handoff(self):
+        resultado = self.detector.detectar(cena_linha_percurso())
+        self.assertTrue(resultado.encontrada)
+        self.assertTrue(resultado.centralizada)
+        self.assertAlmostEqual(resultado.centro_x_ratio, 0.50, delta=0.02)
+
+    def test_linha_longitudinal_lateral_ainda_nao_libera(self):
+        resultado = self.detector.detectar(
+            cena_linha_percurso(centro_x=70))
+        self.assertTrue(resultado.encontrada)
+        self.assertFalse(resultado.centralizada)
+
+    def test_linha_inclinada_no_meio_tambem_libera(self):
+        resultado = self.detector.detectar(
+            cena_linha_percurso_inclinada())
+        self.assertTrue(resultado.encontrada)
+        self.assertTrue(resultado.centralizada)
+
+    def test_faixa_transversal_confirmada_nao_parece_percurso(self):
+        resultado = self.detector.detectar(cena_so_faixa_transversal())
+        self.assertFalse(resultado.encontrada)
+        self.assertFalse(resultado.centralizada)
+
+    def test_cruzamento_em_t_ainda_nao_libera_antes_de_atravessar(self):
+        resultado = self.detector.detectar(cena_preta())
+        self.assertFalse(resultado.encontrada)
+        self.assertFalse(resultado.centralizada)
 
 
 if __name__ == "__main__":
