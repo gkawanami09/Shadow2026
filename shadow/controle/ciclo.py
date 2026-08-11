@@ -141,9 +141,9 @@ def control_loop():
             status.value = 'Procurando continuacao da linha apos a saida'
             print(
                 "[controle] faixa PRETA ja confirmada; procurando "
-                "ramificacao: se estiver visivel, o segue-linha assume "
-                "mesmo torta; sem ramo, o pivo dianteiro procura por "
-                "0.5 s e depois cruza por 1.0 s")
+                "ramificacao com pivo dianteiro obrigatorio: esquerda por "
+                "0.5 s e depois direita por 1.0 s; somente o ramo no "
+                "centro libera o segue-linha")
             try:
                 lado_encontrado = procurar_continuacao_saida_pivo_dianteiro(
                     arduino,
@@ -178,8 +178,8 @@ def control_loop():
             line_status.value = "line_detected"
             status.value = 'Continuacao encontrada - seguindo linha'
             print(
-                "[controle] ramificacao confirmada em "
-                f"{lado_encontrado}; entregando ao segue-linha normal")
+                "[controle] ramificacao centralizada confirmada; "
+                "entregando ao segue-linha normal")
 
         while not terminate.value:
             if not arduino.connected:

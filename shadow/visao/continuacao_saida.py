@@ -24,9 +24,9 @@ def detectar_continuacao_saida(mascara):
 
     A faixa da porta sozinha e quase uma barra reta. Um T, L ou curva e
     aceito pela sua geometria nao linear. Uma linha reta tambem e aceita
-    quando sua extremidade distante ja aponta para a frente. Qualquer ramo
-    aceito e entregue ao segue-linha, mesmo torto; o pivo dianteiro so procura
-    quando nenhuma ramificacao foi encontrada.
+    quando sua extremidade distante ja aponta para a frente. A deteccao guia
+    a varredura dianteira, mas o segue-linha so recebe o ramo quando a ponta
+    distante cruza o centro da camera.
     """
     if mascara is None or getattr(mascara, "ndim", 0) != 2:
         raise ValueError("a busca da continuacao exige uma mascara binaria")

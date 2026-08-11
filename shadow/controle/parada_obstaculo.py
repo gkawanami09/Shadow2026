@@ -382,13 +382,15 @@ def procurar_continuacao_saida_pivo_dianteiro(
     A propria faixa transversal tambem e preta, portanto
     ``orientacao_ramificacao`` deve devolver esquerda, centro, direita ou
     ``None`` usando a extremidade distante do trajeto, e nao a presenca
-    generica de um contorno preto. Qualquer orientacao confirmada e entregue
-    imediatamente ao segue-linha; o pivo so existe enquanto nao ha ramo.
-    Retorna a orientacao encontrada ou ``None`` se os dois lados falharem.
+    generica de um contorno preto. Para nao confundir a faixa transversal com
+    o percurso, a varredura esquerda-direita e sempre executada e somente a
+    ponta distante centralizada confirma o ramo correto. Retorna ``"centro"``
+    ou ``None`` se os dois lados falharem.
 
     O movimento inverte o pivo de 90 graus do segue-linha: TE e TD ficam em
     zero, enquanto FE e FD giram em sentidos opostos. Isso mantem a traseira
-    como apoio e desloca a frente ate a ramificacao reaparecer na camera.
+    como apoio e desloca a frente ate a ramificacao correta cruzar o centro
+    da camera.
     """
     import config
 
@@ -433,24 +435,22 @@ def procurar_continuacao_saida_pivo_dianteiro(
             return orientacao
         return None
 
-    def confirmar_ramificacao_parado(orientacao_inicial=None):
-        orientacao = orientacao_inicial or ler_orientacao()
-        if orientacao is None:
+    def confirmar_ramo_centralizado():
+        if ler_orientacao() != "centro":
             return None
         inicio_confirmacao = relogio()
         while not deve_encerrar():
             orientacao_atual = ler_orientacao()
-            if orientacao_atual is None:
+            if orientacao_atual != "centro":
                 return None
-            orientacao = orientacao_atual
             restante = confirmacao_s - (relogio() - inicio_confirmacao)
             if restante <= 1e-9:
-                return orientacao
+                return "centro"
             atualizar_serial()
             dormir(min(.025, restante))
         return None
 
-    def varrer(enviar_comando, duracao_s, etapa):
+    def varrer(enviar_comando, duracao_s, etapa, procurar=True):
         movimento_acumulado = 0.0
         inicio_movimento = None
         try:
@@ -461,15 +461,13 @@ def procurar_continuacao_saida_pivo_dianteiro(
             while not deve_encerrar():
                 agora = relogio()
                 movimento_atual = agora - inicio_movimento
-                orientacao = ler_orientacao()
-                if orientacao is not None:
+                if procurar and ler_orientacao() == "centro":
                     movimento_acumulado += movimento_atual
                     inicio_movimento = None
                     if arduino.parar() is False:
                         raise RuntimeError(
                             f"nao foi possivel frear durante {etapa}")
-                    orientacao_confirmada = confirmar_ramificacao_parado(
-                        orientacao)
+                    orientacao_confirmada = confirmar_ramo_centralizado()
                     if orientacao_confirmada is not None:
                         return orientacao_confirmada
                     if movimento_acumulado >= duracao_s - 1e-9:
@@ -490,23 +488,14 @@ def procurar_continuacao_saida_pivo_dianteiro(
             arduino.parar()
 
     try:
-        orientacao_inicial = ler_orientacao()
-        orientacao_confirmada = confirmar_ramificacao_parado(
-            orientacao_inicial)
-        if orientacao_confirmada is not None:
-            return orientacao_confirmada
         if deve_encerrar():
             return None
 
-        # Se a ponta ja apareceu de lado, comeca diretamente por ela. Sem
-        # alvo, preserva a preferencia deterministica pela esquerda.
-        primeiro_lado = (
-            orientacao_inicial
-            if orientacao_inicial in ("esquerda", "direita")
-            else "esquerda"
-        )
-        segundo_lado = (
-            "direita" if primeiro_lado == "esquerda" else "esquerda")
+        # A faixa preta ainda ocupa boa parte da imagem no primeiro frame.
+        # Fazer as duas passagens, mesmo vendo algo lateral, obriga o ramo do
+        # trajeto a atravessar o centro antes de ser escolhido.
+        primeiro_lado = "esquerda"
+        segundo_lado = "direita"
         comandos = {
             "esquerda": lambda: arduino.rodas(-pwm, 0, pwm, 0),
             "direita": lambda: arduino.rodas(pwm, 0, -pwm, 0),
@@ -516,6 +505,7 @@ def procurar_continuacao_saida_pivo_dianteiro(
             comandos[primeiro_lado],
             duracao_primeira_s,
             f"o pivo dianteiro {primeiro_lado} da linha de saida",
+            procurar=False,
         )
         if orientacao_confirmada is not None:
             return orientacao_confirmada

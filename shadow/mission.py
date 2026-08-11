@@ -291,10 +291,9 @@ class MissionSystem:
     def _preparar_retomada_linha(self):
         """Apaga decisoes antigas antes do primeiro frame pos-resgate.
 
-        A leitura dedicada entrega qualquer ramificacao visivel ao segue-linha
-        e so pede o pivo dianteiro quando nao encontra ramo. Zerar qualquer
-        memoria verde/lateral impede uma decisao anterior de contaminar essa
-        retomada.
+        A leitura dedicada confirma o ramo somente depois da varredura
+        dianteira esquerda-direita. Zerar qualquer memoria verde/lateral
+        impede uma decisao anterior de contaminar essa retomada.
         """
         self.shared.vision_ready.value = False
         self.shared.line_detected.value = False

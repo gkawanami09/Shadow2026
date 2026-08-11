@@ -398,7 +398,7 @@ class DesvioObstaculoTests(unittest.TestCase):
         self.assertEqual(config.EXIT_LINE_FRONT_PIVOT_FIRST_S, .50)
         self.assertEqual(config.EXIT_LINE_FRONT_PIVOT_CROSS_S, 1.00)
 
-    def test_saida_com_continuacao_no_centro_nao_gira(self):
+    def test_saida_com_continuacao_no_centro_varre_os_dois_lados(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
@@ -414,11 +414,17 @@ class DesvioObstaculoTests(unittest.TestCase):
         )
 
         self.assertEqual(lado, "centro")
-        self.assertFalse(any(
-            comando[0] in ("rodas", "lado") for comando in arduino.comandos))
+        self.assertEqual(
+            [comando for comando in arduino.comandos
+             if comando[0] == "rodas"],
+            [
+                ("rodas", -60, 0, 60, 0),
+                ("rodas", 60, 0, -60, 0),
+            ],
+        )
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
-    def test_saida_encontrada_durante_busca_esquerda_para_imediatamente(self):
+    def test_primeira_passagem_e_cega_antes_da_confirmacao(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
@@ -436,7 +442,7 @@ class DesvioObstaculoTests(unittest.TestCase):
 
         self.assertEqual(lado, "centro")
         self.assertIn(("rodas", -60, 0, 60, 0), arduino.comandos)
-        self.assertNotIn(("rodas", 60, 0, -60, 0), arduino.comandos)
+        self.assertIn(("rodas", 60, 0, -60, 0), arduino.comandos)
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
     def test_saida_varre_esquerda_e_direita_antes_de_desistir(self):
@@ -495,7 +501,7 @@ class DesvioObstaculoTests(unittest.TestCase):
         self.assertIn(comando_direita, arduino.comandos)
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
-    def test_ramificacao_lateral_direita_entrega_sem_pivo(self):
+    def test_ramificacao_lateral_nao_libera_sem_centralizar(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
@@ -510,9 +516,15 @@ class DesvioObstaculoTests(unittest.TestCase):
             dormir=relogio.sleep,
         )
 
-        self.assertEqual(lado, "direita")
-        self.assertFalse(any(
-            comando[0] in ("rodas", "lado") for comando in arduino.comandos))
+        self.assertIsNone(lado)
+        self.assertEqual(
+            [comando for comando in arduino.comandos
+             if comando[0] == "rodas"],
+            [
+                ("rodas", -60, 0, 60, 0),
+                ("rodas", 60, 0, -60, 0),
+            ],
+        )
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
     def test_busca_para_no_timeout_sem_linha(self):

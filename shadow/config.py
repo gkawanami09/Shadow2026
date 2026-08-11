@@ -66,9 +66,9 @@ OBSTACLE_RETRY_COOLDOWN_S = 1.0
 # do pivo forte usado no segue-linha: as traseiras ficam paradas e apenas as
 # dianteiras, em sentidos opostos, varrem a frente do robo. Primeiro procura
 # 0,5 s para o lado onde a ramificacao apareceu (esquerda quando ainda nao ha
-# alvo); depois cruza a orientacao inicial por 1,0 s no sentido oposto. Se
-# qualquer ramificacao ja estiver visivel, mesmo torta, nenhum pivo e executado:
-# o segue-linha recebe sua direcao e faz a correcao proporcional normal.
+# alvo); depois cruza a orientacao inicial por 1,0 s no sentido oposto. As
+# duas passagens sao obrigatorias: so a ponta distante centralizada confirma
+# que e o ramo do percurso, e nao a faixa transversal de saida.
 EXIT_LINE_FRONT_PIVOT_PWM = OBSTACLE_LATERAL_PWM
 EXIT_LINE_FRONT_PIVOT_FIRST_S = .50
 EXIT_LINE_FRONT_PIVOT_CROSS_S = 1.00
