@@ -1193,6 +1193,10 @@ def main():
             init_steering(arduino)
             steer()
             arduino.led("APAGADO")
+            if args.gerenciado_pela_missao:
+                # Ao cair a placa, a tentativa inteira volta ao percurso; nao
+                # e seguro retomar coleta, deposito ou saida numa serial nova.
+                arduino.travar_sessao()
             print(
                 "[resgate] LED APAGADO antes de abrir a camera; "
                 "motores em PARAR")
@@ -1293,6 +1297,15 @@ def main():
                 "Use --drive so depois de validar a visao.")
 
         while True:
+            if (
+                args.drive
+                and sessao_hardware
+                and arduino is not None
+                and not arduino.connected
+            ):
+                raise RuntimeError(
+                    "Arduino desconectado durante o resgate; "
+                    "reinicie a missao pelo percurso")
             pacote = captura.poll(sequencia_frame)
             frame_novo = pacote is not None
             if frame_novo:

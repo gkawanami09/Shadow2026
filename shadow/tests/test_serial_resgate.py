@@ -134,6 +134,15 @@ class RescueSerialLedTests(unittest.TestCase):
         self.assertEqual(sent, ["PARAR"])
         self.assertEqual(arduino._last_cmd, "PARAR")
 
+    def test_sessao_travada_nao_tenta_reconectar(self):
+        arduino = self._bare_arduino()
+        tentativas = []
+        arduino._try_reconnect = lambda: tentativas.append(True)
+        arduino.travar_sessao()
+
+        self.assertFalse(arduino._write_line("PARAR"))
+        self.assertEqual(tentativas, [])
+
     def test_default_refresh_preserves_existing_mode_behavior(self):
         arduino = self._bare_arduino()
         arduino._last_cmd = "LADO 40 40"

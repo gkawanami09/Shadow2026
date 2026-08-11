@@ -20,6 +20,8 @@ SERIAL_RETRY_BACKOFF = 0.5                # s — espera entre tentativas
 SERIAL_KEEPALIVE_S = 0.25                 # s — reenvio do ultimo comando (watchdog 1 s no Uno)
 SERIAL_MIN_RESEND_S = 0.05                # s — dedupe de comandos identicos
 SERIAL_RECONNECT_BACKOFF = 0.5            # s — espera minima entre tentativas de reconexao
+# A missao se recupera de uma queda do Arduino sem encerrar o supervisor.
+MISSION_RECOVERY_DELAY_S = 1.0
 MAX_PWM = 120                             # teto absoluto; firmware tambem trava em 120
 
 # ----------------------------------------------------------------------------

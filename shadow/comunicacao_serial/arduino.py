@@ -25,6 +25,7 @@ class Arduino:
         self._ultra_response_received = False
         self._manual_pending = False
         self._manual_response = None
+        self._reconexao_automatica = True
 
         if port is not None:
             if not self._try_port(port):
@@ -110,6 +111,10 @@ class Arduino:
     @property
     def connected(self):
         return self._connected
+
+    def travar_sessao(self):
+        """Desliga reconexao automatica ate esta instancia ser descartada."""
+        self._reconexao_automatica = False
 
     @property
     def ultima_leitura_ultrassom_respondeu(self):
@@ -266,7 +271,8 @@ class Arduino:
         if not comando:
             raise ValueError("O comando serial nao pode estar vazio")
 
-        if not self._connected:
+        if not self._connected and getattr(
+                self, "_reconexao_automatica", True):
             self._try_reconnect()
         if not self._connected:
             return None
@@ -296,7 +302,8 @@ class Arduino:
         o comportamento dos outros modos existentes.
         """
         if fail_closed and not self._connected:
-            self._try_reconnect()
+            if getattr(self, "_reconexao_automatica", True):
+                self._try_reconnect()
             if not self._connected:
                 return
             # Uma reconexao pode acontecer muito depois do frame que gerou o
@@ -366,7 +373,8 @@ class Arduino:
 
     def _write_line(self, cmd):
         if not self._connected:
-            self._try_reconnect()
+            if getattr(self, "_reconexao_automatica", True):
+                self._try_reconnect()
             if not self._connected:
                 return False
         try:

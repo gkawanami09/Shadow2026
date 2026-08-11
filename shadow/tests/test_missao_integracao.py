@@ -112,6 +112,74 @@ class MissionLineResumeTests(unittest.TestCase):
         self.assertTrue(compartilhado.exit_line_search_pending.value)
 
 
+class MissionRecoveryTests(unittest.TestCase):
+    @staticmethod
+    def _shared():
+        valor = lambda inicial: SimpleNamespace(value=inicial)
+        return SimpleNamespace(
+            terminate=valor(False),
+            vision_ready=valor(True),
+            line_detected=valor(True),
+            line_ahead=valor(True),
+            line_angle=valor(90),
+            line_angle_y=valor(200),
+            line_size=valor(9000.0),
+            last_bottom_point=valor(30),
+            last_bottom_point_y=valor(250),
+            line_status=valor("gap_avoid"),
+            turn_dir=valor("right"),
+            green_turn_target=valor(1),
+            preferencia_linha_esquerda=valor(True),
+            line_crop=valor(config.LINE_CROP_GREEN),
+            min_line_size=valor(9000),
+            entry_armed=valor(False),
+            entry_silver_detected=valor(True),
+            entry_silver_confirmed=valor(True),
+            entry_silver_votes=valor(3),
+            entry_silver_reason=valor("confirmada"),
+            rescue_requested=valor(True),
+            red_finished=valor(True),
+            exit_line_search_pending=valor(True),
+            mission_mode=valor(True),
+            status=valor("Resgate"),
+        )
+
+    def test_recuperacao_rearma_prata_e_reinicia_do_percurso(self):
+        class TravaFalsa:
+            def __init__(self):
+                self.aquisicoes = 0
+
+            def acquire(self):
+                self.aquisicoes += 1
+
+        compartilhado = self._shared()
+        trava = TravaFalsa()
+        sistema = MissionSystem(
+            compartilhado,
+            motor_lock=trava,
+            args=SimpleNamespace(debug=False),
+        )
+        sistema._lock_held = False
+
+        with (
+            patch.object(sistema, "start_line_phase") as iniciar,
+            patch("mission.time.sleep"),
+        ):
+            sistema.reiniciar_missao_do_percurso("Arduino desconectado")
+
+        iniciar.assert_called_once_with()
+        self.assertEqual(trava.aquisicoes, 1)
+        self.assertTrue(compartilhado.entry_armed.value)
+        self.assertFalse(compartilhado.entry_silver_detected.value)
+        self.assertFalse(compartilhado.entry_silver_confirmed.value)
+        self.assertEqual(compartilhado.entry_silver_votes.value, 0)
+        self.assertFalse(compartilhado.rescue_requested.value)
+        self.assertFalse(compartilhado.red_finished.value)
+        self.assertFalse(compartilhado.exit_line_search_pending.value)
+        self.assertEqual(compartilhado.turn_dir.value, "straight")
+        self.assertEqual(compartilhado.line_status.value, "line_detected")
+
+
 class MissionEntryAdvanceTests(unittest.TestCase):
     def test_entrada_prata_confirma_em_dois_de_tres_frames(self):
         self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 2)

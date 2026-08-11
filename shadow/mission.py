@@ -316,6 +316,70 @@ class MissionSystem:
         self._preparar_retomada_linha()
         self.start_line_phase()
 
+    def _preparar_nova_tentativa(self):
+        """Volta todos os dados ao inicio da missao, antes da faixa prata."""
+        self.shared.vision_ready.value = False
+        self.shared.line_detected.value = False
+        self.shared.line_ahead.value = False
+        self.shared.line_angle.value = 0
+        self.shared.line_angle_y.value = -1
+        self.shared.line_size.value = 0.0
+        self.shared.last_bottom_point.value = config.camera_x / 2
+        self.shared.last_bottom_point_y.value = 0
+        self.shared.line_status.value = "line_detected"
+        self.shared.turn_dir.value = "straight"
+        self.shared.green_turn_target.value = 0
+        self.shared.preferencia_linha_esquerda.value = False
+        self.shared.line_crop.value = config.LINE_CROP_INITIAL
+        self.shared.min_line_size.value = config.MIN_LINE_SIZE_DEFAULT
+        self.shared.entry_armed.value = True
+        self.shared.entry_silver_detected.value = False
+        self.shared.entry_silver_confirmed.value = False
+        self.shared.entry_silver_votes.value = 0
+        self.shared.entry_silver_reason.value = ""
+        self.shared.rescue_requested.value = False
+        self.shared.red_finished.value = False
+        self.shared.exit_line_search_pending.value = False
+        self.shared.status.value = "Reiniciando missao - aguardando Arduino"
+
+    def _encerrar_resgate_para_recuperacao(self):
+        if self.rescue_process is None:
+            return
+        self.rescue_process.terminate()
+        try:
+            self.rescue_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.rescue_process.kill()
+            self.rescue_process.wait(timeout=1)
+        self.rescue_process = None
+
+    def reiniciar_missao_do_percurso(self, motivo):
+        """Fecha a tentativa atual e sobe outra, sempre antes da prata."""
+        print(f"[missao] recuperacao: {motivo}")
+        self.shared.terminate.value = True
+        self._encerrar_resgate_para_recuperacao()
+        if self.children:
+            self.join_line_children()
+        self.children = []
+        if not self._lock_held:
+            self.motor_lock.acquire()
+            self._lock_held = True
+        self._preparar_nova_tentativa()
+        print(
+            "[missao] reposicione o robo antes da faixa prata e religue o "
+            "Arduino; o percurso sera iniciado automaticamente")
+        time.sleep(config.MISSION_RECOVERY_DELAY_S)
+        self.start_line_phase()
+
+    def pausar_apos_final(self):
+        """Mantem o supervisor vivo apos a faixa vermelha, sem movimento."""
+        self.shared.terminate.value = True
+        if self.children:
+            self.join_line_children()
+        self.children = []
+        self.shared.mission_mode.value = False
+        self.shared.status.value = "Missao concluida - Ctrl-C para encerrar"
+
     # -- encerramento ----------------------------------------------------
     def shutdown(self):
         self.shared.terminate.value = True
@@ -364,7 +428,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
+def _main_antigo():
     args = parse_args()
     if args.rescue_camera_index is None:
         import config_resgate
@@ -458,6 +522,131 @@ def main():
         inventory = coordinator.inventory
         print(
             f"[missão] estado final: {coordinator.state} | "
+            f"prata {inventory.silver_deposited}/2, "
+            f"preta {inventory.black_deposited}/1")
+    return codigo
+
+
+def main():
+    """Executa tentativas de missao ate Ctrl-C ou desligamento da Raspberry."""
+    args = parse_args()
+    if args.rescue_camera_index is None:
+        import config_resgate
+        args.rescue_camera_index = config_resgate.RESCUE_CAMERA_INDEX
+
+    from controle.trava_motores import MotorLockError, MotorOwnerLock
+    motor_lock = MotorOwnerLock("missao")
+    try:
+        motor_lock.acquire()
+    except MotorLockError as err:
+        print(f"[missao] ERRO: {err}")
+        return 1
+
+    import shared.dados_compartilhados as shared
+
+    shm = _criar_memoria_debug() if args.debug else None
+    coordinator = MissionCoordinator(policy=args.policy)
+    system = MissionSystem(shared, motor_lock, args)
+    codigo = 0
+    tentativas = 1
+
+    try:
+        print(f"[missao] iniciando tentativa {tentativas}")
+        try:
+            system.start_line_phase()
+        except Exception as erro_inicio:           # noqa: BLE001
+            print(f"[missao] nao foi possivel iniciar: {erro_inicio}")
+            coordinator.abort(str(erro_inicio))
+            tentativas += 1
+            while True:
+                try:
+                    print(f"[missao] iniciando tentativa {tentativas}")
+                    system.reiniciar_missao_do_percurso(str(erro_inicio))
+                    coordinator = MissionCoordinator(policy=args.policy)
+                    break
+                except KeyboardInterrupt:
+                    raise
+                except Exception as erro_recuperacao:  # noqa: BLE001
+                    print(
+                        "[missao] ainda aguardando recursos para "
+                        f"reiniciar: {erro_recuperacao}")
+                    time.sleep(config.MISSION_RECOVERY_DELAY_S)
+        while True:
+            try:
+                resultado = system.wait_line_phase()
+
+                if resultado == "quit":
+                    print("[missao] debug encerrado pelo usuario.")
+                    coordinator.abort("janela de debug encerrada")
+                    break
+
+                if resultado == "finished":
+                    coordinator.on_red_finish()
+                    system.pausar_apos_final()
+                    print(
+                        "[missao] faixa vermelha final alcancada; programa "
+                        "permanece ativo e parado. Use Ctrl-C para encerrar")
+                    while True:
+                        time.sleep(1.0)
+
+                if resultado == "child_died":
+                    if not shared.rescue_requested.value:
+                        raise RuntimeError(
+                            "um processo do percurso terminou; "
+                            "reiniciando antes da faixa prata")
+
+                coordinator.on_entry_candidate()
+                coordinator.on_entry_confirmed()
+                coordinator.on_zone_entered()
+                print("[missao] faixa PRATA confirmada; executando o handoff")
+                HandoffExecutor(system, HANDOFF_TO_RESCUE).run()
+                coordinator.on_rescue_started()
+
+                returncode = system.wait_rescue()
+                if returncode != RESCUE_EXIT_OK:
+                    raise RuntimeError(
+                        f"resgate terminou com codigo {returncode}; "
+                        "reiniciando antes da faixa prata")
+                print("[missao] resgate concluido; voltando ao percurso")
+
+                HandoffExecutor(system, HANDOFF_TO_LINE).run()
+                coordinator.state = MissionState.FOLLOW_LINE
+
+            except KeyboardInterrupt:
+                raise
+            except Exception as err:               # noqa: BLE001
+                print(f"[missao] tentativa interrompida: {err}")
+                coordinator.abort(str(err))
+                tentativas += 1
+                while True:
+                    try:
+                        print(f"[missao] iniciando tentativa {tentativas}")
+                        system.reiniciar_missao_do_percurso(str(err))
+                        coordinator = MissionCoordinator(policy=args.policy)
+                        break
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as erro_recuperacao:  # noqa: BLE001
+                        print(
+                            "[missao] ainda aguardando recursos para "
+                            f"reiniciar: {erro_recuperacao}")
+                        time.sleep(config.MISSION_RECOVERY_DELAY_S)
+
+    except KeyboardInterrupt:
+        print("\n[missao] Ctrl-C - encerrando...")
+        coordinator.abort("Ctrl-C")
+        codigo = 130
+    finally:
+        system.shutdown()
+        if shm is not None:
+            shm.close()
+            try:
+                shm.unlink()
+            except FileNotFoundError:
+                pass
+        inventory = coordinator.inventory
+        print(
+            f"[missao] estado final: {coordinator.state} | "
             f"prata {inventory.silver_deposited}/2, "
             f"preta {inventory.black_deposited}/1")
     return codigo

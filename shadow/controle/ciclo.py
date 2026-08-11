@@ -66,10 +66,19 @@ def _enter_rescue_zone(arduino):
 
 
 def control_loop():
-    arduino = Arduino()
+    try:
+        arduino = Arduino()
+    except RuntimeError as erro:
+        status.value = 'Aguardando Arduino para reiniciar a missao'
+        print(f"[controle] Arduino indisponivel: {erro}")
+        return
     init_steering(arduino)
     steer()  # motores parados desde o inicio
     arduino.led("ACESO")
+    if mission_mode.value:
+        # Uma sessao da missao nunca reconecta em movimento. Se a placa cair,
+        # o supervisor cria uma tentativa nova depois do reposicionamento.
+        arduino.travar_sessao()
     print("[controle] LED ACESO: modo segue-linha")
 
     last_turn_dir = "l"
@@ -79,6 +88,10 @@ def control_loop():
     # espera a visao publicar o primeiro frame processado
     wait_start = time.perf_counter()
     while not vision_ready.value and not terminate.value:
+        if not arduino.connected:
+            status.value = 'Arduino desconectado - aguardando reinicio'
+            print("[controle] Arduino desconectado durante a espera da visao")
+            return
         if time.perf_counter() - wait_start > VISION_READY_TIMEOUT:
             print("[controle] AVISO: visão não ficou pronta em "
                   f"{VISION_READY_TIMEOUT} s — seguindo mesmo assim")
@@ -169,6 +182,10 @@ def control_loop():
                 f"{lado_encontrado}; entregando ao segue-linha normal")
 
         while not terminate.value:
+            if not arduino.connected:
+                status.value = 'Arduino desconectado - aguardando reinicio'
+                print("[controle] Arduino desconectado; encerrando sessao")
+                return
 
             # A preferência pós-obstáculo não gira o robô sozinha. A visão
             # apenas desempata contornos transversais para a esquerda e o
