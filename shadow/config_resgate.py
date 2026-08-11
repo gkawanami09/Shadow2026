@@ -621,7 +621,7 @@ EXIT_BLACK_LOCK_SEARCH_Y_MARGIN_RATIO = 0.30
 # movimentos do resgate.
 EXIT_ADVANCE_PWM = 80
 EXIT_ADVANCE_SPEED = EXIT_ADVANCE_PWM / 120.0
-EXIT_ADVANCE_MIN_S = 0.60
+EXIT_ADVANCE_MIN_S = 1.00
 EXIT_ADVANCE_TIMEOUT_S = 3.5
 
 # Antes de entregar a decisao para a camera do segue-linha, o robo para e
@@ -658,19 +658,16 @@ EXIT_SEARCH_OBSERVE_TIMEOUT_S = DEPOSIT_SEARCH_VERIFY_TIMEOUT_S
 EXIT_SEARCH_TANK_ANGLE = DEPOSIT_SEARCH_TANK_ANGLE
 EXIT_SEARCH_TANK_SPEED = RED_DEPOSIT_SEARCH_TANK_SPEED
 
-# Alinhamento em dois eixos antes da aproximação. A inclinação corrige o yaw
-# por tanque; o centro corrige somente a posição lateral pelas rodas omni.
-# Zona em que a soleira ja esta boa o bastante para atravessar. Os limites
-# antigos (0.06 e 3 graus) eram menores que a variacao observada entre frames
-# e faziam o omni ultrapassar o centro alternadamente sem nunca avancar.
-EXIT_ALIGN_MAX_CENTER_ERROR = 0.22
+# Alinhamento em dois eixos antes da aproximacao. A inclinacao corrige o yaw
+# por tanque. O centro usa a mesma curva continua da aproximacao da bolinha.
+# A tolerancia maior inicia a curva; a menor encerra sem ficar alternando.
+EXIT_ALIGN_ENTER_CENTER_ERROR = BALL_ALIGN_THRESHOLD
+EXIT_ALIGN_EXIT_CENTER_ERROR = BALL_ALIGN_EXIT_THRESHOLD
+EXIT_ALIGN_ARC_MIN_ANGLE = BALL_ALIGN_ARC_MIN_ANGLE
+EXIT_ALIGN_ARC_MAX_ANGLE = BALL_ALIGN_ARC_MAX_ANGLE
+EXIT_ALIGN_ARC_SPEED_MIN = BALL_ALIGN_SPEED_MIN
+EXIT_ALIGN_ARC_SPEED_MAX = BALL_ALIGN_SPEED_MAX
 EXIT_ALIGN_MAX_ANGLE_DEG = 15.0
-# Se uma correcao cruzar o centro/angulo desejado, o alvo convergiu mesmo que
-# o frame seguinte caia pouco alem da zona acima. Trava a decisao e avanca em
-# vez de iniciar um novo pulso no sentido oposto.
-EXIT_ALIGN_COMMIT_CENTER_ERROR = 0.28
-EXIT_ALIGN_COMMIT_ANGLE_DEG = 18.0
-EXIT_ALIGN_COMMIT_AFTER_CORRECTIONS = 4
 EXIT_ALIGN_ANGLE = 180
 EXIT_ALIGN_PWM = 50
 EXIT_ALIGN_SPEED = EXIT_ALIGN_PWM / (120 * 1.2)
@@ -678,13 +675,6 @@ EXIT_ALIGN_SETTLE_S = EXIT_SEARCH_SETTLE_S
 EXIT_ALIGN_YAW_MIN_PULSE_S = 0.06
 EXIT_ALIGN_YAW_MAX_PULSE_S = 0.18
 EXIT_ALIGN_YAW_FULL_ERROR_DEG = 18.0
-# Durante a correção horizontal, soma avanço ao movimento lateral. Com ambos
-# em 60, duas rodas recebem 120 e duas recebem 0: diagonal limpa, sem ré.
-EXIT_ALIGN_FORWARD_PWM = 60
-EXIT_ALIGN_OMNI_PWM = 60
-EXIT_ALIGN_OMNI_MIN_PULSE_S = 0.07
-EXIT_ALIGN_OMNI_MAX_PULSE_S = 0.18
-EXIT_ALIGN_OMNI_FULL_ERROR = 0.45
 EXIT_ALIGN_MAX_CORRECTIONS = 14
 # Uma falha de segmentação isolada não pode mandar o robô voltar ao giro e
 # ultrapassar uma faixa que já estava centralizada.

@@ -206,32 +206,27 @@ class ExitPhaseTests(unittest.TestCase):
     def test_rejeicao_final_da_re_de_um_segundo(self):
         self.assertEqual(cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S, 1.0)
 
-    def test_soleira_deslocada_translada_com_omni_sem_mudar_yaw(self):
+    def test_soleira_a_direita_curva_como_na_aproximacao_da_bolinha(self):
         assentou = self._ate_observar()
         soleira = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
         command = self.exit.update(
             soleira, FRAME_SHAPE, now=assentou + 0.02)
-        pwm = cfg.EXIT_ALIGN_OMNI_PWM
-        frente = cfg.EXIT_ALIGN_FORWARD_PWM
-        self.assertEqual(command.state, self.exit.ALIGN_LATERAL)
-        self.assertEqual(
-            command.wheel_speeds,
-            (frente - pwm, frente + pwm, frente + pwm, frente - pwm),
-        )
-        self.assertEqual(command.angle, 190)
+        self.assertEqual(command.state, self.exit.ALIGN_ARC)
+        self.assertGreaterEqual(command.angle, cfg.BALL_ALIGN_ARC_MIN_ANGLE)
+        self.assertLessEqual(command.angle, cfg.BALL_ALIGN_ARC_MAX_ANGLE)
+        self.assertEqual(command.speed, cfg.BALL_ALIGN_SPEED_MIN)
+        self.assertIsNone(command.wheel_speeds)
 
-    def test_soleira_a_esquerda_translada_omni_para_esquerda(self):
+    def test_soleira_a_esquerda_faz_a_mesma_curva_negativa_da_bolinha(self):
         assentou = self._ate_observar()
         soleira = FakeExit(center_x=80.0, timestamp=assentou + 0.01)
         command = self.exit.update(
             soleira, FRAME_SHAPE, now=assentou + 0.02)
-        pwm = cfg.EXIT_ALIGN_OMNI_PWM
-        frente = cfg.EXIT_ALIGN_FORWARD_PWM
-        self.assertEqual(command.state, self.exit.ALIGN_LATERAL)
-        self.assertEqual(
-            command.wheel_speeds,
-            (frente + pwm, frente - pwm, frente - pwm, frente + pwm),
-        )
+        self.assertEqual(command.state, self.exit.ALIGN_ARC)
+        self.assertLessEqual(command.angle, -cfg.BALL_ALIGN_ARC_MIN_ANGLE)
+        self.assertGreaterEqual(command.angle, -cfg.BALL_ALIGN_ARC_MAX_ANGLE)
+        self.assertEqual(command.speed, cfg.BALL_ALIGN_SPEED_MIN)
+        self.assertIsNone(command.wheel_speeds)
 
     def test_inclinacao_e_corrigida_por_tanque_antes_do_lateral(self):
         assentou = self._ate_observar()
@@ -260,54 +255,49 @@ class ExitPhaseTests(unittest.TestCase):
 
         self.assertEqual(command.state, self.exit.CROSS)
 
-    def test_pulso_omni_freia_assenta_e_exige_frame_novo(self):
+    def test_curva_e_continua_e_usa_cada_frame_novo(self):
         assentou = self._ate_observar()
         inicio = assentou + 0.02
         soleira = FakeExit(center_x=600.0, timestamp=inicio - 0.01)
-        pulso = self.exit.update(soleira, FRAME_SHAPE, now=inicio)
-        self.exit.notify_command_written(pulso.state, now=inicio)
+        curva = self.exit.update(soleira, FRAME_SHAPE, now=inicio)
+        self.exit.notify_command_written(curva.state, now=inicio)
+        self.assertEqual(curva.state, self.exit.ALIGN_ARC)
+        self.assertTrue(self.exit.frame_allowed(inicio + 0.01))
 
-        fim = inicio + cfg.EXIT_ALIGN_OMNI_MAX_PULSE_S + 0.01
-        freio = self.exit.update(None, FRAME_SHAPE, now=fim)
-        self.assertEqual(freio.state, self.exit.ALIGN_BRAKE)
-        self.assertEqual(freio.angle, 190)
-        self.assertFalse(
-            self.exit.notify_command_written(freio.state, now=fim))
+        proximo = FakeExit(center_x=400.0, timestamp=inicio + 0.01)
+        corrigida = self.exit.update(
+            proximo, FRAME_SHAPE, now=inicio + 0.02)
+        self.assertEqual(corrigida.state, self.exit.ALIGN_ARC)
+        self.assertLessEqual(corrigida.angle, curva.angle)
 
-        assentado = fim + cfg.EXIT_ALIGN_SETTLE_S
-        medindo = self.exit.update(None, FRAME_SHAPE, now=assentado)
-        self.assertEqual(medindo.state, self.exit.ALIGN)
-        self.assertFalse(self.exit.frame_allowed(assentado))
-        self.assertTrue(self.exit.frame_allowed(assentado + 0.01))
+        centralizada = FakeExit(center_x=350.0, timestamp=inicio + 0.03)
+        avanco = self.exit.update(
+            centralizada, FRAME_SHAPE, now=inicio + 0.04)
+        self.assertEqual(avanco.state, self.exit.CROSS)
 
-    def test_omni_cruza_o_centro_e_avanca_sem_ping_pong(self):
+    def test_curva_usa_histerese_antes_de_comecar_o_avanco(self):
         assentou = self._ate_observar()
         inicio = assentou + 0.02
-        # +0.24 esta fora da zona normal (0.22), mas dentro do envelope de
-        # commit (0.28): inicia uma unica correcao diagonal.
         direita = FakeExit(
-            center_x=320.0 * 1.24,
+            center_x=320.0 * 1.30,
             timestamp=inicio - 0.01,
         )
-        pulso = self.exit.update(direita, FRAME_SHAPE, now=inicio)
-        self.assertEqual(pulso.state, self.exit.ALIGN_LATERAL)
-        self.exit.notify_command_written(pulso.state, now=inicio)
+        curva = self.exit.update(direita, FRAME_SHAPE, now=inicio)
+        self.assertEqual(curva.state, self.exit.ALIGN_ARC)
 
-        fim = inicio + cfg.EXIT_ALIGN_OMNI_MAX_PULSE_S + 0.01
-        freio = self.exit.update(None, FRAME_SHAPE, now=fim)
-        self.assertEqual(freio.state, self.exit.ALIGN_BRAKE)
-        self.exit.notify_command_written(freio.state, now=fim)
-        assentado = fim + cfg.EXIT_ALIGN_SETTLE_S
-        self.exit.update(None, FRAME_SHAPE, now=assentado)
-
-        # A medicao foi um pouco alem do centro. Antes isto iniciava outro
-        # pulso para a esquerda e podia alternar para sempre.
-        esquerda = FakeExit(
-            center_x=320.0 * (1.0 - 0.20),
-            timestamp=assentado + 0.01,
+        ainda_fora = FakeExit(
+            center_x=320.0 * 1.18,
+            timestamp=inicio + 0.01,
         )
-        avanco = self.exit.update(
-            esquerda, FRAME_SHAPE, now=assentado + 0.02)
+        curva_menor = self.exit.update(
+            ainda_fora, FRAME_SHAPE, now=inicio + 0.02)
+        self.assertEqual(curva_menor.state, self.exit.ALIGN_ARC)
+
+        dentro = FakeExit(
+            center_x=320.0 * 1.14,
+            timestamp=inicio + 0.03,
+        )
+        avanco = self.exit.update(dentro, FRAME_SHAPE, now=inicio + 0.04)
         self.assertEqual(avanco.state, self.exit.CROSS)
         self.assertEqual(avanco.angle, 0)
         self.assertEqual(avanco.speed, cfg.EXIT_ADVANCE_SPEED)
@@ -341,7 +331,7 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(falha_longa.state, self.exit.SEARCH_START)
         self.assertEqual(falha_longa.angle, cfg.EXIT_SEARCH_TANK_ANGLE)
 
-    def test_alvo_travado_mantem_um_pulso_lateral_apos_perda_curta(self):
+    def test_alvo_travado_mantem_a_curva_apos_perda_curta(self):
         assentou = self._ate_observar()
         alvo = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
         self.exit.state = self.exit.ALIGN
@@ -353,13 +343,9 @@ class ExitPhaseTests(unittest.TestCase):
             now=assentou + cfg.EXIT_ALIGN_LOST_TIMEOUT_S + 0.05,
         )
 
-        pwm = cfg.EXIT_ALIGN_OMNI_PWM
-        frente = cfg.EXIT_ALIGN_FORWARD_PWM
-        self.assertEqual(comando.state, self.exit.ALIGN_LATERAL)
-        self.assertEqual(
-            comando.wheel_speeds,
-            (frente - pwm, frente + pwm, frente + pwm, frente - pwm),
-        )
+        self.assertEqual(comando.state, self.exit.ALIGN_ARC)
+        self.assertGreater(comando.angle, 0)
+        self.assertIsNone(comando.wheel_speeds)
         self.assertIn("alvo travado", comando.detail)
 
     def test_alvo_travado_so_volta_a_buscar_apos_hold_seguro(self):

@@ -7,13 +7,13 @@ busca era invisível para o robô, passa a ser a única coisa que importa.
 
 Sequência::
 
-    MAP_TRIANGLES → SEARCH(pulsado) → CROSS → DONE
+    MAP_TRIANGLES → SEARCH(pulsado) → ALIGN(curva) → CROSS → DONE
 
 A procura reaproveita o mesmo princípio da busca pulsada de vítimas: gira um
 trecho curto, para, e só confirma com frames capturados depois da parada. A
-faixa confirmada de longe inicia imediatamente o avanço reto, sem ficar presa
-num alinhamento de baixa potência. A travessia termina quando a faixa deixa de
-ser vista, com o tempo servindo apenas de limite de segurança.
+faixa confirmada de longe é centralizada com a mesma curva contínua usada na
+aproximação da bolinha. A travessia termina quando a faixa deixa de ser vista,
+com o tempo servindo apenas de limite de segurança.
 """
 
 import time
@@ -33,7 +33,7 @@ class ExitPhaseController:
     SEARCH_OBSERVE = "EXIT_SEARCH_OBSERVE"
     ALIGN = "EXIT_ALIGN"
     ALIGN_YAW = "EXIT_ALIGN_YAW"
-    ALIGN_LATERAL = "EXIT_ALIGN_LATERAL"
+    ALIGN_ARC = "EXIT_ALIGN_ARC"
     ALIGN_BRAKE = "EXIT_ALIGN_BRAKE"
     ALIGN_SETTLE = "EXIT_ALIGN_SETTLE"
     CROSS = "EXIT_CROSS"
@@ -99,7 +99,7 @@ class ExitPhaseController:
         """Imagens feitas durante o giro não confirmam a soleira."""
         if self.state in (
             self.SEARCH_START, self.SEARCH_ROTATE, self.SEARCH_BRAKE,
-            self.SEARCH_SETTLE, self.ALIGN_YAW, self.ALIGN_LATERAL,
+            self.SEARCH_SETTLE, self.ALIGN_YAW,
             self.ALIGN_BRAKE, self.ALIGN_SETTLE,
         ):
             return False
@@ -145,8 +145,10 @@ class ExitPhaseController:
             return self._on_observe(exit_detection, frame_shape, now)
         if self.state == self.ALIGN:
             return self._on_align(exit_detection, frame_shape, now)
-        if self.state in (self.ALIGN_YAW, self.ALIGN_LATERAL):
+        if self.state == self.ALIGN_YAW:
             return self._on_align_motion(now)
+        if self.state == self.ALIGN_ARC:
+            return self._on_align(exit_detection, frame_shape, now)
         if self.state == self.ALIGN_BRAKE:
             return self._stop(
                 self.ALIGN_BRAKE,
@@ -250,6 +252,11 @@ class ExitPhaseController:
                 else now
             )
             if perdida_por < cfg.EXIT_ALIGN_LOST_TIMEOUT_S - 1e-9:
+                if self.state == self.ALIGN_ARC:
+                    return self._current_alignment_motion(
+                        f"soleira oculta por {perdida_por:.2f}s; "
+                        "mantendo a curva do alvo travado",
+                    )
                 return self._stop(
                     self.ALIGN,
                     f"soleira oculta por {perdida_por:.2f}s; "
@@ -274,11 +281,11 @@ class ExitPhaseController:
                             detalhe=(
                                 "modelo oculto; mantendo giro do alvo travado"),
                         )
-                    if abs(erro_centro) > cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
-                        return self._start_lateral_correction(
+                    if abs(erro_centro) > self._center_threshold():
+                        return self._start_arc_correction(
                             erro_centro,
                             detalhe=(
-                                "modelo oculto; mantendo lateral do alvo travado"),
+                                "modelo oculto; mantendo curva do alvo travado"),
                         )
                 return self._stop(
                     self.ALIGN,
@@ -292,18 +299,13 @@ class ExitPhaseController:
         self._remember_alignment_target(exit_detection, now)
         erro_centro, erro_angulo = self._alignment_errors(
             exit_detection, frame_shape)
-        if self._alignment_converged_after_correction(
-            erro_centro, erro_angulo
-        ):
-            return self.begin_cross(now=now)
         if abs(erro_angulo) > cfg.EXIT_ALIGN_MAX_ANGLE_DEG:
             self._align_previous_errors = (erro_centro, erro_angulo)
             return self._start_yaw_correction(erro_angulo)
-        if abs(erro_centro) > cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
+        if abs(erro_centro) > self._center_threshold():
             self._align_previous_errors = (erro_centro, erro_angulo)
-            return self._start_lateral_correction(erro_centro)
-        # O frame é novo e foi capturado depois da frenagem/estabilização.
-        # Esperar uma segunda vez só dá oportunidade para perder o alvo.
+            return self._start_arc_correction(erro_centro)
+        # A histerese permite começar o avanço com um pequeno erro lateral.
         return self.begin_cross(now=now)
 
     def _on_align_motion(self, now):
@@ -381,9 +383,11 @@ class ExitPhaseController:
             return True
         if state == self.ALIGN:
             return False
-        if state in (self.ALIGN_YAW, self.ALIGN_LATERAL):
+        if state == self.ALIGN_YAW:
             if self._align_motion_started_at is None:
                 self._align_motion_started_at = now
+            return False
+        if state == self.ALIGN_ARC:
             return False
         if state == self.ALIGN_BRAKE:
             self.state = self.ALIGN_SETTLE
@@ -400,7 +404,9 @@ class ExitPhaseController:
 
     def begin_cross(self, now=None):
         """Inicia o avanco reto assim que a soleira distante e confirmada."""
-        if self.state not in (self.SEARCH_OBSERVE, self.ALIGN):
+        if self.state not in (
+            self.SEARCH_OBSERVE, self.ALIGN, self.ALIGN_ARC
+        ):
             raise RuntimeError(
                 "travessia exige soleira confirmada durante a observacao")
         self.state = self.CROSS
@@ -418,54 +424,10 @@ class ExitPhaseController:
         if abs(erro_angulo) > cfg.EXIT_ALIGN_MAX_ANGLE_DEG:
             self._align_previous_errors = (erro_centro, erro_angulo)
             return self._start_yaw_correction(erro_angulo)
-        if abs(erro_centro) > cfg.EXIT_ALIGN_MAX_CENTER_ERROR:
+        if abs(erro_centro) > self._center_threshold():
             self._align_previous_errors = (erro_centro, erro_angulo)
-            return self._start_lateral_correction(erro_centro)
+            return self._start_arc_correction(erro_centro)
         return self.begin_cross()
-
-    def _alignment_converged_after_correction(
-        self, erro_centro, erro_angulo
-    ):
-        """Reconhece convergencia sem deixar o omni entrar em ping-pong.
-
-        Se o erro troca de sinal depois de um pulso, o chassi atravessou o
-        ponto desejado. Dentro de um envelope seguro isso e alinhamento, nao
-        motivo para mandar outro pulso inteiro no sentido contrario. Depois
-        de varias correcoes, o mesmo envelope tambem encerra ruido sem troca
-        de sinal perfeitamente observavel.
-        """
-        anterior = self._align_previous_errors
-        if anterior is None or self._align_corrections <= 0:
-            return False
-        centro_anterior, angulo_anterior = anterior
-        centro_no_envelope = (
-            abs(float(centro_anterior))
-            <= cfg.EXIT_ALIGN_COMMIT_CENTER_ERROR
-            and abs(float(erro_centro))
-            <= cfg.EXIT_ALIGN_COMMIT_CENTER_ERROR
-        )
-        angulo_no_envelope = (
-            abs(float(angulo_anterior)) <= cfg.EXIT_ALIGN_COMMIT_ANGLE_DEG
-            and abs(float(erro_angulo)) <= cfg.EXIT_ALIGN_COMMIT_ANGLE_DEG
-        )
-        cruzou_centro = (
-            centro_no_envelope
-            and float(centro_anterior) * float(erro_centro) <= 0.0
-            and abs(float(centro_anterior) - float(erro_centro)) > 1e-6
-        )
-        cruzou_angulo = (
-            angulo_no_envelope
-            and float(angulo_anterior) * float(erro_angulo) <= 0.0
-            and abs(float(angulo_anterior) - float(erro_angulo)) > 1e-6
-        )
-        dentro_do_envelope = centro_no_envelope and angulo_no_envelope
-        insistiu_sem_convergir = (
-            self._align_corrections
-            >= cfg.EXIT_ALIGN_COMMIT_AFTER_CORRECTIONS
-        )
-        return dentro_do_envelope and (
-            cruzou_centro or cruzou_angulo or insistiu_sem_convergir
-        )
 
     def aligned(self, detection, frame_shape):
         """A soleira está centralizada o bastante para atravessar?"""
@@ -474,7 +436,7 @@ class ExitPhaseController:
         erro_centro, erro_angulo = self._alignment_errors(
             detection, frame_shape)
         return (
-            abs(erro_centro) <= cfg.EXIT_ALIGN_MAX_CENTER_ERROR
+            abs(erro_centro) <= cfg.EXIT_ALIGN_EXIT_CENTER_ERROR
             and abs(erro_angulo) <= cfg.EXIT_ALIGN_MAX_ANGLE_DEG
         )
 
@@ -510,46 +472,27 @@ class ExitPhaseController:
         return self._current_alignment_motion(
             detalhe or f"corrigindo inclinacao {erro_angulo:+.1f} graus")
 
-    def _start_lateral_correction(self, erro_centro, detalhe=None):
-        if not self._correction_allowed():
-            return self._restart_search_after_alignment()
-        proporcao = min(
-            abs(float(erro_centro))
-            / max(cfg.EXIT_ALIGN_OMNI_FULL_ERROR, 1e-6),
-            1.0,
-        )
-        self._align_motion_duration_s = self._interpolate(
-            cfg.EXIT_ALIGN_OMNI_MIN_PULSE_S,
-            cfg.EXIT_ALIGN_OMNI_MAX_PULSE_S,
-            proporcao,
-        )
-        lateral = int(cfg.EXIT_ALIGN_OMNI_PWM)
-        frente = int(cfg.EXIT_ALIGN_FORWARD_PWM)
-        if erro_centro > 0.0:
-            rodas = (
-                frente - lateral,
-                frente + lateral,
-                frente + lateral,
-                frente - lateral,
-            )
-            lado = "esquerda"
-        else:
-            rodas = (
-                frente + lateral,
-                frente - lateral,
-                frente - lateral,
-                frente + lateral,
-            )
-            lado = "direita"
-        rodas = tuple(max(min(valor, 120), -120) for valor in rodas)
-        self._align_wheel_speeds = rodas
-        self._align_angle = 190
+    def _start_arc_correction(self, erro_centro, detalhe=None):
+        severidade = min(max(
+            (
+                abs(float(erro_centro))
+                - cfg.EXIT_ALIGN_EXIT_CENTER_ERROR
+            ) / max(1.0 - cfg.EXIT_ALIGN_EXIT_CENTER_ERROR, 1e-6),
+            0.0,
+        ), 1.0)
+        magnitude = int(round(
+            cfg.EXIT_ALIGN_ARC_MIN_ANGLE
+            + severidade
+            * (cfg.EXIT_ALIGN_ARC_MAX_ANGLE - cfg.EXIT_ALIGN_ARC_MIN_ANGLE)
+        ))
+        self._align_angle = magnitude if erro_centro > 0.0 else -magnitude
+        self._align_wheel_speeds = None
         self._align_motion_started_at = None
         self._stopped_at = None
-        self.state = self.ALIGN_LATERAL
+        self.state = self.ALIGN_ARC
         return self._current_alignment_motion(
             detalhe or (
-                f"avancando diagonal para {lado}; erro={erro_centro:+.2f}"))
+                f"curvando como na bolinha; erro={erro_centro:+.2f}"))
 
     def _remember_alignment_target(self, detection, now):
         self._align_target = detection
@@ -573,13 +516,33 @@ class ExitPhaseController:
             "alinhamento nao convergiu; retomando a procura da soleira")
 
     def _current_alignment_motion(self, detail=None):
-        if self.state == self.ALIGN_LATERAL:
+        if self.state == self.ALIGN_ARC:
+            severidade = min(max(
+                (
+                    abs(float(self._align_angle))
+                    - cfg.EXIT_ALIGN_ARC_MIN_ANGLE
+                ) / max(
+                    cfg.EXIT_ALIGN_ARC_MAX_ANGLE
+                    - cfg.EXIT_ALIGN_ARC_MIN_ANGLE,
+                    1e-6,
+                ),
+                0.0,
+            ), 1.0)
+            velocidade = (
+                cfg.EXIT_ALIGN_ARC_SPEED_MIN
+                + severidade
+                * (
+                    cfg.EXIT_ALIGN_ARC_SPEED_MAX
+                    - cfg.EXIT_ALIGN_ARC_SPEED_MIN
+                )
+            )
             return MotionCommand(
-                self.ALIGN_LATERAL,
+                self.ALIGN_ARC,
+                angle=self._align_angle,
+                speed=float(velocidade),
                 detail=(
                     detail
-                    or "executando pulso lateral omni de alinhamento"),
-                wheel_speeds=self._align_wheel_speeds,
+                    or "curvando continuamente para centralizar a saida"),
             )
         return MotionCommand(
             self.ALIGN_YAW,
@@ -587,6 +550,11 @@ class ExitPhaseController:
             speed=cfg.EXIT_ALIGN_SPEED,
             detail=detail or "executando pulso tanque de alinhamento angular",
         )
+
+    def _center_threshold(self):
+        if self.state == self.ALIGN_ARC:
+            return cfg.EXIT_ALIGN_EXIT_CENTER_ERROR
+        return cfg.EXIT_ALIGN_ENTER_CENTER_ERROR
 
     @staticmethod
     def _interpolate(minimo, maximo, proporcao):
