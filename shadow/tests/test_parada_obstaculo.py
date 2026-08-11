@@ -429,7 +429,7 @@ class DesvioObstaculoTests(unittest.TestCase):
         self.assertGreaterEqual(len(comandos_tanque), 6)
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
-    def test_saida_so_aceita_ramo_centralizado_com_robo_parado(self):
+    def test_segundo_ciclo_aceita_ramificacao_valida_vista_de_lado(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
 
@@ -450,10 +450,36 @@ class DesvioObstaculoTests(unittest.TestCase):
             dormir=relogio.sleep,
         )
 
-        self.assertIsNone(lado)
+        self.assertEqual(lado, "centro")
         self.assertIn(("rodas", -60, -60, 60, 60), arduino.comandos)
         self.assertIn(("rodas", 60, 60, -60, -60), arduino.comandos)
         self.assertIn(("rodas", -60, -60, -60, -60), arduino.comandos)
+        self.assertEqual(arduino.comandos[-1], ("parar",))
+
+    def test_dois_ciclos_sem_ramificacao_executam_re_maior(self):
+        arduino = ArduinoMovimentoFalso()
+        relogio = RelogioFalso()
+
+        lado = procurar_continuacao_saida_pulsada(
+            arduino,
+            orientacao_ramificacao=lambda: None,
+            pwm=60,
+            duracao_pulso_s=.05,
+            pausa_assentamento_s=.02,
+            observacao_s=.05,
+            confirmacao_s=.025,
+            pulsos_esquerda=2,
+            pulsos_direita=4,
+            re_inicial_s=.05,
+            avanco_tentativa_s=.05,
+            re_final_s=.10,
+            relogio=relogio.monotonic,
+            dormir=relogio.sleep,
+        )
+
+        self.assertIsNone(lado)
+        self.assertGreaterEqual(
+            arduino.comandos.count(("rodas", -60, -60, -60, -60)), 2)
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
     def test_saida_mapeia_direita_esquerda_e_volta_para_o_meio(self):
@@ -464,13 +490,15 @@ class DesvioObstaculoTests(unittest.TestCase):
         def orientacao_mapeada():
             nonlocal leituras
             leituras += 1
-            # Tres leituras por parada: primeiro a ponta passa pela direita,
-            # depois pela esquerda. A confirmacao final ja ocorre no meio.
-            if leituras <= 9:
+            # Tres leituras por parada em cada uma das duas varreduras: a
+            # ponta passa pela direita e depois pela esquerda. So a leitura
+            # final, ja no rumo calculado, aparece no centro.
+            if leituras > 36:
+                return "centro"
+            indice_no_ciclo = (leituras - 1) % 18
+            if indice_no_ciclo < 9:
                 return "direita"
-            if leituras <= 18:
-                return "esquerda"
-            return "centro"
+            return "esquerda"
 
         lado = procurar_continuacao_saida_pulsada(
             arduino,

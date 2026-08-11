@@ -513,7 +513,7 @@ def procurar_continuacao_saida_pulsada(
             return None
         return observar_parado(mapa, posicao)
 
-    def escolher_destino_mapeado(mapa):
+    def escolher_destino_mapeado(mapa, destino_anterior=None):
         """Acha onde a ponta cruzou o centro entre dois pulsos.
 
         Ao varrer da esquerda para a direita, uma mesma ponta do trajeto
@@ -548,10 +548,35 @@ def procurar_continuacao_saida_pulsada(
         centros = [posicao for posicao, lado in mapa if lado == "centro"]
         if centros:
             return (centros[-1], "no centro")
+
+        # No segundo ciclo o avanco pode aproximar tanto a linha que a ponta
+        # aparece apenas de um lado antes de sair do quadro. Ela ainda e uma
+        # continuacao valida, pois passou por detectar_continuacao_saida(),
+        # que rejeita a barra transversal isolada. Meio pulso projeta o alvo
+        # para dentro da camera. Havendo mapa anterior, escolhe a estimativa
+        # coerente com ele.
+        estimativas = []
+        for posicao, lado in mapa:
+            if lado == "direita":
+                estimativas.append(posicao + .5)
+            elif lado == "esquerda":
+                estimativas.append(posicao - .5)
+        if estimativas:
+            if destino_anterior is not None:
+                destino = min(
+                    estimativas,
+                    key=lambda valor: abs(valor - destino_anterior),
+                )
+                return (destino, "estimado com o primeiro mapa")
+            estimativas.sort()
+            return (
+                estimativas[len(estimativas) // 2],
+                "estimado pela ponta valida",
+            )
         return (None, None)
 
-    def varrer_e_voltar():
-        """Varre, mapeia os dois lados e volta para a continuacao."""
+    def varrer_e_voltar(*, apenas_mapear, destino_anterior=None):
+        """Varre e volta ao inicio ou ao ramo escolhido no segundo ciclo."""
         posicao = 0
         mapa = []
 
@@ -563,10 +588,15 @@ def procurar_continuacao_saida_pulsada(
             posicao += 1
             pulso("direita", mapa, posicao)
 
-        destino, origem_destino = escolher_destino_mapeado(mapa)
+        destino_mapeado, origem_destino = escolher_destino_mapeado(
+            mapa,
+            destino_anterior=destino_anterior,
+        )
+        # A primeira varredura serve somente para analisar. Ela sempre volta
+        # ao rumo inicial antes do avanco, conservando seu mapa como guia para
+        # o segundo ciclo. No segundo, volta diretamente ao ramo escolhido.
+        destino = 0 if apenas_mapear else destino_mapeado
         if destino is None:
-            # Nao ficou nenhum ramo confiavel no mapa. Volta ao rumo de
-            # inicio antes do proximo avanco para a segunda tentativa.
             destino = 0
 
         while abs(posicao - destino) > 1e-9 and not deve_encerrar():
@@ -577,18 +607,29 @@ def procurar_continuacao_saida_pulsada(
                 return None
             posicao += -fracao_pulso if lado == "esquerda" else fracao_pulso
 
-        if deve_encerrar() or origem_destino is None:
-            return False
-        if not mover(lambda: arduino.parar(), pausa_assentamento_s,
-                     "assentamento da confirmacao final"):
-            return None
-        confirmado = observar_parado(mapa, posicao)
+        if deve_encerrar():
+            return (False, destino_mapeado)
+
         if mapa:
             resumo = ", ".join(
                 f"p{indice:g}:{lado}" for indice, lado in mapa[-12:])
-            print(
-                f"[controle] mapa da saida ({origem_destino}): {resumo}")
-        return confirmado
+            fase = "analise" if apenas_mapear else origem_destino
+            print(f"[controle] mapa da saida ({fase}): {resumo}")
+
+        if apenas_mapear:
+            return (False, destino_mapeado)
+        if destino_mapeado is None or not mapa:
+            return (False, destino_mapeado)
+
+        if not mover(lambda: arduino.parar(), pausa_assentamento_s,
+                     "assentamento da confirmacao final"):
+            return (False, destino_mapeado)
+
+        # A observacao final atualiza a memoria visual, mas nao volta a negar
+        # a ramificacao que o segundo mapa ja comprovou. A partir daqui o
+        # proprio segue-linha corrige o pequeno erro residual de alinhamento.
+        observar_parado(mapa, posicao)
+        return (True, destino_mapeado)
 
     try:
         if deve_encerrar():
@@ -605,8 +646,7 @@ def procurar_continuacao_saida_pulsada(
             "a re curta antes da varredura",
         ):
             return None
-        if varrer_e_voltar():
-            return "centro"
+        _, destino_primeiro_mapa = varrer_e_voltar(apenas_mapear=True)
         if deve_encerrar():
             return None
 
@@ -621,7 +661,11 @@ def procurar_continuacao_saida_pulsada(
             "o avanco para a segunda varredura",
         ):
             return None
-        if varrer_e_voltar():
+        encontrou_segundo_ciclo, _ = varrer_e_voltar(
+            apenas_mapear=False,
+            destino_anterior=destino_primeiro_mapa,
+        )
+        if encontrou_segundo_ciclo:
             return "centro"
         if deve_encerrar():
             return None

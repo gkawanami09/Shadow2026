@@ -65,9 +65,10 @@ OBSTACLE_RETRY_COOLDOWN_S = 1.0
 # Busca da continuacao da linha depois da faixa PRETA de saida. A faixa
 # transversal tambem e preta, portanto o robo se afasta um pouco e faz uma
 # varredura parada entre pulsos, como na busca de bolinhas: dois pulsos de
-# tanque para a esquerda e quatro para a direita. So uma ponta distante que
-# fica centralizada enquanto o chassi esta parado vale como continuacao.
-# Depois da varredura, o robo retorna ao pulso em que essa ponta apareceu.
+# tanque para a esquerda e quatro para a direita. A ponta distante e mapeada
+# em cada parada; se ela cruzar de um lado ao outro, o meio entre os pulsos
+# define o rumo. No segundo ciclo, ate uma ponta vista em um unico lado vale,
+# pois o detector geometrico ja rejeitou a barra transversal isolada.
 EXIT_LINE_PULSE_PWM = 80
 EXIT_LINE_PULSE_S = .40
 EXIT_LINE_PULSE_SETTLE_S = .12
@@ -82,6 +83,10 @@ EXIT_LINE_RETRY_FORWARD_S = .45
 EXIT_LINE_FINAL_REVERSE_PWM = 60
 EXIT_LINE_FINAL_REVERSE_S = 1.00
 EXIT_LINE_REAPPROACH_TIMEOUT_S = 4.0
+# Depois de desligar o detector especial, espera frames NOVOS do pipeline
+# normal. O primeiro e descartado para cobrir um frame que ja estivesse em
+# processamento durante a troca; o segundo entrega um angulo realmente novo.
+EXIT_LINE_HANDOFF_TIMEOUT_S = .75
 EXIT_LINE_CONTINUATION_MAX_AGE_S = .15
 EXIT_CONTINUATION_MIN_AREA_RATIO = .002
 EXIT_CONTINUATION_MIN_TARGET_DISTANCE_RATIO = .30
