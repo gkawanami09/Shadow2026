@@ -341,16 +341,19 @@ class ExitPhaseController:
                 self.DONE,
                 f"travessia encerrada por timeout ({elapsed:.2f} s)",
                 terminal=True)
-        if (
-            elapsed >= cfg.EXIT_ADVANCE_MIN_S - 1e-9
-            and exit_detection is None
+        if exit_detection is None and (
+            self._target_committed
+            or elapsed >= cfg.EXIT_ADVANCE_MIN_S - 1e-9
         ):
-            # Evidência visual: a faixa passou para trás do robô.
+            # O alvo ja foi confirmado. De perto, desaparecer significa que a
+            # faixa pode ter passado sob a camera; a camera de linha assume o
+            # avanco sem exigir outra confirmacao da camera de resgate.
             self._cross_finished_at = now
             self.state = self.DONE
             return self._stop(
                 self.DONE,
-                f"soleira passou para tras ({elapsed:.2f} s); fora da sala",
+                f"soleira confirmada saiu da camera ({elapsed:.2f} s); "
+                "trocando para a camera de linha",
                 terminal=True)
         return self._forward(self.CROSS, "atravessando a soleira de saida")
 

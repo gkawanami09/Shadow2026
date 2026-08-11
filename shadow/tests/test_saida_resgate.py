@@ -405,7 +405,7 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(comando.state, self.exit.CROSS)
         self.assertEqual(comando.angle, 0)
 
-    def test_perda_curta_apos_confirmar_nao_interrompe_o_avanco(self):
+    def test_perda_apos_confirmar_entrega_imediatamente_a_camera_de_linha(self):
         inicio, command = self._ate_comecar_travessia()
         self.exit.notify_command_written(
             command.state, now=inicio + 0.01)
@@ -414,27 +414,24 @@ class ExitPhaseTests(unittest.TestCase):
             FRAME_SHAPE,
             now=inicio + 0.01 + cfg.EXIT_ADVANCE_MIN_S / 2,
         )
-        self.assertEqual(command.state, self.exit.CROSS)
-        self.assertEqual(command.angle, 0)
+        self.assertEqual(command.state, self.exit.DONE)
+        self.assertTrue(command.terminal)
+        self.assertEqual(command.angle, 190)
 
     def test_travessia_termina_quando_a_faixa_passa_para_tras(self):
         alinhado_em, command = self._ate_comecar_travessia()
         inicio = alinhado_em + 0.01
         self.exit.notify_command_written(command.state, now=inicio)
 
-        cedo = inicio + cfg.EXIT_ADVANCE_MIN_S / 2
-        andando = self.exit.update(None, FRAME_SHAPE, now=cedo)
-        self.assertEqual(andando.state, self.exit.CROSS)
-
-        tarde = inicio + cfg.EXIT_ADVANCE_MIN_S + 0.01
-        final = self.exit.update(None, FRAME_SHAPE, now=tarde)
+        perdeu = inicio + cfg.EXIT_ADVANCE_MIN_S / 2
+        final = self.exit.update(None, FRAME_SHAPE, now=perdeu)
         self.assertEqual(final.state, self.exit.DONE)
         self.assertTrue(final.terminal)
         self.assertEqual(final.angle, 190)
         self.assertTrue(self.exit.succeeded)
         self.assertAlmostEqual(
             self.exit.cross_elapsed_s,
-            tarde - inicio,
+            perdeu - inicio,
         )
 
     def test_travessia_tem_timeout_de_seguranca(self):
@@ -548,6 +545,10 @@ class SilverStripeRuntimeTests(unittest.TestCase):
             self.readings = list(
                 [300] * 20 if readings is None else readings)
             self.ultrasonic_active = False
+            self.led_modes = []
+
+        def led(self, mode):
+            self.led_modes.append(str(mode).upper())
 
         def refresh(self, fail_closed=True):
             return True
@@ -626,8 +627,9 @@ class SilverStripeRuntimeTests(unittest.TestCase):
             patch("controle.direcao.steer", side_effect=fake_steer),
             patch("visao.captura.LineCamera", return_value=camera),
         ):
+            arduino = self.Arduino()
             resultado = resgate_runtime._confirmar_saida_com_camera_linha(
-                self.Arduino(),
+                arduino,
                 debug=False,
             )
 
@@ -644,6 +646,7 @@ class SilverStripeRuntimeTests(unittest.TestCase):
             (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED),
             commands,
         )
+        self.assertEqual(arduino.led_modes, ["ACESO"])
 
     def test_prata_confirma_em_movimento_e_da_re(self):
         clock = FakeClock()
@@ -662,8 +665,9 @@ class SilverStripeRuntimeTests(unittest.TestCase):
             patch("controle.direcao.steer", side_effect=fake_steer),
             patch("visao.captura.LineCamera", return_value=camera),
         ):
+            arduino = self.Arduino()
             resultado = resgate_runtime._confirmar_saida_com_camera_linha(
-                self.Arduino(),
+                arduino,
                 debug=False,
             )
 
@@ -681,6 +685,7 @@ class SilverStripeRuntimeTests(unittest.TestCase):
             comando == (0, cfg.EXIT_LINE_VERIFY_SPEED)
             for comando in commands[1:indice_re - 1]
         ))
+        self.assertEqual(arduino.led_modes, ["ACESO", "APAGADO"])
 
     def test_parede_durante_camera_de_linha_da_uma_unica_re_curta(self):
         clock = FakeClock()
@@ -727,6 +732,7 @@ class SilverStripeRuntimeTests(unittest.TestCase):
             reverse_durations,
             [cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S],
         )
+        self.assertEqual(arduino.led_modes, ["ACESO", "APAGADO"])
         # O bloqueio aconteceu ainda na aproximacao; o retorno e a unica re
         # curta acima provam que a travessia visual nao foi concluida.
 

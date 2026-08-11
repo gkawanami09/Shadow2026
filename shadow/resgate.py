@@ -841,9 +841,12 @@ def _confirmar_saida_com_camera_linha(
     ultimo_log = 0.0
     ultimo_resumo = None
     confirmacao_em_movimento_desde = None
+    manter_led_aceso = False
 
     try:
         steer()
+        arduino.led("ACESO")
+        print("[saida] LED ACESO: entrando na camera do segue-linha")
         camera = LineCamera()
         monitor_corredor = _novo_monitor_corredor_saida()
         monitor_corredor.cancelar(arduino)
@@ -965,6 +968,7 @@ def _confirmar_saida_com_camera_linha(
                     return None
 
             if decisao == PRETA:
+                manter_led_aceso = True
                 print(
                     "[saida] faixa PRETA confirmada em movimento em "
                     f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} de "
@@ -1022,6 +1026,9 @@ def _confirmar_saida_com_camera_linha(
             monitor_corredor.cancelar(arduino)
         if camera is not None:
             camera.close()
+        if not manter_led_aceso:
+            arduino.led("APAGADO")
+            print("[saida] LED APAGADO: retornando a camera de resgate")
 
 
 def _iniciar_segue_linha(debug=False):
