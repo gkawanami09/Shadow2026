@@ -696,6 +696,16 @@ EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO = 0.35
 EXIT_LINE_VERIFY_STEP_S = 0.08
 EXIT_LINE_VERIFY_STEP_SETTLE_S = 0.04
 EXIT_LINE_VERIFY_WINDOW = 5
+# Uma primeira leitura de prata/cinza pode ser apenas reflexo ou uma imagem
+# capturada na borda da faixa. Antes de rejeitar, avanca quase nada, espera a
+# camera assentar e faz uma segunda votacao mais longa. Preto continua podendo
+# ser confirmado rapidamente; para negar preto, a evidencia precisa ser maior.
+EXIT_LINE_VERIFY_RECHECK_FORWARD_S = 0.05
+EXIT_LINE_VERIFY_RECHECK_SETTLE_S = 0.08
+EXIT_LINE_VERIFY_RECHECK_TIMEOUT_S = 1.00
+EXIT_LINE_VERIFY_RECHECK_WINDOW = 7
+EXIT_LINE_VERIFY_RECHECK_BLACK_VOTES = 3
+EXIT_LINE_VERIFY_RECHECK_SILVER_VOTES = 5
 # Antes de votar preto/prata, a faixa precisa chegar ao meio da imagem da
 # camera de linha. Uma prata distante nunca pode acumular voto como preta.
 EXIT_LINE_VERIFY_CENTER_Y_RATIO = 0.50

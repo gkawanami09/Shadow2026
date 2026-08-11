@@ -842,6 +842,7 @@ def _confirmar_saida_com_camera_linha(
     ultimo_resumo = None
     faixa_travada_em = None
     tempo_avanco_acumulado = 0.0
+    rechecando_nao_preta = False
     manter_led_aceso = False
 
     try:
@@ -941,15 +942,16 @@ def _confirmar_saida_com_camera_linha(
                 resultado.classificacao,
                 confirmador.votos_pretos,
                 confirmador.votos_nao_pretos,
+                rechecando_nao_preta,
             )
             if resumo != ultimo_resumo and agora - ultimo_log >= 0.15:
                 print(
                     f"[saida] {fase_confirmacao}: "
                     f"{resultado.classificacao}; "
                     f"preta={confirmador.votos_pretos}/"
-                    f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} "
+                    f"{confirmador.votos_pretos_necessarios} "
                     f"nao-preta={confirmador.votos_nao_pretos}/"
-                    f"{cfg.EXIT_LINE_VERIFY_SILVER_VOTES} "
+                    f"{confirmador.votos_nao_pretos_necessarios} "
                     f"textura={resultado.textura:.1f}")
                 ultimo_resumo = resumo
                 ultimo_log = agora
@@ -968,17 +970,50 @@ def _confirmar_saida_com_camera_linha(
                 manter_led_aceso = True
                 print(
                     "[saida] faixa PRETA confirmada com o robo parado em "
-                    f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} de "
-                    f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames; entregando "
+                    f"{confirmador.votos_pretos_necessarios} de "
+                    f"{confirmador.tamanho_janela} frames; entregando "
                     "a camera de linha; o primeiro ciclo pulsado mapeara a "
                     "ramificacao e o segundo a entregara ao segue-linha")
                 return PRETA
 
             if decisao == NAO_PRETA:
+                if not rechecando_nao_preta:
+                    print(
+                        "[saida] aparencia CINZA/PRATA na primeira votacao; "
+                        "avancando apenas "
+                        f"{cfg.EXIT_LINE_VERIFY_RECHECK_FORWARD_S:.2f} s, "
+                        "estabilizando e revalidando antes de negar o preto")
+                    steer()
+                    _mover_saida_por_tempo(
+                        arduino,
+                        steer,
+                        0,
+                        cfg.EXIT_LINE_VERIFY_SPEED,
+                        cfg.EXIT_LINE_VERIFY_RECHECK_FORWARD_S,
+                        epoca_serial,
+                    )
+                    tempo_avanco_acumulado += (
+                        cfg.EXIT_LINE_VERIFY_RECHECK_FORWARD_S)
+                    if steer() is False:
+                        raise RuntimeError(
+                            "nao foi possivel frear para revalidar a faixa")
+                    time.sleep(cfg.EXIT_LINE_VERIFY_RECHECK_SETTLE_S)
+                    confirmador = ConfirmadorFaixaSaidaLinha(
+                        tamanho_janela=cfg.EXIT_LINE_VERIFY_RECHECK_WINDOW,
+                        votos_pretos=(
+                            cfg.EXIT_LINE_VERIFY_RECHECK_BLACK_VOTES),
+                        votos_nao_pretos=(
+                            cfg.EXIT_LINE_VERIFY_RECHECK_SILVER_VOTES),
+                    )
+                    faixa_travada_em = time.monotonic()
+                    rechecando_nao_preta = True
+                    ultimo_resumo = None
+                    continue
+
                 print(
-                    "[saida] faixa CINZA/PRATA confirmada em "
-                    f"{cfg.EXIT_LINE_VERIFY_SILVER_VOTES} de "
-                    f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames; "
+                    "[saida] faixa CINZA/PRATA reconfirmada em "
+                    f"{confirmador.votos_nao_pretos_necessarios} de "
+                    f"{confirmador.tamanho_janela} frames; "
                     "dando re e parando")
                 steer()
                 _mover_saida_por_tempo(
@@ -999,7 +1034,11 @@ def _confirmar_saida_com_camera_linha(
             esgotou_confirmacao = (
                 faixa_travada_em is not None
                 and agora - faixa_travada_em
-                >= cfg.EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S
+                >= (
+                    cfg.EXIT_LINE_VERIFY_RECHECK_TIMEOUT_S
+                    if rechecando_nao_preta
+                    else cfg.EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S
+                )
             )
             if esgotou_aproximacao or esgotou_confirmacao:
                 duracao_retorno = max(

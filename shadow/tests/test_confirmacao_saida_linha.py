@@ -149,6 +149,25 @@ class ConfirmadorTests(unittest.TestCase):
         self.assertIsNone(decisao)
         self.assertEqual(confirmador.votos_pretos, 1)
 
+    def test_rechecagem_pode_exigir_mais_prata_sem_atrasar_preto(self):
+        confirmador = ConfirmadorFaixaSaidaLinha(
+            tamanho_janela=7,
+            votos_pretos=3,
+            votos_nao_pretos=5,
+        )
+        instante = 1.0
+        for _ in range(4):
+            decisao, _ = confirmador.update(
+                cena_prata(), timestamp=instante, now=instante)
+            instante += 0.03
+        self.assertIsNone(decisao)
+
+        for _ in range(3):
+            decisao, _ = confirmador.update(
+                cena_preta(), timestamp=instante, now=instante)
+            instante += 0.03
+        self.assertEqual(decisao, PRETA)
+
 
 if __name__ == "__main__":
     unittest.main()

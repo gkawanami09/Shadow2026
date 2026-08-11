@@ -254,6 +254,7 @@ def vision_loop(debug=False):
                 contours_red,
                 "red",
                 debug_img=cv2_img if debug else None,
+                frame_shape=red_image.shape,
             )
             red_candidate.value = candidato_vermelho_frame
             red_detected.value = confirmador_vermelho.atualizar(

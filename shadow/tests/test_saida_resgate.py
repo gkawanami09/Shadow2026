@@ -616,6 +616,25 @@ class SilverStripeRuntimeTests(unittest.TestCase):
         def close(self):
             self.closed = True
 
+    class CameraPrataDepoisPreta:
+        def __init__(self, clock):
+            self.clock = clock
+            self.closed = False
+            self.frames = 0
+
+        def get_frame(self):
+            self.clock.sleep(0.10)
+            self.frames += 1
+            if self.frames <= 3:
+                frame = cena_prata()
+                deslocado = np.full_like(frame, 205)
+                deslocado[50:] = frame[:-50]
+                return deslocado
+            return cena_preta()
+
+        def close(self):
+            self.closed = True
+
     def test_preto_trava_avanco_e_entrega_ao_segue_linha(self):
         clock = FakeClock()
         camera = self.CameraPreta(clock)
@@ -685,13 +704,53 @@ class SilverStripeRuntimeTests(unittest.TestCase):
         )
         indice_re = commands.index(
             (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED))
-        # Nenhum avanco e permitido depois da decisao de prata.
+        # A primeira decisao de prata causa somente o pequeno passo de
+        # rechecagem. A re acontece apenas depois da segunda votacao.
         ultimo_avanco = max(
             indice for indice, comando in enumerate(commands)
             if comando == (0, cfg.EXIT_LINE_VERIFY_SPEED)
         )
         self.assertLess(ultimo_avanco, indice_re)
         self.assertEqual(arduino.led_modes, ["ACESO", "APAGADO"])
+
+    def test_primeira_prata_que_vira_preto_na_rechecagem_nao_da_re(self):
+        clock = FakeClock()
+        camera = self.CameraPrataDepoisPreta(clock)
+        movimentos = []
+
+        def fake_move(
+            _arduino, _acao, angle, _speed, duration, _epoch,
+        ):
+            movimentos.append((angle, duration))
+            clock.sleep(duration)
+
+        with (
+            patch.object(
+                resgate_runtime.time, "monotonic", side_effect=clock),
+            patch.object(
+                resgate_runtime.time, "sleep", side_effect=clock.sleep),
+            patch("controle.direcao.steer", return_value=True),
+            patch("visao.captura.LineCamera", return_value=camera),
+            patch.object(
+                resgate_runtime,
+                "_mover_saida_por_tempo",
+                side_effect=fake_move,
+            ),
+        ):
+            arduino = self.Arduino()
+            resultado = resgate_runtime._confirmar_saida_com_camera_linha(
+                arduino,
+                debug=False,
+            )
+
+        self.assertEqual(resultado, resgate_runtime.PRETA)
+        self.assertTrue(camera.closed)
+        self.assertIn(
+            (0, cfg.EXIT_LINE_VERIFY_RECHECK_FORWARD_S),
+            movimentos,
+        )
+        self.assertFalse(any(angulo == 200 for angulo, _ in movimentos))
+        self.assertEqual(arduino.led_modes, ["ACESO"])
 
     def test_parede_durante_camera_de_linha_da_uma_unica_re_curta(self):
         clock = FakeClock()

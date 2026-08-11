@@ -254,11 +254,32 @@ class ClassificadorFaixaSaidaLinha:
 class ConfirmadorFaixaSaidaLinha:
     """Votacao temporal que trava em PRETA ou NAO_PRETA."""
 
-    def __init__(self, classificador=None):
+    def __init__(
+        self,
+        classificador=None,
+        tamanho_janela=None,
+        votos_pretos=None,
+        votos_nao_pretos=None,
+    ):
         self.classificador = (
             ClassificadorFaixaSaidaLinha()
             if classificador is None else classificador)
-        self._votos = deque(maxlen=cfg.EXIT_LINE_VERIFY_WINDOW)
+        self.tamanho_janela = int(
+            cfg.EXIT_LINE_VERIFY_WINDOW
+            if tamanho_janela is None else tamanho_janela)
+        self.votos_pretos_necessarios = int(
+            cfg.EXIT_LINE_VERIFY_BLACK_VOTES
+            if votos_pretos is None else votos_pretos)
+        self.votos_nao_pretos_necessarios = int(
+            cfg.EXIT_LINE_VERIFY_SILVER_VOTES
+            if votos_nao_pretos is None else votos_nao_pretos)
+        if self.tamanho_janela < 1:
+            raise ValueError("a janela de confirmacao precisa ser positiva")
+        if not 1 <= self.votos_pretos_necessarios <= self.tamanho_janela:
+            raise ValueError("votos pretos invalidos para a janela")
+        if not 1 <= self.votos_nao_pretos_necessarios <= self.tamanho_janela:
+            raise ValueError("votos nao-pretos invalidos para a janela")
+        self._votos = deque(maxlen=self.tamanho_janela)
         self._ultimo_timestamp = None
         self._decisao = None
         self.ultimo_resultado = None
@@ -294,11 +315,11 @@ class ConfirmadorFaixaSaidaLinha:
             return None, resultado
 
         self._votos.append(resultado.classificacao)
-        if self.votos_pretos >= cfg.EXIT_LINE_VERIFY_BLACK_VOTES:
+        if self.votos_pretos >= self.votos_pretos_necessarios:
             self._decisao = PRETA
         elif (
             self.votos_nao_pretos
-            >= cfg.EXIT_LINE_VERIFY_SILVER_VOTES
+            >= self.votos_nao_pretos_necessarios
         ):
             self._decisao = NAO_PRETA
         return self._decisao, resultado

@@ -225,7 +225,13 @@ GREEN_BRANCH_TRACKER_OFFSET_PX = 150
 # ----------------------------------------------------------------------------
 # Vermelho
 # ----------------------------------------------------------------------------
-RED_MIN_CONTOUR = 15000                   # candidato vermelho em cada frame
+RED_MIN_CONTOUR = 15000                   # area grande: aceita faixa ja proxima
+# Faixa distante: pode ter pouca area, mas precisa ser comprida, transversal
+# e fina. Isso antecipa a desaceleracao/confirmacao sem aceitar uma mancha.
+RED_FAR_MIN_CONTOUR = 900
+RED_FAR_MIN_SPAN_RATIO = .42
+RED_FAR_MIN_ASPECT_RATIO = 3.0
+RED_FAR_MAX_ANGLE_DEG = 30.0
 RED_CONFIRM_WINDOW_FRAMES = 3
 RED_CONFIRM_READINGS = 2                  # 2-de-3: rejeita um frame vermelho isolado
 wait_time_red = 9                         # s parado no vermelho
