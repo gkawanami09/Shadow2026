@@ -143,8 +143,8 @@ def control_loop():
             print(
                 "[controle] faixa PRETA ja confirmada; procurando "
                 "ramificacao por pulsos obrigatorios: 2 a esquerda e 4 a "
-                "direita; somente a ponta distante centralizada libera o "
-                "segue-linha")
+                "direita; o cruzamento esquerda/direita define o meio da "
+                "continuacao e libera o segue-linha")
             try:
                 lado_encontrado = procurar_continuacao_saida_pulsada(
                     arduino,
@@ -203,8 +203,8 @@ def control_loop():
             line_status.value = "line_detected"
             status.value = 'Continuacao encontrada - seguindo linha'
             print(
-                "[controle] ramificacao centralizada confirmada; "
-                "entregando ao segue-linha normal")
+                "[controle] ramificacao mapeada e centralizada; "
+                "entrando no segue-linha normal")
 
         while not terminate.value:
             if not arduino.connected:

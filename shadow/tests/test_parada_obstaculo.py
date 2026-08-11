@@ -456,6 +456,45 @@ class DesvioObstaculoTests(unittest.TestCase):
         self.assertIn(("rodas", -60, -60, -60, -60), arduino.comandos)
         self.assertEqual(arduino.comandos[-1], ("parar",))
 
+    def test_saida_mapeia_direita_esquerda_e_volta_para_o_meio(self):
+        arduino = ArduinoMovimentoFalso()
+        relogio = RelogioFalso()
+        leituras = 0
+
+        def orientacao_mapeada():
+            nonlocal leituras
+            leituras += 1
+            # Tres leituras por parada: primeiro a ponta passa pela direita,
+            # depois pela esquerda. A confirmacao final ja ocorre no meio.
+            if leituras <= 9:
+                return "direita"
+            if leituras <= 18:
+                return "esquerda"
+            return "centro"
+
+        lado = procurar_continuacao_saida_pulsada(
+            arduino,
+            orientacao_ramificacao=orientacao_mapeada,
+            pwm=60,
+            duracao_pulso_s=.05,
+            pausa_assentamento_s=.02,
+            observacao_s=.05,
+            confirmacao_s=.025,
+            pulsos_esquerda=2,
+            pulsos_direita=4,
+            re_inicial_s=.05,
+            avanco_tentativa_s=.05,
+            re_final_s=.05,
+            relogio=relogio.monotonic,
+            dormir=relogio.sleep,
+        )
+
+        self.assertEqual(lado, "centro")
+        # Alem dos dois pulsos iniciais a esquerda, o retorno de p2 para o
+        # meio entre p-1 e p0 requer dois pulsos inteiros e meio a esquerda.
+        self.assertGreaterEqual(
+            arduino.comandos.count(("rodas", -60, -60, 60, 60)), 5)
+
     def test_busca_para_no_timeout_sem_linha(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()

@@ -513,33 +513,71 @@ def procurar_continuacao_saida_pulsada(
             return None
         return observar_parado(mapa, posicao)
 
+    def escolher_destino_mapeado(mapa):
+        """Acha onde a ponta cruzou o centro entre dois pulsos.
+
+        Ao varrer da esquerda para a direita, uma mesma ponta do trajeto
+        aparece primeiro no lado direito da imagem e, depois de o robo passar
+        do seu rumo, no lado esquerdo. Mesmo que nenhum frame tenha caido
+        exatamente no centro, o meio entre esses dois pulsos e a direcao da
+        continuacao. Isso e mais robusto que exigir um frame central isolado.
+        """
+        cruzamentos = []
+        for indice_direita, (posicao_direita, lado_direita) in enumerate(mapa):
+            if lado_direita != "direita":
+                continue
+            for posicao_esquerda, lado_esquerda in (
+                mapa[indice_direita + 1:]
+            ):
+                if (
+                    lado_esquerda == "esquerda"
+                    and posicao_esquerda > posicao_direita
+                ):
+                    cruzamentos.append((
+                        posicao_esquerda - posicao_direita,
+                        posicao_direita,
+                        posicao_esquerda,
+                    ))
+                    break
+        if cruzamentos:
+            _, direita, esquerda = min(cruzamentos)
+            return ((direita + esquerda) / 2.0, "entre os dois lados")
+
+        # O caso ideal continua valido: a ponta realmente apareceu no meio
+        # durante uma das observacoes paradas.
+        centros = [posicao for posicao, lado in mapa if lado == "centro"]
+        if centros:
+            return (centros[-1], "no centro")
+        return (None, None)
+
     def varrer_e_voltar():
-        """Varre esquerda/direita e volta ao pulso com ramo centralizado."""
+        """Varre, mapeia os dois lados e volta para a continuacao."""
         posicao = 0
-        posicao_candidata = None
         mapa = []
 
         for _ in range(pulsos_esquerda):
             posicao -= 1
-            if pulso("esquerda", mapa, posicao):
-                posicao_candidata = posicao
+            pulso("esquerda", mapa, posicao)
 
         for _ in range(pulsos_direita):
             posicao += 1
-            if pulso("direita", mapa, posicao):
-                # A ultima confirmacao e a mais confiavel: foi vista depois
-                # de a camera percorrer os dois lados da faixa.
-                posicao_candidata = posicao
+            pulso("direita", mapa, posicao)
 
-        destino = posicao_candidata if posicao_candidata is not None else 0
-        while posicao != destino and not deve_encerrar():
+        destino, origem_destino = escolher_destino_mapeado(mapa)
+        if destino is None:
+            # Nao ficou nenhum ramo confiavel no mapa. Volta ao rumo de
+            # inicio antes do proximo avanco para a segunda tentativa.
+            destino = 0
+
+        while abs(posicao - destino) > 1e-9 and not deve_encerrar():
             lado = "esquerda" if destino < posicao else "direita"
-            if not mover(comandos[lado], duracao_pulso_s,
+            fracao_pulso = min(abs(destino - posicao), 1.0)
+            if not mover(comandos[lado], duracao_pulso_s * fracao_pulso,
                           f"retorno ao ramo {lado}"):
                 return None
-            posicao += -1 if lado == "esquerda" else 1
+            posicao += -fracao_pulso if lado == "esquerda" else fracao_pulso
 
-        if deve_encerrar() or posicao_candidata is None:
+        if deve_encerrar() or origem_destino is None:
             return False
         if not mover(lambda: arduino.parar(), pausa_assentamento_s,
                      "assentamento da confirmacao final"):
@@ -547,8 +585,9 @@ def procurar_continuacao_saida_pulsada(
         confirmado = observar_parado(mapa, posicao)
         if mapa:
             resumo = ", ".join(
-                f"p{indice}:{lado}" for indice, lado in mapa[-12:])
-            print(f"[controle] mapa da saida: {resumo}")
+                f"p{indice:g}:{lado}" for indice, lado in mapa[-12:])
+            print(
+                f"[controle] mapa da saida ({origem_destino}): {resumo}")
         return confirmado
 
     try:
