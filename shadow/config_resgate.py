@@ -685,11 +685,12 @@ EXIT_ALIGN_LOST_TIMEOUT_S = 0.35
 
 # Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
 # aproxima ate deixar de enxergar a soleira. So entao a camera de linha abre e
-# o robo avanca devagar. Ao primeiro sinal da faixa ele PARA, espera a
+# o robo avanca com o mesmo PWM 80 que ja venceu o atrito na aproximacao.
+# Ao primeiro sinal da faixa ele PARA, espera a
 # autoexposicao assentar e zera os votos. Cinza/prata precisa de apenas dois
 # votos para bloquear; preto precisa de quatro. Assim uma prata escura vista
 # de longe nunca vence a votacao antes de seus reflexos aparecerem.
-EXIT_LINE_VERIFY_SPEED = 0.35
+EXIT_LINE_VERIFY_SPEED = EXIT_ADVANCE_SPEED
 EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
 EXIT_LINE_VERIFY_WINDOW = 5
 EXIT_LINE_VERIFY_SETTLE_S = 0.25
@@ -722,8 +723,11 @@ EXIT_LINE_VERIFY_TEXTURE_ROI_BOTTOM = 0.75
 EXIT_LINE_VERIFY_TEXTURE_BAND_HEIGHT_RATIO = 0.35
 EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED = 0.35
 EXIT_LINE_VERIFY_REJECT_REVERSE_S = 1.0
-EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED = 0.40
-EXIT_LINE_VERIFY_BLACK_FORWARD_S = 0.45
+# Depois de confirmar preto, atravessa a faixa sem voltar ao PWM fraco. Um
+# segundo e o mesmo trecho reto ja validado na entrada da sala; assim a linha
+# seguinte chega ao campo da camera antes do handoff para o segue-linha.
+EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED = EXIT_ADVANCE_SPEED
+EXIT_LINE_VERIFY_BLACK_FORWARD_S = 1.00
 
 # Mapeamento final dos DOIS triangulos, so para diagnostico e para provar que
 # a sala foi compreendida. Nenhum deles comanda o robo nesta fase.

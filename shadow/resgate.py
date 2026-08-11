@@ -849,8 +849,9 @@ def _confirmar_saida_com_camera_linha(
         monitor_corredor = _novo_monitor_corredor_saida()
         monitor_corredor.cancelar(arduino)
         print(
-            "[saida] camera do segue-linha aberta; avancando devagar ate "
-            "a faixa ficar no centro; ultrassonico continua ativo")
+            "[saida] camera do segue-linha aberta; mantendo avanco reto em "
+            f"PWM {cfg.EXIT_ADVANCE_PWM} ate a faixa ficar no centro; "
+            "ultrassonico continua ativo")
         if steer(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
             raise RuntimeError("nao foi possivel iniciar a aproximacao final")
 
@@ -979,7 +980,9 @@ def _confirmar_saida_com_camera_linha(
                     "[saida] faixa PRETA centralizada e confirmada em "
                     f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} de "
                     f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames com o robo parado; "
-                    "entrando no percurso")
+                    "continuando reto por "
+                    f"{cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_S:.2f} s para "
+                    "colocar a linha seguinte na camera")
                 _mover_saida_por_tempo(
                     arduino,
                     steer,

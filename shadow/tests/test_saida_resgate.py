@@ -227,6 +227,17 @@ class ExitPhaseTests(unittest.TestCase):
     def test_rejeicao_final_da_re_de_um_segundo(self):
         self.assertEqual(cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S, 1.0)
 
+    def test_camera_de_linha_mantem_pwm_forte_ate_o_percurso(self):
+        self.assertEqual(
+            cfg.EXIT_LINE_VERIFY_SPEED,
+            cfg.EXIT_ADVANCE_SPEED,
+        )
+        self.assertEqual(
+            cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_SPEED,
+            cfg.EXIT_ADVANCE_SPEED,
+        )
+        self.assertEqual(cfg.EXIT_LINE_VERIFY_BLACK_FORWARD_S, 1.0)
+
     def test_soleira_a_direita_curva_como_na_aproximacao_da_bolinha(self):
         assentou = self._ate_observar()
         soleira = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
