@@ -291,7 +291,7 @@ def _movimentar_ate_confirmar(
                 confirmada_desde = None
 
             restante = timeout_s - (agora - inicio)
-            if restante <= 0:
+            if restante <= 1e-9:
                 return False
 
             arduino.refresh(fail_closed=True)
@@ -333,3 +333,88 @@ def avancar_ate_linha(
         relogio,
         dormir,
     )
+
+
+def procurar_continuacao_saida_lateral(
+    arduino,
+    linha_a_frente,
+    pwm=None,
+    duracao_esquerda_s=None,
+    duracao_direita_s=None,
+    confirmacao_s=None,
+    deve_encerrar=None,
+    relogio=time.monotonic,
+    dormir=time.sleep,
+):
+    """Procura lateralmente a linha de percurso depois da saida preta.
+
+    A propria faixa transversal tambem e preta, portanto ``linha_a_frente``
+    deve representar continuidade longitudinal (``line_ahead``), e nao a
+    presenca generica de algum contorno preto. Retorna ``"centro"``,
+    ``"esquerda"``, ``"direita"`` ou ``None`` se os dois lados falharem.
+    """
+    import config
+
+    pwm = int(round(
+        config.EXIT_LINE_LATERAL_SEARCH_PWM if pwm is None else pwm))
+    duracao_esquerda_s = float(
+        config.EXIT_LINE_LATERAL_SEARCH_LEFT_S
+        if duracao_esquerda_s is None else duracao_esquerda_s)
+    duracao_direita_s = float(
+        config.EXIT_LINE_LATERAL_SEARCH_RIGHT_S
+        if duracao_direita_s is None else duracao_direita_s)
+    confirmacao_s = float(
+        config.EXIT_LINE_LATERAL_SEARCH_CONFIRM_S
+        if confirmacao_s is None else confirmacao_s)
+    deve_encerrar = deve_encerrar or (lambda: False)
+
+    if not 1 <= pwm <= MAX_PWM:
+        raise ValueError(f"PWM lateral deve ficar entre 1 e {MAX_PWM}")
+    if duracao_esquerda_s <= 0 or duracao_direita_s <= 0:
+        raise ValueError("duracoes da busca lateral devem ser positivas")
+
+    # Confirma primeiro com o robo parado. Assim uma continuacao que ja esta
+    # no centro nao provoca nem mesmo um pequeno deslocamento desnecessario.
+    if _movimentar_ate_confirmar(
+        arduino,
+        arduino.parar,
+        linha_a_frente,
+        confirmacao_s + .05,
+        confirmacao_s,
+        "a confirmacao central da linha de saida",
+        deve_encerrar,
+        relogio,
+        dormir,
+    ):
+        return "centro"
+    if deve_encerrar():
+        return None
+
+    encontrou = _movimentar_ate_confirmar(
+        arduino,
+        lambda: arduino.rodas(-pwm, pwm, pwm, -pwm),
+        linha_a_frente,
+        duracao_esquerda_s,
+        confirmacao_s,
+        "a busca lateral esquerda da linha de saida",
+        deve_encerrar,
+        relogio,
+        dormir,
+    )
+    if encontrou:
+        return "esquerda"
+    if deve_encerrar():
+        return None
+
+    encontrou = _movimentar_ate_confirmar(
+        arduino,
+        lambda: arduino.rodas(pwm, -pwm, -pwm, pwm),
+        linha_a_frente,
+        duracao_direita_s,
+        confirmacao_s,
+        "a busca lateral direita da linha de saida",
+        deve_encerrar,
+        relogio,
+        dormir,
+    )
+    return "direita" if encontrou else None

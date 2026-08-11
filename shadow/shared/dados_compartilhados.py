@@ -65,6 +65,9 @@ entry_silver_votes = Value("i", 0)
 entry_silver_reason = manager.Value("i", "")  # motivo da última rejeição
 rescue_requested = Value("b", False)  # controle pediu o handoff
 red_finished = Value("b", False)      # faixa vermelha final cumprida
+# Armado exclusivamente pelo handoff resgate -> percurso. O main.py isolado
+# nunca executa a procura lateral especial da continuacao da saida.
+exit_line_search_pending = Value("b", False)
 
 timer = Timer()
 

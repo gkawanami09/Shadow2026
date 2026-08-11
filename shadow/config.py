@@ -60,6 +60,14 @@ OBSTACLE_LEFT_PREFERENCE_ARM_TIME_S = .08
 OBSTACLE_LEFT_PREFERENCE_CONFIRM_TIME_S = .12
 OBSTACLE_RETRY_COOLDOWN_S = 1.0
 
+# Busca da continuacao da linha depois da faixa PRETA de saida. A primeira
+# passada vai 0,3 s para a esquerda; a segunda percorre 0,6 s para a direita,
+# cruzando o ponto inicial e cobrindo os dois lados sem girar o chassi.
+EXIT_LINE_LATERAL_SEARCH_PWM = OBSTACLE_LATERAL_PWM
+EXIT_LINE_LATERAL_SEARCH_LEFT_S = .30
+EXIT_LINE_LATERAL_SEARCH_RIGHT_S = .60
+EXIT_LINE_LATERAL_SEARCH_CONFIRM_S = .10
+
 # ----------------------------------------------------------------------------
 # Câmera: captura 640×480 e processamento em 448×252
 # ----------------------------------------------------------------------------

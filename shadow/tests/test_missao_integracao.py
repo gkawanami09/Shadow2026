@@ -76,6 +76,7 @@ class MissionStraightResumeTests(unittest.TestCase):
         compartilhado = SimpleNamespace(
             vision_ready=valor(True),
             line_detected=valor(True),
+            line_ahead=valor(True),
             line_angle=valor(90),
             line_angle_y=valor(200),
             line_size=valor(9000.0),
@@ -87,6 +88,7 @@ class MissionStraightResumeTests(unittest.TestCase):
             preferencia_linha_esquerda=valor(True),
             line_crop=valor(config.LINE_CROP_GREEN),
             min_line_size=valor(9000),
+            exit_line_search_pending=valor(False),
         )
         sistema = MissionSystem(
             compartilhado,
@@ -100,12 +102,14 @@ class MissionStraightResumeTests(unittest.TestCase):
         iniciar.assert_called_once_with()
         self.assertFalse(compartilhado.vision_ready.value)
         self.assertFalse(compartilhado.line_detected.value)
+        self.assertFalse(compartilhado.line_ahead.value)
         self.assertEqual(compartilhado.line_angle.value, 0)
         self.assertEqual(compartilhado.last_bottom_point.value, 224)
         self.assertEqual(compartilhado.line_status.value, "line_detected")
         self.assertEqual(compartilhado.turn_dir.value, "straight")
         self.assertEqual(compartilhado.green_turn_target.value, 0)
         self.assertFalse(compartilhado.preferencia_linha_esquerda.value)
+        self.assertTrue(compartilhado.exit_line_search_pending.value)
 
 
 class MissionEntryAdvanceTests(unittest.TestCase):
@@ -219,6 +223,7 @@ class LineFollowerUnchangedTests(unittest.TestCase):
         self.assertFalse(shared.rescue_requested.value)
         self.assertFalse(shared.red_finished.value)
         self.assertFalse(shared.entry_silver_confirmed.value)
+        self.assertFalse(shared.exit_line_search_pending.value)
 
     def test_entrada_desarmada_nao_reprocessa(self):
         """Depois de entrar na sala, a faixa prata deixa de ser avaliada."""

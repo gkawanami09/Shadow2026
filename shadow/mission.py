@@ -298,6 +298,7 @@ class MissionSystem:
         """
         self.shared.vision_ready.value = False
         self.shared.line_detected.value = False
+        self.shared.line_ahead.value = False
         self.shared.line_angle.value = 0
         self.shared.line_angle_y.value = -1
         self.shared.line_size.value = 0.0
@@ -309,6 +310,7 @@ class MissionSystem:
         self.shared.preferencia_linha_esquerda.value = False
         self.shared.line_crop.value = config.LINE_CROP_NORMAL
         self.shared.min_line_size.value = config.MIN_LINE_SIZE_DEFAULT
+        self.shared.exit_line_search_pending.value = True
 
     def reacquire_line(self):
         self._preparar_retomada_reta()

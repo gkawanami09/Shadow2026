@@ -26,6 +26,7 @@ from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
     desviar_obstaculo,
+    procurar_continuacao_saida_lateral,
 )
 from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
@@ -38,6 +39,7 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                entry_silver_detected, entry_silver_reason,
                                entry_silver_votes, green_candidate,
                                green_turn_target,
+                               exit_line_search_pending,
                                last_bottom_point,
                                last_bottom_point_y,
                                line_ahead, line_angle, line_detected,
@@ -120,6 +122,47 @@ def control_loop():
     preferencia_esquerda_alinhada_desde = None
 
     try:
+        if mission_mode.value and exit_line_search_pending.value:
+            status.value = 'Procurando continuacao da linha apos a saida'
+            print(
+                "[controle] faixa PRETA ja confirmada; procurando "
+                "continuacao: esquerda por 0.3 s e depois direita por "
+                "0.6 s")
+            try:
+                lado_encontrado = procurar_continuacao_saida_lateral(
+                    arduino,
+                    linha_a_frente=lambda: bool(line_ahead.value),
+                    deve_encerrar=lambda: bool(terminate.value),
+                )
+            except RuntimeError as erro:
+                lado_encontrado = None
+                print(
+                    "[controle] falha na busca lateral pos-resgate: "
+                    f"{erro}")
+            finally:
+                # A manobra e exclusiva da primeira retomada apos o resgate.
+                # Nunca pode contaminar perdas de linha normais posteriores.
+                exit_line_search_pending.value = False
+
+            if terminate.value:
+                return
+            if lado_encontrado is None:
+                status.value = (
+                    'Continuacao da saida nao encontrada - PARADO')
+                print(
+                    "[controle] continuacao nao encontrada nos dois lados; "
+                    "PARADO por seguranca")
+                while not terminate.value:
+                    arduino.refresh(fail_closed=True)
+                    time.sleep(.05)
+                return
+
+            line_status.value = "line_detected"
+            status.value = 'Continuacao encontrada - seguindo linha'
+            print(
+                "[controle] continuacao confirmada no "
+                f"{lado_encontrado}; iniciando segue-linha normal")
+
         while not terminate.value:
 
             # A preferência pós-obstáculo não gira o robô sozinha. A visão
