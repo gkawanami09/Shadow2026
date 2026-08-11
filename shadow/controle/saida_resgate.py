@@ -59,7 +59,7 @@ class ExitPhaseController:
         self._align_angle = 190
         self._align_previous_errors = None
         self._align_target = None
-        self._align_memory_corrections = 0
+        self._target_committed = False
         self._tracking_reset_requested = False
         self.mapped_triangles = {"green": False, "red": False}
 
@@ -190,6 +190,10 @@ class ExitPhaseController:
             and float(getattr(exit_detection, "confidence", 0.0))
             >= cfg.EXIT_MODEL_FAST_LOCK_CONFIDENCE
         ):
+            # Uma resposta forte do modelo ja e suficiente para guardar o
+            # centro. Depois da frenagem, esse alvo nao pode ser esquecido so
+            # porque a faixa ficou borrada ou saiu parcialmente do quadro.
+            self._remember_alignment_target(exit_detection, now)
             self.state = self.SEARCH_BRAKE
             return self._stop(
                 self.SEARCH_BRAKE,
@@ -229,6 +233,15 @@ class ExitPhaseController:
             self._align_corrections = 0
             self._align_previous_errors = None
             return self._align_command(exit_detection, frame_shape)
+        if self._target_committed and self._align_target is not None:
+            # O modelo ja confirmou com alta confianca durante o giro. Use o
+            # centro salvo para apontar o robo, sem voltar aos picos de busca.
+            self.state = self.ALIGN
+            self._stopped_at = None
+            self._align_frame_after = None
+            self._align_corrections = 0
+            self._align_previous_errors = None
+            return self._align_command(self._align_target, frame_shape)
         if (
             self._settled_at is not None
             and now - self._settled_at
@@ -243,9 +256,8 @@ class ExitPhaseController:
 
     def _on_align(self, exit_detection, frame_shape, now):
         if not self._usable(exit_detection, now):
-            # Uma borda fina pode falhar em um único frame mesmo com o chassi
-            # parado. Não recomece o giro imediatamente, pois isso ultrapassa
-            # justamente a faixa que já estava sendo alinhada.
+            # O modelo pode falhar em um frame durante a curva. Não recomece
+            # o giro, pois isso abandona justamente a saída já confirmada.
             perdida_por = now - (
                 self._align_last_seen_at
                 if self._align_last_seen_at is not None
@@ -262,35 +274,11 @@ class ExitPhaseController:
                     f"soleira oculta por {perdida_por:.2f}s; "
                     "parado aguardando reaparecer",
                 )
-            # Perda persistente: voltar a procurar sem avançar às cegas.
-            if (
-                self._align_target is not None
-                and perdida_por < cfg.EXIT_ALIGN_LOCK_HOLD_S - 1e-9
-            ):
-                if (
-                    self._align_memory_corrections
-                    < cfg.EXIT_ALIGN_MEMORY_MAX_CORRECTIONS
-                ):
-                    self._align_memory_corrections += 1
-                    erro_centro, erro_angulo = self._alignment_errors(
-                        self._align_target, frame_shape)
-                    self._align_previous_errors = (erro_centro, erro_angulo)
-                    if abs(erro_angulo) > cfg.EXIT_ALIGN_MAX_ANGLE_DEG:
-                        return self._start_yaw_correction(
-                            erro_angulo,
-                            detalhe=(
-                                "modelo oculto; mantendo giro do alvo travado"),
-                        )
-                    if abs(erro_centro) > self._center_threshold():
-                        return self._start_arc_correction(
-                            erro_centro,
-                            detalhe=(
-                                "modelo oculto; mantendo curva do alvo travado"),
-                        )
-                return self._stop(
-                    self.ALIGN,
-                    "alvo de saida travado; aguardando o modelo reaparecer",
-                )
+            if self._target_committed and self._align_target is not None:
+                # O centro ja foi confirmado. Depois de uma curva curta na
+                # ultima direcao conhecida, perder a faixa normalmente quer
+                # dizer que ela ficou perto/embaixo do robo: siga reto.
+                return self.begin_cross(now=now)
             self._tracking_reset_requested = True
             self.state = self.SEARCH_START
             self._align_last_seen_at = None
@@ -497,7 +485,7 @@ class ExitPhaseController:
     def _remember_alignment_target(self, detection, now):
         self._align_target = detection
         self._align_last_seen_at = now
-        self._align_memory_corrections = 0
+        self._target_committed = True
 
     def _correction_allowed(self):
         self._align_corrections += 1

@@ -187,6 +187,27 @@ class ExitPhaseTests(unittest.TestCase):
 
         self.assertEqual(freio.state, self.exit.SEARCH_BRAKE)
 
+    def test_previa_forte_guarda_centro_e_nao_volta_ao_giro(self):
+        command = self.exit.update(
+            None, FRAME_SHAPE, mapper=FakeMapper(both=True), now=0.0)
+        self.exit.notify_command_written(command.state, now=0.0)
+        preview = FakeExit(
+            center_x=600.0,
+            timestamp=0.05,
+            confidence=cfg.EXIT_MODEL_FAST_LOCK_CONFIDENCE,
+        )
+        freio = self.exit.update(preview, FRAME_SHAPE, now=0.05)
+        self.exit.notify_command_written(freio.state, now=0.05)
+
+        assentou = 0.05 + cfg.EXIT_SEARCH_SETTLE_S
+        observando = self.exit.update(None, FRAME_SHAPE, now=assentou)
+        self.assertEqual(observando.state, self.exit.SEARCH_OBSERVE)
+
+        apontando = self.exit.update(
+            None, FRAME_SHAPE, now=assentou + 0.01)
+        self.assertEqual(apontando.state, self.exit.ALIGN_ARC)
+        self.assertGreater(apontando.angle, 0)
+
     def test_frame_anterior_ao_assentamento_nao_alinha(self):
         assentou = self._ate_observar()
         antigo = FakeExit(timestamp=assentou - 0.05)
@@ -331,16 +352,18 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(falha_longa.state, self.exit.SEARCH_START)
         self.assertEqual(falha_longa.angle, cfg.EXIT_SEARCH_TANK_ANGLE)
 
-    def test_alvo_travado_mantem_a_curva_apos_perda_curta(self):
+    def test_alvo_travado_mantem_a_curva_durante_perda_curta(self):
         assentou = self._ate_observar()
         alvo = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
         self.exit.state = self.exit.ALIGN
-        self.exit._remember_alignment_target(alvo, assentou)
+        curva = self.exit.update(
+            alvo, FRAME_SHAPE, now=assentou + 0.01)
+        self.assertEqual(curva.state, self.exit.ALIGN_ARC)
 
         comando = self.exit.update(
             None,
             FRAME_SHAPE,
-            now=assentou + cfg.EXIT_ALIGN_LOST_TIMEOUT_S + 0.05,
+            now=assentou + 0.01 + cfg.EXIT_ALIGN_LOST_TIMEOUT_S / 2,
         )
 
         self.assertEqual(comando.state, self.exit.ALIGN_ARC)
@@ -348,19 +371,22 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertIsNone(comando.wheel_speeds)
         self.assertIn("alvo travado", comando.detail)
 
-    def test_alvo_travado_so_volta_a_buscar_apos_hold_seguro(self):
+    def test_alvo_travado_perdido_avanca_reto_sem_voltar_ao_giro(self):
         assentou = self._ate_observar()
         alvo = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
         self.exit.state = self.exit.ALIGN
-        self.exit._remember_alignment_target(alvo, assentou)
+        curva = self.exit.update(
+            alvo, FRAME_SHAPE, now=assentou + 0.01)
+        self.assertEqual(curva.state, self.exit.ALIGN_ARC)
 
         comando = self.exit.update(
             None,
             FRAME_SHAPE,
-            now=assentou + cfg.EXIT_ALIGN_LOCK_HOLD_S + 0.01,
+            now=assentou + 0.01 + cfg.EXIT_ALIGN_LOST_TIMEOUT_S + 0.01,
         )
 
-        self.assertEqual(comando.state, self.exit.SEARCH_START)
+        self.assertEqual(comando.state, self.exit.CROSS)
+        self.assertEqual(comando.angle, 0)
 
     def test_perda_curta_apos_confirmar_nao_interrompe_o_avanco(self):
         inicio, command = self._ate_comecar_travessia()

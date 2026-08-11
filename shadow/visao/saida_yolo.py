@@ -9,6 +9,7 @@ detecção do modelo commande o robô.
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+import threading
 import time
 
 import numpy as np
@@ -115,6 +116,16 @@ class ExitModel:
         net = ncnn.Net()
         net.opt.num_threads = int(cfg.EXIT_MODEL_THREADS)
         net.opt.use_vulkan_compute = False
+        if cfg.EXIT_MODEL_USE_FP16:
+            # O Cortex-A76 do Pi 5 possui FP16 nativo. O NCNN mantem o mesmo
+            # modelo e usa os kernels ARM de meia precisao durante a inferencia.
+            for option_name in (
+                "use_fp16_packed",
+                "use_fp16_storage",
+                "use_fp16_arithmetic",
+            ):
+                if hasattr(net.opt, option_name):
+                    setattr(net.opt, option_name, True)
         if net.load_param(str(param)) != 0 or net.load_model(str(weights)) != 0:
             raise ExitModelError("não consegui abrir o modelo NCNN de saída")
         self._net = net
@@ -296,3 +307,140 @@ class ModelGuidedExitDetector:
             bbox=(x, y, box_width, box_height),
             angle_deg=0.0,
         )
+
+
+@dataclass(frozen=True)
+class AsyncExitResult:
+    sequence: int
+    source_sequence: object
+    detection: object
+    frame_shape: tuple
+    captured_at: float
+    completed_at: float
+    processing_ms: float
+    preview: bool
+    dropped_frames: int
+
+
+class LatestFrameExitDetector:
+    """Executa o modelo de saida fora do controle e nunca acumula backlog."""
+
+    def __init__(self, detector, clock=time.monotonic):
+        self.detector = detector
+        self._clock = clock
+        self._condition = threading.Condition()
+        self._pending = None
+        self._result = None
+        self._error = None
+        self._stopping = False
+        self._next_sequence = 0
+        self._dropped_frames = 0
+        self._thread = threading.Thread(
+            target=self._run,
+            name="shadow-saida-modelo",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def submit(
+        self,
+        frame,
+        captured_at,
+        source_sequence=None,
+        *,
+        preview=False,
+    ):
+        if frame is None:
+            raise ValueError("frame ausente para o modelo de saida")
+        with self._condition:
+            if self._stopping:
+                return None
+            self._next_sequence += 1
+            sequence = self._next_sequence
+            if self._pending is not None:
+                self._dropped_frames += 1
+            # A fonte de captura publica uma matriz propria. Manter somente a
+            # referencia evita copiar 640x480 a cada frame da camera.
+            self._pending = (
+                sequence,
+                frame,
+                float(captured_at),
+                source_sequence,
+                bool(preview),
+            )
+            self._condition.notify()
+            return sequence
+
+    def poll(self, after_sequence=0):
+        with self._condition:
+            if self._error is not None:
+                raise RuntimeError(
+                    f"detector assincrono da saida falhou: {self._error}"
+                ) from self._error
+            if (
+                self._result is not None
+                and self._result.sequence > after_sequence
+            ):
+                return self._result
+            return None
+
+    @property
+    def is_alive(self):
+        return self._thread.is_alive()
+
+    def close(self, timeout=2.0):
+        with self._condition:
+            self._stopping = True
+            self._pending = None
+            self._result = None
+            self._condition.notify_all()
+        self._thread.join(timeout=max(float(timeout), 0.0))
+        return not self._thread.is_alive()
+
+    def _run(self):
+        while True:
+            with self._condition:
+                while self._pending is None and not self._stopping:
+                    self._condition.wait()
+                if self._stopping:
+                    return
+                (
+                    sequence,
+                    frame,
+                    captured_at,
+                    source_sequence,
+                    preview,
+                ) = self._pending
+                self._pending = None
+                dropped_frames = self._dropped_frames
+
+            started = self._clock()
+            try:
+                detection = (
+                    self.detector.preview(frame, timestamp=captured_at)
+                    if preview
+                    else self.detector.detect(frame, timestamp=captured_at)
+                )
+                completed = self._clock()
+                result = AsyncExitResult(
+                    sequence=sequence,
+                    source_sequence=source_sequence,
+                    detection=detection,
+                    frame_shape=tuple(frame.shape),
+                    captured_at=captured_at,
+                    completed_at=completed,
+                    processing_ms=(completed - started) * 1000.0,
+                    preview=preview,
+                    dropped_frames=dropped_frames,
+                )
+            except Exception as error:
+                with self._condition:
+                    self._error = error
+                    self._condition.notify_all()
+                return
+
+            with self._condition:
+                if self._stopping:
+                    return
+                self._result = result
+                self._condition.notify_all()

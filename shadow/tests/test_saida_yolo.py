@@ -2,6 +2,8 @@
 
 from pathlib import Path
 import sys
+import threading
+import time
 import unittest
 
 import numpy as np
@@ -14,6 +16,7 @@ from visao.faixa_saida import ExitStripeDetection  # noqa: E402
 from visao.saida_yolo import (  # noqa: E402
     ExitModel,
     ExitModelDetection,
+    LatestFrameExitDetector,
     ModelGuidedExitDetector,
 )
 
@@ -115,6 +118,54 @@ class SaidaYoloTests(unittest.TestCase):
         self.assertIsNotNone(detection)
         self.assertAlmostEqual(detection.center_x, 208.0)
         self.assertAlmostEqual(detection.confidence, .90)
+
+
+class SaidaAssincronaTests(unittest.TestCase):
+    def test_worker_nao_bloqueia_e_descarta_backlog_antigo(self):
+        iniciou = threading.Event()
+        liberar = threading.Event()
+
+        class DetectorLento:
+            def detect(self, frame, timestamp=None):
+                iniciou.set()
+                liberar.wait(timeout=1.0)
+                return faixa(
+                    centro_x=float(frame[0, 0, 0]),
+                    centro_y=240.0,
+                )
+
+            def preview(self, frame, timestamp=None):
+                return self.detect(frame, timestamp=timestamp)
+
+        worker = LatestFrameExitDetector(DetectorLento())
+        try:
+            primeiro = np.full((4, 4, 3), 1, dtype=np.uint8)
+            segundo = np.full((4, 4, 3), 2, dtype=np.uint8)
+            ultimo = np.full((4, 4, 3), 3, dtype=np.uint8)
+            worker.submit(primeiro, 1.0, source_sequence=1)
+            self.assertTrue(iniciou.wait(timeout=1.0))
+
+            comecou = time.perf_counter()
+            worker.submit(segundo, 2.0, source_sequence=2)
+            worker.submit(ultimo, 3.0, source_sequence=3)
+            self.assertLess(time.perf_counter() - comecou, 0.05)
+            liberar.set()
+
+            limite = time.monotonic() + 1.0
+            resultado = None
+            while time.monotonic() < limite:
+                atual = worker.poll()
+                if atual is not None and atual.source_sequence == 3:
+                    resultado = atual
+                    break
+                time.sleep(0.005)
+
+            self.assertIsNotNone(resultado)
+            self.assertEqual(resultado.detection.center_x, 3.0)
+            self.assertGreaterEqual(resultado.dropped_frames, 1)
+        finally:
+            liberar.set()
+            worker.close()
 
 
 if __name__ == "__main__":

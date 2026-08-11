@@ -684,11 +684,14 @@ class BlackExitGate:
             if callable(preview)
             else self.detector.detect(frame_bgr, timestamp=timestamp)
         )
+        return self.preview_detection(detection)
+
+    def preview_detection(self, detection):
+        """Recebe a previa pronta quando o modelo roda em outra thread."""
         self.last_detection = detection
         return detection
 
     def update(self, frame_bgr, timestamp=None, now=None):
-        self._just_locked = False
         detection = self.detector.detect(frame_bgr, timestamp=timestamp)
         if (
             detection is None
@@ -699,22 +702,42 @@ class BlackExitGate:
                 self._locked_search_frame(frame_bgr),
                 timestamp=timestamp,
             )
+        return self.update_detection(
+            detection,
+            frame_bgr.shape,
+            timestamp=timestamp,
+            now=now,
+        )
+
+    def update_detection(
+        self,
+        detection,
+        frame_shape,
+        timestamp=None,
+        now=None,
+    ):
+        """Aplica votos e lock a uma inferencia concluida assincronamente."""
+        self._just_locked = False
         current_reference = None
         if detection is not None:
-            height, width = frame_bgr.shape[:2]
+            height, width = frame_shape[:2]
             current_reference = (
                 float(detection.center_x) / max(float(width), 1.0),
                 float(detection.center_y) / max(float(height), 1.0),
                 float(detection.span_ratio),
             )
             if self.track_locked:
-                if not self._same_locked_candidate(
-                    self._locked_reference, current_reference
-                ):
+                mesma_regiao = self._same_locked_candidate(
+                    self._locked_reference, current_reference)
+                confianca_forte = self._strong_locked_detection(detection)
+                if not mesma_regiao and not confianca_forte:
                     # Não troque a soleira já confirmada por uma sombra,
                     # parede ou objeto preto que apareceu durante o pulso.
                     self.last_detection = None
                     return True, None
+                # Durante a curva, a caixa pode saltar para outra parte do
+                # quadro. Se o proprio modelo voltou a dar alta confianca,
+                # reposicione o lock em vez de fingir que a saida sumiu.
                 self._locked_reference = current_reference
                 self._vote_reference = current_reference
                 self.last_detection = detection
@@ -776,6 +799,15 @@ class BlackExitGate:
             <= cfg.EXIT_BLACK_LOCK_MAX_CENTER_Y_DRIFT_RATIO
             and abs(reference[2] - current[2])
             <= cfg.EXIT_BLACK_LOCK_MAX_SPAN_DRIFT_RATIO
+        )
+
+    def _strong_locked_detection(self, detection):
+        limite = getattr(self.detector, "fast_lock_confidence", None)
+        confianca = getattr(detection, "confidence", None)
+        return (
+            limite is not None
+            and confianca is not None
+            and float(confianca) >= float(limite)
         )
 
     def _locked_search_frame(self, frame_bgr):

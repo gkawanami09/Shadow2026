@@ -101,7 +101,10 @@ EXIT_MODEL_INPUT = 640
 EXIT_NCNN_MODEL_INPUT = 640
 EXIT_MODEL_MIN_CONFIDENCE = .45
 EXIT_MODEL_FAST_LOCK_CONFIDENCE = .75
-EXIT_MODEL_THREADS = 2
+# A fase de saida comeca depois que o worker de vitimas foi encerrado. Nesse
+# ponto os quatro nucleos do Raspberry Pi 5 podem ser usados pelo NCNN.
+EXIT_MODEL_THREADS = 4
+EXIT_MODEL_USE_FP16 = True
 # O modelo treinado decide presença e centro. A geometria antiga por OpenCV
 # fica fora desta rota: ela adicionava Hough/ângulo a uma tarefa em que o robô
 # pode chegar levemente torto e a câmera de linha fará a confirmação final.
@@ -679,8 +682,6 @@ EXIT_ALIGN_MAX_CORRECTIONS = 14
 # Uma falha de segmentação isolada não pode mandar o robô voltar ao giro e
 # ultrapassar uma faixa que já estava centralizada.
 EXIT_ALIGN_LOST_TIMEOUT_S = 0.35
-EXIT_ALIGN_LOCK_HOLD_S = 1.50
-EXIT_ALIGN_MEMORY_MAX_CORRECTIONS = 2
 
 # Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
 # aproxima ate deixar de enxergar a soleira. So entao a camera de linha abre e

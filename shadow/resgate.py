@@ -84,6 +84,7 @@ from visao.confirmacao_saida_linha import (  # noqa: E402
 from visao.faixa_saida import BlackExitGate  # noqa: E402
 from visao.saida_yolo import (  # noqa: E402
     ExitModel,
+    LatestFrameExitDetector,
     ModelGuidedExitDetector,
 )
 from visao.marcador_resgate import (  # noqa: E402
@@ -1133,6 +1134,7 @@ def main():
     trava = None
     captura = None
     trabalhador = None
+    trabalhador_saida = None
     marcadores = None
     controlador = None
     controlador_verde = None
@@ -1248,6 +1250,7 @@ def main():
 
         sequencia_frame = 0
         sequencia_resultado = 0
+        sequencia_resultado_saida = 0
         frame_atual = None
         resultado_atual = None
         deteccao_atual = None
@@ -1384,28 +1387,88 @@ def main():
                 and portao_saida is not None
                 and frame_novo
             ):
-                if (
+                previa_saida = (
                     controlador_saida.state
                     == controlador_saida.SEARCH_ROTATE
-                ):
-                    # Durante o giro, a imagem não confirma a faixa. Ela só
-                    # serve para frear imediatamente quando um candidato
-                    # aparece, em vez de completar mais um pulso inteiro.
-                    deteccao_saida = portao_saida.preview(
+                )
+                permitido_saida = (
+                    previa_saida
+                    or controlador_saida.frame_allowed(pacote.captured_at)
+                )
+                if trabalhador_saida is not None and permitido_saida:
+                    # O worker substitui qualquer pendencia pelo frame mais
+                    # novo. A camera/debug nunca espera os ~200 ms do NCNN.
+                    trabalhador_saida.submit(
                         frame_atual,
-                        timestamp=pacote.captured_at,
+                        captured_at=pacote.captured_at,
+                        source_sequence=pacote.sequence,
+                        preview=previa_saida,
                     )
-                elif controlador_saida.frame_allowed(pacote.captured_at):
-                    confirmada_saida, candidata_saida = portao_saida.update(
-                        frame_atual,
-                        timestamp=pacote.captured_at,
-                        now=agora,
+                elif trabalhador_saida is None:
+                    # Fallback classico quando EXIT_MODEL_ENABLED=False.
+                    if previa_saida:
+                        deteccao_saida = portao_saida.preview(
+                            frame_atual,
+                            timestamp=pacote.captured_at,
+                        )
+                    elif permitido_saida:
+                        confirmada_saida, candidata_saida = portao_saida.update(
+                            frame_atual,
+                            timestamp=pacote.captured_at,
+                            now=agora,
+                        )
+                        if controlador_saida.state == controlador_saida.CROSS:
+                            if candidata_saida is None:
+                                faltas_saida += 1
+                                if faltas_saida >= 2:
+                                    deteccao_saida = None
+                            else:
+                                faltas_saida = 0
+                                deteccao_saida = candidata_saida
+                        elif confirmada_saida:
+                            deteccao_saida = candidata_saida
+                            faltas_saida = 0
+                        else:
+                            deteccao_saida = None
+
+            resultado_saida = None
+            if trabalhador_saida is not None:
+                resultado_saida = trabalhador_saida.poll(
+                    sequencia_resultado_saida)
+                if not trabalhador_saida.is_alive:
+                    trabalhador_saida.poll(sequencia_resultado_saida)
+                    raise RuntimeError(
+                        "detector assincrono da saida encerrou inesperadamente")
+
+            if (
+                resultado_saida is not None
+                and controlador_saida is not None
+                and portao_saida is not None
+            ):
+                sequencia_resultado_saida = resultado_saida.sequence
+                if resultado_saida.preview:
+                    if (
+                        controlador_saida.state
+                        == controlador_saida.SEARCH_ROTATE
+                    ):
+                        deteccao_saida = portao_saida.preview_detection(
+                            resultado_saida.detection)
+                elif controlador_saida.frame_allowed(
+                    resultado_saida.captured_at
+                ):
+                    confirmada_saida, candidata_saida = (
+                        portao_saida.update_detection(
+                            resultado_saida.detection,
+                            resultado_saida.frame_shape,
+                            timestamp=resultado_saida.captured_at,
+                            now=agora,
+                        )
                     )
                     if portao_saida.just_locked and candidata_saida is not None:
                         print(
                             "[saida] alvo TRAVADO pelo modelo: "
                             f"confianca={candidata_saida.confidence:.0%}; "
-                            "iniciando alinhamento")
+                            "direcionando para o centro")
                     if controlador_saida.state == controlador_saida.CROSS:
                         if candidata_saida is None:
                             faltas_saida += 1
@@ -1419,25 +1482,24 @@ def main():
                         faltas_saida = 0
                     else:
                         deteccao_saida = None
-                else:
-                    deteccao_saida = None
 
-                if (
-                    args.debug
-                    and modelo_saida is not None
-                    and agora - ultimo_log_modelo_saida >= 0.50
-                ):
-                    aceito = (
-                        modelo_saida.last_raw_confidence
-                        >= modelo_saida.min_confidence)
-                    print(
-                        "[saida/modelo] "
-                        f"raw={modelo_saida.last_raw_confidence:.0%} "
-                        f"limiar={modelo_saida.min_confidence:.0%} "
-                        f"aceito={'sim' if aceito else 'nao'} "
-                        f"lock={'sim' if portao_saida.track_locked else 'nao'} "
-                        f"{modelo_saida.last_inference_ms:.0f}ms")
-                    ultimo_log_modelo_saida = agora
+            if (
+                args.debug
+                and modelo_saida is not None
+                and controlador_saida is not None
+                and agora - ultimo_log_modelo_saida >= 0.50
+            ):
+                aceito = (
+                    modelo_saida.last_raw_confidence
+                    >= modelo_saida.min_confidence)
+                print(
+                    "[saida/modelo] "
+                    f"raw={modelo_saida.last_raw_confidence:.0%} "
+                    f"limiar={modelo_saida.min_confidence:.0%} "
+                    f"aceito={'sim' if aceito else 'nao'} "
+                    f"lock={'sim' if portao_saida.track_locked else 'nao'} "
+                    f"{modelo_saida.last_inference_ms:.0f}ms async")
+                ultimo_log_modelo_saida = agora
 
             resultado = None
             if trabalhador is not None:
@@ -2149,6 +2211,11 @@ def main():
                         start_time=inicio_saida)
                     portao_saida, modelo_saida = novo_portao_saida(
                         modelo_saida)
+                    trabalhador_saida = (
+                        LatestFrameExitDetector(portao_saida.detector)
+                        if modelo_saida is not None else None
+                    )
+                    sequencia_resultado_saida = 0
                     deteccao_saida = None
                     faltas_saida = 0
                     epoca_saida = arduino.connection_epoch
@@ -2446,6 +2513,10 @@ def main():
                     # a proxima busca torne a enquadrar exatamente a mesma
                     # parede ou mancha.
                     agora_reinicio = time.monotonic()
+                    if trabalhador_saida is not None:
+                        trabalhador_saida.close(
+                            timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
+                        trabalhador_saida = None
                     controlador_saida = ExitPhaseController(
                         start_time=(
                             inicio_saida
@@ -2455,6 +2526,11 @@ def main():
                     )
                     portao_saida, modelo_saida = novo_portao_saida(
                         modelo_saida)
+                    trabalhador_saida = (
+                        LatestFrameExitDetector(portao_saida.detector)
+                        if modelo_saida is not None else None
+                    )
+                    sequencia_resultado_saida = 0
                     epoca_saida = arduino.connection_epoch
                     deteccao_saida = None
                     faltas_saida = 0
@@ -2487,6 +2563,10 @@ def main():
                 if trabalhador is not None:
                     trabalhador.close(timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
                     trabalhador = None
+                if trabalhador_saida is not None:
+                    trabalhador_saida.close(
+                        timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
+                    trabalhador_saida = None
                 if captura is not None:
                     fechou = captura.close(
                         timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
@@ -2552,6 +2632,11 @@ def main():
                         start_time=inicio_saida)
                     portao_saida, modelo_saida = novo_portao_saida(
                         modelo_saida)
+                    trabalhador_saida = (
+                        LatestFrameExitDetector(portao_saida.detector)
+                        if modelo_saida is not None else None
+                    )
+                    sequencia_resultado_saida = 0
                     epoca_saida = arduino.connection_epoch
                     forma = (
                         cfg.RESCUE_CAMERA_MAX_HEIGHT,
@@ -2652,7 +2737,7 @@ def main():
                     )
                     cv2.putText(
                         anotado,
-                        "SAIDA: MODELO YOLO 640",
+                        "SAIDA: MODELO YOLO 640 ASYNC",
                         (8, max(topo_saida - 7, 18)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.46,
@@ -2677,7 +2762,7 @@ def main():
                             "NCNN raw="
                             f"{modelo_saida.last_raw_confidence:.0%} "
                             f"lim={modelo_saida.min_confidence:.0%} "
-                            f"{modelo_saida.last_inference_ms:.0f}ms "
+                            f"{modelo_saida.last_inference_ms:.0f}ms async "
                             "lock="
                             f"{'SIM' if portao_saida.track_locked else 'NAO'}",
                             (8, 84),
@@ -2788,6 +2873,11 @@ def main():
             _melhor_esforco(
                 "encerrar o detector",
                 lambda: trabalhador.close(
+                    timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S))
+        if trabalhador_saida is not None:
+            _melhor_esforco(
+                "encerrar o detector da saida",
+                lambda: trabalhador_saida.close(
                     timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S))
         if captura is not None:
             _melhor_esforco(

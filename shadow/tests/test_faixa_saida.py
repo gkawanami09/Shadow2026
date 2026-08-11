@@ -364,6 +364,46 @@ class BlackExitGateTests(unittest.TestCase):
         self.assertIsNone(detection)
         self.assertTrue(gate.track_locked)
 
+    def test_modelo_forte_pode_reposicionar_o_centro_ja_travado(self):
+        class DetectorForteQueMove:
+            fast_lock_confidence = 0.80
+
+            def __init__(self):
+                self.resultados = [
+                    (100.0, 0.60),
+                    (102.0, 0.60),
+                    (600.0, 0.95),
+                ]
+
+            def detect(self, _frame, timestamp=None):
+                centro, confianca = self.resultados.pop(0)
+                return SimpleNamespace(
+                    center_x=centro,
+                    center_y=390.0,
+                    span_ratio=0.70,
+                    confidence=confianca,
+                    timestamp=timestamp,
+                )
+
+        gate = BlackExitGate(
+            detector=DetectorForteQueMove(),
+            confirmer=StripeConfirmer(
+                votes_needed=2,
+                window=3,
+                max_age_s=cfg.BALL_FRAME_STALE_S,
+            ),
+        )
+        frame = cs.piso_neutro(cs.RESCUE_FRAME, 185)
+        gate.update(frame, timestamp=1.00, now=1.00)
+        gate.update(frame, timestamp=1.05, now=1.05)
+        confirmed, detection = gate.update(
+            frame, timestamp=1.10, now=1.10)
+
+        self.assertTrue(confirmed)
+        self.assertIsNotNone(detection)
+        self.assertEqual(detection.center_x, 600.0)
+        self.assertTrue(gate.track_locked)
+
     def test_depois_do_lock_segunda_leitura_sensivel_recupera_a_faixa(self):
         class DetectorRigido:
             def __init__(self):
