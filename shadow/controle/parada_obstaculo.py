@@ -335,69 +335,81 @@ def avancar_ate_linha(
     )
 
 
-def continuacao_saida_valida(resultado, agora=None):
-    """Confirma quando a ponta distante do trajeto aponta para a frente."""
+def orientacao_continuacao_saida(resultado, agora=None):
+    """Devolve o lado da ramificacao ou ``centro`` quando ja alinhada."""
     import config
 
     agora = time.monotonic() if agora is None else float(agora)
     if resultado is None or int(getattr(resultado, "sequencia", 0)) <= 0:
-        return False
+        return None
     idade = agora - float(getattr(resultado, "publicado_em", 0.0))
     if not -0.05 <= idade <= config.EXIT_LINE_CONTINUATION_MAX_AGE_S:
-        return False
+        return None
     if not bool(getattr(resultado, "continuacao_saida_detectada", False)):
-        return False
+        return None
 
     alvo_x = float(getattr(resultado, "continuacao_saida_x", -1.0))
     alvo_y = float(getattr(resultado, "continuacao_saida_y", -1.0))
     distancia = float(getattr(
         resultado, "continuacao_saida_distancia", 0.0))
-    return (
+    if not (
         distancia >= config.EXIT_CONTINUATION_MIN_TARGET_DISTANCE_RATIO
-        and abs(alvo_x - config.camera_x / 2)
-        <= config.camera_x * config.EXIT_CONTINUATION_ALIGN_X_TOLERANCE_RATIO
-        and 0.0 <= alvo_y
-        <= config.camera_y * config.EXIT_CONTINUATION_ALIGN_MAX_TARGET_Y_RATIO
-    )
+        and 0.0 <= alvo_x <= config.camera_x
+        and 0.0 <= alvo_y <= config.camera_y
+    ):
+        return None
 
+    erro_x = alvo_x - config.camera_x / 2
+    tolerancia = (
+        config.camera_x * config.EXIT_CONTINUATION_ALIGN_X_TOLERANCE_RATIO)
+    if abs(erro_x) <= tolerancia:
+        return "centro"
+    return "esquerda" if erro_x < 0 else "direita"
 
-def procurar_continuacao_saida_tanque(
+def procurar_continuacao_saida_pivo_dianteiro(
     arduino,
-    linha_a_frente,
+    orientacao_ramificacao,
     pwm=None,
-    duracao_esquerda_s=None,
-    duracao_direita_s=None,
+    duracao_primeira_s=None,
+    duracao_cruzada_s=None,
     confirmacao_s=None,
     deve_encerrar=None,
     relogio=time.monotonic,
     dormir=time.sleep,
 ):
-    """Procura com giro tanque a linha de percurso depois da saida preta.
+    """Procura a linha pos-resgate girando somente as rodas dianteiras.
 
-    A propria faixa transversal tambem e preta, portanto ``linha_a_frente``
-    deve validar a extremidade distante do trajeto apontando para a frente,
-    e nao a presenca generica de um contorno preto. Retorna ``"centro"``,
-    ``"esquerda"``, ``"direita"`` ou ``None`` se os dois lados falharem.
+    A propria faixa transversal tambem e preta, portanto
+    ``orientacao_ramificacao`` deve devolver esquerda, centro, direita ou
+    ``None`` usando a extremidade distante do trajeto, e nao a presenca
+    generica de um contorno preto. Qualquer orientacao confirmada e entregue
+    imediatamente ao segue-linha; o pivo so existe enquanto nao ha ramo.
+    Retorna a orientacao encontrada ou ``None`` se os dois lados falharem.
+
+    O movimento inverte o pivo de 90 graus do segue-linha: TE e TD ficam em
+    zero, enquanto FE e FD giram em sentidos opostos. Isso mantem a traseira
+    como apoio e desloca a frente ate a ramificacao reaparecer na camera.
     """
     import config
 
     pwm = int(round(
-        config.EXIT_LINE_TANK_SEARCH_PWM if pwm is None else pwm))
-    duracao_esquerda_s = float(
-        config.EXIT_LINE_TANK_SEARCH_LEFT_S
-        if duracao_esquerda_s is None else duracao_esquerda_s)
-    duracao_direita_s = float(
-        config.EXIT_LINE_TANK_SEARCH_RIGHT_S
-        if duracao_direita_s is None else duracao_direita_s)
+        config.EXIT_LINE_FRONT_PIVOT_PWM if pwm is None else pwm))
+    duracao_primeira_s = float(
+        config.EXIT_LINE_FRONT_PIVOT_FIRST_S
+        if duracao_primeira_s is None else duracao_primeira_s)
+    duracao_cruzada_s = float(
+        config.EXIT_LINE_FRONT_PIVOT_CROSS_S
+        if duracao_cruzada_s is None else duracao_cruzada_s)
     confirmacao_s = float(
-        config.EXIT_LINE_TANK_SEARCH_CONFIRM_S
+        config.EXIT_LINE_FRONT_PIVOT_CONFIRM_S
         if confirmacao_s is None else confirmacao_s)
     deve_encerrar = deve_encerrar or (lambda: False)
 
     if not 1 <= pwm <= MAX_PWM:
-        raise ValueError(f"PWM lateral deve ficar entre 1 e {MAX_PWM}")
-    if duracao_esquerda_s <= 0 or duracao_direita_s <= 0:
-        raise ValueError("duracoes da busca lateral devem ser positivas")
+        raise ValueError(
+            f"PWM do pivo dianteiro deve ficar entre 1 e {MAX_PWM}")
+    if duracao_primeira_s <= 0 or duracao_cruzada_s <= 0:
+        raise ValueError("duracoes do pivo dianteiro devem ser positivas")
 
     if confirmacao_s < 0:
         raise ValueError("tempo de confirmacao nao pode ser negativo")
@@ -413,21 +425,30 @@ def procurar_continuacao_saida_tanque(
             or arduino.connection_epoch != epoca_serial
         ):
             raise RuntimeError(
-                "conexao serial mudou durante a busca tanque da saida")
+                "conexao serial mudou durante o pivo dianteiro da saida")
 
-    def confirmar_parado():
-        if not linha_a_frente():
-            return False
+    def ler_orientacao():
+        orientacao = orientacao_ramificacao()
+        if orientacao in ("esquerda", "centro", "direita"):
+            return orientacao
+        return None
+
+    def confirmar_ramificacao_parado(orientacao_inicial=None):
+        orientacao = orientacao_inicial or ler_orientacao()
+        if orientacao is None:
+            return None
         inicio_confirmacao = relogio()
         while not deve_encerrar():
-            if not linha_a_frente():
-                return False
+            orientacao_atual = ler_orientacao()
+            if orientacao_atual is None:
+                return None
+            orientacao = orientacao_atual
             restante = confirmacao_s - (relogio() - inicio_confirmacao)
             if restante <= 1e-9:
-                return True
+                return orientacao
             atualizar_serial()
             dormir(min(.025, restante))
-        return False
+        return None
 
     def varrer(enviar_comando, duracao_s, etapa):
         movimento_acumulado = 0.0
@@ -440,16 +461,19 @@ def procurar_continuacao_saida_tanque(
             while not deve_encerrar():
                 agora = relogio()
                 movimento_atual = agora - inicio_movimento
-                if linha_a_frente():
+                orientacao = ler_orientacao()
+                if orientacao is not None:
                     movimento_acumulado += movimento_atual
                     inicio_movimento = None
                     if arduino.parar() is False:
                         raise RuntimeError(
                             f"nao foi possivel frear durante {etapa}")
-                    if confirmar_parado():
-                        return True
+                    orientacao_confirmada = confirmar_ramificacao_parado(
+                        orientacao)
+                    if orientacao_confirmada is not None:
+                        return orientacao_confirmada
                     if movimento_acumulado >= duracao_s - 1e-9:
-                        return False
+                        return None
                     if enviar_comando() is False:
                         raise RuntimeError(
                             f"nao foi possivel retomar {etapa}")
@@ -458,34 +482,53 @@ def procurar_continuacao_saida_tanque(
 
                 restante = duracao_s - movimento_acumulado - movimento_atual
                 if restante <= 1e-9:
-                    return False
+                    return None
                 atualizar_serial()
                 dormir(min(.025, restante))
-            return False
+            return None
         finally:
             arduino.parar()
 
     try:
-        if confirmar_parado():
-            return "centro"
+        orientacao_inicial = ler_orientacao()
+        orientacao_confirmada = confirmar_ramificacao_parado(
+            orientacao_inicial)
+        if orientacao_confirmada is not None:
+            return orientacao_confirmada
         if deve_encerrar():
             return None
 
-        if varrer(
-            lambda: arduino.lado(-pwm, pwm),
-            duracao_esquerda_s,
-            "o giro tanque esquerdo da linha de saida",
-        ):
-            return "esquerda"
+        # Se a ponta ja apareceu de lado, comeca diretamente por ela. Sem
+        # alvo, preserva a preferencia deterministica pela esquerda.
+        primeiro_lado = (
+            orientacao_inicial
+            if orientacao_inicial in ("esquerda", "direita")
+            else "esquerda"
+        )
+        segundo_lado = (
+            "direita" if primeiro_lado == "esquerda" else "esquerda")
+        comandos = {
+            "esquerda": lambda: arduino.rodas(-pwm, 0, pwm, 0),
+            "direita": lambda: arduino.rodas(pwm, 0, -pwm, 0),
+        }
+
+        orientacao_confirmada = varrer(
+            comandos[primeiro_lado],
+            duracao_primeira_s,
+            f"o pivo dianteiro {primeiro_lado} da linha de saida",
+        )
+        if orientacao_confirmada is not None:
+            return orientacao_confirmada
         if deve_encerrar():
             return None
 
-        if varrer(
-            lambda: arduino.lado(pwm, -pwm),
-            duracao_direita_s,
-            "o giro tanque direito da linha de saida",
-        ):
-            return "direita"
+        orientacao_confirmada = varrer(
+            comandos[segundo_lado],
+            duracao_cruzada_s,
+            f"o pivo dianteiro {segundo_lado} da linha de saida",
+        )
+        if orientacao_confirmada is not None:
+            return orientacao_confirmada
         return None
     finally:
         arduino.parar()

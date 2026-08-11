@@ -70,7 +70,7 @@ class MissionDebugWindowTests(unittest.TestCase):
         self.assertEqual(processos[-1].name, "shadow-debug-linha")
 
 
-class MissionStraightResumeTests(unittest.TestCase):
+class MissionLineResumeTests(unittest.TestCase):
     def test_retomada_apaga_memoria_lateral_e_prefere_ramo_reto(self):
         valor = lambda inicial: SimpleNamespace(value=inicial)
         compartilhado = SimpleNamespace(

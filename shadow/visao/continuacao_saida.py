@@ -24,8 +24,9 @@ def detectar_continuacao_saida(mascara):
 
     A faixa da porta sozinha e quase uma barra reta. Um T, L ou curva e
     aceito pela sua geometria nao linear. Uma linha reta tambem e aceita
-    quando sua extremidade distante ja aponta para a frente; isso permite que
-    o giro tanque alinhe qualquer angulo antes de entregar ao segue-linha.
+    quando sua extremidade distante ja aponta para a frente. Qualquer ramo
+    aceito e entregue ao segue-linha, mesmo torto; o pivo dianteiro so procura
+    quando nenhuma ramificacao foi encontrada.
     """
     if mascara is None or getattr(mascara, "ndim", 0) != 2:
         raise ValueError("a busca da continuacao exige uma mascara binaria")
@@ -89,12 +90,14 @@ def detectar_continuacao_saida(mascara):
             and w >= largura * config.EXIT_CONTINUATION_MIN_BBOX_WIDTH_RATIO
             and h >= altura * config.EXIT_CONTINUATION_MIN_BBOX_HEIGHT_RATIO
         )
-        reta_apontada = (
+        # Uma reta inclinada tambem e uma continuacao valida. O avanco
+        # vertical distingue essa linha da faixa transversal isolada, sem
+        # exigir que ela ja esteja centralizada na camera.
+        reta_com_avanco = (
             alvo_y <= altura * config.EXIT_CONTINUATION_FORWARD_TARGET_Y_RATIO
-            and abs(alvo_x - largura / 2.0)
-            <= largura * config.EXIT_CONTINUATION_FORWARD_X_TOLERANCE_RATIO
+            and h >= altura * config.EXIT_CONTINUATION_MIN_BBOX_HEIGHT_RATIO
         )
-        if not (forma_bidimensional or reta_apontada):
+        if not (forma_bidimensional or reta_com_avanco):
             continue
 
         pontuacao = (

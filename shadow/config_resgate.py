@@ -688,8 +688,8 @@ EXIT_ALIGN_LOST_TIMEOUT_S = 0.35
 # o robo avanca a PWM 60, mantendo a camera ativa durante todo o trecho.
 # A votacao preto/prata so comeca quando a faixa transversal chega ao meio da
 # imagem, mas os motores continuam em frente. Prata para e recua; preto passa
-# imediatamente o controle ao segue-linha, que preserva o ramo reto alinhado
-# com o robo no cruzamento de 90 graus.
+# o controle para a leitura dedicada da ramificacao. Se ela ainda nao estiver
+# visivel, a retomada gira somente as rodas dianteiras para encontra-la.
 EXIT_LINE_VERIFY_PWM = 60
 EXIT_LINE_VERIFY_SPEED = EXIT_LINE_VERIFY_PWM / 120.0
 EXIT_LINE_VERIFY_TIMEOUT_S = 5.0

@@ -60,13 +60,17 @@ OBSTACLE_LEFT_PREFERENCE_ARM_TIME_S = .08
 OBSTACLE_LEFT_PREFERENCE_CONFIRM_TIME_S = .12
 OBSTACLE_RETRY_COOLDOWN_S = 1.0
 
-# Busca da continuacao da linha depois da faixa PRETA de saida. O primeiro
-# giro tanque procura 0,5 s para a esquerda; o segundo volta 1,0 s para a
-# direita, cruza a orientacao inicial e cobre os dois lados.
-EXIT_LINE_TANK_SEARCH_PWM = OBSTACLE_LATERAL_PWM
-EXIT_LINE_TANK_SEARCH_LEFT_S = .50
-EXIT_LINE_TANK_SEARCH_RIGHT_S = 1.00
-EXIT_LINE_TANK_SEARCH_CONFIRM_S = .10
+# Busca da continuacao da linha depois da faixa PRETA de saida. E o inverso
+# do pivo forte usado no segue-linha: as traseiras ficam paradas e apenas as
+# dianteiras, em sentidos opostos, varrem a frente do robo. Primeiro procura
+# 0,5 s para o lado onde a ramificacao apareceu (esquerda quando ainda nao ha
+# alvo); depois cruza a orientacao inicial por 1,0 s no sentido oposto. Se
+# qualquer ramificacao ja estiver visivel, mesmo torta, nenhum pivo e executado:
+# o segue-linha recebe sua direcao e faz a correcao proporcional normal.
+EXIT_LINE_FRONT_PIVOT_PWM = OBSTACLE_LATERAL_PWM
+EXIT_LINE_FRONT_PIVOT_FIRST_S = .50
+EXIT_LINE_FRONT_PIVOT_CROSS_S = 1.00
+EXIT_LINE_FRONT_PIVOT_CONFIRM_S = .10
 EXIT_LINE_CONTINUATION_MAX_AGE_S = .15
 EXIT_CONTINUATION_MIN_AREA_RATIO = .002
 EXIT_CONTINUATION_MIN_TARGET_DISTANCE_RATIO = .30
@@ -77,9 +81,13 @@ EXIT_CONTINUATION_MIN_PCA_RATIO = .025
 EXIT_CONTINUATION_MIN_BBOX_WIDTH_RATIO = .16
 EXIT_CONTINUATION_MIN_BBOX_HEIGHT_RATIO = .18
 EXIT_CONTINUATION_FORWARD_TARGET_Y_RATIO = .62
-EXIT_CONTINUATION_FORWARD_X_TOLERANCE_RATIO = .24
 EXIT_CONTINUATION_ALIGN_X_TOLERANCE_RATIO = .15
-EXIT_CONTINUATION_ALIGN_MAX_TARGET_Y_RATIO = .68
+# Depois que a ramificacao aparece, a visao continua favorecendo o componente
+# conectado a sua ponta por este curto periodo. O segue-linha ja esta ativo e
+# corrige o angulo; o peso so impede a faixa transversal de vencer a escolha.
+EXIT_CONTINUATION_FOLLOW_BIAS_S = 1.00
+EXIT_CONTINUATION_CONTOUR_TARGET_WEIGHT = 4.0
+EXIT_CONTINUATION_ANGLE_TARGET_WEIGHT = .78
 
 # ----------------------------------------------------------------------------
 # Câmera: captura 640×480 e processamento em 448×252

@@ -973,8 +973,9 @@ def _confirmar_saida_com_camera_linha(
                     "[saida] faixa PRETA confirmada em movimento em "
                     f"{cfg.EXIT_LINE_VERIFY_BLACK_VOTES} de "
                     f"{cfg.EXIT_LINE_VERIFY_WINDOW} frames; entregando "
-                    "imediatamente ao segue-linha com preferencia pelo "
-                    "ramo reto alinhado ao robo")
+                    "a camera de linha; ramificacao visivel sera seguida "
+                    "imediatamente e, se ainda nao apareceu, sera procurada "
+                    "com o pivo dianteiro")
                 return PRETA
 
             if decisao == NAO_PRETA:

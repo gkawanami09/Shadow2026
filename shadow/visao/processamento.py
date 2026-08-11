@@ -97,6 +97,13 @@ def vision_loop(debug=False):
     entry_gate = build_entry_gate()
     ultimo_alinhamento_entrada = 0.
 
+    # Ao sair do resgate, a ponta distante identifica qual parte do preto e a
+    # ramificacao do percurso. Ela permanece como alvo por um instante depois
+    # que o controle libera o segue-linha, para a faixa transversal nao tomar
+    # a decisao enquanto o proprio controle proporcional corrige o angulo.
+    preferencia_saida_ate = 0.
+    alvo_saida_memorizado = None
+
     # Matriz usada para reduzir ruídos das máscaras.
     kernal = np.ones((3, 3), np.uint8)
     confirmador_vermelho = ConfirmadorVermelho()
@@ -117,6 +124,14 @@ def vision_loop(debug=False):
         while not terminate.value:
             cv2_img = camera.get_frame()
             frame_captured_at = time.perf_counter()
+
+            busca_saida_pendente = bool(exit_line_search_pending.value)
+            preferencia_saida_ativa = (
+                frame_captured_at <= preferencia_saida_ate)
+            modo_continuacao_saida = (
+                busca_saida_pendente or preferencia_saida_ativa)
+            if not modo_continuacao_saida:
+                alvo_saida_memorizado = None
 
             if time.perf_counter() - fps_limit_time <= 1 / VISION_MAX_FRAMES:
                 continue
@@ -179,7 +194,7 @@ def vision_loop(debug=False):
                 apply_gap_avoid_mask(black_image)
 
             if (
-                not exit_line_search_pending.value
+                not modo_continuacao_saida
                 and bottom_y < camera_y * .95
                 and media_preto < BLACK_AVG_SIDE_MASK
                 and line_status.value == "line_detected"
@@ -219,9 +234,20 @@ def vision_loop(debug=False):
             # Esta leitura existe apenas na retomada depois do resgate. Ela
             # enxerga a mascara inteira e procura a extremidade mais distante
             # do componente preto conectado a base, inclusive em T, L e curva.
-            if exit_line_search_pending.value:
+            if modo_continuacao_saida:
                 continuacao_saida_frame = detectar_continuacao_saida(
                     black_image)
+                if continuacao_saida_frame is not None:
+                    alvo_saida_memorizado = (
+                        continuacao_saida_frame.alvo_x,
+                        continuacao_saida_frame.alvo_y,
+                    )
+                    if busca_saida_pendente:
+                        preferencia_saida_ate = max(
+                            preferencia_saida_ate,
+                            frame_captured_at
+                            + config.EXIT_CONTINUATION_FOLLOW_BIAS_S,
+                        )
 
             # Procura a faixa vermelha.
             candidato_vermelho_frame = check_contour_size(
@@ -260,10 +286,29 @@ def vision_loop(debug=False):
                 direcao_geometria = (
                     "straight" if preferir_esquerda else direcao_marcada
                 )
+                preferir_esquerda_geometria = preferir_esquerda
+                alvo_saida_linha = (
+                    alvo_saida_memorizado
+                    if modo_continuacao_saida else None
+                )
+                if alvo_saida_linha is not None:
+                    erro_alvo_saida = (
+                        alvo_saida_linha[0] - camera_x / 2)
+                    tolerancia_alvo_saida = (
+                        camera_x
+                        * config.EXIT_CONTINUATION_ALIGN_X_TOLERANCE_RATIO)
+                    direcao_geometria = (
+                        "left" if erro_alvo_saida < -tolerancia_alvo_saida
+                        else "right"
+                        if erro_alvo_saida > tolerancia_alvo_saida
+                        else "straight"
+                    )
+                    preferir_esquerda_geometria = False
                 blackline, black_line_crop = determine_correct_line(
                     contours_blk,
-                    preferir_esquerda=preferir_esquerda,
+                    preferir_esquerda=preferir_esquerda_geometria,
                     turn_direction=direcao_geometria,
+                    alvo_saida=alvo_saida_linha,
                 )
                 area_linha_frame = float(cv2.contourArea(blackline))
                 line_size.value = area_linha_frame
@@ -284,7 +329,8 @@ def vision_loop(debug=False):
                     direcao_geometria,
                     last_bottom_point_x,
                     last_average_line_point,
-                    preferir_esquerda=preferir_esquerda,
+                    preferir_esquerda=preferir_esquerda_geometria,
+                    alvo_saida=alvo_saida_linha,
                 )
                 angulo_frame = float(line_angle.value)
                 line_angle_y.value = int(poi[1])

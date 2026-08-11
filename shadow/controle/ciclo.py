@@ -26,8 +26,8 @@ from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
     desviar_obstaculo,
-    continuacao_saida_valida,
-    procurar_continuacao_saida_tanque,
+    orientacao_continuacao_saida,
+    procurar_continuacao_saida_pivo_dianteiro,
 )
 from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
@@ -128,12 +128,13 @@ def control_loop():
             status.value = 'Procurando continuacao da linha apos a saida'
             print(
                 "[controle] faixa PRETA ja confirmada; procurando "
-                "continuacao com giro tanque: esquerda por 0.5 s e depois "
-                "direita por 1.0 s")
+                "ramificacao: se estiver visivel, o segue-linha assume "
+                "mesmo torta; sem ramo, o pivo dianteiro procura por "
+                "0.5 s e depois cruza por 1.0 s")
             try:
-                lado_encontrado = procurar_continuacao_saida_tanque(
+                lado_encontrado = procurar_continuacao_saida_pivo_dianteiro(
                     arduino,
-                    linha_a_frente=lambda: continuacao_saida_valida(
+                    orientacao_ramificacao=lambda: orientacao_continuacao_saida(
                         ler_resultado_visao_rapida(),
                     ),
                     deve_encerrar=lambda: bool(terminate.value),
@@ -141,7 +142,7 @@ def control_loop():
             except RuntimeError as erro:
                 lado_encontrado = None
                 print(
-                    "[controle] falha na busca tanque pos-resgate: "
+                    "[controle] falha no pivo dianteiro pos-resgate: "
                     f"{erro}")
             finally:
                 # A manobra e exclusiva da primeira retomada apos o resgate.
@@ -164,8 +165,8 @@ def control_loop():
             line_status.value = "line_detected"
             status.value = 'Continuacao encontrada - seguindo linha'
             print(
-                "[controle] continuacao confirmada no "
-                f"{lado_encontrado}; iniciando segue-linha normal")
+                "[controle] ramificacao confirmada em "
+                f"{lado_encontrado}; entregando ao segue-linha normal")
 
         while not terminate.value:
 
