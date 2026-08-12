@@ -53,7 +53,6 @@ import config  # noqa: E402
 from controle.missao import (  # noqa: E402
     HANDOFF_TO_LINE,
     HANDOFF_TO_RESCUE,
-    HandoffError,
     HandoffExecutor,
     MissionCoordinator,
     MissionState,
@@ -66,7 +65,6 @@ SHADOW_ROOT = Path(__file__).resolve().parent
 CHILD_JOIN_TIMEOUT_S = 6.0
 #: Códigos de saída do subprocesso de resgate, lidos pelo supervisor.
 RESCUE_EXIT_OK = 0
-RESCUE_EXIT_INCOMPLETE = 3
 
 
 def iniciar_visao(debug):
@@ -368,15 +366,6 @@ class MissionSystem:
         time.sleep(config.MISSION_RECOVERY_DELAY_S)
         self.start_line_phase()
 
-    def pausar_apos_final(self):
-        """Mantem o supervisor vivo apos a faixa vermelha, sem movimento."""
-        self.shared.terminate.value = True
-        if self.children:
-            self.join_line_children()
-        self.children = []
-        self.shared.mission_mode.value = False
-        self.shared.status.value = "Missao concluida - Ctrl-C para encerrar"
-
     # -- encerramento ----------------------------------------------------
     def shutdown(self):
         self.shared.terminate.value = True
@@ -425,105 +414,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def _main_antigo():
-    args = parse_args()
-    if args.rescue_camera_index is None:
-        import config_resgate
-        args.rescue_camera_index = config_resgate.RESCUE_CAMERA_INDEX
-
-    from controle.trava_motores import MotorLockError, MotorOwnerLock
-    motor_lock = MotorOwnerLock("missao")
-    try:
-        motor_lock.acquire()
-    except MotorLockError as err:
-        print(f"[missão] ERRO: {err}")
-        return 1
-
-    import shared.dados_compartilhados as shared
-
-    shm = _criar_memoria_debug() if args.debug else None
-    coordinator = MissionCoordinator(policy=args.policy)
-    system = MissionSystem(shared, motor_lock, args)
-    codigo = 0
-
-    try:
-        system.start_line_phase()
-        while True:
-            resultado = system.wait_line_phase()
-
-            if resultado == "quit":
-                print("[missão] debug encerrado pelo usuário.")
-                coordinator.abort("janela de debug encerrada")
-                break
-
-            if resultado == "finished":
-                coordinator.on_red_finish()
-                print("[missão] faixa vermelha final alcançada.")
-                break
-
-            if resultado == "child_died":
-                if shared.rescue_requested.value:
-                    resultado = "rescue"
-                else:
-                    print(
-                        "[missão] um processo do percurso terminou sem pedir "
-                        "o resgate; encerrando por segurança.")
-                    coordinator.abort("processo do percurso encerrou")
-                    codigo = 2
-                    break
-
-            # Handoff percurso → resgate, na ordem testada.
-            coordinator.on_entry_candidate()
-            coordinator.on_entry_confirmed()
-            coordinator.on_zone_entered()
-            print("[missão] faixa PRATA confirmada; executando o handoff")
-            HandoffExecutor(system, HANDOFF_TO_RESCUE).run()
-            coordinator.on_rescue_started()
-
-            returncode = system.wait_rescue()
-            if returncode == RESCUE_EXIT_OK:
-                print("[missão] resgate concluído; voltando ao percurso")
-            else:
-                print(
-                    f"[missão] o resgate terminou com código {returncode}; "
-                    "faixa preta não confirmada; permanecendo parado")
-                coordinator.abort(
-                    f"saída do resgate não confirmada: código {returncode}")
-                codigo = returncode or RESCUE_EXIT_INCOMPLETE
-                break
-
-            # Handoff resgate → percurso, na ordem testada.
-            HandoffExecutor(system, HANDOFF_TO_LINE).run()
-            coordinator.state = MissionState.FOLLOW_LINE
-
-    except HandoffError as err:
-        print(f"[missão] ERRO no handoff: {err}")
-        coordinator.abort(str(err))
-        codigo = 2
-    except KeyboardInterrupt:
-        print("\n[missão] Ctrl-C — encerrando…")
-        coordinator.abort("Ctrl-C")
-        codigo = 130
-    except Exception as err:                      # noqa: BLE001
-        print(f"[missão] ERRO inesperado: {err}")
-        coordinator.abort(str(err))
-        codigo = 2
-    finally:
-        system.shutdown()
-        if shm is not None:
-            shm.close()
-            try:
-                shm.unlink()
-            except FileNotFoundError:
-                pass
-        inventory = coordinator.inventory
-        print(
-            f"[missão] estado final: {coordinator.state} | "
-            f"prata {inventory.silver_deposited}/2, "
-            f"preta {inventory.black_deposited}/1")
-    return codigo
-
-
 def main():
     """Executa tentativas de missao ate Ctrl-C ou desligamento da Raspberry."""
     args = parse_args()
@@ -533,11 +423,16 @@ def main():
 
     from controle.trava_motores import MotorLockError, MotorOwnerLock
     motor_lock = MotorOwnerLock("missao")
-    try:
-        motor_lock.acquire()
-    except MotorLockError as err:
-        print(f"[missao] ERRO: {err}")
-        return 1
+    while True:
+        try:
+            motor_lock.acquire()
+            break
+        except MotorLockError as err:
+            # Uma trava remanescente ou outro processo ainda em desligamento
+            # nao pode encerrar o supervisor. Esperar e tentar de novo tambem
+            # preserva o dono atual: nunca removemos a trava de outro processo.
+            print(f"[missao] aguardando a trava dos motores: {err}")
+            time.sleep(config.MISSION_RECOVERY_DELAY_S)
 
     import shared.dados_compartilhados as shared
 
@@ -573,18 +468,26 @@ def main():
                 resultado = system.wait_line_phase()
 
                 if resultado == "quit":
-                    print("[missao] debug encerrado pelo usuario.")
-                    coordinator.abort("janela de debug encerrada")
-                    break
+                    # No modo debug, q/Esc fecha a janela e sinaliza
+                    # ``terminate``. Isso nao pode encerrar a missao da
+                    # Raspberry: a tentativa e simplesmente refeita.
+                    print("[missao] sinal de parada recebido; reiniciando")
+                    tentativas += 1
+                    system.reiniciar_missao_do_percurso(
+                        "sinal de parada da fase de percurso")
+                    coordinator = MissionCoordinator(policy=args.policy)
+                    continue
 
                 if resultado == "finished":
                     coordinator.on_red_finish()
-                    system.pausar_apos_final()
                     print(
-                        "[missao] faixa vermelha final alcancada; programa "
-                        "permanece ativo e parado. Use Ctrl-C para encerrar")
-                    while True:
-                        time.sleep(1.0)
+                        "[missao] faixa vermelha final alcancada; "
+                        "reiniciando a missao automaticamente")
+                    tentativas += 1
+                    system.reiniciar_missao_do_percurso(
+                        "faixa vermelha final alcancada")
+                    coordinator = MissionCoordinator(policy=args.policy)
+                    continue
 
                 if resultado == "child_died":
                     if not shared.rescue_requested.value:

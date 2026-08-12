@@ -583,10 +583,10 @@ def control_loop():
                 stop_for_red()
                 if mission_mode.value and not entry_armed.value:
                     # A sala de resgate já ficou para trás: esta é a faixa
-                    # vermelha final da prova. O supervisor encerra a missão.
+                    # vermelha final da prova. O supervisor reinicia a missão.
                     red_finished.value = True
-                    status.value = 'Faixa vermelha final — missão concluída'
-                    print("[controle] faixa vermelha final; missão concluída")
+                    status.value = 'Faixa vermelha final — reiniciando missão'
+                    print("[controle] faixa vermelha final; reiniciando missão")
                     break
                 line_status.value = "line_detected"
                 continue
