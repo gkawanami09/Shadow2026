@@ -7,7 +7,7 @@ uniforme de luz altera ambos e praticamente preserva a razao.
 
 Os 28% externos de cada lado do quadro sao usados para medir a soleira. Isso
 remove da amostra a linha preta longitudinal que aparece no centro nos casos
-T/L. Frames repetidos, faixa fora do centro e exposicao instavel nao votam.
+T/L. Frames repetidos, faixa ainda distante e exposicao instavel nao votam.
 """
 
 from collections import deque
@@ -61,6 +61,24 @@ def faixa_centralizada(resultado):
         posicao is not None
         and abs(posicao - cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO)
         <= cfg.EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE
+    )
+
+
+def faixa_pronta_para_confirmacao(resultado):
+    """A soleira chegou perto o bastante para frear e votar sua cor?
+
+    Nao ha limite inferior na imagem depois desse ponto: se a latencia da
+    camera fizer a faixa passar do centro, mandar re criaria uma oscilacao e
+    recusar seus votos deixaria o robo parado sobre uma faixa valida.
+    """
+    posicao = posicao_vertical_faixa(resultado)
+    return (
+        posicao is not None
+        and posicao
+        >= (
+            cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO
+            - cfg.EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE
+        )
     )
 
 
@@ -429,7 +447,7 @@ class ConfirmadorFaixaSaidaLinha:
         if now - timestamp > cfg.EXIT_LINE_VERIFY_MAX_AGE_S:
             return None, resultado
 
-        if not faixa_centralizada(resultado):
+        if not faixa_pronta_para_confirmacao(resultado):
             self._votos.clear()
             self._frames_exposicao_estavel = 0
             self._ultima_referencia_luz = None

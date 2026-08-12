@@ -406,24 +406,21 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
         )
         arduino = FakeArduino()
         steer = RecordingSteer(clock)
-        confirmadores = ConfirmadorFactory([PRETA, PRETA])
         retomada = RetomadaFactory()
 
-        with patch.object(
-            saida_linha,
-            "ConfirmadorFaixaSaidaLinha",
-            new=confirmadores,
-        ):
-            resultado = saida_linha.confirmar_saida_com_camera_linha(
-                arduino,
-                steer,
-                lambda: camera,
-                relogio=clock,
-                dormir=clock.sleep,
-                retomada_factory=retomada,
-            )
+        # Este caso usa o confirmador REAL: o mock antigo escondia a
+        # incompatibilidade entre a zona de frenagem e a zona de votacao.
+        resultado = saida_linha.confirmar_saida_com_camera_linha(
+            arduino,
+            steer,
+            lambda: camera,
+            relogio=clock,
+            dormir=clock.sleep,
+            retomada_factory=retomada,
+        )
 
         self.assertEqual(resultado, PRETA)
+        self.assertEqual(cfg.EXIT_LINE_VERIFY_BRAKE_SETTLE_S, 0.12)
         movimentos = [
             args for _t, args, _kwargs in steer.events if args
         ]

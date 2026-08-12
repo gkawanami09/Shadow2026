@@ -20,6 +20,7 @@ from visao.confirmacao_saida_linha import (  # noqa: E402
     ClassificadorFaixaSaidaLinha,
     ConfirmadorFaixaSaidaLinha,
     faixa_centralizada,
+    faixa_pronta_para_confirmacao,
     posicao_vertical_faixa,
 )
 
@@ -380,7 +381,7 @@ class ConfirmadorTests(unittest.TestCase):
         self.assertEqual(confirmador.votos_pretos, 0)
         self.assertFalse(confirmador.exposicao_estavel)
 
-    def test_faixa_fora_do_centro_nao_vota(self):
+    def test_faixa_ainda_distante_nao_vota(self):
         confirmador = ConfirmadorFaixaSaidaLinha()
         distante = cena_preta(topo=28, base=78)
 
@@ -395,6 +396,34 @@ class ConfirmadorTests(unittest.TestCase):
         self.assertIsNone(decisao)
         self.assertEqual(confirmador.votos_pretos, 0)
         self.assertFalse(confirmador.exposicao_estavel)
+
+    def test_faixa_que_passou_do_centro_ainda_pode_votar_sua_cor(self):
+        for baixa, esperado in (
+            (cena_preta(topo=158, base=218), PRETA),
+            (cena_prata(topo=158, base=218), NAO_PRETA),
+        ):
+            with self.subTest(esperado=esperado):
+                confirmador = ConfirmadorFaixaSaidaLinha()
+                resultado_inicial = (
+                    ClassificadorFaixaSaidaLinha().classificar(baixa)
+                )
+
+                self.assertFalse(faixa_centralizada(resultado_inicial))
+                self.assertTrue(
+                    faixa_pronta_para_confirmacao(resultado_inicial)
+                )
+
+                decisoes = []
+                for indice in range(4):
+                    instante = 1.0 + indice * 0.03
+                    decisao, _resultado = confirmador.update(
+                        baixa, timestamp=instante, now=instante
+                    )
+                    decisoes.append(decisao)
+
+                self.assertEqual(
+                    decisoes, [None, None, None, esperado]
+                )
 
     def test_salto_de_exposicao_apaga_votos_anteriores(self):
         confirmador = ConfirmadorFaixaSaidaLinha()

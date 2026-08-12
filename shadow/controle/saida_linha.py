@@ -15,6 +15,7 @@ from visao.confirmacao_saida_linha import (
     ClassificadorFaixaSaidaLinha,
     ConfirmadorFaixaSaidaLinha,
     anotar_confirmacao,
+    faixa_pronta_para_confirmacao,
     posicao_vertical_faixa,
 )
 from visao.continuacao_saida import anotar_analise_saida
@@ -176,13 +177,8 @@ def confirmar_saida_com_camera_linha(
                     frame, timestamp=agora)
                 decisao = None
                 posicao_faixa = posicao_vertical_faixa(resultado)
-                inicio_zona_util = (
-                    cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO
-                    - cfg.EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE
-                )
                 candidata_valida = (
-                    posicao_faixa is not None
-                    and posicao_faixa >= inicio_zona_util
+                    faixa_pronta_para_confirmacao(resultado)
                     and resultado.classificacao in (PRETA, NAO_PRETA)
                 )
                 if candidata_valida:
@@ -194,7 +190,7 @@ def confirmar_saida_com_camera_linha(
                         parar()
                         avancando_para_faixa = False
                         faixa_centralizada_hits = 1
-                        dormir(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S)
+                        dormir(cfg.EXIT_LINE_VERIFY_BRAKE_SETTLE_S)
                     else:
                         faixa_centralizada_hits += 1
                 else:

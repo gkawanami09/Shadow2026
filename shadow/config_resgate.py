@@ -676,7 +676,9 @@ EXIT_LINE_VERIFY_SPEED = EXIT_LINE_VERIFY_PWM / 120.0
 EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
 EXIT_LINE_CAMERA_WARMUP_S = 0.35
 EXIT_LINE_VERIFY_CONFIRM_TIMEOUT_S = 1.20
-EXIT_LINE_VERIFY_STEP_SETTLE_S = 0.04
+# PARAR no firmware deixa as rodas livres; use o mesmo assentamento de 0,12 s
+# ja validado nas buscas pulsadas antes de chamar um frame de "parado".
+EXIT_LINE_VERIFY_BRAKE_SETTLE_S = BALL_SEARCH_SETTLE_S
 EXIT_LINE_APPROACH_CONFIRM_FRAMES = 2
 EXIT_LINE_VERIFY_WINDOW = 5
 # A primeira votacao apenas escolhe uma hipotese. A segunda, feita sem mover o
