@@ -216,6 +216,7 @@ class EntryModelWorker:
         self._pending = None
         self._latest = None
         self._delivered_timestamp = None
+        self._generation = 0
         self._error = None
         self._stopping = False
         self._thread = threading.Thread(
@@ -228,8 +229,22 @@ class EntryModelWorker:
     def submit(self, frame, timestamp, line_aligned):
         # A cópia impede a câmera de reutilizar o buffer durante a inferência.
         with self._condition:
-            self._pending = (frame.copy(), float(timestamp), bool(line_aligned))
+            self._pending = (
+                self._generation,
+                frame.copy(),
+                float(timestamp),
+                bool(line_aligned),
+            )
             self._condition.notify()
+
+    def reset(self):
+        """Invalida trabalhos e resultados de uma fase anterior da pista."""
+        with self._condition:
+            self._generation += 1
+            self._pending = None
+            self._latest = None
+            self._delivered_timestamp = None
+            self._condition.notify_all()
 
     def poll(self):
         with self._condition:
@@ -256,7 +271,7 @@ class EntryModelWorker:
                     self._condition.wait()
                 if self._stopping:
                     return
-                frame, timestamp, line_aligned = self._pending
+                generation, frame, timestamp, line_aligned = self._pending
                 self._pending = None
             try:
                 started = time.perf_counter()
@@ -267,6 +282,11 @@ class EntryModelWorker:
                     self._error = error
                 return
             with self._condition:
+                if generation != self._generation:
+                    # O 180 (ou outro rearme) invalidou este frame enquanto a
+                    # inferencia estava em andamento. Nunca o entregue na
+                    # fase seguinte.
+                    continue
                 self._latest = EntryInference(
                     timestamp, line_aligned, detection, inference_ms)
 
@@ -283,6 +303,13 @@ class EntryGate:
     @property
     def votes(self):
         return sum(self._hits)
+
+    def reset(self):
+        """Esquece votos e caixas da fase de percurso anterior."""
+        self._hits.clear()
+        self.last_detection = None
+        self.last_reason = "reiniciado"
+        self._last_timestamp = None
 
     def update(self, inference):
         if inference is None:
@@ -318,6 +345,7 @@ class EntryPipeline:
         self.worker = EntryModelWorker(self.model).start()
         self.gate = EntryGate()
         self.last_inference = None
+        self._armed = False
 
     @property
     def last_detection(self):
@@ -333,6 +361,16 @@ class EntryPipeline:
 
     def submit(self, frame, timestamp, line_aligned):
         self.worker.submit(frame, timestamp, line_aligned)
+
+    def set_armed(self, armed):
+        """Separa o rearme atual de inferencias/votos anteriores."""
+        armed = bool(armed)
+        if armed == self._armed:
+            return
+        self.worker.reset()
+        self.gate.reset()
+        self.last_inference = None
+        self._armed = armed
 
     def poll(self):
         inference = self.worker.poll()
@@ -359,8 +397,13 @@ def update_entry_silver(entry_gate, frame, captured_at, *, line_aligned=False):
     if entry_gate is None:
         return
     if not entry_armed.value:
+        entry_gate.set_armed(False)
         entry_silver_detected.value = False
+        entry_silver_confirmed.value = False
+        entry_silver_votes.value = 0
+        entry_silver_reason.value = "entrada desarmada"
         return
+    entry_gate.set_armed(True)
     # A confirmação pertence ao processo de controle. Mantenha-a publicada
     # até ele parar, apagar o LED e solicitar o handoff; não deixe um poll sem
     # resultado apagar o único frame que confirmou a entrada.

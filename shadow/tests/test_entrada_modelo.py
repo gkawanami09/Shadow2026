@@ -12,7 +12,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
 from visao.entrada_missao import (  # noqa: E402
-    EntryDetection, EntryGate, EntryInference, EntryModel)
+    EntryDetection, EntryGate, EntryInference, EntryModel, EntryPipeline)
 
 
 class _Session:
@@ -71,3 +71,41 @@ class EntryGateTests(unittest.TestCase):
         self.assertFalse(gate.update(EntryInference(.03, False, detection, 0.))[0])
         self.assertFalse(gate.update(EntryInference(.06, True, detection, 0.))[0])
         self.assertEqual(gate.last_reason, "votando")
+
+    def test_reset_descarta_votos_e_o_timestamp_da_fase_anterior(self):
+        detection = EntryDetection((1, 2, 3, 4), .7)
+        gate = EntryGate()
+        gate.update(EntryInference(1., True, detection, 0.))
+        self.assertEqual(gate.votes, 1)
+
+        gate.reset()
+
+        self.assertEqual(gate.votes, 0)
+        self.assertIsNone(gate.last_detection)
+        # O novo trecho da pista pode comecar com timestamp menor no replay
+        # ou em uma nova sessao de camera: ele nao herda o frame anterior.
+        self.assertFalse(gate.update(EntryInference(.1, True, detection, 0.))[0])
+
+    def test_rearme_invalida_o_worker_e_zera_o_portao_uma_unica_vez(self):
+        class WorkerFalso:
+            def __init__(self):
+                self.resets = 0
+
+            def reset(self):
+                self.resets += 1
+
+        detection = EntryDetection((1, 2, 3, 4), .7)
+        pipeline = object.__new__(EntryPipeline)
+        pipeline.worker = WorkerFalso()
+        pipeline.gate = EntryGate()
+        pipeline.gate.update(EntryInference(1., True, detection, 0.))
+        pipeline.last_inference = object()
+        pipeline._armed = True
+
+        pipeline.set_armed(False)
+        pipeline.set_armed(False)
+
+        self.assertEqual(pipeline.worker.resets, 1)
+        self.assertEqual(pipeline.gate.votes, 0)
+        self.assertIsNone(pipeline.gate.last_detection)
+        self.assertIsNone(pipeline.last_inference)

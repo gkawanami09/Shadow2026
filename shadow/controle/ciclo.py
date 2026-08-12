@@ -63,6 +63,14 @@ def _enter_rescue_zone(arduino):
           "resgate fará o avanço de 1 s")
 
 
+def _reset_entry_silver(reason):
+    """Descarta qualquer candidatura de prata antes de mudar de percurso."""
+    entry_silver_detected.value = False
+    entry_silver_confirmed.value = False
+    entry_silver_votes.value = 0
+    entry_silver_reason.value = reason
+
+
 def control_loop():
     try:
         arduino = Arduino()
@@ -133,6 +141,7 @@ def control_loop():
     green_turn_target.value = 0
     preferencia_esquerda_inicio = 0.
     preferencia_esquerda_alinhada_desde = None
+    entry_rearm_after = None
 
     try:
         while not terminate.value:
@@ -270,6 +279,25 @@ def control_loop():
                 rescue_requested.value = True
                 break
 
+            # O 180 e uma manobra bloqueante: a visao continua recebendo
+            # frames enquanto o controle gira e da a re de retomada. So
+            # rearmamos a entrada depois de um trecho novo de segue-linha;
+            # assim votos/candidatos vistos durante a manobra nao podem
+            # solicitar o resgate quando ela retorna.
+            if (
+                mission_mode.value
+                and entry_rearm_after is not None
+                and time.monotonic() >= entry_rearm_after
+                and turn_dir.value == "straight"
+                and line_detected.value
+            ):
+                _reset_entry_silver("prata reiniciada apos giro de 180")
+                entry_armed.value = True
+                entry_rearm_after = None
+                print(
+                    "[controle] 180 concluido; entrada prata rearmada "
+                    "com votos zerados")
+
             # Estado normal do segue-linha.
             if line_status.value == "line_detected":
 
@@ -298,6 +326,14 @@ def control_loop():
                 ):
                     status.value = 'Girando 180° para a direita'
 
+                    if mission_mode.value:
+                        # Desarma ANTES do primeiro comando da manobra. A
+                        # visao ainda roda em paralelo, mas o resultado dela
+                        # sera descartado ate o rearme limpo pos-retorno.
+                        entry_armed.value = False
+                        _reset_entry_silver(
+                            "prata desarmada durante giro de 180")
+
                     last_turn_dir = turn_around(last_turn_dir)
                     # O filtro visual pode degradar "dois verdes" para apenas
                     # left/right por alguns frames. Nao iniciar uma segunda
@@ -311,6 +347,16 @@ def control_loop():
                     green_armed = False
                     green_rearm_after = (
                         time.monotonic() + TURN_AROUND_GREEN_COOLDOWN)
+                    if mission_mode.value:
+                        entry_rearm_after = (
+                            time.monotonic()
+                            + config.ENTRY_TURN_AROUND_REARM_S
+                        )
+                        _reset_entry_silver(
+                            "prata zerada apos giro de 180")
+                        print(
+                            "[controle] 180 concluido; prata permanece "
+                            "zerada ate o rearme")
                     continue
 
                 status.value = (

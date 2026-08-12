@@ -74,7 +74,7 @@ class ControladorRetomadaSaida:
                 lambda: self.acao_direcao(
                     0, cfg.EXIT_POST_FORWARD_SPEED),
                 cfg.EXIT_POST_FORWARD_S,
-                "avanco reto de 0,3 s",
+                "avanco reto de 0,6 s",
             )
             self._assentar()
             continuacao = self._confirmar_continuacao()

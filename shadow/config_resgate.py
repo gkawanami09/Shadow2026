@@ -720,7 +720,7 @@ EXIT_LINE_VERIFY_REJECT_REVERSE_S = 1.0
 # missao so reabre o segue-linha normal quando a terceira linha ja foi achada.
 EXIT_POST_FORWARD_PWM = 60
 EXIT_POST_FORWARD_SPEED = EXIT_POST_FORWARD_PWM / 120.0
-EXIT_POST_FORWARD_S = 0.30
+EXIT_POST_FORWARD_S = 0.60
 # Mapeamento confirmado fisicamente neste chassi:
 # esquerda=(-PWM,+PWM,+PWM,-PWM), direita=inverso.
 EXIT_POST_OMNI_PWM = 60

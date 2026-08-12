@@ -290,23 +290,50 @@ class LineFollowerUnchangedTests(unittest.TestCase):
 
     def test_entrada_desarmada_nao_reprocessa(self):
         """Depois de entrar na sala, a faixa prata deixa de ser avaliada."""
-        from shared.dados_compartilhados import (entry_armed,
-                                                 entry_silver_detected)
+        from shared.dados_compartilhados import (
+            entry_armed,
+            entry_silver_confirmed,
+            entry_silver_detected,
+            entry_silver_reason,
+            entry_silver_votes,
+        )
         from visao import entrada_missao
 
         class GatePlaceholder:
+            def __init__(self):
+                self.arm_states = []
+
+            def set_armed(self, armed):
+                self.arm_states.append(bool(armed))
+
             def update(self, *args, **kwargs):
                 raise AssertionError(
                     "o portão não pode ser consultado com a entrada desarmada")
 
         anterior = entry_armed.value
+        anterior_detectada = entry_silver_detected.value
+        anterior_confirmada = entry_silver_confirmed.value
+        anterior_votos = entry_silver_votes.value
+        anterior_motivo = entry_silver_reason.value
         try:
             entry_armed.value = False
             entry_silver_detected.value = True
-            entrada_missao.update_entry_silver(GatePlaceholder(), None, 0.0)
+            entry_silver_confirmed.value = True
+            entry_silver_votes.value = 2
+            entry_silver_reason.value = "confirmada_rapida"
+            gate = GatePlaceholder()
+            entrada_missao.update_entry_silver(gate, None, 0.0)
             self.assertFalse(entry_silver_detected.value)
+            self.assertFalse(entry_silver_confirmed.value)
+            self.assertEqual(entry_silver_votes.value, 0)
+            self.assertEqual(entry_silver_reason.value, "entrada desarmada")
+            self.assertEqual(gate.arm_states, [False])
         finally:
             entry_armed.value = anterior
+            entry_silver_detected.value = anterior_detectada
+            entry_silver_confirmed.value = anterior_confirmada
+            entry_silver_votes.value = anterior_votos
+            entry_silver_reason.value = anterior_motivo
 
 
 class PulsedSearchConfigTests(unittest.TestCase):

@@ -240,6 +240,10 @@ TURN_AROUND_REVERSE = .15                 # metade da ré após re-aquisitar a l
 TURN_AROUND_REVERSE_EXTRA = .20           # metade do extra se line_size < 5500
 TURN_AROUND_SMALL_LINE = 5500
 TURN_AROUND_GREEN_COOLDOWN = 1.0          # ignora memoria residual dos dois verdes
+# Durante o 180 a visao nao pode confirmar a entrada. Depois de parar e dar
+# a re de retomada, aguardamos este trecho de segue-linha antes de rearmar o
+# modelo de prata com votos novos.
+ENTRY_TURN_AROUND_REARM_S = 1.0
 
 # ----------------------------------------------------------------------------
 # Loops
