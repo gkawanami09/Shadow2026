@@ -7,13 +7,14 @@ busca era invisível para o robô, passa a ser a única coisa que importa.
 
 Sequência::
 
-    MAP_TRIANGLES → SEARCH(pulsado) → ALIGN(curva) → CROSS → DONE
+    MAP_TRIANGLES → SEARCH(pulsado) → ALIGN(curva) → DONE
 
 A procura reaproveita o mesmo princípio da busca pulsada de vítimas: gira um
 trecho curto, para, e só confirma com frames capturados depois da parada. A
 faixa confirmada de longe é centralizada com a mesma curva contínua usada na
-aproximação da bolinha. A travessia termina quando a faixa deixa de ser vista,
-com o tempo servindo apenas de limite de segurança.
+aproximação da bolinha. Quando o alinhamento termina, a câmera inferior assume
+o avanço reto e procura a próxima faixa preta/prata; a câmera frontal não
+precisa esperar a soleira desaparecer para liberar essa transição.
 """
 
 import time
@@ -23,7 +24,7 @@ from controle.aproximacao_resgate import MotionCommand
 
 
 class ExitPhaseController:
-    """Conduz o robô do fim do resgate até fora da sala, parado e seguro."""
+    """Alinha a saída e entrega o avanço monitorado à câmera de linha."""
 
     MAP_TRIANGLES = "EXIT_MAP_TRIANGLES"
     SEARCH_START = "EXIT_SEARCH_START"
@@ -36,7 +37,6 @@ class ExitPhaseController:
     ALIGN_ARC = "EXIT_ALIGN_ARC"
     ALIGN_BRAKE = "EXIT_ALIGN_BRAKE"
     ALIGN_SETTLE = "EXIT_ALIGN_SETTLE"
-    CROSS = "EXIT_CROSS"
     DONE = "EXIT_DONE"
     FAILED = "EXIT_FAILED"
 
@@ -48,8 +48,6 @@ class ExitPhaseController:
         self._rotate_started_at = None
         self._stopped_at = None
         self._settled_at = None
-        self._cross_started_at = None
-        self._cross_finished_at = None
         self._align_last_seen_at = None
         self._align_frame_after = None
         self._align_motion_started_at = None
@@ -59,7 +57,6 @@ class ExitPhaseController:
         self._align_angle = 190
         self._align_center_hits = 0
         self._align_last_counted_timestamp = None
-        self._cross_loss_started_at = None
         self._tracking_reset_requested = False
         self.mapped_triangles = {"green": False, "red": False}
 
@@ -70,18 +67,6 @@ class ExitPhaseController:
     @property
     def succeeded(self):
         return self.state == self.DONE
-
-    @property
-    def cross_elapsed_s(self):
-        """Tempo real em que o comando reto da tentativa ficou ativo."""
-        if self._cross_started_at is None:
-            return 0.0
-        end = (
-            self._cross_finished_at
-            if self._cross_finished_at is not None
-            else time.monotonic()
-        )
-        return max(float(end) - float(self._cross_started_at), 0.0)
 
     @property
     def stopped(self):
@@ -113,16 +98,16 @@ class ExitPhaseController:
         now = time.monotonic() if now is None else float(now)
 
         if self.state == self.DONE:
-            return self._stop(self.DONE, "fora da sala; robo parado",
-                              terminal=True)
+            return self._stop(
+                self.DONE,
+                "saida alinhada; aguardando handoff para a camera de linha",
+                terminal=True,
+            )
         if self.state == self.FAILED:
             return self._stop(
                 self.FAILED, "saida nao encontrada no prazo", terminal=True)
 
-        if (
-            self.state != self.CROSS
-            and now - self._created_at >= cfg.EXIT_SEARCH_TIMEOUT_S
-        ):
+        if now - self._created_at >= cfg.EXIT_SEARCH_TIMEOUT_S:
             self.state = self.FAILED
             return self._stop(
                 self.FAILED,
@@ -155,8 +140,6 @@ class ExitPhaseController:
                 "fim da correcao; freando antes de medir novamente")
         if self.state == self.ALIGN_SETTLE:
             return self._on_align_settle(now)
-        if self.state == self.CROSS:
-            return self._on_cross(exit_detection, now)
         raise RuntimeError(f"estado de saida desconhecido: {self.state}")
 
     # -- estados ---------------------------------------------------------
@@ -308,7 +291,7 @@ class ExitPhaseController:
                 f"{self._align_center_hits}/"
                 f"{cfg.EXIT_ALIGN_CENTER_CONFIRM_FRAMES}",
             )
-        return self.begin_cross(now=now)
+        return self.handoff_to_line_camera()
 
     def _on_align_motion(self, now):
         if self._align_motion_started_at is None:
@@ -345,44 +328,6 @@ class ExitPhaseController:
             self.ALIGN_SETTLE,
             "aguardando vibracao do alinhamento terminar")
 
-    def _on_cross(self, exit_detection, now):
-        if self._cross_started_at is None:
-            return self._forward(
-                self.CROSS, "atravessando a soleira de saida")
-        elapsed = now - self._cross_started_at
-        if elapsed >= cfg.EXIT_ADVANCE_TIMEOUT_S - 1e-9:
-            self._cross_finished_at = now
-            self.state = self.FAILED
-            return self._stop(
-                self.FAILED,
-                f"modelo nao perdeu a soleira no timeout ({elapsed:.2f} s)",
-                terminal=True)
-        if self._usable(exit_detection, now):
-            self._cross_loss_started_at = None
-        elif exit_detection is None:
-            if self._cross_loss_started_at is None:
-                self._cross_loss_started_at = now
-        else:
-            # Um resultado apenas envelhecido pode significar worker/camera
-            # travados, nao que a soleira realmente saiu do quadro. Somente
-            # ausencias novas, convertidas em ``None`` pelo gate assincrono,
-            # autorizam a troca de camera.
-            self._cross_loss_started_at = None
-        perdeu_confirmado = (
-            self._cross_loss_started_at is not None
-            and now - self._cross_loss_started_at
-            >= cfg.EXIT_ADVANCE_LOST_CONFIRM_S - 1e-9
-        )
-        if perdeu_confirmado:
-            self._cross_finished_at = now
-            self.state = self.DONE
-            return self._stop(
-                self.DONE,
-                f"soleira confirmada saiu da camera ({elapsed:.2f} s); "
-                "trocando para a camera de linha",
-                terminal=True)
-        return self._forward(self.CROSS, "atravessando a soleira de saida")
-
     # -- confirmações de escrita serial ----------------------------------
     def notify_command_written(self, state, now=None):
         """Confirma a escrita serial e devolve se a visão deve ser zerada."""
@@ -414,28 +359,30 @@ class ExitPhaseController:
             # Diferente da busca inicial, o alinhamento já possui uma faixa
             # confirmada. Não apague seu gate: mantenha o LOCK entre pulsos.
             return False
-        if state == self.CROSS and self._cross_started_at is None:
-            self._cross_started_at = now
-            return False
         return False
 
-    def begin_cross(self, now=None):
-        """Inicia o avanco reto assim que a soleira distante e confirmada."""
+    def handoff_to_line_camera(self):
+        """Entrega o avanco a camera inferior depois do alinhamento.
+
+        Nao ha travessia cega pela camera frontal. ``resgate.py`` recebe este
+        estado terminal, fecha a camera de resgate e abre a inferior antes de
+        mandar qualquer comando reto. A rotina inferior mantem o avanco ate
+        encontrar e confirmar uma faixa preta ou prata.
+        """
         if self.state not in (
             self.SEARCH_OBSERVE, self.ALIGN, self.ALIGN_ARC
         ):
             raise RuntimeError(
-                "travessia exige soleira confirmada durante a observacao")
+                "handoff exige soleira confirmada durante a observacao")
         if self._align_center_hits < cfg.EXIT_ALIGN_CENTER_CONFIRM_FRAMES:
             raise RuntimeError(
-                "travessia exige centro confirmado em frames distintos")
-        self.state = self.CROSS
-        self._cross_started_at = None
-        self._cross_finished_at = None
-        self._cross_loss_started_at = None
-        return self._forward(
-            self.CROSS,
-            "soleira confirmada de longe; avancando reto imediatamente",
+                "handoff exige centro confirmado em frames distintos")
+        self.state = self.DONE
+        return self._stop(
+            self.DONE,
+            "saida alinhada; trocando para a camera de linha para avancar "
+            "reto ate a proxima faixa",
+            terminal=True,
         )
 
     # -- auxiliares ------------------------------------------------------
@@ -590,11 +537,6 @@ class ExitPhaseController:
             angle=cfg.EXIT_SEARCH_TANK_ANGLE,
             speed=cfg.EXIT_SEARCH_TANK_SPEED,
             detail=detail)
-
-    @staticmethod
-    def _forward(state, detail):
-        return MotionCommand(
-            state, angle=0, speed=cfg.EXIT_ADVANCE_SPEED, detail=detail)
 
     @staticmethod
     def _stop(state, detail, terminal=False):

@@ -1124,15 +1124,7 @@ def main():
                             timestamp=pacote.captured_at,
                             now=agora,
                         )
-                        if controlador_saida.state == controlador_saida.CROSS:
-                            if candidata_saida is None:
-                                faltas_saida += 1
-                                if faltas_saida >= 2:
-                                    deteccao_saida = None
-                            else:
-                                faltas_saida = 0
-                                deteccao_saida = candidata_saida
-                        elif confirmada_saida:
+                        if confirmada_saida:
                             deteccao_saida = candidata_saida
                             faltas_saida = 0
                         else:
@@ -1176,15 +1168,7 @@ def main():
                             "[saida] alvo TRAVADO pelo modelo: "
                             f"confianca={candidata_saida.confidence:.0%}; "
                             "direcionando para o centro")
-                    if controlador_saida.state == controlador_saida.CROSS:
-                        if candidata_saida is None:
-                            faltas_saida += 1
-                            if faltas_saida >= 2:
-                                deteccao_saida = None
-                        else:
-                            faltas_saida = 0
-                            deteccao_saida = candidata_saida
-                    elif confirmada_saida:
+                    if confirmada_saida:
                         deteccao_saida = candidata_saida
                         faltas_saida = 0
                     else:
@@ -2194,9 +2178,9 @@ def main():
 
                 steer()
                 print(
-                    "[saida] YOLO perdeu a saida apos a aproximacao; "
-                    "trocando diretamente para a camera de linha com o "
-                    "LED aceso")
+                    "[saida] saida alinhada; trocando diretamente para a "
+                    "camera de linha com o LED aceso para avancar ate a "
+                    "proxima faixa")
                 if trabalhador is not None:
                     trabalhador.close(timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
                     trabalhador = None

@@ -51,9 +51,9 @@ RESCUE_SCAN ──► TARGET_BRAKE ──► TARGET_VERIFY ──► TARGET_LOCK
                                           │
                               DETECT_BOTH_TRIANGLES_FINAL
                                           │
-                                  FIND_BLACK_EXIT ──► CROSS_EXIT
+                                  FIND_BLACK_EXIT ──► ALIGN_EXIT
                                           │
-                              STOP_AND_HANDOFF_TO_LINE
+                             HANDOFF_TO_LINE_AND_VERIFY
                                           │
                                     FOLLOW_LINE ──► RED_FINISH
 ```

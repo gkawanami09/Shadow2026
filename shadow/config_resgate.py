@@ -616,16 +616,6 @@ EXIT_BLACK_LOCK_MIN_CONFIDENCE = 0.22
 EXIT_BLACK_LOCK_SEARCH_X_MARGIN_RATIO = 0.42
 EXIT_BLACK_LOCK_SEARCH_Y_MARGIN_RATIO = 0.30
 
-# Travessia da soleira de saida. Igual a entrada: o tempo e apenas o limite
-# de seguranca; o fim normal e a faixa deixar de ser vista.
-# Ao confirmar a faixa distante, o robo precisa vencer o atrito imediatamente.
-# 0.35 equivalia a somente 42 PWM e, no chassi real, podia deixar os motores
-# apenas fazendo ruido. A saida usa o mesmo PWM forte ja validado nos demais
-# movimentos do resgate.
-EXIT_ADVANCE_PWM = 80
-EXIT_ADVANCE_SPEED = EXIT_ADVANCE_PWM / 120.0
-EXIT_ADVANCE_TIMEOUT_S = 3.5
-
 # Giro pulsado de procura da saida quando nenhuma faixa esta no campo.
 EXIT_SEARCH_TIMEOUT_S = 60.0
 # Usa o mesmo pulso completo da procura dos retangulos. Um candidato visto
@@ -658,26 +648,22 @@ EXIT_ALIGN_YAW_MAX_PULSE_S = 0.18
 EXIT_ALIGN_YAW_FULL_ERROR_DEG = 18.0
 EXIT_ALIGN_MAX_CORRECTIONS = 14
 # O centro precisa aparecer alinhado em frames distintos com o robo parado.
-# Um unico resultado do worker nao pode autorizar a travessia.
+# Um unico resultado do worker nao pode autorizar o handoff da camera.
 EXIT_ALIGN_CENTER_CONFIRM_FRAMES = 2
 # Uma falha de segmentação isolada não pode mandar o robô voltar ao giro e
 # ultrapassar uma faixa que já estava centralizada.
 EXIT_ALIGN_LOST_TIMEOUT_S = 0.35
-# Durante o avanco, a perda precisa persistir depois do tempo minimo. Isso
-# evita trocar de camera por um unico dropout do modelo.
-EXIT_ADVANCE_LOST_CONFIRM_S = 0.18
-
 # Confirmacao final com a camera do segue-linha. A metrica de cor e relativa ao
 # piso do MESMO frame; assim autoexposicao e mudancas uniformes de luz nao
 # transformam prata em preto. A camera aquece, a exposicao precisa estabilizar
 # e as duas decisoes passam por uma segunda votacao simetrica.
 EXIT_LINE_VERIFY_PWM = 60
 EXIT_LINE_VERIFY_SPEED = EXIT_LINE_VERIFY_PWM / 120.0
-# A distancia entre a perda do YOLO e a soleira vista pela camera inferior
-# varia com o ponto em que a caixa sai da camera frontal. Por padrao nao existe
-# timeout de distancia: com piso branco o comando reto continua ate uma faixa
-# PRETA/PRATA real aparecer. Um numero positivo pode ser usado apenas em teste
-# de bancada ou como limite deliberadamente calibrado para outro campo.
+# Depois de alinhar a saida na camera frontal, a camera inferior acompanha o
+# avanco reto. Por padrao nao existe timeout de distancia: com piso branco o
+# comando continua ate uma faixa PRETA/PRATA real aparecer. Um numero positivo
+# pode ser usado apenas em teste de bancada ou como limite deliberadamente
+# calibrado para outro campo.
 EXIT_LINE_VERIFY_TIMEOUT_S = None
 EXIT_LINE_CAMERA_WARMUP_S = 0.35
 EXIT_LINE_VERIFY_CONFIRM_TIMEOUT_S = 1.20

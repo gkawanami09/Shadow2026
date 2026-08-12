@@ -76,7 +76,7 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(observando.state, self.exit.SEARCH_OBSERVE)
         return assentou
 
-    def _ate_cross(self):
+    def _ate_handoff_linha(self):
         assentou = self._ate_observar()
         primeiro_t = assentou + 0.01
         primeiro = self.exit.update(
@@ -88,13 +88,14 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(primeiro.angle, 190)
 
         segundo_t = primeiro_t + 0.02
-        cross = self.exit.update(
+        handoff = self.exit.update(
             FakeExit(timestamp=segundo_t),
             FRAME_SHAPE,
             now=segundo_t + 0.001,
         )
-        self.assertEqual(cross.state, self.exit.CROSS)
-        return segundo_t + 0.001, cross
+        self.assertEqual(handoff.state, self.exit.DONE)
+        self.assertTrue(handoff.terminal)
+        return segundo_t + 0.001, handoff
 
     def test_mapeia_antes_de_procurar_e_timeout_do_mapa_nao_prende(self):
         mapeando = self.exit.update(
@@ -120,7 +121,7 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(girando.state, self.exit.SEARCH_ROTATE)
         self.assertFalse(self.exit.frame_allowed(candidato.timestamp))
 
-    def test_previa_forte_em_movimento_so_freia_e_nao_autoriza_cross(self):
+    def test_previa_forte_em_movimento_so_freia_e_nao_autoriza_handoff(self):
         command = self.exit.update(
             None, FRAME_SHAPE, mapper=FakeMapper(both=True), now=0.0)
         self.exit.notify_command_written(command.state, now=0.0)
@@ -142,7 +143,7 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(ainda_observando.state, self.exit.SEARCH_OBSERVE)
         self.assertFalse(self.exit.terminal)
 
-    def test_cross_exige_dois_timestamps_distintos_e_centralizados(self):
+    def test_handoff_exige_dois_timestamps_distintos_e_centralizados(self):
         assentou = self._ate_observar()
         timestamp = assentou + 0.01
         deteccao = FakeExit(timestamp=timestamp)
@@ -161,7 +162,8 @@ class ExitPhaseTests(unittest.TestCase):
             FRAME_SHAPE,
             now=timestamp + 0.021,
         )
-        self.assertEqual(novo.state, self.exit.CROSS)
+        self.assertEqual(novo.state, self.exit.DONE)
+        self.assertTrue(novo.terminal)
 
     def test_centro_encontrado_durante_curva_freia_assenta_e_reconfirma(self):
         assentou = self._ate_observar()
@@ -199,7 +201,8 @@ class ExitPhaseTests(unittest.TestCase):
             FRAME_SHAPE,
             now=frame_2_t + 0.001,
         )
-        self.assertEqual(frame_2.state, self.exit.CROSS)
+        self.assertEqual(frame_2.state, self.exit.DONE)
+        self.assertTrue(frame_2.terminal)
 
     def test_perda_persistente_apos_lock_nunca_reabre_giro(self):
         assentou = self._ate_observar()
@@ -234,7 +237,7 @@ class ExitPhaseTests(unittest.TestCase):
             self.assertEqual(comando.angle, 190)
 
         # O lock nao foi descartado: quando o mesmo alvo reaparece no centro,
-        # a sequencia retoma dali e entra em CROSS sem qualquer novo giro.
+        # a sequencia retoma dali e entrega a camera inferior, sem novo giro.
         reapareceu_em = (
             visto_em + cfg.EXIT_ALIGN_LOST_TIMEOUT_S + 0.50
         )
@@ -249,7 +252,8 @@ class ExitPhaseTests(unittest.TestCase):
             now=reapareceu_em + 0.02,
         )
         self.assertEqual(primeiro.state, self.exit.ALIGN)
-        self.assertEqual(segundo.state, self.exit.CROSS)
+        self.assertEqual(segundo.state, self.exit.DONE)
+        self.assertTrue(segundo.terminal)
 
     def test_limite_de_correcao_apos_lock_para_sem_voltar_ao_search(self):
         assentou = self._ate_observar()
@@ -276,77 +280,21 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(comando.angle, 190)
         self.assertNotEqual(comando.state, self.exit.SEARCH_START)
 
-    def test_cross_so_termina_apos_perda_persistente(self):
-        alinhado_em, cross = self._ate_cross()
-        inicio = alinhado_em + 0.01
-        self.exit.notify_command_written(cross.state, now=inicio)
+    def test_saida_alinhada_entrega_imediatamente_a_camera_de_linha(self):
+        alinhado_em, handoff = self._ate_handoff_linha()
 
-        perda_curta = inicio + 0.02
-        ainda = self.exit.update(None, FRAME_SHAPE, now=perda_curta)
-        self.assertEqual(ainda.state, self.exit.CROSS)
-        ainda_curta = self.exit.update(
-            None,
-            FRAME_SHAPE,
-            now=perda_curta + cfg.EXIT_ADVANCE_LOST_CONFIRM_S / 2,
-        )
-        self.assertEqual(ainda_curta.state, self.exit.CROSS)
-
-        # Reaparecer zera qualquer perda curta acumulada.
-        reapareceu = (
-            perda_curta + cfg.EXIT_ADVANCE_LOST_CONFIRM_S / 2 + 0.01)
-        presente = self.exit.update(
-            FakeExit(timestamp=reapareceu),
-            FRAME_SHAPE,
-            now=reapareceu,
-        )
-        self.assertEqual(presente.state, self.exit.CROSS)
-
-        perda = reapareceu + 0.01
-        curta = self.exit.update(None, FRAME_SHAPE, now=perda)
-        self.assertEqual(curta.state, self.exit.CROSS)
-        ainda_curta = self.exit.update(
-            None,
-            FRAME_SHAPE,
-            now=perda + cfg.EXIT_ADVANCE_LOST_CONFIRM_S / 2,
-        )
-        self.assertEqual(ainda_curta.state, self.exit.CROSS)
-
-        confirmada = self.exit.update(
-            None,
-            FRAME_SHAPE,
-            now=perda + cfg.EXIT_ADVANCE_LOST_CONFIRM_S,
-        )
-        self.assertEqual(confirmada.state, self.exit.DONE)
-        self.assertTrue(confirmada.terminal)
+        self.assertEqual(handoff.angle, 190)
+        self.assertEqual(handoff.speed, 0.0)
+        self.assertTrue(handoff.terminal)
         self.assertTrue(self.exit.succeeded)
+        self.assertIn("camera de linha", handoff.detail)
 
-    def test_timeout_da_travessia_falha_em_vez_de_liberar_segue_linha(self):
-        alinhado_em, cross = self._ate_cross()
-        inicio = alinhado_em + 0.01
-        self.exit.notify_command_written(cross.state, now=inicio)
-        fim = inicio + cfg.EXIT_ADVANCE_TIMEOUT_S
-
-        final = self.exit.update(
-            FakeExit(timestamp=fim), FRAME_SHAPE, now=fim)
-
-        self.assertEqual(final.state, self.exit.FAILED)
-        self.assertTrue(final.terminal)
-        self.assertFalse(self.exit.succeeded)
-        self.assertEqual(final.angle, 190)
-
-    def test_resultado_envelhecido_nao_e_confundido_com_perda_real(self):
-        alinhado_em, cross = self._ate_cross()
-        inicio = alinhado_em + 0.01
-        self.exit.notify_command_written(cross.state, now=inicio)
-        antiga = FakeExit(timestamp=inicio)
-
-        depois_do_minimo = (
-            inicio + cfg.EXIT_ADVANCE_LOST_CONFIRM_S + 0.05)
-        ainda = self.exit.update(
-            antiga, FRAME_SHAPE, now=depois_do_minimo)
-
-        self.assertEqual(ainda.state, self.exit.CROSS)
-        self.assertFalse(ainda.terminal)
+        # A decisao e tomada com a propria deteccao centralizada; nao espera
+        # a soleira desaparecer, nem o timeout da antiga travessia frontal.
+        repetido = self.exit.update(
+            None, FRAME_SHAPE, now=alinhado_em + 10.0)
+        self.assertEqual(repetido.state, self.exit.DONE)
+        self.assertTrue(repetido.terminal)
 
     def test_procura_sem_saida_termina_parada(self):
         command = self.exit.update(
@@ -367,7 +315,8 @@ class ExitCameraHandoffTests(unittest.TestCase):
         self.assertIn("_confirmar_saida_com_camera_linha", fonte)
         self.assertNotIn("_validar_corredor_saida", fonte)
         self.assertNotIn("_recuperar_bloqueio_saida", fonte)
-        self.assertIn("trocando diretamente para a camera de linha", fonte)
+        self.assertIn("saida alinhada", fonte)
+        self.assertIn("_confirmar_saida_com_camera_linha", fonte)
 
 
 class OverlayColorTests(unittest.TestCase):
