@@ -15,7 +15,6 @@ from visao.confirmacao_saida_linha import (
     ClassificadorFaixaSaidaLinha,
     ConfirmadorFaixaSaidaLinha,
     anotar_confirmacao,
-    faixa_centralizada,
     posicao_vertical_faixa,
 )
 from visao.continuacao_saida import anotar_analise_saida
@@ -75,7 +74,6 @@ def confirmar_saida_com_camera_linha(
     confirmacao_iniciada_em = None
     hipotese_inicial = None
     rechecando = False
-    ultima_posicao_faixa = None
     faixa_centralizada_hits = 0
     avancando_para_faixa = False
     manter_led_aceso = False
@@ -156,12 +154,16 @@ def confirmar_saida_com_camera_linha(
 
         print(
             f"[saida] avancando CONTINUAMENTE a PWM "
-            f"{cfg.EXIT_LINE_VERIFY_PWM} ate confirmar uma faixa em "
-            f"{cfg.EXIT_LINE_APPROACH_CONFIRM_FRAMES} frames; so entao "
-            "o robo freia para decidir preto/prata")
+            f"{cfg.EXIT_LINE_VERIFY_PWM}; freando na primeira faixa valida "
+            f"e confirmando o segundo frame PARADO antes de decidir "
+            "preto/prata")
 
         while True:
-            if confirmador is None and not avancando_para_faixa:
+            if (
+                confirmador is None
+                and faixa_centralizada_hits == 0
+                and not avancando_para_faixa
+            ):
                 if acao_direcao(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
                     raise RuntimeError(
                         "nao foi possivel avancar com a camera de linha")
@@ -174,39 +176,52 @@ def confirmar_saida_com_camera_linha(
                     frame, timestamp=agora)
                 decisao = None
                 posicao_faixa = posicao_vertical_faixa(resultado)
-                if posicao_faixa is not None:
-                    ultima_posicao_faixa = posicao_faixa
+                inicio_zona_util = (
+                    cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO
+                    - cfg.EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE
+                )
                 candidata_valida = (
-                    faixa_centralizada(resultado)
+                    posicao_faixa is not None
+                    and posicao_faixa >= inicio_zona_util
                     and resultado.classificacao in (PRETA, NAO_PRETA)
                 )
-                faixa_centralizada_hits = (
-                    faixa_centralizada_hits + 1
-                    if candidata_valida else 0
-                )
+                if candidata_valida:
+                    if faixa_centralizada_hits == 0:
+                        # Freia na PRIMEIRA aparicao utilizavel. O segundo
+                        # frame e lido parado; continuar andando ate dois
+                        # frames podia ultrapassar a faixa e disparar a antiga
+                        # alternancia frente/re curta.
+                        parar()
+                        avancando_para_faixa = False
+                        faixa_centralizada_hits = 1
+                        dormir(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S)
+                    else:
+                        faixa_centralizada_hits += 1
+                else:
+                    faixa_centralizada_hits = 0
                 if (
                     faixa_centralizada_hits
                     >= cfg.EXIT_LINE_APPROACH_CONFIRM_FRAMES
                 ):
-                    parar()
-                    avancando_para_faixa = False
-                    dormir(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S)
                     confirmador = ConfirmadorFaixaSaidaLinha()
                     confirmacao_iniciada_em = relogio()
                     fase_confirmacao = (
-                        "faixa centralizada; estabilizando exposicao")
+                        "faixa confirmada parado; estabilizando exposicao")
                     print(
-                        "[saida] faixa no centro util; AVANCO TRAVADO e "
-                        "votacao iniciada com frames posteriores")
+                        "[saida] faixa confirmada em dois frames, sendo o "
+                        "segundo PARADO; iniciando votacao de cor")
                 else:
-                    fase_confirmacao = (
-                        "avancando ate aparecer uma faixa valida"
-                        if posicao_faixa is None
-                        else (
+                    if faixa_centralizada_hits:
+                        fase_confirmacao = (
+                            "candidata encontrada; confirmando parado")
+                    elif posicao_faixa is None:
+                        fase_confirmacao = (
+                            "avancando ate aparecer uma faixa valida")
+                    else:
+                        fase_confirmacao = (
                             f"faixa em {posicao_faixa:.0%}; mantendo "
                             "avanco continuo"
                         )
-                    )
             else:
                 decisao, resultado = confirmador.update(
                     frame, timestamp=agora, now=agora)
@@ -322,30 +337,6 @@ def confirmar_saida_com_camera_linha(
                     "estavel; PARADO, sem re e sem giro")
                 return RETOMADA_FALHOU
 
-            if confirmador is None:
-                alvo = cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO
-                tolerancia = cfg.EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE
-                if (
-                    (
-                        posicao_faixa is not None
-                        and posicao_faixa > alvo + tolerancia
-                    )
-                    or (
-                        posicao_faixa is None
-                        and ultima_posicao_faixa is not None
-                        and ultima_posicao_faixa > alvo
-                    )
-                ):
-                    parar()
-                    avancando_para_faixa = False
-                    mover(
-                        200,
-                        cfg.EXIT_LINE_VERIFY_SPEED,
-                        cfg.EXIT_LINE_VERIFY_REVERSE_STEP_S,
-                    )
-                    faixa_centralizada_hits = 0
-                    parar()
-                    dormir(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S)
     finally:
         parar_melhor_esforco()
         erro_limpeza = None

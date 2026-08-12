@@ -21,6 +21,7 @@ from visao.confirmacao_saida_linha import (  # noqa: E402
     NAO_PRETA,
     PRETA,
     ClassificadorFaixaSaidaLinha,
+    posicao_vertical_faixa,
 )
 
 
@@ -42,6 +43,14 @@ def cena_prata_centralizada():
     frame[topo:base, :, 1] = textura
     frame[topo:base, :, 2] = textura
     frame[:topo, 200:248] = 35
+    return frame
+
+
+def cena_preta_abaixo_do_centro():
+    frame = np.full(
+        (config.camera_y, config.camera_x, 3), 205, dtype=np.uint8)
+    frame[:158, 200:248] = 35
+    frame[158:218, :] = 35
     return frame
 
 
@@ -366,6 +375,55 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
         self.assertEqual(resultado, saida_linha.LINHA_NAO_ENCONTRADA)
         self.assertEqual(arduino.led_modes, ["ACESO", "APAGADO"])
         self.assertEqual(retomada.executou, 0)
+        movimentos = [
+            args for _t, args, _kwargs in steer.events if args
+        ]
+        self.assertEqual(
+            movimentos,
+            [(0, cfg.EXIT_LINE_VERIFY_SPEED)],
+        )
+        self.assertEqual(steer.events[-1][1], ())
+
+    def test_faixa_que_chega_baixa_freia_sem_alternar_frente_e_re(self):
+        clock = FakeClock()
+        distante = np.full(
+            (config.camera_y, config.camera_x, 3), 205, dtype=np.uint8
+        )
+        distante[18:68, :] = 35
+        distante[:18, 200:248] = 35
+        faixa_baixa = cena_preta_abaixo_do_centro()
+        medicao_baixa = ClassificadorFaixaSaidaLinha().classificar(
+            faixa_baixa)
+        self.assertGreater(
+            posicao_vertical_faixa(medicao_baixa),
+            cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO
+            + cfg.EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE,
+        )
+
+        camera = FakeCameraSequencial(
+            clock,
+            [distante] * 10 + [faixa_baixa] * 8,
+        )
+        arduino = FakeArduino()
+        steer = RecordingSteer(clock)
+        confirmadores = ConfirmadorFactory([PRETA, PRETA])
+        retomada = RetomadaFactory()
+
+        with patch.object(
+            saida_linha,
+            "ConfirmadorFaixaSaidaLinha",
+            new=confirmadores,
+        ):
+            resultado = saida_linha.confirmar_saida_com_camera_linha(
+                arduino,
+                steer,
+                lambda: camera,
+                relogio=clock,
+                dormir=clock.sleep,
+                retomada_factory=retomada,
+            )
+
+        self.assertEqual(resultado, PRETA)
         movimentos = [
             args for _t, args, _kwargs in steer.events if args
         ]
