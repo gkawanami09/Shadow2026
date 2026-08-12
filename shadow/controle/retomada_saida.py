@@ -24,10 +24,6 @@ class ErroRetomadaSaida(RuntimeError):
     pass
 
 
-class BloqueioRetomadaSaida(ErroRetomadaSaida):
-    pass
-
-
 @dataclass(frozen=True)
 class ResultadoRetomadaSaida:
     orientacao_soleira: str
@@ -45,7 +41,6 @@ class ControladorRetomadaSaida:
         arduino,
         acao_direcao,
         analisador=None,
-        monitor_obstaculo=None,
         relogio=time.monotonic,
         dormir=time.sleep,
         debug_callback=None,
@@ -55,7 +50,6 @@ class ControladorRetomadaSaida:
         self.acao_direcao = acao_direcao
         self.analisador = (
             AnalisadorSaidaPreta() if analisador is None else analisador)
-        self.monitor_obstaculo = monitor_obstaculo
         self.relogio = relogio
         self.dormir = dormir
         self.debug_callback = debug_callback
@@ -285,11 +279,6 @@ class ControladorRetomadaSaida:
         ):
             raise ErroRetomadaSaida(
                 "serial mudou durante a retomada da linha")
-        if self.monitor_obstaculo is not None:
-            self.monitor_obstaculo.atualizar(self.arduino, agora=agora)
-            if self.monitor_obstaculo.parada_confirmada:
-                raise BloqueioRetomadaSaida(
-                    "ultrassom bloqueou a retomada da linha")
 
     def _enviar(self, enviar, descricao):
         self._vigiar()

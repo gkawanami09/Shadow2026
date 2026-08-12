@@ -5,9 +5,7 @@ import time
 import cv2
 
 import config_resgate as cfg
-from controle.parada_obstaculo import MonitorObstaculo
 from controle.retomada_saida import (
-    BloqueioRetomadaSaida,
     ControladorRetomadaSaida,
     ErroRetomadaSaida,
 )
@@ -24,22 +22,7 @@ from visao.confirmacao_saida_linha import (
 from visao.continuacao_saida import anotar_analise_saida
 
 
-CORREDOR_BLOQUEADO = "bloqueado"
 RETOMADA_FALHOU = "retomada_falhou"
-
-
-def _novo_monitor_corredor():
-    return MonitorObstaculo(
-        distancia_parada_mm=cfg.EXIT_CLEARANCE_DISTANCE_MM,
-        intervalo_s=cfg.EXIT_CLEARANCE_SAMPLE_INTERVAL_S,
-        timeout_s=cfg.EXIT_CLEARANCE_READ_TIMEOUT_S,
-        confirmacoes=cfg.EXIT_CLEARANCE_NEAR_CONFIRMATIONS,
-        tamanho_historico=cfg.EXIT_CLEARANCE_VALID_READINGS,
-        janela_s=cfg.EXIT_CLEARANCE_TIMEOUT_S,
-        distancia_minima_mm=cfg.EXIT_CLEARANCE_MIN_VALID_MM,
-        distancia_maxima_mm=cfg.EXIT_CLEARANCE_MAX_VALID_MM,
-        distancia_bloqueio_rapido_mm=cfg.EXIT_CLEARANCE_DISTANCE_MM,
-    )
 
 
 def _mover_por_tempo(
@@ -76,7 +59,6 @@ def confirmar_saida_com_camera_linha(
     janela_debug="Shadow2026 - resgate (visao)",
     relogio=time.monotonic,
     dormir=time.sleep,
-    monitor_factory=_novo_monitor_corredor,
     retomada_factory=ControladorRetomadaSaida,
 ):
     """Devolve PRETA somente depois de achar a terceira linha.
@@ -85,7 +67,6 @@ def confirmar_saida_com_camera_linha(
     timeout ou exposicao instavel falha fechada e nunca libera o segue-linha.
     """
     camera = None
-    monitor = None
     epoca_serial = arduino.connection_epoch
     inicio = None
     ultimo_log = 0.0
@@ -125,7 +106,7 @@ def confirmar_saida_com_camera_linha(
             dormir,
         )
 
-    def vigiar(agora):
+    def vigiar():
         arduino.refresh(fail_closed=True)
         if (
             not arduino.connected
@@ -133,8 +114,6 @@ def confirmar_saida_com_camera_linha(
         ):
             raise RuntimeError(
                 "serial mudou durante a confirmacao preta/prata")
-        monitor.atualizar(arduino, agora=agora)
-        return monitor.parada_confirmada
 
     def recuar_e_retornar(resultado, duracao=None):
         nonlocal deslocamento_temporal
@@ -169,8 +148,6 @@ def confirmar_saida_com_camera_linha(
         arduino.led("ACESO")
         print("[saida] LED ACESO: entrando na camera do segue-linha")
         camera = camera_factory()
-        monitor = monitor_factory()
-        monitor.cancelar(arduino)
 
         print(
             "[saida] camera de linha aberta com o robo PARADO; "
@@ -179,15 +156,7 @@ def confirmar_saida_com_camera_linha(
         prazo_aquecimento = relogio() + cfg.EXIT_LINE_CAMERA_WARMUP_S
         while relogio() < prazo_aquecimento:
             camera.get_frame()
-            agora = relogio()
-            if vigiar(agora):
-                print(
-                    "[saida] bloqueio ultrassonico durante o aquecimento "
-                    "da camera; recuando uma vez")
-                return recuar_e_retornar(
-                    CORREDOR_BLOQUEADO,
-                    cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
-                )
+            vigiar()
         # Inicializacao do driver e aquecimento nao consomem o prazo fisico
         # de aproximacao da faixa.
         inicio = relogio()
@@ -232,20 +201,7 @@ def confirmar_saida_com_camera_linha(
                     "rechecagem simetrica parada"
                     if rechecando else "confirmacao primaria parada")
 
-            if vigiar(agora):
-                print(
-                    "[saida] BLOQUEIO ULTRASSONICO durante a camera de linha: "
-                    f"{monitor.distancia_confirmada_mm / 10.0:.1f} cm; "
-                    f"leituras={list(monitor.distancias_validas)}")
-                recuo_bloqueio = max(
-                    cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
-                    max(deslocamento_temporal, 0.0)
-                    + cfg.EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S,
-                )
-                return recuar_e_retornar(
-                    CORREDOR_BLOQUEADO,
-                    recuo_bloqueio,
-                )
+            vigiar()
 
             resumo = (
                 fase_confirmacao,
@@ -316,13 +272,12 @@ def confirmar_saida_com_camera_linha(
                         camera,
                         arduino,
                         acao_direcao,
-                        monitor_obstaculo=monitor,
                         relogio=relogio,
                         dormir=dormir,
                         debug_callback=(
                             debug_retomada if debug else None),
                     ).executar()
-                except (BloqueioRetomadaSaida, ErroRetomadaSaida) as erro:
+                except ErroRetomadaSaida as erro:
                     print(f"[saida] retomada falhou: {erro}; PARADO")
                     return RETOMADA_FALHOU
                 manter_led_aceso = True
@@ -383,11 +338,6 @@ def confirmar_saida_com_camera_linha(
     finally:
         parar_melhor_esforco()
         erro_limpeza = None
-        if monitor is not None:
-            try:
-                monitor.cancelar(arduino)
-            except Exception as erro:
-                erro_limpeza = erro
         if camera is not None:
             try:
                 camera.close()
@@ -403,4 +353,4 @@ def confirmar_saida_com_camera_linha(
             print("[saida] LED APAGADO: retornando a camera de resgate")
         if erro_limpeza is not None:
             raise RuntimeError(
-                "falha ao liberar camera/monitor da saida") from erro_limpeza
+                "falha ao liberar a camera da saida") from erro_limpeza

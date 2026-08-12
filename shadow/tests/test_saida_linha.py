@@ -73,6 +73,19 @@ class FakeCamera:
         self.closed = True
 
 
+class FakeCameraSequencial(FakeCamera):
+    def __init__(self, clock, frames):
+        super().__init__(clock, frames[-1])
+        self._frames = list(frames)
+
+    def get_frame(self):
+        self.clock.sleep(0.05)
+        self.frames += 1
+        if len(self._frames) > 1:
+            return self._frames.pop(0).copy()
+        return self._frames[0].copy()
+
+
 class FakeArduino:
     def __init__(self):
         self.connected = True
@@ -89,35 +102,6 @@ class FakeArduino:
     def parar(self):
         self.paradas += 1
         return True
-
-
-class FakeMonitor:
-    def __init__(self):
-        self.parada_confirmada = False
-        self.distancia_confirmada_mm = None
-        self.distancias_validas = ()
-        self.cancelamentos = 0
-
-    def atualizar(self, arduino, agora=None):
-        return False
-
-    def cancelar(self, arduino):
-        self.cancelamentos += 1
-
-
-class FakeMonitorBloqueio(FakeMonitor):
-    def __init__(self, bloquear_na_atualizacao):
-        super().__init__()
-        self.bloquear_na_atualizacao = int(bloquear_na_atualizacao)
-        self.atualizacoes = 0
-
-    def atualizar(self, arduino, agora=None):
-        self.atualizacoes += 1
-        if self.atualizacoes >= self.bloquear_na_atualizacao:
-            self.parada_confirmada = True
-            self.distancia_confirmada_mm = 120.0
-            self.distancias_validas = (122, 118)
-        return self.parada_confirmada
 
 
 class RecordingSteer:
@@ -194,7 +178,6 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
         )
         camera = FakeCamera(clock, frame)
         arduino = FakeArduino()
-        monitor = FakeMonitor()
         steer = RecordingSteer(clock)
         confirmadores = ConfirmadorFactory(decisoes)
         retomada = RetomadaFactory(falhar=falhar_retomada)
@@ -210,7 +193,6 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
                 lambda: camera,
                 relogio=clock,
                 dormir=clock.sleep,
-                monitor_factory=lambda: monitor,
                 retomada_factory=retomada,
             )
         return SimpleNamespace(
@@ -218,7 +200,6 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
             clock=clock,
             camera=camera,
             arduino=arduino,
-            monitor=monitor,
             steer=steer,
             confirmadores=confirmadores,
             retomada=retomada,
@@ -301,48 +282,60 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
             for _t, args, _kwargs in run.steer.events
         ))
 
-    def test_bloqueio_desfaz_todo_avanco_acumulado_mais_margem(self):
+    def test_camera_de_linha_avanca_primeiro_com_led_aceso_sem_giro(self):
         clock = FakeClock()
-        frame = np.full(
+        distante = np.full(
             (config.camera_y, config.camera_x, 3), 205, dtype=np.uint8
         )
-        frame[18:68, :] = 35
-        frame[:18, 200:248] = 35
-        camera = FakeCamera(clock, frame)
-        arduino = FakeArduino()
-        monitor = FakeMonitorBloqueio(bloquear_na_atualizacao=14)
-        steer = RecordingSteer(clock)
-
-        resultado = saida_linha.confirmar_saida_com_camera_linha(
-            arduino,
-            steer,
-            lambda: camera,
-            relogio=clock,
-            dormir=clock.sleep,
-            monitor_factory=lambda: monitor,
+        distante[18:68, :] = 35
+        distante[:18, 200:248] = 35
+        central = cena_preta_centralizada()
+        camera = FakeCameraSequencial(
+            clock,
+            [distante] * 10 + [central] * 5,
         )
+        arduino = FakeArduino()
+        steer = RecordingSteer(clock)
+        confirmadores = ConfirmadorFactory([PRETA, PRETA])
+        retomada = RetomadaFactory()
 
-        self.assertEqual(resultado, saida_linha.CORREDOR_BLOQUEADO)
+        def abrir_camera_com_led():
+            self.assertEqual(arduino.led_modes, ["ACESO"])
+            return camera
+
+        with patch.object(
+            saida_linha,
+            "ConfirmadorFaixaSaidaLinha",
+            new=confirmadores,
+        ):
+            resultado = saida_linha.confirmar_saida_com_camera_linha(
+                arduino,
+                steer,
+                abrir_camera_com_led,
+                relogio=clock,
+                dormir=clock.sleep,
+                retomada_factory=retomada,
+            )
+
+        self.assertEqual(resultado, PRETA)
+        self.assertEqual(arduino.led_modes, ["ACESO"])
+        self.assertEqual(retomada.executou, 1)
         avancos = [
             args for _t, args, _kwargs in steer.events
             if args == (0, cfg.EXIT_LINE_VERIFY_SPEED)
         ]
-        self.assertGreaterEqual(len(avancos), 4)
-        indice_re = next(
-            i for i, (_t, args, _kwargs) in enumerate(steer.events)
-            if args == (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED)
+        self.assertGreaterEqual(len(avancos), 1)
+        primeiro_movimento = next(
+            args for _t, args, _kwargs in steer.events if args
         )
-        inicio_re = steer.events[indice_re][0]
-        fim_re = next(
-            t for t, args, _kwargs in steer.events[indice_re + 1:]
-            if args == ()
+        self.assertEqual(
+            primeiro_movimento,
+            (0, cfg.EXIT_LINE_VERIFY_SPEED),
         )
-        esperado = max(
-            cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
-            len(avancos) * cfg.EXIT_LINE_VERIFY_STEP_S
-            + cfg.EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S,
-        )
-        self.assertAlmostEqual(fim_re - inicio_re, esperado, places=9)
+        self.assertFalse(any(
+            args and args[0] != 0
+            for _t, args, _kwargs in steer.events
+        ))
 
 
 if __name__ == "__main__":

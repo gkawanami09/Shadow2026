@@ -110,9 +110,6 @@ EXIT_OK = 0
 EXIT_INCOMPLETE = 3
 EXIT_SEM_MODELO = 4
 
-CORREDOR_LIVRE = "livre"
-CORREDOR_BLOQUEADO = "bloqueado"
-CORREDOR_INCONCLUSIVO = "inconclusivo"
 RETOMADA_FALHOU = "retomada_falhou"
 
 
@@ -713,114 +710,6 @@ def _avancar_entrada_da_missao(args, arduino, acao_direcao):
         "[resgate] entrada concluida; iniciando a busca giratoria "
         "das vitimas")
     return True
-
-
-def _recuperar_bloqueio_saida(arduino, acao_direcao, epoca_serial):
-    """Recua meio segundo e muda o setor visto antes de procurar de novo."""
-    acao_direcao()
-    _mover_saida_por_tempo(
-        arduino,
-        acao_direcao,
-        200,
-        cfg.EXIT_CLEARANCE_REVERSE_SPEED,
-        cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
-        epoca_serial,
-    )
-    acao_direcao()
-    _mover_saida_por_tempo(
-        arduino,
-        acao_direcao,
-        cfg.DEPOSIT_SEARCH_TANK_ANGLE,
-        cfg.RED_DEPOSIT_SEARCH_TANK_SPEED,
-        cfg.EXIT_CLEARANCE_ESCAPE_TURN_S,
-        epoca_serial,
-    )
-    acao_direcao()
-
-
-def _novo_monitor_corredor_saida():
-    """Cria o monitor de 15 cm usado nas duas etapas da saída."""
-    return MonitorObstaculo(
-        distancia_parada_mm=cfg.EXIT_CLEARANCE_DISTANCE_MM,
-        intervalo_s=cfg.EXIT_CLEARANCE_SAMPLE_INTERVAL_S,
-        timeout_s=cfg.EXIT_CLEARANCE_READ_TIMEOUT_S,
-        confirmacoes=cfg.EXIT_CLEARANCE_NEAR_CONFIRMATIONS,
-        tamanho_historico=cfg.EXIT_CLEARANCE_VALID_READINGS,
-        janela_s=cfg.EXIT_CLEARANCE_TIMEOUT_S,
-        distancia_minima_mm=cfg.EXIT_CLEARANCE_MIN_VALID_MM,
-        distancia_maxima_mm=cfg.EXIT_CLEARANCE_MAX_VALID_MM,
-        distancia_bloqueio_rapido_mm=cfg.EXIT_CLEARANCE_DISTANCE_MM,
-    )
-
-
-def _validar_corredor_saida(
-    arduino,
-    relogio=time.monotonic,
-    dormir=time.sleep,
-):
-    """Confirma pelo ultrassonico se ha espaco antes da camera de linha.
-
-    O robo ja deve estar parado. Um eco isolado nao bloqueia a saida, mas
-    tambem nao autorizamos a troca de camera se as medidas forem misturadas ou
-    se o sensor nao responder. Assim uma falha do HC-SR04 nunca vira "livre".
-    """
-    epoca_serial = arduino.connection_epoch
-    monitor = _novo_monitor_corredor_saida()
-    monitor.cancelar(arduino)
-
-    try:
-        # A primeira leitura logo depois do PARAR ainda pode carregar vibracao
-        # do chassi. Durante este curto assentamento apenas alimentamos o
-        # watchdog; nenhum eco e usado para autorizar a troca de camera.
-        assentado_em = relogio() + cfg.EXIT_CLEARANCE_SETTLE_S
-        while relogio() < assentado_em:
-            arduino.refresh(fail_closed=True)
-            if (
-                not arduino.connected
-                or arduino.connection_epoch != epoca_serial
-            ):
-                raise RuntimeError(
-                    "serial mudou enquanto o chassi assentava na saida")
-            dormir(min(0.01, max(assentado_em - relogio(), 0.0)))
-
-        prazo = relogio() + cfg.EXIT_CLEARANCE_TIMEOUT_S
-        while relogio() < prazo:
-            agora = relogio()
-            monitor.atualizar(arduino, agora=agora)
-            leituras = monitor.distancias_validas
-
-            if monitor.parada_confirmada:
-                return (
-                    CORREDOR_BLOQUEADO,
-                    monitor.distancia_confirmada_mm,
-                    leituras,
-                )
-
-            if len(leituras) >= cfg.EXIT_CLEARANCE_VALID_READINGS:
-                if all(
-                    distancia > cfg.EXIT_CLEARANCE_DISTANCE_MM
-                    for distancia in leituras
-                ):
-                    return CORREDOR_LIVRE, min(leituras), leituras
-                return CORREDOR_INCONCLUSIVO, min(leituras), leituras
-
-            arduino.refresh(fail_closed=True)
-            if (
-                not arduino.connected
-                or arduino.connection_epoch != epoca_serial
-            ):
-                raise RuntimeError(
-                    "serial mudou durante a validacao ultrassonica da saida")
-            dormir(min(0.01, max(prazo - relogio(), 0.0)))
-    finally:
-        monitor.cancelar(arduino)
-
-    leituras = monitor.distancias_validas
-    return (
-        CORREDOR_INCONCLUSIVO,
-        min(leituras) if leituras else None,
-        leituras,
-    )
 
 
 def _confirmar_saida_com_camera_linha(
@@ -2304,80 +2193,10 @@ def main():
                 from controle.direcao import steer
 
                 steer()
-                estado_corredor, distancia_corredor_mm, leituras_corredor = (
-                    _validar_corredor_saida(arduino)
-                )
-                if estado_corredor != CORREDOR_LIVRE:
-                    motivo_corredor = (
-                        f"objeto confirmado a "
-                        f"{distancia_corredor_mm / 10.0:.1f} cm"
-                        if estado_corredor == CORREDOR_BLOQUEADO
-                        and distancia_corredor_mm is not None
-                        else "medicao inconclusiva"
-                    )
-                    print(
-                        f"[saida] {motivo_corredor}; leituras="
-                        f"{list(leituras_corredor)}; recuando "
-                        f"{cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S:.2f} s "
-                        "e girando um setor curto")
-                    _recuperar_bloqueio_saida(
-                        arduino,
-                        steer,
-                        arduino.connection_epoch,
-                    )
-
-                    # A camera de resgate continua aberta. A tentativa falsa
-                    # e descartada. O recuo curto e o giro acima impedem que
-                    # a proxima busca torne a enquadrar exatamente a mesma
-                    # parede ou mancha.
-                    agora_reinicio = time.monotonic()
-                    if trabalhador_saida is not None:
-                        trabalhador_saida.close(
-                            timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
-                        trabalhador_saida = None
-                    controlador_saida = ExitPhaseController(
-                        start_time=(
-                            inicio_saida
-                            if inicio_saida is not None
-                            else agora_reinicio
-                        )
-                    )
-                    portao_saida, modelo_saida = novo_portao_saida(
-                        modelo_saida)
-                    trabalhador_saida = (
-                        LatestFrameExitDetector(portao_saida.detector)
-                        if modelo_saida is not None else None
-                    )
-                    sequencia_resultado_saida = 0
-                    epoca_saida = arduino.connection_epoch
-                    deteccao_saida = None
-                    faltas_saida = 0
-                    resultado_atual = None
-                    deteccao_atual = None
-                    forma = (
-                        cfg.RESCUE_CAMERA_MAX_HEIGHT,
-                        cfg.RESCUE_CAMERA_MAX_WIDTH,
-                        3,
-                    )
-                    comando = controlador_saida.update(
-                        None,
-                        forma,
-                        mapper=None,
-                        now=agora_reinicio,
-                    )
-                    ultimo_controle_ocioso = agora_reinicio
-                    print(
-                        "[saida] camera de resgate mantida; "
-                        "continuando a procura da faixa")
-                    continue
-
                 print(
-                    "[saida] corredor livre confirmado pelo ultrassonico "
-                    f"({distancia_corredor_mm / 10.0:.1f} cm); "
-                    "liberando a camera de linha")
-                print(
-                    "[saida] a camera de resgate chegou ao limite visual; "
-                    "trocando para a camera do segue-linha")
+                    "[saida] YOLO perdeu a saida apos a aproximacao; "
+                    "trocando diretamente para a camera de linha com o "
+                    "LED aceso")
                 if trabalhador is not None:
                     trabalhador.close(timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
                     trabalhador = None
@@ -2437,17 +2256,12 @@ def main():
                 elif resultado_verificacao in (
                     NAO_PRETA,
                     INCONCLUSIVA,
-                    CORREDOR_BLOQUEADO,
                 ):
                     # A re ja foi executada antes de fechar a camera de linha.
                     # Fechada essa camera, a frontal de resgate pode reabrir
                     # com seguranca e voltar aos pulsos de procura.
                     if resultado_verificacao == NAO_PRETA:
                         motivo = "faixa prata; re de 1 segundo concluida"
-                    elif resultado_verificacao == CORREDOR_BLOQUEADO:
-                        motivo = (
-                            "parede abaixo de 15 cm; todo o avanco foi "
-                            "desfeito")
                     else:
                         motivo = (
                             "verificacao inconclusiva; re de 1 segundo "

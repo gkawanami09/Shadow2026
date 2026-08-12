@@ -1,10 +1,10 @@
 """Regressoes da busca, centralizacao e travessia da saida do resgate."""
 
 from dataclasses import dataclass
+import inspect
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import patch
 
 import numpy as np
 
@@ -15,13 +15,6 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config_resgate as cfg  # noqa: E402
 import resgate as resgate_runtime  # noqa: E402
 from controle.saida_resgate import ExitPhaseController  # noqa: E402
-from resgate import (  # noqa: E402
-    CORREDOR_BLOQUEADO,
-    CORREDOR_INCONCLUSIVO,
-    CORREDOR_LIVRE,
-    _recuperar_bloqueio_saida,
-    _validar_corredor_saida,
-)
 from visao.triangulos_finais import (  # noqa: E402
     annotate_final_triangles,
     dominant_channel,
@@ -57,45 +50,6 @@ class FakeMapper:
     @property
     def both_found(self):
         return all(self.confirmed.values())
-
-
-class FakeClock:
-    def __init__(self):
-        self.now = 0.0
-
-    def __call__(self):
-        return self.now
-
-    def sleep(self, seconds):
-        self.now += max(float(seconds), 0.001)
-
-
-class FakeUltrasonicArduino:
-    def __init__(self, readings):
-        self.readings = list(readings)
-        self.connected = True
-        self.connection_epoch = 1
-        self.active = False
-
-    def cancelar_ultrassom(self):
-        self.active = False
-
-    def iniciar_ultrassom(self, timeout):
-        if self.active:
-            return False
-        self.active = True
-        return True
-
-    def poll_ultrassom(self):
-        if not self.active:
-            return False, None
-        self.active = False
-        if not self.readings:
-            return True, None
-        return True, self.readings.pop(0)
-
-    def refresh(self, fail_closed=True):
-        return True
 
 
 class ExitPhaseTests(unittest.TestCase):
@@ -349,74 +303,14 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(command.angle, 190)
 
 
-class ExitClearanceTests(unittest.TestCase):
-    def _validate(self, readings):
-        clock = FakeClock()
-        arduino = FakeUltrasonicArduino(readings)
-        return _validar_corredor_saida(
-            arduino,
-            relogio=clock,
-            dormir=clock.sleep,
-        )
+class ExitCameraHandoffTests(unittest.TestCase):
+    def test_done_vai_direto_para_camera_de_linha_sem_gate_ultrassonico(self):
+        fonte = inspect.getsource(resgate_runtime.main)
 
-    def test_cinco_medidas_livres_liberam_camera_de_linha(self):
-        state, distance, readings = self._validate(
-            [210, 190, 180, 205, 195])
-        self.assertEqual(state, CORREDOR_LIVRE)
-        self.assertEqual(distance, 180)
-        self.assertEqual(readings, (210, 190, 180, 205, 195))
-
-    def test_duas_medidas_proximas_bloqueiam(self):
-        state, distance, readings = self._validate([143, 260, 148])
-        self.assertEqual(state, CORREDOR_BLOQUEADO)
-        self.assertEqual(distance, 146)
-        self.assertEqual(readings, (143, 260, 148))
-
-    def test_sensor_sem_eco_fica_inconclusivo(self):
-        state, distance, readings = self._validate([None] * 20)
-        self.assertEqual(state, CORREDOR_INCONCLUSIVO)
-        self.assertIsNone(distance)
-        self.assertEqual(readings, ())
-
-    def test_bloqueio_recua_e_gira_um_pulso(self):
-        movimentos = []
-        paradas = []
-
-        def direcao(*args):
-            if args:
-                movimentos.append(args)
-            else:
-                paradas.append(True)
-            return True
-
-        with patch.object(
-            resgate_runtime,
-            "_mover_saida_por_tempo",
-            side_effect=lambda _a, _d, angulo, velocidade, duracao, epoca: (
-                movimentos.append((angulo, velocidade, duracao, epoca))
-            ),
-        ):
-            _recuperar_bloqueio_saida(
-                FakeUltrasonicArduino([]), direcao, 7)
-
-        self.assertEqual(
-            movimentos,
-            [
-                (
-                    200,
-                    cfg.EXIT_CLEARANCE_REVERSE_SPEED,
-                    cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
-                    7,
-                ),
-                (
-                    cfg.DEPOSIT_SEARCH_TANK_ANGLE,
-                    cfg.RED_DEPOSIT_SEARCH_TANK_SPEED,
-                    cfg.EXIT_CLEARANCE_ESCAPE_TURN_S,
-                    7,
-                ),
-            ],
-        )
-        self.assertEqual(len(paradas), 3)
+        self.assertIn("_confirmar_saida_com_camera_linha", fonte)
+        self.assertNotIn("_validar_corredor_saida", fonte)
+        self.assertNotIn("_recuperar_bloqueio_saida", fonte)
+        self.assertIn("trocando diretamente para a camera de linha", fonte)
 
 
 class OverlayColorTests(unittest.TestCase):

@@ -626,27 +626,6 @@ EXIT_ADVANCE_PWM = 80
 EXIT_ADVANCE_SPEED = EXIT_ADVANCE_PWM / 120.0
 EXIT_ADVANCE_TIMEOUT_S = 3.5
 
-# Antes de entregar a decisao para a camera do segue-linha, o robo para e
-# confirma que nao esta apenas olhando uma mancha/objeto proximo. Tres medidas
-# livres sao obrigatorias. Duas medidas proximas confirmam o bloqueio; medida
-# sem eco ou resultado misturado nunca autoriza a troca de camera.
-EXIT_CLEARANCE_DISTANCE_MM = 150
-EXIT_CLEARANCE_VALID_READINGS = 5
-EXIT_CLEARANCE_NEAR_CONFIRMATIONS = 2
-EXIT_CLEARANCE_SETTLE_S = 0.20
-EXIT_CLEARANCE_TIMEOUT_S = 1.20
-EXIT_CLEARANCE_READ_TIMEOUT_S = 0.08
-EXIT_CLEARANCE_SAMPLE_INTERVAL_S = 0.06
-EXIT_CLEARANCE_MIN_VALID_MM = 1
-EXIT_CLEARANCE_MAX_VALID_MM = 4000
-EXIT_CLEARANCE_REVERSE_SPEED = EXIT_ADVANCE_SPEED
-# Quando o ultrassonico veta um candidato visto pela camera de resgate, um
-# recuo curto e um pequeno giro mudam o ponto de vista antes da nova busca.
-EXIT_CLEARANCE_BLOCKED_REVERSE_S = 0.30
-# Depois de um bloqueio, muda o enquadramento com exatamente um pulso igual ao
-# usado na procura dos retangulos.
-EXIT_CLEARANCE_ESCAPE_TURN_S = DEPOSIT_SEARCH_PULSE_S
-
 # Giro pulsado de procura da saida quando nenhuma faixa esta no campo.
 EXIT_SEARCH_TIMEOUT_S = 60.0
 # Usa o mesmo pulso completo da procura dos retangulos. Um candidato visto
