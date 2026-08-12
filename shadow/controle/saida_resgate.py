@@ -264,14 +264,16 @@ class ExitPhaseController:
                     f"soleira oculta por {perdida_por:.2f}s; "
                     "parado aguardando reaparecer",
                 )
-            self._tracking_reset_requested = True
-            self.state = self.SEARCH_BRAKE
-            self._align_last_seen_at = None
+            # Depois que o alvo entrou em ALIGN, SEARCH nunca mais recebe
+            # autoridade. Girar novamente pode ultrapassar a saida que ja foi
+            # localizada. Freia e espera o MESMO lock reaparecer.
+            self.state = self.ALIGN
             self._align_center_hits = 0
             self._align_last_counted_timestamp = None
             return self._stop(
-                self.SEARCH_BRAKE,
-                "soleira perdida; freando antes de retomar a procura")
+                self.ALIGN,
+                "soleira confirmada temporariamente oculta; mantendo "
+                "PARAR e aguardando o mesmo alvo reaparecer")
         self._align_last_seen_at = now
         erro_centro, erro_angulo = self._alignment_errors(
             exit_detection, frame_shape)
@@ -457,7 +459,8 @@ class ExitPhaseController:
 
     def _start_yaw_correction(self, erro_angulo, detalhe=None):
         if not self._correction_allowed():
-            return self._restart_search_after_alignment()
+            return self._hold_after_alignment(
+                "limite de correcoes atingido")
         proporcao = min(
             abs(float(erro_angulo))
             / max(cfg.EXIT_ALIGN_YAW_FULL_ERROR_DEG, 1e-6),
@@ -506,18 +509,17 @@ class ExitPhaseController:
         self._align_corrections += 1
         return self._align_corrections <= cfg.EXIT_ALIGN_MAX_CORRECTIONS
 
-    def _restart_search_after_alignment(self):
-        self._tracking_reset_requested = True
-        self._align_last_seen_at = None
+    def _hold_after_alignment(self, motivo):
+        """Falha de alinhamento nunca devolve autoridade ao giro de busca."""
         self._align_frame_after = None
         self._align_motion_started_at = None
         self._align_wheel_speeds = None
         self._align_center_hits = 0
         self._align_last_counted_timestamp = None
-        self.state = self.SEARCH_START
-        return self._tank(
-            self.SEARCH_START,
-            "alinhamento nao convergiu; retomando a procura da soleira")
+        self.state = self.ALIGN
+        return self._stop(
+            self.ALIGN,
+            f"{motivo}; alvo permanece travado e robo fica PARADO")
 
     def _current_alignment_motion(self, detail=None):
         if self.state == self.ALIGN_ARC:

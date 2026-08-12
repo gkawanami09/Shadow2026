@@ -384,6 +384,47 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(steer.events[-1][1], ())
 
+    def test_distancia_maior_que_antigos_cinco_segundos_nao_aborta(self):
+        clock = FakeClock()
+        piso_branco = np.full(
+            (config.camera_y, config.camera_x, 3), 205, dtype=np.uint8
+        )
+        central = cena_preta_centralizada()
+        # 120 frames a 50 ms = 6 s de piso, alem do timeout antigo de 5 s.
+        camera = FakeCameraSequencial(
+            clock,
+            [piso_branco] * 120 + [central] * 8,
+        )
+        arduino = FakeArduino()
+        steer = RecordingSteer(clock)
+        confirmadores = ConfirmadorFactory([PRETA, PRETA])
+        retomada = RetomadaFactory()
+
+        with patch.object(
+            saida_linha,
+            "ConfirmadorFaixaSaidaLinha",
+            new=confirmadores,
+        ):
+            resultado = saida_linha.confirmar_saida_com_camera_linha(
+                arduino,
+                steer,
+                lambda: camera,
+                relogio=clock,
+                dormir=clock.sleep,
+                retomada_factory=retomada,
+            )
+
+        self.assertIsNone(cfg.EXIT_LINE_VERIFY_TIMEOUT_S)
+        self.assertGreater(clock.now, 5.0)
+        self.assertEqual(resultado, PRETA)
+        movimentos = [
+            args for _t, args, _kwargs in steer.events if args
+        ]
+        self.assertEqual(
+            movimentos,
+            [(0, cfg.EXIT_LINE_VERIFY_SPEED)],
+        )
+
     def test_faixa_que_chega_baixa_freia_sem_alternar_frente_e_re(self):
         clock = FakeClock()
         distante = np.full(

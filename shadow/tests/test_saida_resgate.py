@@ -201,7 +201,7 @@ class ExitPhaseTests(unittest.TestCase):
         )
         self.assertEqual(frame_2.state, self.exit.CROSS)
 
-    def test_perda_persistente_no_alinhamento_reabre_busca(self):
+    def test_perda_persistente_apos_lock_nunca_reabre_giro(self):
         assentou = self._ate_observar()
         visto_em = assentou + 0.01
         curva = self.exit.update(
@@ -216,8 +216,65 @@ class ExitPhaseTests(unittest.TestCase):
             FRAME_SHAPE,
             now=visto_em + cfg.EXIT_ALIGN_LOST_TIMEOUT_S + 0.01,
         )
-        self.assertEqual(comando.state, self.exit.SEARCH_BRAKE)
+        self.assertEqual(comando.state, self.exit.ALIGN)
         self.assertEqual(comando.angle, 190)
+
+        # Mesmo depois de varias atualizacoes sem alvo, nenhum SEARCH/tanque
+        # volta a receber autoridade.
+        for indice in range(1, 8):
+            comando = self.exit.update(
+                None,
+                FRAME_SHAPE,
+                now=(
+                    visto_em + cfg.EXIT_ALIGN_LOST_TIMEOUT_S
+                    + 0.01 + indice * 0.05
+                ),
+            )
+            self.assertEqual(comando.state, self.exit.ALIGN)
+            self.assertEqual(comando.angle, 190)
+
+        # O lock nao foi descartado: quando o mesmo alvo reaparece no centro,
+        # a sequencia retoma dali e entra em CROSS sem qualquer novo giro.
+        reapareceu_em = (
+            visto_em + cfg.EXIT_ALIGN_LOST_TIMEOUT_S + 0.50
+        )
+        primeiro = self.exit.update(
+            FakeExit(timestamp=reapareceu_em),
+            FRAME_SHAPE,
+            now=reapareceu_em,
+        )
+        segundo = self.exit.update(
+            FakeExit(timestamp=reapareceu_em + 0.02),
+            FRAME_SHAPE,
+            now=reapareceu_em + 0.02,
+        )
+        self.assertEqual(primeiro.state, self.exit.ALIGN)
+        self.assertEqual(segundo.state, self.exit.CROSS)
+
+    def test_limite_de_correcao_apos_lock_para_sem_voltar_ao_search(self):
+        assentou = self._ate_observar()
+        visto_em = assentou + 0.01
+        primeiro = self.exit.update(
+            FakeExit(timestamp=visto_em),
+            FRAME_SHAPE,
+            now=visto_em,
+        )
+        self.assertEqual(primeiro.state, self.exit.ALIGN)
+        self.exit._align_corrections = cfg.EXIT_ALIGN_MAX_CORRECTIONS
+
+        comando = self.exit.update(
+            FakeExit(
+                center_x=320.0,
+                timestamp=visto_em + 0.02,
+                angle_deg=30.0,
+            ),
+            FRAME_SHAPE,
+            now=visto_em + 0.02,
+        )
+
+        self.assertEqual(comando.state, self.exit.ALIGN)
+        self.assertEqual(comando.angle, 190)
+        self.assertNotEqual(comando.state, self.exit.SEARCH_START)
 
     def test_cross_so_termina_apos_perda_persistente(self):
         alinhado_em, cross = self._ate_cross()

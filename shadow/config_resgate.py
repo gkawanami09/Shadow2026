@@ -673,7 +673,12 @@ EXIT_ADVANCE_LOST_CONFIRM_S = 0.18
 # e as duas decisoes passam por uma segunda votacao simetrica.
 EXIT_LINE_VERIFY_PWM = 60
 EXIT_LINE_VERIFY_SPEED = EXIT_LINE_VERIFY_PWM / 120.0
-EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
+# A distancia entre a perda do YOLO e a soleira vista pela camera inferior
+# varia com o ponto em que a caixa sai da camera frontal. Por padrao nao existe
+# timeout de distancia: com piso branco o comando reto continua ate uma faixa
+# PRETA/PRATA real aparecer. Um numero positivo pode ser usado apenas em teste
+# de bancada ou como limite deliberadamente calibrado para outro campo.
+EXIT_LINE_VERIFY_TIMEOUT_S = None
 EXIT_LINE_CAMERA_WARMUP_S = 0.35
 EXIT_LINE_VERIFY_CONFIRM_TIMEOUT_S = 1.20
 # PARAR no firmware deixa as rodas livres; use o mesmo assentamento de 0,12 s

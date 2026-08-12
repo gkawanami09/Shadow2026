@@ -157,7 +157,7 @@ def confirmar_saida_com_camera_linha(
             f"[saida] avancando CONTINUAMENTE a PWM "
             f"{cfg.EXIT_LINE_VERIFY_PWM}; freando na primeira faixa valida "
             f"e confirmando o segundo frame PARADO antes de decidir "
-            "preto/prata")
+            "preto/prata; piso branco NAO encerra este avanco")
 
         while True:
             if (
@@ -312,6 +312,7 @@ def confirmar_saida_com_camera_linha(
             esgotou_aproximacao = (
                 confirmador is None
                 and inicio is not None
+                and cfg.EXIT_LINE_VERIFY_TIMEOUT_S is not None
                 and agora - inicio >= cfg.EXIT_LINE_VERIFY_TIMEOUT_S)
             limite_confirmacao = (
                 cfg.EXIT_LINE_VERIFY_RECHECK_TIMEOUT_S
