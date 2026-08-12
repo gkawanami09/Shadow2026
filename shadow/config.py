@@ -44,13 +44,12 @@ OBSTACLE_MAX_VALID_MM = 4000
 OBSTACLE_LATERAL_PWM = 60                  # translação com rodas omnidirecionais
 OBSTACLE_LATERAL_TIME_S = 1.5              # s deslizando para a esquerda
 OBSTACLE_FORWARD_PWM = 60
-OBSTACLE_FORWARD_TIME_S = 2.0              # s avançando depois do lateral
-# Parâmetros da antiga busca frontal após o desvio. Mantidos por enquanto
-# porque a função de teste de busca ainda os utiliza, mas não fazem parte da
-# rota de obstáculo executada pela missão.
+# Utilitario independente para ensaios/reaproximacao de obstaculo. Nao faz
+# parte da logica especial de saida do resgate.
 OBSTACLE_LINE_SEARCH_PWM = 60
 OBSTACLE_LINE_SEARCH_TIMEOUT_S = 4.0
 OBSTACLE_LINE_CONFIRM_TIME_S = .10
+OBSTACLE_FORWARD_TIME_S = 2.0              # s avançando depois do lateral
 # Ao encontrar uma linha transversal, o segue-linha recebe preferência
 # temporária pelo ramo esquerdo, sem executar um giro tanque separado.
 OBSTACLE_LEFT_PREFERENCE_MIN_TIME_S = .20
@@ -61,49 +60,6 @@ OBSTACLE_LEFT_PREFERENCE_MIN_SPAN_RATIO = .45
 OBSTACLE_LEFT_PREFERENCE_ARM_TIME_S = .08
 OBSTACLE_LEFT_PREFERENCE_CONFIRM_TIME_S = .12
 OBSTACLE_RETRY_COOLDOWN_S = 1.0
-
-# Busca da continuacao da linha depois da faixa PRETA de saida. A faixa
-# transversal tambem e preta, portanto o robo se afasta um pouco e faz uma
-# varredura parada entre pulsos, como na busca de bolinhas: dois pulsos de
-# tanque para a esquerda e quatro para a direita. A ponta distante e mapeada
-# em cada parada; se ela cruzar de um lado ao outro, o meio entre os pulsos
-# define o rumo. No segundo ciclo, ate uma ponta vista em um unico lado vale,
-# pois o detector geometrico ja rejeitou a barra transversal isolada.
-EXIT_LINE_PULSE_PWM = 80
-EXIT_LINE_PULSE_S = .40
-EXIT_LINE_PULSE_SETTLE_S = .12
-EXIT_LINE_PULSE_OBSERVE_S = .25
-EXIT_LINE_PULSE_CONFIRM_S = .10
-EXIT_LINE_PULSES_LEFT = 2
-EXIT_LINE_PULSES_RIGHT = 4
-EXIT_LINE_INITIAL_REVERSE_PWM = 60
-EXIT_LINE_INITIAL_REVERSE_S = .20
-EXIT_LINE_RETRY_FORWARD_PWM = 60
-EXIT_LINE_RETRY_FORWARD_S = .45
-EXIT_LINE_FINAL_REVERSE_PWM = 60
-EXIT_LINE_FINAL_REVERSE_S = 1.00
-EXIT_LINE_REAPPROACH_TIMEOUT_S = 4.0
-# Depois de desligar o detector especial, espera frames NOVOS do pipeline
-# normal. O primeiro e descartado para cobrir um frame que ja estivesse em
-# processamento durante a troca; o segundo entrega um angulo realmente novo.
-EXIT_LINE_HANDOFF_TIMEOUT_S = .75
-EXIT_LINE_CONTINUATION_MAX_AGE_S = .15
-EXIT_CONTINUATION_MIN_AREA_RATIO = .002
-EXIT_CONTINUATION_MIN_TARGET_DISTANCE_RATIO = .30
-EXIT_CONTINUATION_MAX_ANCHOR_DISTANCE_RATIO = .42
-EXIT_CONTINUATION_TARGET_CLUSTER_RATIO = .035
-EXIT_CONTINUATION_MAX_TARGET_Y_RATIO = .82
-EXIT_CONTINUATION_MIN_PCA_RATIO = .025
-EXIT_CONTINUATION_MIN_BBOX_WIDTH_RATIO = .16
-EXIT_CONTINUATION_MIN_BBOX_HEIGHT_RATIO = .18
-EXIT_CONTINUATION_FORWARD_TARGET_Y_RATIO = .62
-EXIT_CONTINUATION_ALIGN_X_TOLERANCE_RATIO = .15
-# Depois que a ramificacao aparece, a visao continua favorecendo o componente
-# conectado a sua ponta por este curto periodo. O segue-linha ja esta ativo e
-# corrige o angulo; o peso so impede a faixa transversal de vencer a escolha.
-EXIT_CONTINUATION_FOLLOW_BIAS_S = 1.00
-EXIT_CONTINUATION_CONTOUR_TARGET_WEIGHT = 4.0
-EXIT_CONTINUATION_ANGLE_TARGET_WEIGHT = .78
 
 # ----------------------------------------------------------------------------
 # Câmera: captura 640×480 e processamento em 448×252

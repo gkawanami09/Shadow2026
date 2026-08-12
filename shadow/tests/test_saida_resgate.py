@@ -1,8 +1,8 @@
-"""Testes da fase de saída e do mapeamento final dos dois triângulos."""
+"""Regressoes da busca, centralizacao e travessia da saida do resgate."""
 
 from dataclasses import dataclass
-import sys
 from pathlib import Path
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -21,10 +21,6 @@ from resgate import (  # noqa: E402
     CORREDOR_LIVRE,
     _recuperar_bloqueio_saida,
     _validar_corredor_saida,
-)
-from tests.test_confirmacao_saida_linha import (  # noqa: E402
-    cena_preta,
-    cena_prata,
 )
 from visao.triangulos_finais import (  # noqa: E402
     annotate_final_triangles,
@@ -107,7 +103,7 @@ class ExitPhaseTests(unittest.TestCase):
         self.exit = ExitPhaseController(start_time=0.0)
 
     def _ate_observar(self, inicio=0.0):
-        """Mapeia, gira um pulso, freia, assenta e chega em OBSERVE."""
+        """Completa um pulso e chega parado a SEARCH_OBSERVE."""
         command = self.exit.update(
             None, FRAME_SHAPE, mapper=FakeMapper(both=True), now=inicio)
         self.assertEqual(command.state, self.exit.SEARCH_START)
@@ -126,340 +122,231 @@ class ExitPhaseTests(unittest.TestCase):
         self.assertEqual(observando.state, self.exit.SEARCH_OBSERVE)
         return assentou
 
-    def _ate_comecar_travessia(self, inicio=0.0, center_x=320.0):
-        assentou = self._ate_observar(inicio=inicio)
-        instante = assentou + 0.02
-        soleira = FakeExit(center_x=center_x, timestamp=instante - 0.01)
-        travessia = self.exit.update(
-            soleira, FRAME_SHAPE, now=instante)
-        self.assertEqual(travessia.state, self.exit.CROSS)
-        return instante, travessia
+    def _ate_cross(self):
+        assentou = self._ate_observar()
+        primeiro_t = assentou + 0.01
+        primeiro = self.exit.update(
+            FakeExit(timestamp=primeiro_t),
+            FRAME_SHAPE,
+            now=primeiro_t + 0.001,
+        )
+        self.assertEqual(primeiro.state, self.exit.ALIGN)
+        self.assertEqual(primeiro.angle, 190)
 
-    def test_comeca_mapeando_os_dois_triangulos(self):
-        self.assertEqual(self.exit.state, self.exit.MAP_TRIANGLES)
-        command = self.exit.update(
-            None, FRAME_SHAPE, mapper=FakeMapper(frames=0), now=0.0)
-        self.assertEqual(command.state, self.exit.MAP_TRIANGLES)
-        self.assertEqual(command.angle, 190)
+        segundo_t = primeiro_t + 0.02
+        cross = self.exit.update(
+            FakeExit(timestamp=segundo_t),
+            FRAME_SHAPE,
+            now=segundo_t + 0.001,
+        )
+        self.assertEqual(cross.state, self.exit.CROSS)
+        return segundo_t + 0.001, cross
 
-    def test_mapeamento_nao_prende_a_missao(self):
-        """Não achar os dois triângulos não pode impedir a saída."""
-        command = self.exit.update(
-            None, FRAME_SHAPE, mapper=FakeMapper(frames=0),
-            now=cfg.FINAL_TRIANGLE_MAP_TIMEOUT_S)
-        self.assertEqual(command.state, self.exit.SEARCH_START)
+    def test_mapeia_antes_de_procurar_e_timeout_do_mapa_nao_prende(self):
+        mapeando = self.exit.update(
+            None, FRAME_SHAPE, mapper=FakeMapper(), now=0.0)
+        self.assertEqual(mapeando.state, self.exit.MAP_TRIANGLES)
 
-    def test_procura_pulsada_para_para_observar(self):
-        self._ate_observar()
-        self.assertTrue(self.exit.stopped)
-        command = self.exit.update(None, FRAME_SHAPE, now=0.45)
-        self.assertEqual(command.angle, 190)
+        procurando = self.exit.update(
+            None,
+            FRAME_SHAPE,
+            mapper=FakeMapper(),
+            now=cfg.FINAL_TRIANGLE_MAP_TIMEOUT_S,
+        )
+        self.assertEqual(procurando.state, self.exit.SEARCH_START)
 
-    def test_frames_do_giro_nao_confirmam_a_saida(self):
-        command = self.exit.update(
-            None, FRAME_SHAPE, mapper=FakeMapper(both=True), now=0.0)
-        self.exit.notify_command_written(command.state, now=0.0)
-        self.exit.update(None, FRAME_SHAPE, now=0.05)
-        self.assertFalse(self.exit.frame_allowed(0.10))
-
-    def test_candidato_durante_giro_nao_encurta_o_pulso(self):
+    def test_frames_capturados_durante_o_giro_nao_confirmam(self):
         command = self.exit.update(
             None, FRAME_SHAPE, mapper=FakeMapper(both=True), now=0.0)
         self.exit.notify_command_written(command.state, now=0.0)
 
-        instante = min(0.05, cfg.EXIT_SEARCH_PULSE_S / 2.0)
-        candidato = FakeExit(timestamp=instante)
-        girando = self.exit.update(
-            candidato, FRAME_SHAPE, now=instante)
+        candidato = FakeExit(timestamp=0.05)
+        girando = self.exit.update(candidato, FRAME_SHAPE, now=0.05)
 
         self.assertEqual(girando.state, self.exit.SEARCH_ROTATE)
-        self.assertEqual(girando.angle, cfg.EXIT_SEARCH_TANK_ANGLE)
-        self.assertEqual(girando.speed, cfg.EXIT_SEARCH_TANK_SPEED)
-        self.assertFalse(self.exit.terminal)
+        self.assertFalse(self.exit.frame_allowed(candidato.timestamp))
 
-    def test_previa_muito_confiavel_freia_para_confirmar(self):
+    def test_previa_forte_em_movimento_so_freia_e_nao_autoriza_cross(self):
         command = self.exit.update(
             None, FRAME_SHAPE, mapper=FakeMapper(both=True), now=0.0)
         self.exit.notify_command_written(command.state, now=0.0)
         preview = FakeExit(
+            center_x=320.0,
             timestamp=0.05,
             confidence=cfg.EXIT_MODEL_FAST_LOCK_CONFIDENCE,
         )
 
         freio = self.exit.update(preview, FRAME_SHAPE, now=0.05)
-
         self.assertEqual(freio.state, self.exit.SEARCH_BRAKE)
-
-    def test_previa_forte_guarda_centro_e_nao_volta_ao_giro(self):
-        command = self.exit.update(
-            None, FRAME_SHAPE, mapper=FakeMapper(both=True), now=0.0)
-        self.exit.notify_command_written(command.state, now=0.0)
-        preview = FakeExit(
-            center_x=600.0,
-            timestamp=0.05,
-            confidence=cfg.EXIT_MODEL_FAST_LOCK_CONFIDENCE,
-        )
-        freio = self.exit.update(preview, FRAME_SHAPE, now=0.05)
         self.exit.notify_command_written(freio.state, now=0.05)
 
         assentou = 0.05 + cfg.EXIT_SEARCH_SETTLE_S
         observando = self.exit.update(None, FRAME_SHAPE, now=assentou)
         self.assertEqual(observando.state, self.exit.SEARCH_OBSERVE)
-
-        apontando = self.exit.update(
+        ainda_observando = self.exit.update(
             None, FRAME_SHAPE, now=assentou + 0.01)
-        self.assertEqual(apontando.state, self.exit.ALIGN_ARC)
-        self.assertGreater(apontando.angle, 0)
+        self.assertEqual(ainda_observando.state, self.exit.SEARCH_OBSERVE)
+        self.assertFalse(self.exit.terminal)
 
-    def test_frame_anterior_ao_assentamento_nao_alinha(self):
+    def test_cross_exige_dois_timestamps_distintos_e_centralizados(self):
         assentou = self._ate_observar()
-        antigo = FakeExit(timestamp=assentou - 0.05)
-        command = self.exit.update(
-            antigo, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.SEARCH_OBSERVE)
+        timestamp = assentou + 0.01
+        deteccao = FakeExit(timestamp=timestamp)
 
-    def test_soleira_confirmada_e_alinhada_avanca_imediatamente(self):
-        assentou = self._ate_observar()
-        soleira = FakeExit(center_x=320.0, timestamp=assentou + 0.01)
-        command = self.exit.update(
-            soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.CROSS)
-        self.assertEqual(command.angle, 0)
-        self.assertEqual(cfg.EXIT_ADVANCE_PWM, 80)
+        primeiro = self.exit.update(
+            deteccao, FRAME_SHAPE, now=timestamp + 0.001)
+        repetido = self.exit.update(
+            deteccao, FRAME_SHAPE, now=timestamp + 0.002)
 
-    def test_rejeicao_final_da_re_de_um_segundo(self):
-        self.assertEqual(cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S, 1.0)
+        self.assertEqual(primeiro.state, self.exit.ALIGN)
+        self.assertEqual(repetido.state, self.exit.ALIGN)
+        self.assertEqual(repetido.angle, 190)
 
-    def test_camera_de_linha_confirma_parado_entre_passos_a_pwm_60(self):
-        self.assertEqual(cfg.EXIT_LINE_VERIFY_PWM, 60)
-        self.assertEqual(cfg.EXIT_LINE_VERIFY_SPEED, 0.5)
-        self.assertEqual(cfg.EXIT_LINE_VERIFY_STEP_S, 0.08)
-        self.assertEqual(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S, 0.04)
-        self.assertEqual(
-            cfg.EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S,
-            0.60,
-        )
-        self.assertEqual(
-            cfg.EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO,
-            0.35,
-        )
-        self.assertEqual(
-            cfg.EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S,
-            0.10,
-        )
-        self.assertFalse(hasattr(cfg, "EXIT_LINE_HANDOFF_VOTES"))
-        self.assertFalse(hasattr(cfg, "EXIT_LINE_VERIFY_BLACK_FORWARD_S"))
-
-    def test_soleira_a_direita_curva_como_na_aproximacao_da_bolinha(self):
-        assentou = self._ate_observar()
-        soleira = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
-        command = self.exit.update(
-            soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.ALIGN_ARC)
-        self.assertGreaterEqual(command.angle, cfg.BALL_ALIGN_ARC_MIN_ANGLE)
-        self.assertLessEqual(command.angle, cfg.BALL_ALIGN_ARC_MAX_ANGLE)
-        self.assertEqual(command.speed, cfg.BALL_ALIGN_SPEED_MIN)
-        self.assertIsNone(command.wheel_speeds)
-
-    def test_soleira_a_esquerda_faz_a_mesma_curva_negativa_da_bolinha(self):
-        assentou = self._ate_observar()
-        soleira = FakeExit(center_x=80.0, timestamp=assentou + 0.01)
-        command = self.exit.update(
-            soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.ALIGN_ARC)
-        self.assertLessEqual(command.angle, -cfg.BALL_ALIGN_ARC_MIN_ANGLE)
-        self.assertGreaterEqual(command.angle, -cfg.BALL_ALIGN_ARC_MAX_ANGLE)
-        self.assertEqual(command.speed, cfg.BALL_ALIGN_SPEED_MIN)
-        self.assertIsNone(command.wheel_speeds)
-
-    def test_inclinacao_e_corrigida_por_tanque_antes_do_lateral(self):
-        assentou = self._ate_observar()
-        soleira = FakeExit(
-            center_x=600.0,
-            angle_deg=-18.0,
-            timestamp=assentou + 0.01,
-        )
-        command = self.exit.update(
-            soleira, FRAME_SHAPE, now=assentou + 0.02)
-        self.assertEqual(command.state, self.exit.ALIGN_YAW)
-        self.assertEqual(command.angle, -cfg.EXIT_ALIGN_ANGLE)
-        self.assertEqual(command.speed, cfg.EXIT_ALIGN_SPEED)
-        self.assertIsNone(command.wheel_speeds)
-
-    def test_inclinacao_moderada_nao_impede_avanco(self):
-        assentou = self._ate_observar()
-        soleira = FakeExit(
-            center_x=320.0,
-            angle_deg=-12.0,
-            timestamp=assentou + 0.01,
-        )
-
-        command = self.exit.update(
-            soleira, FRAME_SHAPE, now=assentou + 0.02)
-
-        self.assertEqual(command.state, self.exit.CROSS)
-
-    def test_curva_e_continua_e_usa_cada_frame_novo(self):
-        assentou = self._ate_observar()
-        inicio = assentou + 0.02
-        soleira = FakeExit(center_x=600.0, timestamp=inicio - 0.01)
-        curva = self.exit.update(soleira, FRAME_SHAPE, now=inicio)
-        self.exit.notify_command_written(curva.state, now=inicio)
-        self.assertEqual(curva.state, self.exit.ALIGN_ARC)
-        self.assertTrue(self.exit.frame_allowed(inicio + 0.01))
-
-        proximo = FakeExit(center_x=400.0, timestamp=inicio + 0.01)
-        corrigida = self.exit.update(
-            proximo, FRAME_SHAPE, now=inicio + 0.02)
-        self.assertEqual(corrigida.state, self.exit.ALIGN_ARC)
-        self.assertLessEqual(corrigida.angle, curva.angle)
-
-        centralizada = FakeExit(center_x=350.0, timestamp=inicio + 0.03)
-        avanco = self.exit.update(
-            centralizada, FRAME_SHAPE, now=inicio + 0.04)
-        self.assertEqual(avanco.state, self.exit.CROSS)
-
-    def test_curva_usa_histerese_antes_de_comecar_o_avanco(self):
-        assentou = self._ate_observar()
-        inicio = assentou + 0.02
-        direita = FakeExit(
-            center_x=320.0 * 1.30,
-            timestamp=inicio - 0.01,
-        )
-        curva = self.exit.update(direita, FRAME_SHAPE, now=inicio)
-        self.assertEqual(curva.state, self.exit.ALIGN_ARC)
-
-        ainda_fora = FakeExit(
-            center_x=320.0 * 1.18,
-            timestamp=inicio + 0.01,
-        )
-        curva_menor = self.exit.update(
-            ainda_fora, FRAME_SHAPE, now=inicio + 0.02)
-        self.assertEqual(curva_menor.state, self.exit.ALIGN_ARC)
-
-        dentro = FakeExit(
-            center_x=320.0 * 1.14,
-            timestamp=inicio + 0.03,
-        )
-        avanco = self.exit.update(dentro, FRAME_SHAPE, now=inicio + 0.04)
-        self.assertEqual(avanco.state, self.exit.CROSS)
-        self.assertEqual(avanco.angle, 0)
-        self.assertEqual(avanco.speed, cfg.EXIT_ADVANCE_SPEED)
-
-    def test_falha_visual_curta_no_alinhamento_nao_reinicia_o_giro(self):
-        assentou = self._ate_observar()
-        self.exit.state = self.exit.ALIGN
-        self.exit._align_last_seen_at = assentou + 0.02
-
-        falha_curta = self.exit.update(
-            None,
+        novo = self.exit.update(
+            FakeExit(timestamp=timestamp + 0.02),
             FRAME_SHAPE,
-            now=assentou + 0.02 + cfg.EXIT_ALIGN_LOST_TIMEOUT_S / 2,
+            now=timestamp + 0.021,
         )
+        self.assertEqual(novo.state, self.exit.CROSS)
 
-        self.assertEqual(falha_curta.state, self.exit.ALIGN)
-        self.assertEqual(falha_curta.angle, 190)
-        self.assertEqual(falha_curta.speed, 0.0)
-
-    def test_falha_visual_persistente_retorna_a_procura(self):
+    def test_centro_encontrado_durante_curva_freia_assenta_e_reconfirma(self):
         assentou = self._ate_observar()
-        self.exit.state = self.exit.ALIGN
-        self.exit._align_last_seen_at = assentou + 0.02
-
-        falha_longa = self.exit.update(
-            None,
-            FRAME_SHAPE,
-            now=assentou + 0.03 + cfg.EXIT_ALIGN_LOST_TIMEOUT_S,
-        )
-
-        self.assertEqual(falha_longa.state, self.exit.SEARCH_START)
-        self.assertEqual(falha_longa.angle, cfg.EXIT_SEARCH_TANK_ANGLE)
-
-    def test_alvo_travado_mantem_a_curva_durante_perda_curta(self):
-        assentou = self._ate_observar()
-        alvo = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
-        self.exit.state = self.exit.ALIGN
+        inicio = assentou + 0.01
         curva = self.exit.update(
-            alvo, FRAME_SHAPE, now=assentou + 0.01)
+            FakeExit(center_x=600.0, timestamp=inicio),
+            FRAME_SHAPE,
+            now=inicio + 0.001,
+        )
+        self.assertEqual(curva.state, self.exit.ALIGN_ARC)
+
+        freio = self.exit.update(
+            FakeExit(center_x=320.0, timestamp=inicio + 0.02),
+            FRAME_SHAPE,
+            now=inicio + 0.021,
+        )
+        self.assertEqual(freio.state, self.exit.ALIGN_BRAKE)
+        self.assertEqual(freio.angle, 190)
+        self.exit.notify_command_written(freio.state, now=inicio + 0.021)
+
+        fim_settle = inicio + 0.021 + cfg.EXIT_ALIGN_SETTLE_S
+        parado = self.exit.update(None, FRAME_SHAPE, now=fim_settle)
+        self.assertEqual(parado.state, self.exit.ALIGN)
+
+        frame_1_t = fim_settle + 0.01
+        frame_1 = self.exit.update(
+            FakeExit(timestamp=frame_1_t),
+            FRAME_SHAPE,
+            now=frame_1_t + 0.001,
+        )
+        self.assertEqual(frame_1.state, self.exit.ALIGN)
+        frame_2_t = frame_1_t + 0.02
+        frame_2 = self.exit.update(
+            FakeExit(timestamp=frame_2_t),
+            FRAME_SHAPE,
+            now=frame_2_t + 0.001,
+        )
+        self.assertEqual(frame_2.state, self.exit.CROSS)
+
+    def test_perda_persistente_no_alinhamento_reabre_busca(self):
+        assentou = self._ate_observar()
+        visto_em = assentou + 0.01
+        curva = self.exit.update(
+            FakeExit(center_x=600.0, timestamp=visto_em),
+            FRAME_SHAPE,
+            now=visto_em,
+        )
         self.assertEqual(curva.state, self.exit.ALIGN_ARC)
 
         comando = self.exit.update(
             None,
             FRAME_SHAPE,
-            now=assentou + 0.01 + cfg.EXIT_ALIGN_LOST_TIMEOUT_S / 2,
+            now=visto_em + cfg.EXIT_ALIGN_LOST_TIMEOUT_S + 0.01,
         )
+        self.assertEqual(comando.state, self.exit.SEARCH_BRAKE)
+        self.assertEqual(comando.angle, 190)
 
-        self.assertEqual(comando.state, self.exit.ALIGN_ARC)
-        self.assertGreater(comando.angle, 0)
-        self.assertIsNone(comando.wheel_speeds)
-        self.assertIn("alvo travado", comando.detail)
-
-    def test_alvo_travado_perdido_avanca_reto_sem_voltar_ao_giro(self):
-        assentou = self._ate_observar()
-        alvo = FakeExit(center_x=600.0, timestamp=assentou + 0.01)
-        self.exit.state = self.exit.ALIGN
-        curva = self.exit.update(
-            alvo, FRAME_SHAPE, now=assentou + 0.01)
-        self.assertEqual(curva.state, self.exit.ALIGN_ARC)
-
-        comando = self.exit.update(
-            None,
-            FRAME_SHAPE,
-            now=assentou + 0.01 + cfg.EXIT_ALIGN_LOST_TIMEOUT_S + 0.01,
-        )
-
-        self.assertEqual(comando.state, self.exit.CROSS)
-        self.assertEqual(comando.angle, 0)
-
-    def test_perda_apos_confirmar_entrega_imediatamente_a_camera_de_linha(self):
-        inicio, command = self._ate_comecar_travessia()
-        self.exit.notify_command_written(
-            command.state, now=inicio + 0.01)
-        command = self.exit.update(
-            None,
-            FRAME_SHAPE,
-            now=inicio + 0.01 + cfg.EXIT_ADVANCE_MIN_S / 2,
-        )
-        self.assertEqual(command.state, self.exit.DONE)
-        self.assertTrue(command.terminal)
-        self.assertEqual(command.angle, 190)
-
-    def test_travessia_termina_quando_a_faixa_passa_para_tras(self):
-        alinhado_em, command = self._ate_comecar_travessia()
+    def test_cross_so_termina_apos_perda_persistente(self):
+        alinhado_em, cross = self._ate_cross()
         inicio = alinhado_em + 0.01
-        self.exit.notify_command_written(command.state, now=inicio)
+        self.exit.notify_command_written(cross.state, now=inicio)
 
-        perdeu = inicio + cfg.EXIT_ADVANCE_MIN_S / 2
-        final = self.exit.update(None, FRAME_SHAPE, now=perdeu)
-        self.assertEqual(final.state, self.exit.DONE)
-        self.assertTrue(final.terminal)
-        self.assertEqual(final.angle, 190)
+        perda_curta = inicio + 0.02
+        ainda = self.exit.update(None, FRAME_SHAPE, now=perda_curta)
+        self.assertEqual(ainda.state, self.exit.CROSS)
+        ainda_curta = self.exit.update(
+            None,
+            FRAME_SHAPE,
+            now=perda_curta + cfg.EXIT_ADVANCE_LOST_CONFIRM_S / 2,
+        )
+        self.assertEqual(ainda_curta.state, self.exit.CROSS)
+
+        # Reaparecer zera qualquer perda curta acumulada.
+        reapareceu = (
+            perda_curta + cfg.EXIT_ADVANCE_LOST_CONFIRM_S / 2 + 0.01)
+        presente = self.exit.update(
+            FakeExit(timestamp=reapareceu),
+            FRAME_SHAPE,
+            now=reapareceu,
+        )
+        self.assertEqual(presente.state, self.exit.CROSS)
+
+        perda = reapareceu + 0.01
+        curta = self.exit.update(None, FRAME_SHAPE, now=perda)
+        self.assertEqual(curta.state, self.exit.CROSS)
+        ainda_curta = self.exit.update(
+            None,
+            FRAME_SHAPE,
+            now=perda + cfg.EXIT_ADVANCE_LOST_CONFIRM_S / 2,
+        )
+        self.assertEqual(ainda_curta.state, self.exit.CROSS)
+
+        confirmada = self.exit.update(
+            None,
+            FRAME_SHAPE,
+            now=perda + cfg.EXIT_ADVANCE_LOST_CONFIRM_S,
+        )
+        self.assertEqual(confirmada.state, self.exit.DONE)
+        self.assertTrue(confirmada.terminal)
         self.assertTrue(self.exit.succeeded)
-        self.assertAlmostEqual(
-            self.exit.cross_elapsed_s,
-            perdeu - inicio,
-        )
 
-    def test_travessia_tem_timeout_de_seguranca(self):
-        alinhado_em, command = self._ate_comecar_travessia()
+    def test_timeout_da_travessia_falha_em_vez_de_liberar_segue_linha(self):
+        alinhado_em, cross = self._ate_cross()
         inicio = alinhado_em + 0.01
-        self.exit.notify_command_written(command.state, now=inicio)
-        # A faixa continua sendo vista: só o timeout encerra.
+        self.exit.notify_command_written(cross.state, now=inicio)
         fim = inicio + cfg.EXIT_ADVANCE_TIMEOUT_S
-        presente = FakeExit(timestamp=fim)
+
         final = self.exit.update(
-            presente, FRAME_SHAPE, now=fim)
-        self.assertEqual(final.state, self.exit.DONE)
+            FakeExit(timestamp=fim), FRAME_SHAPE, now=fim)
+
+        self.assertEqual(final.state, self.exit.FAILED)
+        self.assertTrue(final.terminal)
+        self.assertFalse(self.exit.succeeded)
         self.assertEqual(final.angle, 190)
 
-    def test_procura_sem_sucesso_termina_parada(self):
+    def test_resultado_envelhecido_nao_e_confundido_com_perda_real(self):
+        alinhado_em, cross = self._ate_cross()
+        inicio = alinhado_em + 0.01
+        self.exit.notify_command_written(cross.state, now=inicio)
+        antiga = FakeExit(timestamp=inicio)
+
+        depois_do_minimo = (
+            inicio + cfg.EXIT_ADVANCE_LOST_CONFIRM_S + 0.05)
+        ainda = self.exit.update(
+            antiga, FRAME_SHAPE, now=depois_do_minimo)
+
+        self.assertEqual(ainda.state, self.exit.CROSS)
+        self.assertFalse(ainda.terminal)
+
+    def test_procura_sem_saida_termina_parada(self):
         command = self.exit.update(
-            None, FRAME_SHAPE, mapper=FakeMapper(both=True),
-            now=cfg.EXIT_SEARCH_TIMEOUT_S + 1.0)
+            None,
+            FRAME_SHAPE,
+            mapper=FakeMapper(both=True),
+            now=cfg.EXIT_SEARCH_TIMEOUT_S + 1.0,
+        )
         self.assertEqual(command.state, self.exit.FAILED)
         self.assertTrue(command.terminal)
         self.assertEqual(command.angle, 190)
-        self.assertFalse(self.exit.succeeded)
 
 
 class ExitClearanceTests(unittest.TestCase):
@@ -472,32 +359,26 @@ class ExitClearanceTests(unittest.TestCase):
             dormir=clock.sleep,
         )
 
-    def test_cinco_medidas_acima_de_15_cm_liberam_camera_de_linha(self):
+    def test_cinco_medidas_livres_liberam_camera_de_linha(self):
         state, distance, readings = self._validate(
             [210, 190, 180, 205, 195])
         self.assertEqual(state, CORREDOR_LIVRE)
         self.assertEqual(distance, 180)
         self.assertEqual(readings, (210, 190, 180, 205, 195))
 
-    def test_duas_medidas_em_15_cm_bloqueiam_a_tentativa(self):
+    def test_duas_medidas_proximas_bloqueiam(self):
         state, distance, readings = self._validate([143, 260, 148])
         self.assertEqual(state, CORREDOR_BLOQUEADO)
         self.assertEqual(distance, 146)
         self.assertEqual(readings, (143, 260, 148))
 
-    def test_uma_medida_proxima_isolada_nao_libera_a_tentativa(self):
-        state, distance, readings = self._validate([145, 230, 240])
-        self.assertEqual(state, CORREDOR_INCONCLUSIVO)
-        self.assertEqual(distance, 145)
-        self.assertEqual(readings, (145, 230, 240))
-
-    def test_sensor_sem_eco_nao_e_tratado_como_corredor_livre(self):
+    def test_sensor_sem_eco_fica_inconclusivo(self):
         state, distance, readings = self._validate([None] * 20)
         self.assertEqual(state, CORREDOR_INCONCLUSIVO)
         self.assertIsNone(distance)
         self.assertEqual(readings, ())
 
-    def test_bloqueio_recua_300ms_e_gira_um_pulso_antes_de_recomecar(self):
+    def test_bloqueio_recua_e_gira_um_pulso(self):
         movimentos = []
         paradas = []
 
@@ -516,10 +397,7 @@ class ExitClearanceTests(unittest.TestCase):
             ),
         ):
             _recuperar_bloqueio_saida(
-                FakeUltrasonicArduino([]),
-                direcao,
-                7,
-            )
+                FakeUltrasonicArduino([]), direcao, 7)
 
         self.assertEqual(
             movimentos,
@@ -527,7 +405,7 @@ class ExitClearanceTests(unittest.TestCase):
                 (
                     200,
                     cfg.EXIT_CLEARANCE_REVERSE_SPEED,
-                    0.30,
+                    cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
                     7,
                 ),
                 (
@@ -538,334 +416,10 @@ class ExitClearanceTests(unittest.TestCase):
                 ),
             ],
         )
-        self.assertEqual(cfg.EXIT_CLEARANCE_ESCAPE_TURN_S, 0.40)
-        self.assertEqual(cfg.EXIT_SEARCH_PULSE_S, 0.40)
         self.assertEqual(len(paradas), 3)
 
 
-class SilverStripeRuntimeTests(unittest.TestCase):
-    class Arduino:
-        def __init__(self, readings=None):
-            self.connected = True
-            self.connection_epoch = 1
-            self.readings = list(
-                [300] * 20 if readings is None else readings)
-            self.ultrasonic_active = False
-            self.led_modes = []
-
-        def led(self, mode):
-            self.led_modes.append(str(mode).upper())
-
-        def refresh(self, fail_closed=True):
-            return True
-
-        def cancelar_ultrassom(self):
-            self.ultrasonic_active = False
-
-        def iniciar_ultrassom(self, timeout):
-            if self.ultrasonic_active:
-                return False
-            self.ultrasonic_active = True
-            return True
-
-        def poll_ultrassom(self):
-            if not self.ultrasonic_active:
-                return False, None
-            self.ultrasonic_active = False
-            if not self.readings:
-                return True, None
-            return True, self.readings.pop(0)
-
-    class Camera:
-        def __init__(self, clock):
-            self.clock = clock
-            self.closed = False
-
-        def get_frame(self):
-            self.clock.sleep(0.10)
-            frame = cena_prata()
-            # Primeiro a faixa aparece alta. No quadro seguinte, o avanco a
-            # trouxe ao centro e so entao a votacao pode comecar.
-            if self.clock.now <= 0.10:
-                return frame
-            deslocado = np.full_like(frame, 205)
-            deslocado[50:] = frame[:-50]
-            return deslocado
-
-        def close(self):
-            self.closed = True
-
-    class CameraPreta:
-        def __init__(self, clock):
-            self.clock = clock
-            self.closed = False
-            self.frames = 0
-
-        def get_frame(self):
-            self.clock.sleep(0.10)
-            self.frames += 1
-            frame = cena_preta()
-            # O primeiro quadro ainda ve a faixa longe. Ele nao pode votar;
-            # os tres seguintes ja a mostram perto do centro.
-            if self.frames == 1:
-                distante = np.full_like(frame, 205)
-                distante[:-50] = frame[50:]
-                return distante
-            return frame
-
-        def close(self):
-            self.closed = True
-
-    class CameraPrataDepoisPreta:
-        def __init__(self, clock):
-            self.clock = clock
-            self.closed = False
-            self.frames = 0
-
-        def get_frame(self):
-            self.clock.sleep(0.10)
-            self.frames += 1
-            if self.frames <= 3:
-                frame = cena_prata()
-                deslocado = np.full_like(frame, 205)
-                deslocado[50:] = frame[:-50]
-                return deslocado
-            return cena_preta()
-
-        def close(self):
-            self.closed = True
-
-    def test_preto_trava_avanco_e_entrega_ao_segue_linha(self):
-        clock = FakeClock()
-        camera = self.CameraPreta(clock)
-        commands = []
-
-        def fake_steer(angle=190.0, speed=0.8, **_kwargs):
-            commands.append((angle, speed))
-            return True
-
-        with (
-            patch.object(
-                resgate_runtime.time, "monotonic", side_effect=clock),
-            patch.object(
-                resgate_runtime.time, "sleep", side_effect=clock.sleep),
-            patch("controle.direcao.steer", side_effect=fake_steer),
-            patch("visao.captura.LineCamera", return_value=camera),
-        ):
-            arduino = self.Arduino()
-            resultado = resgate_runtime._confirmar_saida_com_camera_linha(
-                arduino,
-                debug=False,
-            )
-
-        self.assertEqual(resultado, resgate_runtime.PRETA)
-        self.assertTrue(camera.closed)
-        self.assertEqual(camera.frames, 4)
-        # O primeiro quadro ainda esta longe: existe exatamente um passo.
-        # Assim que o preto entra na zona, nao ha outro comando de avanco.
-        self.assertEqual(
-            commands.count((0, cfg.EXIT_LINE_VERIFY_SPEED)),
-            1,
-        )
-        self.assertNotIn(
-            (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED),
-            commands,
-        )
-        self.assertEqual(arduino.led_modes, ["ACESO"])
-
-    def test_prata_trava_avanco_confirma_parada_e_da_re(self):
-        clock = FakeClock()
-        camera = self.Camera(clock)
-        commands = []
-
-        def fake_steer(angle=190.0, speed=0.8, **_kwargs):
-            commands.append((angle, speed))
-            return True
-
-        with (
-            patch.object(
-                resgate_runtime.time, "monotonic", side_effect=clock),
-            patch.object(
-                resgate_runtime.time, "sleep", side_effect=clock.sleep),
-            patch("controle.direcao.steer", side_effect=fake_steer),
-            patch("visao.captura.LineCamera", return_value=camera),
-        ):
-            arduino = self.Arduino()
-            resultado = resgate_runtime._confirmar_saida_com_camera_linha(
-                arduino,
-                debug=False,
-            )
-
-        self.assertEqual(resultado, resgate_runtime.NAO_PRETA)
-        self.assertTrue(camera.closed)
-        self.assertIn(
-            (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED),
-            commands,
-        )
-        indice_re = commands.index(
-            (200, cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED))
-        # A primeira decisao de prata causa somente o pequeno passo de
-        # rechecagem. A re acontece apenas depois da segunda votacao.
-        ultimo_avanco = max(
-            indice for indice, comando in enumerate(commands)
-            if comando == (0, cfg.EXIT_LINE_VERIFY_SPEED)
-        )
-        self.assertLess(ultimo_avanco, indice_re)
-        self.assertEqual(arduino.led_modes, ["ACESO", "APAGADO"])
-
-    def test_primeira_prata_que_vira_preto_na_rechecagem_nao_da_re(self):
-        clock = FakeClock()
-        camera = self.CameraPrataDepoisPreta(clock)
-        movimentos = []
-
-        def fake_move(
-            _arduino, _acao, angle, _speed, duration, _epoch,
-        ):
-            movimentos.append((angle, duration))
-            clock.sleep(duration)
-
-        with (
-            patch.object(
-                resgate_runtime.time, "monotonic", side_effect=clock),
-            patch.object(
-                resgate_runtime.time, "sleep", side_effect=clock.sleep),
-            patch("controle.direcao.steer", return_value=True),
-            patch("visao.captura.LineCamera", return_value=camera),
-            patch.object(
-                resgate_runtime,
-                "_mover_saida_por_tempo",
-                side_effect=fake_move,
-            ),
-        ):
-            arduino = self.Arduino()
-            resultado = resgate_runtime._confirmar_saida_com_camera_linha(
-                arduino,
-                debug=False,
-            )
-
-        self.assertEqual(resultado, resgate_runtime.PRETA)
-        self.assertTrue(camera.closed)
-        self.assertIn(
-            (0, cfg.EXIT_LINE_VERIFY_RECHECK_FORWARD_S),
-            movimentos,
-        )
-        self.assertFalse(any(angulo == 200 for angulo, _ in movimentos))
-        self.assertEqual(arduino.led_modes, ["ACESO"])
-
-    def test_parede_durante_camera_de_linha_da_uma_unica_re_curta(self):
-        clock = FakeClock()
-        camera = self.Camera(clock)
-        arduino = self.Arduino([120, 110, 105])
-        commands = []
-        reverse_durations = []
-
-        def fake_steer(angle=190.0, speed=0.8, **_kwargs):
-            commands.append((angle, speed))
-            return True
-
-        def fake_move(
-            _arduino,
-            _acao,
-            angle,
-            _speed,
-            duration,
-            _epoch,
-        ):
-            if angle == 200:
-                reverse_durations.append(duration)
-            else:
-                self.assertEqual(angle, 0)
-                self.assertEqual(duration, cfg.EXIT_LINE_VERIFY_STEP_S)
-
-        with (
-            patch.object(
-                resgate_runtime.time, "monotonic", side_effect=clock),
-            patch.object(
-                resgate_runtime.time, "sleep", side_effect=clock.sleep),
-            patch("controle.direcao.steer", side_effect=fake_steer),
-            patch("visao.captura.LineCamera", return_value=camera),
-            patch.object(
-                resgate_runtime,
-                "_mover_saida_por_tempo",
-                side_effect=fake_move,
-            ),
-        ):
-            resultado = resgate_runtime._confirmar_saida_com_camera_linha(
-                arduino,
-                debug=False,
-            )
-
-        self.assertEqual(resultado, resgate_runtime.CORREDOR_BLOQUEADO)
-        self.assertEqual(
-            reverse_durations,
-            [cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S],
-        )
-        self.assertEqual(arduino.led_modes, ["ACESO", "APAGADO"])
-        # O bloqueio aconteceu ainda na aproximacao; o retorno e a unica re
-        # curta acima provam que a travessia visual nao foi concluida.
-
-    def test_inconclusiva_desfaz_todos_os_passos_antes_de_reabrir_resgate(self):
-        clock = FakeClock()
-        commands = []
-        movimentos = []
-
-        class CameraVazia:
-            def get_frame(self):
-                clock.sleep(.10)
-                return np.full((252, 448, 3), 205, dtype=np.uint8)
-
-            def close(self):
-                pass
-
-        def fake_steer(angle=190.0, speed=0.8, **_kwargs):
-            commands.append((angle, speed))
-            return True
-
-        def fake_move(
-            _arduino, _acao, angle, _speed, duration, _epoch,
-        ):
-            movimentos.append((angle, duration))
-            clock.sleep(duration)
-
-        with (
-            patch.object(
-                resgate_runtime.time, "monotonic", side_effect=clock),
-            patch.object(
-                resgate_runtime.time, "sleep", side_effect=clock.sleep),
-            patch.object(cfg, "EXIT_LINE_VERIFY_TIMEOUT_S", .35),
-            patch.object(cfg, "EXIT_LINE_VERIFY_REJECT_REVERSE_S", .10),
-            patch("controle.direcao.steer", side_effect=fake_steer),
-            patch("visao.captura.LineCamera", return_value=CameraVazia()),
-            patch.object(
-                resgate_runtime,
-                "_mover_saida_por_tempo",
-                side_effect=fake_move,
-            ),
-        ):
-            resultado = resgate_runtime._confirmar_saida_com_camera_linha(
-                self.Arduino(),
-                debug=False,
-            )
-
-        self.assertEqual(resultado, resgate_runtime.INCONCLUSIVA)
-        passos = [duracao for angulo, duracao in movimentos if angulo == 0]
-        retornos = [
-            duracao for angulo, duracao in movimentos if angulo == 200]
-        self.assertEqual(passos, [cfg.EXIT_LINE_VERIFY_STEP_S] * 2)
-        self.assertEqual(len(retornos), 1)
-        self.assertAlmostEqual(
-            retornos[0],
-            sum(passos) + cfg.EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S,
-        )
-
-
 class OverlayColorTests(unittest.TestCase):
-    """As cores do overlay não podem estar invertidas.
-
-    Um verde desenhado em vermelho faz a equipe recalibrar a cor errada em
-    campo; por isso este teste lê os pixels realmente desenhados.
-    """
-
     def test_constantes_bgr_do_overlay(self):
         report = overlay_color_report()
         self.assertEqual(report["green"], (0, 255, 0))
@@ -873,8 +427,8 @@ class OverlayColorTests(unittest.TestCase):
 
     def test_canal_dominante_por_cor(self):
         report = overlay_color_report()
-        self.assertEqual(dominant_channel(report["green"]), 1)  # G
-        self.assertEqual(dominant_channel(report["red"]), 2)    # R
+        self.assertEqual(dominant_channel(report["green"]), 1)
+        self.assertEqual(dominant_channel(report["red"]), 2)
 
     def test_pixels_desenhados_nao_estao_invertidos(self):
         frame = np.zeros(FRAME_SHAPE, dtype=np.uint8)
@@ -888,23 +442,17 @@ class OverlayColorTests(unittest.TestCase):
         vermelho = canvas[300, 420:540]
         verde_pixels = verde[verde.any(axis=1)]
         vermelho_pixels = vermelho[vermelho.any(axis=1)]
-        self.assertTrue(len(verde_pixels) > 0)
-        self.assertTrue(len(vermelho_pixels) > 0)
-
-        # O retângulo do triângulo verde é desenhado em verde puro…
-        self.assertTrue(
-            np.all(verde_pixels[:, 1] == 255),
-            "o retângulo do triângulo verde não saiu verde")
+        self.assertGreater(len(verde_pixels), 0)
+        self.assertGreater(len(vermelho_pixels), 0)
+        self.assertTrue(np.all(verde_pixels[:, 1] == 255))
         self.assertTrue(np.all(verde_pixels[:, 2] == 0))
-        # …e o do vermelho, em vermelho puro.
-        self.assertTrue(
-            np.all(vermelho_pixels[:, 2] == 255),
-            "o retângulo do triângulo vermelho não saiu vermelho")
+        self.assertTrue(np.all(vermelho_pixels[:, 2] == 255))
         self.assertTrue(np.all(vermelho_pixels[:, 1] == 0))
 
-    def test_deteccao_ausente_nao_desenha_nada(self):
+    def test_deteccao_ausente_nao_desenha(self):
         frame = np.zeros(FRAME_SHAPE, dtype=np.uint8)
-        canvas = annotate_final_triangles(frame, {"green": None, "red": None})
+        canvas = annotate_final_triangles(
+            frame, {"green": None, "red": None})
         self.assertEqual(int(canvas.sum()), 0)
 
 

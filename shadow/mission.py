@@ -291,9 +291,9 @@ class MissionSystem:
     def _preparar_retomada_linha(self):
         """Apaga decisoes antigas antes do primeiro frame pos-resgate.
 
-        A leitura dedicada confirma o ramo somente depois da varredura
-        dianteira esquerda-direita. Zerar qualquer memoria verde/lateral
-        impede uma decisao anterior de contaminar essa retomada.
+        A terceira linha ja foi confirmada pelo processo de resgate, ainda com
+        a camera inferior aberta. Aqui apenas zeramos memorias antigas antes
+        de iniciar o segue-linha normal.
         """
         self.shared.vision_ready.value = False
         self.shared.line_detected.value = False
@@ -309,7 +309,6 @@ class MissionSystem:
         self.shared.preferencia_linha_esquerda.value = False
         self.shared.line_crop.value = config.LINE_CROP_NORMAL
         self.shared.min_line_size.value = config.MIN_LINE_SIZE_DEFAULT
-        self.shared.exit_line_search_pending.value = True
 
     def reacquire_line(self):
         self._preparar_retomada_linha()
@@ -338,7 +337,6 @@ class MissionSystem:
         self.shared.entry_silver_reason.value = ""
         self.shared.rescue_requested.value = False
         self.shared.red_finished.value = False
-        self.shared.exit_line_search_pending.value = False
         self.shared.status.value = "Reiniciando missao - aguardando Arduino"
 
     def _encerrar_resgate_para_recuperacao(self):

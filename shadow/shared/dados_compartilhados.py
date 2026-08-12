@@ -65,10 +65,6 @@ entry_silver_votes = Value("i", 0)
 entry_silver_reason = manager.Value("i", "")  # motivo da última rejeição
 rescue_requested = Value("b", False)  # controle pediu o handoff
 red_finished = Value("b", False)      # faixa vermelha final cumprida
-# Armado exclusivamente pelo handoff resgate -> percurso. O main.py isolado
-# nunca executa a busca pulsada especial da continuacao da saida.
-exit_line_search_pending = Value("b", False)
-
 timer = Timer()
 
 
@@ -86,15 +82,11 @@ class ResultadoVisaoRapida(NamedTuple):
     area_linha: float
     candidato_verde: bool
     candidato_vermelho: bool
-    continuacao_saida_detectada: bool
-    continuacao_saida_x: float
-    continuacao_saida_y: float
-    continuacao_saida_distancia: float
 
 
 # Um único bloqueio publica todos os campos. O controle nunca usa uma mistura
 # do ângulo de um frame com o ponto inferior do frame seguinte.
-_resultado_visao_rapida = Array("d", 15, lock=True)
+_resultado_visao_rapida = Array("d", 11, lock=True)
 
 
 def publicar_resultado_visao_rapida(
@@ -109,10 +101,6 @@ def publicar_resultado_visao_rapida(
     area_linha,
     candidato_verde,
     candidato_vermelho,
-    continuacao_saida_detectada=False,
-    continuacao_saida_x=-1.0,
-    continuacao_saida_y=-1.0,
-    continuacao_saida_distancia=0.0,
 ):
     with _resultado_visao_rapida.get_lock():
         dados = _resultado_visao_rapida.get_obj()
@@ -127,10 +115,6 @@ def publicar_resultado_visao_rapida(
         dados[8] = float(area_linha)
         dados[9] = bool(candidato_verde)
         dados[10] = bool(candidato_vermelho)
-        dados[11] = bool(continuacao_saida_detectada)
-        dados[12] = float(continuacao_saida_x)
-        dados[13] = float(continuacao_saida_y)
-        dados[14] = float(continuacao_saida_distancia)
 
 
 def ler_resultado_visao_rapida():
@@ -148,10 +132,6 @@ def ler_resultado_visao_rapida():
         area_linha=dados[8],
         candidato_verde=bool(dados[9]),
         candidato_vermelho=bool(dados[10]),
-        continuacao_saida_detectada=bool(dados[11]),
-        continuacao_saida_x=dados[12],
-        continuacao_saida_y=dados[13],
-        continuacao_saida_distancia=dados[14],
     )
 
 

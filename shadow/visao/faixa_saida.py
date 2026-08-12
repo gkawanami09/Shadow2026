@@ -298,7 +298,9 @@ class BlackExitDetector:
             return None
 
         segments = []
-        for x1, y1, x2, y2 in lines[:, 0]:
+        # OpenCV 4 devolve (N, 1, 4); builds mais novos podem devolver
+        # diretamente (N, 4). O conteúdo é o mesmo nos dois casos.
+        for x1, y1, x2, y2 in np.asarray(lines).reshape((-1, 4)):
             if x1 > x2:
                 x1, y1, x2, y2 = x2, y2, x1, y1
             dx = float(x2 - x1)

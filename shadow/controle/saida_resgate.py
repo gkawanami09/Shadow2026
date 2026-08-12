@@ -57,9 +57,9 @@ class ExitPhaseController:
         self._align_corrections = 0
         self._align_wheel_speeds = None
         self._align_angle = 190
-        self._align_previous_errors = None
-        self._align_target = None
-        self._target_committed = False
+        self._align_center_hits = 0
+        self._align_last_counted_timestamp = None
+        self._cross_loss_started_at = None
         self._tracking_reset_requested = False
         self.mapped_triangles = {"green": False, "red": False}
 
@@ -190,10 +190,9 @@ class ExitPhaseController:
             and float(getattr(exit_detection, "confidence", 0.0))
             >= cfg.EXIT_MODEL_FAST_LOCK_CONFIDENCE
         ):
-            # Uma resposta forte do modelo ja e suficiente para guardar o
-            # centro. Depois da frenagem, esse alvo nao pode ser esquecido so
-            # porque a faixa ficou borrada ou saiu parcialmente do quadro.
-            self._remember_alignment_target(exit_detection, now)
+            # A previa em movimento apenas antecipa a frenagem. O alvo so
+            # ganha autoridade depois de reaparecer em um frame capturado
+            # apos o SETTLE.
             self.state = self.SEARCH_BRAKE
             return self._stop(
                 self.SEARCH_BRAKE,
@@ -228,20 +227,11 @@ class ExitPhaseController:
         if self._usable(exit_detection, now):
             self.state = self.ALIGN
             self._stopped_at = None
-            self._remember_alignment_target(exit_detection, now)
             self._align_frame_after = None
             self._align_corrections = 0
-            self._align_previous_errors = None
-            return self._align_command(exit_detection, frame_shape)
-        if self._target_committed and self._align_target is not None:
-            # O modelo ja confirmou com alta confianca durante o giro. Use o
-            # centro salvo para apontar o robo, sem voltar aos picos de busca.
-            self.state = self.ALIGN
-            self._stopped_at = None
-            self._align_frame_after = None
-            self._align_corrections = 0
-            self._align_previous_errors = None
-            return self._align_command(self._align_target, frame_shape)
+            self._align_center_hits = 0
+            self._align_last_counted_timestamp = None
+            return self._on_align(exit_detection, frame_shape, now)
         if (
             self._settled_at is not None
             and now - self._settled_at
@@ -274,26 +264,48 @@ class ExitPhaseController:
                     f"soleira oculta por {perdida_por:.2f}s; "
                     "parado aguardando reaparecer",
                 )
-            if self._target_committed and self._align_target is not None:
-                # O centro ja foi confirmado. Depois de uma curva curta na
-                # ultima direcao conhecida, perder a faixa normalmente quer
-                # dizer que ela ficou perto/embaixo do robo: siga reto.
-                return self.begin_cross(now=now)
             self._tracking_reset_requested = True
-            self.state = self.SEARCH_START
+            self.state = self.SEARCH_BRAKE
             self._align_last_seen_at = None
-            return self._tank(
-                self.SEARCH_START, "soleira perdida; retomando a procura")
-        self._remember_alignment_target(exit_detection, now)
+            self._align_center_hits = 0
+            self._align_last_counted_timestamp = None
+            return self._stop(
+                self.SEARCH_BRAKE,
+                "soleira perdida; freando antes de retomar a procura")
+        self._align_last_seen_at = now
         erro_centro, erro_angulo = self._alignment_errors(
             exit_detection, frame_shape)
         if abs(erro_angulo) > cfg.EXIT_ALIGN_MAX_ANGLE_DEG:
-            self._align_previous_errors = (erro_centro, erro_angulo)
+            self._align_center_hits = 0
             return self._start_yaw_correction(erro_angulo)
         if abs(erro_centro) > self._center_threshold():
-            self._align_previous_errors = (erro_centro, erro_angulo)
+            self._align_center_hits = 0
             return self._start_arc_correction(erro_centro)
-        # A histerese permite começar o avanço com um pequeno erro lateral.
+        if self.state == self.ALIGN_ARC:
+            # O primeiro quadro central pode ter sido capturado enquanto o
+            # chassi ainda fazia a curva. Ele serve apenas para mandar frear.
+            # A travessia sera autorizada por quadros posteriores ao settle.
+            self._align_center_hits = 0
+            self._align_last_counted_timestamp = None
+            self.state = self.ALIGN_BRAKE
+            return self._stop(
+                self.ALIGN_BRAKE,
+                "centro alcancado durante a curva; freando para confirmar",
+            )
+        timestamp = float(exit_detection.timestamp)
+        if (
+            self._align_last_counted_timestamp is None
+            or timestamp > self._align_last_counted_timestamp + 1e-9
+        ):
+            self._align_center_hits += 1
+            self._align_last_counted_timestamp = timestamp
+        if self._align_center_hits < cfg.EXIT_ALIGN_CENTER_CONFIRM_FRAMES:
+            return self._stop(
+                self.ALIGN,
+                "centro confirmado em frame novo "
+                f"{self._align_center_hits}/"
+                f"{cfg.EXIT_ALIGN_CENTER_CONFIRM_FRAMES}",
+            )
         return self.begin_cross(now=now)
 
     def _on_align_motion(self, now):
@@ -322,6 +334,8 @@ class ExitPhaseController:
             self._align_wheel_speeds = None
             self._align_angle = 190
             self._stopped_at = None
+            self._align_center_hits = 0
+            self._align_last_counted_timestamp = None
             return self._stop(
                 self.ALIGN,
                 "chassi assentado; medindo centro e inclinacao novamente")
@@ -336,18 +350,28 @@ class ExitPhaseController:
         elapsed = now - self._cross_started_at
         if elapsed >= cfg.EXIT_ADVANCE_TIMEOUT_S - 1e-9:
             self._cross_finished_at = now
-            self.state = self.DONE
+            self.state = self.FAILED
             return self._stop(
-                self.DONE,
-                f"travessia encerrada por timeout ({elapsed:.2f} s)",
+                self.FAILED,
+                f"modelo nao perdeu a soleira no timeout ({elapsed:.2f} s)",
                 terminal=True)
-        if exit_detection is None and (
-            self._target_committed
-            or elapsed >= cfg.EXIT_ADVANCE_MIN_S - 1e-9
-        ):
-            # O alvo ja foi confirmado. De perto, desaparecer significa que a
-            # faixa pode ter passado sob a camera; a camera de linha assume o
-            # avanco sem exigir outra confirmacao da camera de resgate.
+        if self._usable(exit_detection, now):
+            self._cross_loss_started_at = None
+        elif exit_detection is None:
+            if self._cross_loss_started_at is None:
+                self._cross_loss_started_at = now
+        else:
+            # Um resultado apenas envelhecido pode significar worker/camera
+            # travados, nao que a soleira realmente saiu do quadro. Somente
+            # ausencias novas, convertidas em ``None`` pelo gate assincrono,
+            # autorizam a troca de camera.
+            self._cross_loss_started_at = None
+        perdeu_confirmado = (
+            self._cross_loss_started_at is not None
+            and now - self._cross_loss_started_at
+            >= cfg.EXIT_ADVANCE_LOST_CONFIRM_S - 1e-9
+        )
+        if perdeu_confirmado:
             self._cross_finished_at = now
             self.state = self.DONE
             return self._stop(
@@ -400,26 +424,19 @@ class ExitPhaseController:
         ):
             raise RuntimeError(
                 "travessia exige soleira confirmada durante a observacao")
+        if self._align_center_hits < cfg.EXIT_ALIGN_CENTER_CONFIRM_FRAMES:
+            raise RuntimeError(
+                "travessia exige centro confirmado em frames distintos")
         self.state = self.CROSS
         self._cross_started_at = None
         self._cross_finished_at = None
+        self._cross_loss_started_at = None
         return self._forward(
             self.CROSS,
             "soleira confirmada de longe; avancando reto imediatamente",
         )
 
     # -- auxiliares ------------------------------------------------------
-    def _align_command(self, detection, frame_shape):
-        erro_centro, erro_angulo = self._alignment_errors(
-            detection, frame_shape)
-        if abs(erro_angulo) > cfg.EXIT_ALIGN_MAX_ANGLE_DEG:
-            self._align_previous_errors = (erro_centro, erro_angulo)
-            return self._start_yaw_correction(erro_angulo)
-        if abs(erro_centro) > self._center_threshold():
-            self._align_previous_errors = (erro_centro, erro_angulo)
-            return self._start_arc_correction(erro_centro)
-        return self.begin_cross()
-
     def aligned(self, detection, frame_shape):
         """A soleira está centralizada o bastante para atravessar?"""
         if detection is None or frame_shape is None:
@@ -485,11 +502,6 @@ class ExitPhaseController:
             detalhe or (
                 f"curvando como na bolinha; erro={erro_centro:+.2f}"))
 
-    def _remember_alignment_target(self, detection, now):
-        self._align_target = detection
-        self._align_last_seen_at = now
-        self._target_committed = True
-
     def _correction_allowed(self):
         self._align_corrections += 1
         return self._align_corrections <= cfg.EXIT_ALIGN_MAX_CORRECTIONS
@@ -500,7 +512,8 @@ class ExitPhaseController:
         self._align_frame_after = None
         self._align_motion_started_at = None
         self._align_wheel_speeds = None
-        self._align_previous_errors = None
+        self._align_center_hits = 0
+        self._align_last_counted_timestamp = None
         self.state = self.SEARCH_START
         return self._tank(
             self.SEARCH_START,
@@ -543,9 +556,9 @@ class ExitPhaseController:
         )
 
     def _center_threshold(self):
-        if self.state == self.ALIGN_ARC:
-            return cfg.EXIT_ALIGN_EXIT_CENTER_ERROR
-        return cfg.EXIT_ALIGN_ENTER_CENTER_ERROR
+        # A travessia so usa a tolerancia estreita. A banda larga continua
+        # util para graduar a curva, mas nunca vale como "centralizado".
+        return cfg.EXIT_ALIGN_EXIT_CENTER_ERROR
 
     @staticmethod
     def _interpolate(minimo, maximo, proporcao):

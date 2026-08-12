@@ -6,8 +6,6 @@ from numba import njit
 
 from config import (BOTTOM_CENTER_CONTROL, BOTTOM_CENTER_MIN_Y,
                     BOTTOM_CENTER_WEIGHT,
-                    EXIT_CONTINUATION_ANGLE_TARGET_WEIGHT,
-                    EXIT_CONTINUATION_CONTOUR_TARGET_WEIGHT,
                     GREEN_BRANCH_TRACKER_OFFSET_PX,
                     OBSTACLE_LEFT_PREFERENCE_MIN_SPAN_RATIO,
                     camera_x, camera_y)
@@ -26,18 +24,11 @@ def init_tracker():
 
 
 def determine_correct_line(contours_blk, preferir_esquerda=False,
-                           turn_direction=None, alvo_saida=None):
-    """Escolhe o contorno mantendo o ramo verde ou de saida ja marcado."""
+                           turn_direction=None):
+    """Escolhe o contorno mantendo o ramo verde ja marcado."""
     global x_last, y_last
     candidates = np.zeros((len(contours_blk), 5), dtype=np.int32)
-    distancias_alvo = np.zeros(len(contours_blk), dtype=np.float32)
     off_bottom = 0
-    alvo = (
-        np.asarray(alvo_saida, dtype=np.float32)
-        if alvo_saida is not None else None
-    )
-    if alvo is not None and alvo.shape != (2,):
-        raise ValueError("o alvo da saida deve conter x e y")
 
     # A intencao do verde precisa participar da escolha deste quadro. Antes,
     # o deslocamento era aplicado apenas ao ``x_last`` depois de selecionar o
@@ -46,13 +37,12 @@ def determine_correct_line(contours_blk, preferir_esquerda=False,
     # mesmo deslocamento passa a ser a referencia da pontuacao atual.
     direcao_marcada = turn_direction or turn_dir.value
     x_referencia = x_last
-    if alvo is None:
-        if direcao_marcada == "left":
-            x_referencia = np.clip(
-                x_last - GREEN_BRANCH_TRACKER_OFFSET_PX, 0, camera_x)
-        elif direcao_marcada == "right":
-            x_referencia = np.clip(
-                x_last + GREEN_BRANCH_TRACKER_OFFSET_PX, 0, camera_x)
+    if direcao_marcada == "left":
+        x_referencia = np.clip(
+            x_last - GREEN_BRANCH_TRACKER_OFFSET_PX, 0, camera_x)
+    elif direcao_marcada == "right":
+        x_referencia = np.clip(
+            x_last + GREEN_BRANCH_TRACKER_OFFSET_PX, 0, camera_x)
 
     for i, contour in enumerate(contours_blk):
         box = cv2.boxPoints(cv2.minAreaRect(contour))
@@ -68,31 +58,14 @@ def determine_correct_line(contours_blk, preferir_esquerda=False,
         x_y_distance = abs(x_referencia - x_mean) + abs(y_last - y_mean)  # Distance between the last x/y and current x/y
 
         candidates[i] = i, bottom_y, x_y_distance, x_mean, y_mean
-        if alvo is not None:
-            pontos = contour.reshape(-1, 2).astype(np.float32)
-            distancias_alvo[i] = float(np.min(
-                np.linalg.norm(pontos - alvo, axis=1)))
 
-    if alvo is not None:
-        # A ponta foi encontrada no proprio componente da ramificacao. Sua
-        # distancia recebe peso dominante, mas o historico e a proximidade da
-        # base continuam desempatando contornos sobrepostos ou duplicados.
-        pontuacoes = (
-            distancias_alvo * EXIT_CONTINUATION_CONTOUR_TARGET_WEIGHT
-            + candidates[:, 2] * .25
-            - candidates[:, 1] * .10
-        )
-        candidates = candidates[np.argsort(pontuacoes)]
-    elif off_bottom < 2:
+    if off_bottom < 2:
         candidates = candidates[candidates[:, 1].argsort()[::-1]]  # Sort candidates by their bottom_y
     else:
         off_bottom_candidates = candidates[np.where(candidates[:, 1] >= (camera_y * 0.75))]
         candidates = off_bottom_candidates[off_bottom_candidates[:, 2].argsort()]
 
-    if alvo is not None:
-        x_last = np.clip(alvo[0], 0, camera_x)
-        y_last = np.clip(alvo[1], 0, camera_y)
-    elif preferir_esquerda:
+    if preferir_esquerda:
         # Peso para o próximo quadro sem transformar a preferência em uma
         # ordem de giro: contornos mais à esquerda ficam mais próximos do
         # histórico e vencem apenas quando houver ambiguidade.
@@ -107,8 +80,7 @@ def determine_correct_line(contours_blk, preferir_esquerda=False,
     else:
         x_last = candidates[0][3]
 
-    if alvo is None:
-        y_last = candidates[0][4]
+    y_last = candidates[0][4]
     blackline = contours_blk[candidates[0][0]]
     blackline_crop = blackline[np.where(blackline[:, 0, 1] > camera_y * line_crop.value)]
 
@@ -237,7 +209,6 @@ def calculate_angle(
     last_bottom_point,
     average_line_point,
     preferir_esquerda=False,
-    alvo_saida=None,
 ):
     global multiple_bottom_side
 
@@ -250,19 +221,7 @@ def calculate_angle(
     black_l_high = poi_no_crop[1][1] < camera_y * .5
     black_r_high = poi_no_crop[2][1] < camera_y * .5
 
-    alvo_saida_array = (
-        np.asarray(alvo_saida, dtype=np.float32)
-        if alvo_saida is not None else None
-    )
-    if alvo_saida_array is not None and alvo_saida_array.shape != (2,):
-        raise ValueError("o alvo da saida deve conter x e y")
-
-    if alvo_saida_array is not None:
-        final_poi = np.array([
-            np.clip(alvo_saida_array[0], 0, camera_x),
-            np.clip(alvo_saida_array[1], 0, camera_y),
-        ])
-    elif not timer.get_timer("multiple_bottom"):
+    if not timer.get_timer("multiple_bottom"):
         final_poi = [multiple_bottom_side, camera_y]
 
     elif turn_direction in ["left", "right"]:
@@ -351,15 +310,7 @@ def calculate_angle(
 
     legacy_angle = int((final_poi[0] - camera_x / 2) / (camera_x / 2) * 180)
 
-    if (alvo_saida_array is not None
-            and bottom_point[1] >= camera_y * BOTTOM_CENTER_MIN_Y):
-        bottom_angle = int(
-            (bottom_point[0] - camera_x / 2) / (camera_x / 2) * 180)
-        line_angle = int(round(np.clip(
-            EXIT_CONTINUATION_ANGLE_TARGET_WEIGHT * legacy_angle
-            + (1 - EXIT_CONTINUATION_ANGLE_TARGET_WEIGHT) * bottom_angle,
-            -180, 180)))
-    elif BOTTOM_CENTER_CONTROL and bottom_point[1] >= camera_y * BOTTOM_CENTER_MIN_Y:
+    if BOTTOM_CENTER_CONTROL and bottom_point[1] >= camera_y * BOTTOM_CENTER_MIN_Y:
         bottom_angle = int((bottom_point[0] - camera_x / 2) / (camera_x / 2) * 180)
         line_angle = int(round(np.clip(
             BOTTOM_CENTER_WEIGHT * bottom_angle

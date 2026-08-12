@@ -26,9 +26,6 @@ from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
     desviar_obstaculo,
-    orientacao_continuacao_saida,
-    procurar_continuacao_saida_pulsada,
-    avancar_ate_linha,
 )
 from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
@@ -41,9 +38,9 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                entry_silver_detected, entry_silver_reason,
                                entry_silver_votes, green_candidate,
                                green_turn_target,
-                               exit_line_search_pending,
                                last_bottom_point,
                                last_bottom_point_y,
+                               ler_resultado_visao_rapida,
                                line_ahead, line_angle,
                                line_detected,
                                line_size, line_status, min_line_size,
@@ -51,7 +48,7 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                preferencia_linha_esquerda,
                                red_candidate, red_detected, red_finished,
                                rescue_requested, status, terminate,
-                               ler_resultado_visao_rapida, timer, turn_dir,
+                               timer, turn_dir,
                                vision_ready)
 
 
@@ -138,104 +135,6 @@ def control_loop():
     preferencia_esquerda_alinhada_desde = None
 
     try:
-        if mission_mode.value and exit_line_search_pending.value:
-            status.value = 'Procurando continuacao da linha apos a saida'
-            print(
-                "[controle] faixa PRETA ja confirmada; procurando "
-                "ramificacao por pulsos obrigatorios: 2 a esquerda e 4 a "
-                "direita; o cruzamento esquerda/direita define o meio da "
-                "continuacao e libera o segue-linha")
-            lado_encontrado = None
-            sequencia_antes_handoff = 0
-            try:
-                lado_encontrado = procurar_continuacao_saida_pulsada(
-                    arduino,
-                    orientacao_ramificacao=lambda: orientacao_continuacao_saida(
-                        ler_resultado_visao_rapida(),
-                    ),
-                    deve_encerrar=lambda: bool(terminate.value),
-                )
-            except RuntimeError as erro:
-                lado_encontrado = None
-                print(
-                    "[controle] falha na busca pulsada pos-resgate: "
-                    f"{erro}")
-                if terminate.value:
-                    return
-                if lado_encontrado is None:
-                    status.value = 'Reaproximando a linha apos a saida'
-                    print(
-                        "[controle] segundo ciclo nao encontrou a "
-                        "continuacao; re maior concluida, reaproximando em "
-                        "frente pela camera do segue-linha")
-                    try:
-                        lado_encontrado = (
-                            "centro" if avancar_ate_linha(
-                                arduino,
-                                linha_proxima=lambda: (
-                                    orientacao_continuacao_saida(
-                                        ler_resultado_visao_rapida())
-                                    == "centro"
-                                ),
-                                timeout_s=(
-                                    config.EXIT_LINE_REAPPROACH_TIMEOUT_S),
-                                deve_encerrar=lambda: bool(terminate.value),
-                            ) else None
-                        )
-                    except RuntimeError as erro:
-                        lado_encontrado = None
-                        print(
-                            "[controle] falha na reaproximacao pos-resgate: "
-                            f"{erro}")
-                sequencia_antes_handoff = (
-                    ler_resultado_visao_rapida().sequencia)
-            finally:
-                # So desliga o detector especial depois de TODA a busca,
-                # inclusive a reaproximacao. Assim ele nunca some no meio da
-                # tentativa final.
-                exit_line_search_pending.value = False
-
-            if terminate.value:
-                return
-            if lado_encontrado is None:
-                status.value = (
-                    'Continuacao da saida nao encontrada - PARADO')
-                print(
-                    "[controle] continuacao nao encontrada apos o segundo "
-                    "ciclo e a reaproximacao; PARADO por seguranca")
-                while not terminate.value:
-                    arduino.refresh(fail_closed=True)
-                    time.sleep(.05)
-                return
-
-            # O ramo ja foi escolhido. Agora encerra definitivamente o modo
-            # de busca e espera a visao publicar um angulo NOVO, calculado
-            # pelo segue-linha normal com a preferencia temporaria do alvo.
-            arduino.parar()
-            status.value = 'Entregando ramificacao ao segue-linha'
-            prazo_handoff = (
-                time.monotonic() + config.EXIT_LINE_HANDOFF_TIMEOUT_S)
-            sequencia_handoff = sequencia_antes_handoff
-            frames_handoff = 0
-            while not terminate.value and time.monotonic() < prazo_handoff:
-                resultado_handoff = ler_resultado_visao_rapida()
-                if resultado_handoff.sequencia > sequencia_handoff:
-                    sequencia_handoff = resultado_handoff.sequencia
-                    frames_handoff += 1
-                    if (
-                        frames_handoff >= 2
-                        and resultado_handoff.linha_detectada
-                    ):
-                        break
-                arduino.refresh(fail_closed=True)
-                time.sleep(.01)
-
-            line_status.value = "line_detected"
-            status.value = 'Continuacao encontrada - seguindo linha'
-            print(
-                "[controle] segundo ciclo encontrou a ramificacao; modo de "
-                "busca ENCERRADO e segue-linha normal ATIVO")
-
         while not terminate.value:
             if not arduino.connected:
                 status.value = 'Arduino desconectado - aguardando reinicio'

@@ -88,7 +88,6 @@ class MissionLineResumeTests(unittest.TestCase):
             preferencia_linha_esquerda=valor(True),
             line_crop=valor(config.LINE_CROP_GREEN),
             min_line_size=valor(9000),
-            exit_line_search_pending=valor(False),
         )
         sistema = MissionSystem(
             compartilhado,
@@ -109,7 +108,6 @@ class MissionLineResumeTests(unittest.TestCase):
         self.assertEqual(compartilhado.turn_dir.value, "straight")
         self.assertEqual(compartilhado.green_turn_target.value, 0)
         self.assertFalse(compartilhado.preferencia_linha_esquerda.value)
-        self.assertTrue(compartilhado.exit_line_search_pending.value)
 
 
 class MissionRecoveryTests(unittest.TestCase):
@@ -139,7 +137,6 @@ class MissionRecoveryTests(unittest.TestCase):
             entry_silver_reason=valor("confirmada"),
             rescue_requested=valor(True),
             red_finished=valor(True),
-            exit_line_search_pending=valor(True),
             mission_mode=valor(True),
             status=valor("Resgate"),
         )
@@ -175,7 +172,6 @@ class MissionRecoveryTests(unittest.TestCase):
         self.assertEqual(compartilhado.entry_silver_votes.value, 0)
         self.assertFalse(compartilhado.rescue_requested.value)
         self.assertFalse(compartilhado.red_finished.value)
-        self.assertFalse(compartilhado.exit_line_search_pending.value)
         self.assertEqual(compartilhado.turn_dir.value, "straight")
         self.assertEqual(compartilhado.line_status.value, "line_detected")
 
@@ -291,7 +287,6 @@ class LineFollowerUnchangedTests(unittest.TestCase):
         self.assertFalse(shared.rescue_requested.value)
         self.assertFalse(shared.red_finished.value)
         self.assertFalse(shared.entry_silver_confirmed.value)
-        self.assertFalse(shared.exit_line_search_pending.value)
 
     def test_entrada_desarmada_nao_reprocessa(self):
         """Depois de entrar na sala, a faixa prata deixa de ser avaliada."""

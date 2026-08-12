@@ -76,9 +76,6 @@ from visao.confirmacao_saida_linha import (  # noqa: E402
     INCONCLUSIVA,
     NAO_PRETA,
     PRETA,
-    ConfirmadorFaixaSaidaLinha,
-    anotar_confirmacao,
-    posicao_vertical_faixa,
 )
 from visao.faixa_saida import BlackExitGate  # noqa: E402
 from visao.saida_yolo import (  # noqa: E402
@@ -116,6 +113,7 @@ EXIT_SEM_MODELO = 4
 CORREDOR_LIVRE = "livre"
 CORREDOR_BLOQUEADO = "bloqueado"
 CORREDOR_INCONCLUSIVO = "inconclusivo"
+RETOMADA_FALHOU = "retomada_falhou"
 
 
 class VideoSource:
@@ -829,265 +827,18 @@ def _confirmar_saida_com_camera_linha(
     arduino,
     debug=False,
 ):
-    """Centraliza, confirma e devolve PRETA, NAO_PRETA ou INCONCLUSIVA."""
+    """Confirma cor e terceira linha mantendo camera/serial na mesma sessao."""
     from controle.direcao import steer
+    from controle.saida_linha import confirmar_saida_com_camera_linha
     from visao.captura import LineCamera
 
-    camera = None
-    monitor_corredor = None
-    confirmador = ConfirmadorFaixaSaidaLinha()
-    epoca_serial = arduino.connection_epoch
-    inicio = time.monotonic()
-    ultimo_log = 0.0
-    ultimo_resumo = None
-    faixa_travada_em = None
-    tempo_avanco_acumulado = 0.0
-    rechecando_nao_preta = False
-    manter_led_aceso = False
-
-    try:
-        steer()
-        arduino.led("ACESO")
-        print("[saida] LED ACESO: entrando na camera do segue-linha")
-        camera = LineCamera()
-        monitor_corredor = _novo_monitor_corredor_saida()
-        monitor_corredor.cancelar(arduino)
-        print(
-            "[saida] camera do segue-linha aberta com o robo PARADO; "
-            f"avancando em passos de {cfg.EXIT_LINE_VERIFY_STEP_S:.2f} s "
-            f"a PWM {cfg.EXIT_LINE_VERIFY_PWM} e observando entre eles; "
-            "ultrassonico continua ativo")
-
-        while True:
-            frame = camera.get_frame()
-            agora = time.monotonic()
-            if faixa_travada_em is None:
-                # Durante o avanço só procuramos a presença da faixa. Votos
-                # feitos aqui seriam perigosos: prata/cinza distante pode
-                # parecer preta antes de o reflexo entrar no quadro.
-                resultado = confirmador.classificador.classificar(
-                    frame, timestamp=agora)
-                decisao = None
-                fase_confirmacao = "procurando faixa entre passos"
-                if resultado.faixa_presente:
-                    posicao_faixa = posicao_vertical_faixa(resultado)
-                    if (
-                        posicao_faixa is not None
-                        and posicao_faixa
-                        >= cfg.EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO
-                    ):
-                        if steer() is False:
-                            raise RuntimeError(
-                                "nao foi possivel travar ao avistar a faixa")
-                        confirmador = ConfirmadorFaixaSaidaLinha()
-                        faixa_travada_em = agora
-                        decisao, resultado = confirmador.update(
-                            frame,
-                            timestamp=agora,
-                            now=agora,
-                        )
-                        fase_confirmacao = "faixa travada; confirmando parado"
-                        print(
-                            "[saida] faixa entrou na zona de decisao; "
-                            "AVANCO TRAVADO enquanto confirma preto/prata")
-                    else:
-                        fase_confirmacao = (
-                            "aproximando faixa em passos"
-                            if posicao_faixa is None
-                            else f"aproximando faixa ({posicao_faixa:.0%})"
-                        )
-            else:
-                decisao, resultado = confirmador.update(
-                    frame,
-                    timestamp=agora,
-                    now=agora,
-                )
-                fase_confirmacao = "faixa travada; confirmando parado"
-
-            arduino.refresh(fail_closed=True)
-            if (
-                not arduino.connected
-                or arduino.connection_epoch != epoca_serial
-            ):
-                raise RuntimeError(
-                    "serial mudou durante a confirmacao preta/prata")
-
-            # A primeira validacao ocorreu antes de abrir esta camera, mas o
-            # robo voltou a avancar em passos. O HC-SR04 continua sendo lido
-            # entre todos eles e durante a confirmacao parada. O bloqueio tem
-            # prioridade sobre qualquer voto visual preto.
-            monitor_corredor.atualizar(arduino, agora=agora)
-            if monitor_corredor.parada_confirmada:
-                print(
-                    "[saida] BLOQUEIO ULTRASSONICO durante a camera de linha: "
-                    f"{monitor_corredor.distancia_confirmada_mm / 10.0:.1f} "
-                    f"cm; leituras="
-                    f"{list(monitor_corredor.distancias_validas)}; "
-                    "recuando uma unica vez por "
-                    f"{cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S:.2f} s")
-                steer()
-                _mover_saida_por_tempo(
-                    arduino,
-                    steer,
-                    200,
-                    cfg.EXIT_CLEARANCE_REVERSE_SPEED,
-                    cfg.EXIT_CLEARANCE_BLOCKED_REVERSE_S,
-                    epoca_serial,
-                )
-                steer()
-                return CORREDOR_BLOQUEADO
-
-            resumo = (
-                fase_confirmacao,
-                resultado.classificacao,
-                confirmador.votos_pretos,
-                confirmador.votos_nao_pretos,
-                rechecando_nao_preta,
-            )
-            if resumo != ultimo_resumo and agora - ultimo_log >= 0.15:
-                print(
-                    f"[saida] {fase_confirmacao}: "
-                    f"{resultado.classificacao}; "
-                    f"preta={confirmador.votos_pretos}/"
-                    f"{confirmador.votos_pretos_necessarios} "
-                    f"nao-preta={confirmador.votos_nao_pretos}/"
-                    f"{confirmador.votos_nao_pretos_necessarios} "
-                    f"textura={resultado.textura:.1f}")
-                ultimo_resumo = resumo
-                ultimo_log = agora
-
-            if debug:
-                cv2.imshow(
-                    JANELA,
-                    anotar_confirmacao(frame, resultado, decisao),
-                )
-                tecla = cv2.waitKey(1) & 0xFF
-                if tecla in (ord("q"), 27):
-                    steer()
-                    return None
-
-            if decisao == PRETA:
-                manter_led_aceso = True
-                print(
-                    "[saida] faixa PRETA confirmada com o robo parado em "
-                    f"{confirmador.votos_pretos_necessarios} de "
-                    f"{confirmador.tamanho_janela} frames; entregando "
-                    "a camera de linha; o primeiro ciclo pulsado mapeara a "
-                    "ramificacao e o segundo a entregara ao segue-linha")
-                return PRETA
-
-            if decisao == NAO_PRETA:
-                if not rechecando_nao_preta:
-                    print(
-                        "[saida] aparencia CINZA/PRATA na primeira votacao; "
-                        "avancando apenas "
-                        f"{cfg.EXIT_LINE_VERIFY_RECHECK_FORWARD_S:.2f} s, "
-                        "estabilizando e revalidando antes de negar o preto")
-                    steer()
-                    _mover_saida_por_tempo(
-                        arduino,
-                        steer,
-                        0,
-                        cfg.EXIT_LINE_VERIFY_SPEED,
-                        cfg.EXIT_LINE_VERIFY_RECHECK_FORWARD_S,
-                        epoca_serial,
-                    )
-                    tempo_avanco_acumulado += (
-                        cfg.EXIT_LINE_VERIFY_RECHECK_FORWARD_S)
-                    if steer() is False:
-                        raise RuntimeError(
-                            "nao foi possivel frear para revalidar a faixa")
-                    time.sleep(cfg.EXIT_LINE_VERIFY_RECHECK_SETTLE_S)
-                    confirmador = ConfirmadorFaixaSaidaLinha(
-                        tamanho_janela=cfg.EXIT_LINE_VERIFY_RECHECK_WINDOW,
-                        votos_pretos=(
-                            cfg.EXIT_LINE_VERIFY_RECHECK_BLACK_VOTES),
-                        votos_nao_pretos=(
-                            cfg.EXIT_LINE_VERIFY_RECHECK_SILVER_VOTES),
-                    )
-                    faixa_travada_em = time.monotonic()
-                    rechecando_nao_preta = True
-                    ultimo_resumo = None
-                    continue
-
-                print(
-                    "[saida] faixa CINZA/PRATA reconfirmada em "
-                    f"{confirmador.votos_nao_pretos_necessarios} de "
-                    f"{confirmador.tamanho_janela} frames; "
-                    "dando re e parando")
-                steer()
-                _mover_saida_por_tempo(
-                    arduino,
-                    steer,
-                    200,
-                    cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED,
-                    cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
-                    epoca_serial,
-                )
-                steer()
-                return NAO_PRETA
-
-            esgotou_aproximacao = (
-                faixa_travada_em is None
-                and agora - inicio >= cfg.EXIT_LINE_VERIFY_TIMEOUT_S
-            )
-            esgotou_confirmacao = (
-                faixa_travada_em is not None
-                and agora - faixa_travada_em
-                >= (
-                    cfg.EXIT_LINE_VERIFY_RECHECK_TIMEOUT_S
-                    if rechecando_nao_preta
-                    else cfg.EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S
-                )
-            )
-            if esgotou_aproximacao or esgotou_confirmacao:
-                duracao_retorno = max(
-                    cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
-                    tempo_avanco_acumulado
-                    + cfg.EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S,
-                )
-                print(
-                    "[saida] nao foi possivel confirmar preto/prata em "
-                    "passos parados no prazo; "
-                    f"desfazendo todo o avanco por {duracao_retorno:.2f} s")
-                steer()
-                _mover_saida_por_tempo(
-                    arduino,
-                    steer,
-                    200,
-                    cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED,
-                    duracao_retorno,
-                    epoca_serial,
-                )
-                steer()
-                return INCONCLUSIVA
-
-            if faixa_travada_em is None:
-                # Avanca pouco e volta a parar antes de pedir outro frame.
-                # Com queue=False na LineCamera, a proxima imagem e posterior
-                # a parada; a faixa nao atravessa tres votos em movimento.
-                _mover_saida_por_tempo(
-                    arduino,
-                    steer,
-                    0,
-                    cfg.EXIT_LINE_VERIFY_SPEED,
-                    cfg.EXIT_LINE_VERIFY_STEP_S,
-                    epoca_serial,
-                )
-                tempo_avanco_acumulado += cfg.EXIT_LINE_VERIFY_STEP_S
-                if steer() is False:
-                    raise RuntimeError(
-                        "nao foi possivel frear o passo da faixa de saida")
-                time.sleep(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S)
-    finally:
-        steer()
-        if monitor_corredor is not None:
-            monitor_corredor.cancelar(arduino)
-        if camera is not None:
-            camera.close()
-        if not manter_led_aceso:
-            arduino.led("APAGADO")
-            print("[saida] LED APAGADO: retornando a camera de resgate")
+    return confirmar_saida_com_camera_linha(
+        arduino,
+        steer,
+        LineCamera,
+        debug=debug,
+        janela_debug=JANELA,
+    )
 
 
 def _iniciar_segue_linha(debug=False):
@@ -2663,6 +2414,24 @@ def main():
                         detail=(
                             "faixa preta confirmada; segue-linha sera "
                             "iniciado apos liberar camera e serial"),
+                        terminal=True,
+                    )
+                elif resultado_verificacao == RETOMADA_FALHOU:
+                    # A cor preta foi reconfirmada, mas a terceira linha nao
+                    # fechou a votacao geometrica dentro da manobra mapeada.
+                    # Nao reabre a busca frontal: isso poderia repetir a
+                    # travessia e sair da arena. Permanece parado e devolve
+                    # falha ao supervisor da missao.
+                    controlador_saida = None
+                    portao_saida = None
+                    epoca_saida = None
+                    inicio_saida = None
+                    codigo_saida = EXIT_INCOMPLETE
+                    comando = MotionCommand(
+                        "EXIT_LINE_RECOVERY_FAILED",
+                        detail=(
+                            "faixa preta confirmada, mas terceira linha nao "
+                            "foi confirmada; robo parado"),
                         terminal=True,
                     )
                 elif resultado_verificacao in (

@@ -624,7 +624,6 @@ EXIT_BLACK_LOCK_SEARCH_Y_MARGIN_RATIO = 0.30
 # movimentos do resgate.
 EXIT_ADVANCE_PWM = 80
 EXIT_ADVANCE_SPEED = EXIT_ADVANCE_PWM / 120.0
-EXIT_ADVANCE_MIN_S = 1.00
 EXIT_ADVANCE_TIMEOUT_S = 3.5
 
 # Antes de entregar a decisao para a camera do segue-linha, o robo para e
@@ -679,65 +678,116 @@ EXIT_ALIGN_YAW_MIN_PULSE_S = 0.06
 EXIT_ALIGN_YAW_MAX_PULSE_S = 0.18
 EXIT_ALIGN_YAW_FULL_ERROR_DEG = 18.0
 EXIT_ALIGN_MAX_CORRECTIONS = 14
+# O centro precisa aparecer alinhado em frames distintos com o robo parado.
+# Um unico resultado do worker nao pode autorizar a travessia.
+EXIT_ALIGN_CENTER_CONFIRM_FRAMES = 2
 # Uma falha de segmentação isolada não pode mandar o robô voltar ao giro e
 # ultrapassar uma faixa que já estava centralizada.
 EXIT_ALIGN_LOST_TIMEOUT_S = 0.35
+# Durante o avanco, a perda precisa persistir depois do tempo minimo. Isso
+# evita trocar de camera por um unico dropout do modelo.
+EXIT_ADVANCE_LOST_CONFIRM_S = 0.18
 
-# Confirmacao final com a camera do segue-linha. Primeiro a camera de resgate
-# aproxima ate deixar de enxergar a soleira. A camera de linha abre com o robo
-# parado e avanca em passos curtos a PWM 60. Depois de cada passo ele freia,
-# assenta e captura um frame novo. Ao avistar a faixa na zona util, o avanco
-# fica travado ate decidir: prata recua; preto entrega para a ramificacao.
+# Confirmacao final com a camera do segue-linha. A metrica de cor e relativa ao
+# piso do MESMO frame; assim autoexposicao e mudancas uniformes de luz nao
+# transformam prata em preto. A camera aquece, a exposicao precisa estabilizar
+# e as duas decisoes passam por uma segunda votacao simetrica.
 EXIT_LINE_VERIFY_PWM = 60
 EXIT_LINE_VERIFY_SPEED = EXIT_LINE_VERIFY_PWM / 120.0
 EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
-EXIT_LINE_VERIFY_MOVING_CONFIRM_TIMEOUT_S = 0.60
-EXIT_LINE_VERIFY_MOVING_VOTE_START_Y_RATIO = 0.35
+EXIT_LINE_CAMERA_WARMUP_S = 0.35
+EXIT_LINE_VERIFY_CONFIRM_TIMEOUT_S = 1.20
 EXIT_LINE_VERIFY_STEP_S = 0.08
 EXIT_LINE_VERIFY_STEP_SETTLE_S = 0.04
+EXIT_LINE_VERIFY_REVERSE_STEP_S = 0.05
 EXIT_LINE_VERIFY_WINDOW = 5
-# Uma primeira leitura de prata/cinza pode ser apenas reflexo ou uma imagem
-# capturada na borda da faixa. Antes de rejeitar, avanca quase nada, espera a
-# camera assentar e faz uma segunda votacao mais longa. Preto continua podendo
-# ser confirmado rapidamente; para negar preto, a evidencia precisa ser maior.
-EXIT_LINE_VERIFY_RECHECK_FORWARD_S = 0.05
-EXIT_LINE_VERIFY_RECHECK_SETTLE_S = 0.08
-EXIT_LINE_VERIFY_RECHECK_TIMEOUT_S = 1.00
+# A primeira votacao apenas escolhe uma hipotese. A segunda, feita sem mover o
+# chassi, precisa confirmar a MESMA cor com mais frames.
+EXIT_LINE_VERIFY_RECHECK_SETTLE_S = 0.12
+EXIT_LINE_VERIFY_RECHECK_TIMEOUT_S = 1.20
 EXIT_LINE_VERIFY_RECHECK_WINDOW = 7
-EXIT_LINE_VERIFY_RECHECK_BLACK_VOTES = 3
-EXIT_LINE_VERIFY_RECHECK_SILVER_VOTES = 5
+EXIT_LINE_VERIFY_RECHECK_BLACK_VOTES = 4
+EXIT_LINE_VERIFY_RECHECK_SILVER_VOTES = 4
 # Antes de votar preto/prata, a faixa precisa chegar ao meio da imagem da
 # camera de linha. Uma prata distante nunca pode acumular voto como preta.
 EXIT_LINE_VERIFY_CENTER_Y_RATIO = 0.50
-EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE = 0.10
+EXIT_LINE_VERIFY_CENTER_Y_TOLERANCE = 0.13
 EXIT_LINE_VERIFY_BLACK_VOTES = 3
 EXIT_LINE_VERIFY_SILVER_VOTES = 3
 EXIT_LINE_VERIFY_MAX_AGE_S = 0.35
-EXIT_LINE_VERIFY_EDGE_MIN = 18
-EXIT_LINE_VERIFY_EDGE_FILL = 0.48
-EXIT_LINE_VERIFY_DARK_VALUE_MAX = 100
-EXIT_LINE_VERIFY_DARK_LOCAL_MAX = 12
-EXIT_LINE_VERIFY_DARK_ROW_FILL = 0.60
-EXIT_LINE_VERIFY_DARK_MIN_HEIGHT_RATIO = 0.05
-# Medido nas quatro imagens reais de 05/08: preto ficou em 6-7 e prata em
-# 13-21 depois da normalizacao para 448x252. A zona 9.5..11.5 permanece
-# inconclusiva em vez de arriscar classificar prata como preta.
-EXIT_LINE_VERIFY_BLACK_TEXTURE_MAX = 10.5
-# A janela local acompanha a faixa e pode incluir a propria borda. Por isso
-# recebe uma folga pequena; preto ainda exige que a janela global seja lisa.
-EXIT_LINE_VERIFY_BLACK_LOCAL_TEXTURE_MAX = 13.5
-EXIT_LINE_VERIFY_SILVER_TEXTURE_MIN = 11.5
-EXIT_LINE_VERIFY_TEXTURE_ROI_TOP = 0.15
-EXIT_LINE_VERIFY_TEXTURE_ROI_BOTTOM = 0.75
-# Depois de centralizar, a textura e medida a partir da borda da propria
-# faixa, nao mais em uma janela fixa que podia ficar acima dela.
-EXIT_LINE_VERIFY_TEXTURE_BAND_HEIGHT_RATIO = 0.35
-EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED = 0.35
+# Perfil horizontal robusto: os 28% externos de cada lado ignoram a linha
+# longitudinal no centro e medem apenas a soleira. Os valores abaixo foram
+# separados nas duas capturas limpas entregues em 11/08/2026; o intervalo
+# 0.31..0.38 permanece inconclusivo, salvo quando a textura metalica comprova
+# prata.
+EXIT_LINE_VERIFY_SIDE_X_MIN_RATIO = 0.04
+EXIT_LINE_VERIFY_SIDE_X_MAX_RATIO = 0.32
+EXIT_LINE_VERIFY_EDGE_SEARCH_TOP_RATIO = 0.08
+EXIT_LINE_VERIFY_EDGE_SEARCH_BOTTOM_RATIO = 0.86
+EXIT_LINE_VERIFY_EDGE_CONTRAST_MIN = 18.0
+EXIT_LINE_VERIFY_MIN_HEIGHT_RATIO = 0.04
+EXIT_LINE_VERIFY_MAX_HEIGHT_RATIO = 0.52
+EXIT_LINE_VERIFY_BLACK_BRIGHTNESS_RATIO_MAX = 0.31
+EXIT_LINE_VERIFY_SILVER_BRIGHTNESS_RATIO_MIN = 0.38
+EXIT_LINE_VERIFY_BLACK_DARK_FILL_MIN = 0.65
+EXIT_LINE_VERIFY_BLACK_MAX_HEIGHT_RATIO = 0.50
+EXIT_LINE_VERIFY_DARK_PIXEL_RATIO = 0.32
+# Textura tambem tem uma zona inconclusiva sem sobreposicao. Isso permite
+# reconhecer prata metalica escurecida por reflexo sem chamar preto riscado de
+# preto automaticamente.
+EXIT_LINE_VERIFY_BLACK_TEXTURE_RATIO_MAX = 0.040
+EXIT_LINE_VERIFY_SILVER_TEXTURE_RATIO_MIN = 0.060
+EXIT_LINE_VERIFY_SILVER_DARK_FILL_MAX = 0.75
+EXIT_LINE_VERIFY_EXPOSURE_MAX_REL_CHANGE = 0.12
+EXIT_LINE_VERIFY_EXPOSURE_STABLE_FRAMES = 2
+EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED = 0.50
 EXIT_LINE_VERIFY_REJECT_REVERSE_S = 1.0
 # Se nenhuma cor fechar a votacao, desfaz TODOS os passos dados pela camera
 # de linha e acrescenta esta margem. Assim uma faixa perdida nao deixa o robo
 # continuar a busca ja do lado de fora da sala.
 EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S = 0.10
+
+# Retomada da linha depois que PRETO foi reconfirmado. Esta etapa ainda roda
+# dentro de resgate.py, com a mesma camera de linha e a mesma sessao serial; a
+# missao so reabre o segue-linha normal quando a terceira linha ja foi achada.
+EXIT_POST_FORWARD_PWM = 60
+EXIT_POST_FORWARD_SPEED = EXIT_POST_FORWARD_PWM / 120.0
+EXIT_POST_FORWARD_S = 0.30
+# Mapeamento confirmado fisicamente neste chassi:
+# esquerda=(-PWM,+PWM,+PWM,-PWM), direita=inverso.
+EXIT_POST_OMNI_PWM = 60
+EXIT_POST_OMNI_LEFT_S = 1.00
+EXIT_POST_OMNI_RIGHT_S = 2.00
+EXIT_POST_TANK_PWM = 80
+# ``steer`` multiplica pivôs tanque por 1,2; esta divisão preserva PWM 80
+# efetivo nas quatro rodas em vez de enviar 96 sem perceber.
+EXIT_POST_TANK_SPEED = EXIT_POST_TANK_PWM / (120.0 * 1.2)
+EXIT_POST_TANK_ANGLE = 180
+EXIT_POST_TANK_PULSE_S = 0.18
+EXIT_POST_TANK_TIMEOUT_S = 2.40
+EXIT_POST_SETTLE_S = 0.08
+EXIT_POST_TOTAL_TIMEOUT_S = 7.00
+EXIT_POST_POSE_WINDOW = 5
+EXIT_POST_POSE_VOTES = 3
+EXIT_POST_CONTINUATION_WINDOW = 3
+EXIT_POST_CONTINUATION_VOTES = 2
+EXIT_POST_CONTINUATION_TARGET_TOLERANCE_RATIO = 0.18
+EXIT_POST_LEVEL_DELTA_RATIO = 0.055
+EXIT_POST_SIDE_MIN_COVERAGE = 0.55
+EXIT_POST_COLUMN_MIN_RUN_RATIO = 0.025
+EXIT_POST_GEOMETRY_MAX_MAD_RATIO = 0.035
+EXIT_POST_BAND_ERASE_MARGIN_RATIO = 0.018
+EXIT_POST_CONTINUATION_MIN_AREA_RATIO = 0.0015
+EXIT_POST_CONTINUATION_MIN_HEIGHT_RATIO = 0.16
+EXIT_POST_CONTINUATION_MAX_HORIZONTAL_SPAN_RATIO = 0.78
+EXIT_POST_CONTINUATION_MAX_HORIZONTAL_HEIGHT_RATIO = 0.35
+EXIT_POST_CONTINUATION_CONNECT_TOLERANCE_RATIO = 0.08
+EXIT_POST_CONTINUATION_MIN_FORWARD_PROGRESS_RATIO = 0.10
+# Sem uma soleira completa para servir de referencia, so aceitamos um
+# componente predominantemente longitudinal. Isso impede que o resto de uma
+# soleira diagonal, ja parcialmente fora do quadro, vire a "terceira linha".
+EXIT_POST_FALLBACK_MAX_LATERAL_PER_FORWARD = 0.85
+EXIT_POST_FALLBACK_EDGE_MARGIN_RATIO = 0.015
 
 # Mapeamento final dos DOIS triangulos, so para diagnostico e para provar que
 # a sala foi compreendida. Nenhum deles comanda o robo nesta fase.
