@@ -223,6 +223,21 @@ class ClassificadorTests(unittest.TestCase):
         self.assertFalse(resultado.faixa_presente)
         self.assertIsNone(posicao_vertical_faixa(resultado))
 
+    def test_sombra_lisa_no_piso_nao_e_confundida_com_prata(self):
+        frame = np.full(
+            (config.camera_y, config.camera_x, 3), 205, dtype=np.uint8
+        )
+        # Uma sombra horizontal lisa tem bordas, mas brilho relativo alto e
+        # nenhuma textura metalica. Ela nao pode frear a aproximacao como se
+        # fosse a soleira prata.
+        frame[92:162, :] = 170
+
+        resultado = ClassificadorFaixaSaidaLinha().classificar(frame)
+
+        self.assertTrue(resultado.faixa_presente)
+        self.assertTrue(faixa_centralizada(resultado))
+        self.assertEqual(resultado.classificacao, INCONCLUSIVA)
+
     def test_centralizacao_depende_da_posicao_vertical_da_faixa(self):
         classificador = ClassificadorFaixaSaidaLinha()
         central = classificador.classificar(cena_preta())

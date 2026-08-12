@@ -18,7 +18,6 @@ import config_resgate as cfg  # noqa: E402
 from controle import saida_linha  # noqa: E402
 from controle.retomada_saida import ErroRetomadaSaida  # noqa: E402
 from visao.confirmacao_saida_linha import (  # noqa: E402
-    INCONCLUSIVA,
     NAO_PRETA,
     PRETA,
     ClassificadorFaixaSaidaLinha,
@@ -249,9 +248,14 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
             with self.subTest(primaria=primaria, secundaria=secundaria):
                 run = self._executar([primaria, secundaria])
 
-                self.assertEqual(run.resultado, INCONCLUSIVA)
+                self.assertEqual(run.resultado, saida_linha.RETOMADA_FALHOU)
                 self.assertEqual(len(run.confirmadores.instances), 2)
                 self.assertEqual(run.retomada.executou, 0)
+                self.assertFalse(any(
+                    args and args[0] != 0
+                    for _t, args, _kwargs in run.steer.events
+                ))
+                self.assertEqual(run.steer.events[-1][1], ())
                 primeira_kwargs = run.confirmadores.calls[0][1]
                 segunda_kwargs = run.confirmadores.calls[1][1]
                 self.assertEqual(primeira_kwargs, {})
@@ -278,7 +282,7 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
         self.assertTrue(run.camera.closed)
         self.assertEqual(run.steer.events[-1][1], ())
         self.assertFalse(any(
-            args and args[0] in (0, 200)
+            args and args[0] != 0
             for _t, args, _kwargs in run.steer.events
         ))
 
@@ -324,7 +328,9 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
             args for _t, args, _kwargs in steer.events
             if args == (0, cfg.EXIT_LINE_VERIFY_SPEED)
         ]
-        self.assertGreaterEqual(len(avancos), 1)
+        # Um unico comando permanece ativo enquanto frames brancos/distantes
+        # sao lidos. Isso evita pulsos curtos que nao vencem a inercia.
+        self.assertEqual(len(avancos), 1)
         primeiro_movimento = next(
             args for _t, args, _kwargs in steer.events if args
         )
@@ -336,6 +342,38 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
             args and args[0] != 0
             for _t, args, _kwargs in steer.events
         ))
+
+    def test_piso_branco_mantem_avanco_e_timeout_para_sem_re_ou_giro(self):
+        clock = FakeClock()
+        piso_branco = np.full(
+            (config.camera_y, config.camera_x, 3), 205, dtype=np.uint8
+        )
+        camera = FakeCamera(clock, piso_branco)
+        arduino = FakeArduino()
+        steer = RecordingSteer(clock)
+        retomada = RetomadaFactory()
+
+        with patch.object(cfg, "EXIT_LINE_VERIFY_TIMEOUT_S", 0.30):
+            resultado = saida_linha.confirmar_saida_com_camera_linha(
+                arduino,
+                steer,
+                lambda: camera,
+                relogio=clock,
+                dormir=clock.sleep,
+                retomada_factory=retomada,
+            )
+
+        self.assertEqual(resultado, saida_linha.LINHA_NAO_ENCONTRADA)
+        self.assertEqual(arduino.led_modes, ["ACESO", "APAGADO"])
+        self.assertEqual(retomada.executou, 0)
+        movimentos = [
+            args for _t, args, _kwargs in steer.events if args
+        ]
+        self.assertEqual(
+            movimentos,
+            [(0, cfg.EXIT_LINE_VERIFY_SPEED)],
+        )
+        self.assertEqual(steer.events[-1][1], ())
 
 
 if __name__ == "__main__":

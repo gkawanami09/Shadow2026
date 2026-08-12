@@ -676,9 +676,9 @@ EXIT_LINE_VERIFY_SPEED = EXIT_LINE_VERIFY_PWM / 120.0
 EXIT_LINE_VERIFY_TIMEOUT_S = 5.0
 EXIT_LINE_CAMERA_WARMUP_S = 0.35
 EXIT_LINE_VERIFY_CONFIRM_TIMEOUT_S = 1.20
-EXIT_LINE_VERIFY_STEP_S = 0.08
 EXIT_LINE_VERIFY_STEP_SETTLE_S = 0.04
 EXIT_LINE_VERIFY_REVERSE_STEP_S = 0.05
+EXIT_LINE_APPROACH_CONFIRM_FRAMES = 2
 EXIT_LINE_VERIFY_WINDOW = 5
 # A primeira votacao apenas escolhe uma hipotese. A segunda, feita sem mover o
 # chassi, precisa confirmar a MESMA cor com mais frames.
@@ -708,6 +708,7 @@ EXIT_LINE_VERIFY_MIN_HEIGHT_RATIO = 0.04
 EXIT_LINE_VERIFY_MAX_HEIGHT_RATIO = 0.52
 EXIT_LINE_VERIFY_BLACK_BRIGHTNESS_RATIO_MAX = 0.31
 EXIT_LINE_VERIFY_SILVER_BRIGHTNESS_RATIO_MIN = 0.38
+EXIT_LINE_VERIFY_SILVER_BRIGHTNESS_RATIO_MAX = 0.70
 EXIT_LINE_VERIFY_BLACK_DARK_FILL_MIN = 0.65
 EXIT_LINE_VERIFY_BLACK_MAX_HEIGHT_RATIO = 0.50
 EXIT_LINE_VERIFY_DARK_PIXEL_RATIO = 0.32
@@ -721,10 +722,6 @@ EXIT_LINE_VERIFY_EXPOSURE_MAX_REL_CHANGE = 0.12
 EXIT_LINE_VERIFY_EXPOSURE_STABLE_FRAMES = 2
 EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED = 0.50
 EXIT_LINE_VERIFY_REJECT_REVERSE_S = 1.0
-# Se nenhuma cor fechar a votacao, desfaz TODOS os passos dados pela camera
-# de linha e acrescenta esta margem. Assim uma faixa perdida nao deixa o robo
-# continuar a busca ja do lado de fora da sala.
-EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S = 0.10
 
 # Retomada da linha depois que PRETO foi reconfirmado. Esta etapa ainda roda
 # dentro de resgate.py, com a mesma camera de linha e a mesma sessao serial; a

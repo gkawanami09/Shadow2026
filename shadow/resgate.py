@@ -73,7 +73,6 @@ from controle.retangulo_verde_resgate import (  # noqa: E402
 from controle.saida_resgate import ExitPhaseController  # noqa: E402
 from visao import overlay_resgate  # noqa: E402
 from visao.confirmacao_saida_linha import (  # noqa: E402
-    INCONCLUSIVA,
     NAO_PRETA,
     PRETA,
 )
@@ -111,6 +110,7 @@ EXIT_INCOMPLETE = 3
 EXIT_SEM_MODELO = 4
 
 RETOMADA_FALHOU = "retomada_falhou"
+LINHA_NAO_ENCONTRADA = "linha_nao_encontrada"
 
 
 class VideoSource:
@@ -2235,12 +2235,13 @@ def main():
                             "iniciado apos liberar camera e serial"),
                         terminal=True,
                     )
-                elif resultado_verificacao == RETOMADA_FALHOU:
-                    # A cor preta foi reconfirmada, mas a terceira linha nao
-                    # fechou a votacao geometrica dentro da manobra mapeada.
-                    # Nao reabre a busca frontal: isso poderia repetir a
-                    # travessia e sair da arena. Permanece parado e devolve
-                    # falha ao supervisor da missao.
+                elif resultado_verificacao in (
+                    RETOMADA_FALHOU,
+                    LINHA_NAO_ENCONTRADA,
+                ):
+                    # Tanto uma faixa ausente quanto uma retomada geometrica
+                    # incompleta falham paradas. Nao reabrir a busca frontal:
+                    # isso repetiria a travessia e poderia sair da arena.
                     controlador_saida = None
                     portao_saida = None
                     epoca_saida = None
@@ -2249,26 +2250,18 @@ def main():
                     comando = MotionCommand(
                         "EXIT_LINE_RECOVERY_FAILED",
                         detail=(
-                            "faixa preta confirmada, mas terceira linha nao "
-                            "foi confirmada; robo parado"),
+                            "camera de linha nao concluiu a retomada; "
+                            "robo parado, sem re nem nova rotacao"),
                         terminal=True,
                     )
-                elif resultado_verificacao in (
-                    NAO_PRETA,
-                    INCONCLUSIVA,
-                ):
+                elif resultado_verificacao == NAO_PRETA:
                     # A re ja foi executada antes de fechar a camera de linha.
                     # Fechada essa camera, a frontal de resgate pode reabrir
                     # com seguranca e voltar aos pulsos de procura.
-                    if resultado_verificacao == NAO_PRETA:
-                        motivo = "faixa prata; re de 1 segundo concluida"
-                    else:
-                        motivo = (
-                            "verificacao inconclusiva; re de 1 segundo "
-                            "concluida")
                     print(
-                        f"[saida] {motivo}; reabrindo a camera de resgate "
-                        "para continuar a busca")
+                        "[saida] faixa prata; re de 1 segundo concluida; "
+                        "reabrindo a camera de resgate para continuar a "
+                        "busca")
                     from visao.captura_resgate import RescueCamera
 
                     fonte = RescueCamera(args.camera_index)

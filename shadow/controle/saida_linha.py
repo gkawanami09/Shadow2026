@@ -10,7 +10,6 @@ from controle.retomada_saida import (
     ErroRetomadaSaida,
 )
 from visao.confirmacao_saida_linha import (
-    INCONCLUSIVA,
     NAO_PRETA,
     PRETA,
     ClassificadorFaixaSaidaLinha,
@@ -23,6 +22,7 @@ from visao.continuacao_saida import anotar_analise_saida
 
 
 RETOMADA_FALHOU = "retomada_falhou"
+LINHA_NAO_ENCONTRADA = "linha_nao_encontrada"
 
 
 def _mover_por_tempo(
@@ -75,8 +75,9 @@ def confirmar_saida_com_camera_linha(
     confirmacao_iniciada_em = None
     hipotese_inicial = None
     rechecando = False
-    deslocamento_temporal = 0.0
     ultima_posicao_faixa = None
+    faixa_centralizada_hits = 0
+    avancando_para_faixa = False
     manter_led_aceso = False
 
     def parar():
@@ -115,23 +116,15 @@ def confirmar_saida_com_camera_linha(
             raise RuntimeError(
                 "serial mudou durante a confirmacao preta/prata")
 
-    def recuar_e_retornar(resultado, duracao=None):
-        nonlocal deslocamento_temporal
-        if duracao is None:
-            duracao = max(
-                cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
-                max(deslocamento_temporal, 0.0)
-                + cfg.EXIT_LINE_VERIFY_MISSED_REVERSE_MARGIN_S,
-            )
+    def recuar_prata_e_retornar():
         parar()
         mover(
             200,
             cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_SPEED,
-            duracao,
+            cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
         )
-        deslocamento_temporal -= float(duracao)
         parar()
-        return resultado
+        return NAO_PRETA
 
     def debug_retomada(frame, analise, fase):
         if not debug:
@@ -162,12 +155,17 @@ def confirmar_saida_com_camera_linha(
         inicio = relogio()
 
         print(
-            f"[saida] procurando a faixa em passos de "
-            f"{cfg.EXIT_LINE_VERIFY_STEP_S:.2f} s a PWM "
-            f"{cfg.EXIT_LINE_VERIFY_PWM}; votos so contam no centro e com "
-            "luz estavel")
+            f"[saida] avancando CONTINUAMENTE a PWM "
+            f"{cfg.EXIT_LINE_VERIFY_PWM} ate confirmar uma faixa em "
+            f"{cfg.EXIT_LINE_APPROACH_CONFIRM_FRAMES} frames; so entao "
+            "o robo freia para decidir preto/prata")
 
         while True:
+            if confirmador is None and not avancando_para_faixa:
+                if acao_direcao(0, cfg.EXIT_LINE_VERIFY_SPEED) is False:
+                    raise RuntimeError(
+                        "nao foi possivel avancar com a camera de linha")
+                avancando_para_faixa = True
             frame = camera.get_frame()
             agora = relogio()
             posicao_faixa = None
@@ -178,8 +176,20 @@ def confirmar_saida_com_camera_linha(
                 posicao_faixa = posicao_vertical_faixa(resultado)
                 if posicao_faixa is not None:
                     ultima_posicao_faixa = posicao_faixa
-                if faixa_centralizada(resultado):
+                candidata_valida = (
+                    faixa_centralizada(resultado)
+                    and resultado.classificacao in (PRETA, NAO_PRETA)
+                )
+                faixa_centralizada_hits = (
+                    faixa_centralizada_hits + 1
+                    if candidata_valida else 0
+                )
+                if (
+                    faixa_centralizada_hits
+                    >= cfg.EXIT_LINE_APPROACH_CONFIRM_FRAMES
+                ):
                     parar()
+                    avancando_para_faixa = False
                     dormir(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S)
                     confirmador = ConfirmadorFaixaSaidaLinha()
                     confirmacao_iniciada_em = relogio()
@@ -190,9 +200,12 @@ def confirmar_saida_com_camera_linha(
                         "votacao iniciada com frames posteriores")
                 else:
                     fase_confirmacao = (
-                        "procurando faixa entre passos"
+                        "avancando ate aparecer uma faixa valida"
                         if posicao_faixa is None
-                        else f"recentralizando faixa ({posicao_faixa:.0%})"
+                        else (
+                            f"faixa em {posicao_faixa:.0%}; mantendo "
+                            "avanco continuo"
+                        )
                     )
             else:
                 decisao, resultado = confirmador.update(
@@ -252,17 +265,14 @@ def confirmar_saida_com_camera_linha(
                 if decisao != hipotese_inicial:
                     print(
                         "[saida] votacoes discordaram; PRETO nao sera "
-                        "liberado")
-                    return recuar_e_retornar(INCONCLUSIVA)
+                        "liberado; robo permanecera PARADO")
+                    return RETOMADA_FALHOU
 
                 if decisao == NAO_PRETA:
                     print(
                         "[saida] faixa PRATA reconfirmada; re de 1,00 s e "
                         "retorno aos pulsos da camera frontal")
-                    return recuar_e_retornar(
-                        NAO_PRETA,
-                        cfg.EXIT_LINE_VERIFY_REJECT_REVERSE_S,
-                    )
+                    return recuar_prata_e_retornar()
 
                 print(
                     "[saida] faixa PRETA reconfirmada; medindo inclinacao e "
@@ -300,10 +310,17 @@ def confirmar_saida_com_camera_linha(
                 and confirmacao_iniciada_em is not None
                 and agora - confirmacao_iniciada_em >= limite_confirmacao)
             if esgotou_aproximacao or esgotou_confirmacao:
+                parar()
+                avancando_para_faixa = False
+                if esgotou_aproximacao:
+                    print(
+                        "[saida] nenhuma faixa valida apareceu durante o "
+                        "avanco continuo; PARADO, sem re e sem giro")
+                    return LINHA_NAO_ENCONTRADA
                 print(
-                    "[saida] cor nao fechou com centro/luz estaveis; "
-                    "desfazendo a aproximacao")
-                return recuar_e_retornar(INCONCLUSIVA)
+                    "[saida] faixa vista, mas a cor nao fechou com luz "
+                    "estavel; PARADO, sem re e sem giro")
+                return RETOMADA_FALHOU
 
             if confirmador is None:
                 alvo = cfg.EXIT_LINE_VERIFY_CENTER_Y_RATIO
@@ -319,22 +336,16 @@ def confirmar_saida_com_camera_linha(
                         and ultima_posicao_faixa > alvo
                     )
                 ):
+                    parar()
+                    avancando_para_faixa = False
                     mover(
                         200,
                         cfg.EXIT_LINE_VERIFY_SPEED,
                         cfg.EXIT_LINE_VERIFY_REVERSE_STEP_S,
                     )
-                    deslocamento_temporal -= (
-                        cfg.EXIT_LINE_VERIFY_REVERSE_STEP_S)
-                else:
-                    mover(
-                        0,
-                        cfg.EXIT_LINE_VERIFY_SPEED,
-                        cfg.EXIT_LINE_VERIFY_STEP_S,
-                    )
-                    deslocamento_temporal += cfg.EXIT_LINE_VERIFY_STEP_S
-                parar()
-                dormir(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S)
+                    faixa_centralizada_hits = 0
+                    parar()
+                    dormir(cfg.EXIT_LINE_VERIFY_STEP_SETTLE_S)
     finally:
         parar_melhor_esforco()
         erro_limpeza = None

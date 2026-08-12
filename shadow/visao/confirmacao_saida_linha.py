@@ -262,8 +262,11 @@ class ClassificadorFaixaSaidaLinha:
         prata = bool(
             faixa_presente
             and (
-                brilho_relativo
-                >= cfg.EXIT_LINE_VERIFY_SILVER_BRIGHTNESS_RATIO_MIN
+                (
+                    cfg.EXIT_LINE_VERIFY_SILVER_BRIGHTNESS_RATIO_MIN
+                    <= brilho_relativo
+                    <= cfg.EXIT_LINE_VERIFY_SILVER_BRIGHTNESS_RATIO_MAX
+                )
                 or (
                     textura_relativa
                     >= cfg.EXIT_LINE_VERIFY_SILVER_TEXTURE_RATIO_MIN
