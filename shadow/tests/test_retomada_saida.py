@@ -214,7 +214,7 @@ def primeiro_intervalo(chassi, nome, predicado=lambda _cmd: True):
 
 class RetomadaSaidaTests(unittest.TestCase):
     def test_avanco_reto_dura_os_030_segundos_completos(self):
-        evento = EventoDeteccao("tanque_direita", 1, .04)
+        evento = EventoDeteccao("tanque_esquerda", 1, .04)
         controlador, chassi, _relogio, _fonte = criar_controlador(
             delta_pose=.12, eventos=(evento,))
 
@@ -229,8 +229,8 @@ class RetomadaSaidaTests(unittest.TestCase):
             fim - inicio, cfg.EXIT_POST_FORWARD_S, places=9)
         self.assertEqual(resultado.orientacao_soleira, DIREITA_BAIXA)
 
-    def test_diagonal_direita_baixa_gira_tanque_para_direita(self):
-        evento = EventoDeteccao("tanque_direita", 1, .04)
+    def test_diagonal_direita_baixa_gira_tanque_para_esquerda(self):
+        evento = EventoDeteccao("tanque_esquerda", 1, .04)
         controlador, chassi, _relogio, _fonte = criar_controlador(
             delta_pose=.12, eventos=(evento,))
 
@@ -241,14 +241,14 @@ class RetomadaSaidaTests(unittest.TestCase):
             if comando[1] == "direcao" and comando[2] != 0
         ]
         self.assertTrue(giros)
-        self.assertTrue(all(comando[2] == cfg.EXIT_POST_TANK_ANGLE
+        self.assertTrue(all(comando[2] == -cfg.EXIT_POST_TANK_ANGLE
                             for comando in giros))
         self.assertTrue(all(comando[3] == cfg.EXIT_POST_TANK_SPEED
                             for comando in giros))
-        self.assertEqual(resultado.fase_encontro, "tanque_direita")
+        self.assertEqual(resultado.fase_encontro, "tanque_esquerda")
 
-    def test_diagonal_esquerda_baixa_gira_tanque_para_esquerda(self):
-        evento = EventoDeteccao("tanque_esquerda", 1, .04)
+    def test_diagonal_esquerda_baixa_gira_tanque_para_direita(self):
+        evento = EventoDeteccao("tanque_direita", 1, .04)
         controlador, chassi, _relogio, _fonte = criar_controlador(
             delta_pose=-.12, eventos=(evento,))
 
@@ -259,9 +259,9 @@ class RetomadaSaidaTests(unittest.TestCase):
             if comando[1] == "direcao" and comando[2] != 0
         ]
         self.assertTrue(giros)
-        self.assertTrue(all(comando[2] == -cfg.EXIT_POST_TANK_ANGLE
+        self.assertTrue(all(comando[2] == cfg.EXIT_POST_TANK_ANGLE
                             for comando in giros))
-        self.assertEqual(resultado.fase_encontro, "tanque_esquerda")
+        self.assertEqual(resultado.fase_encontro, "tanque_direita")
 
     def test_nivelado_varre_esquerda_1s_e_direita_ate_2s(self):
         controlador, chassi, _relogio, _fonte = criar_controlador(

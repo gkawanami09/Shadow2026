@@ -83,11 +83,13 @@ class ControladorRetomadaSaida:
                     orientacao, delta, "apos_avanco", continuacao)
 
             if orientacao == DIREITA_BAIXA:
-                continuacao = self._buscar_com_tanque(direita=True)
-                fase = "tanque_direita"
-            elif orientacao == ESQUERDA_BAIXA:
+                # A parte baixa indica o lado do qual o robo esta vindo; para
+                # apontar para a terceira linha, o tanque gira ao lado oposto.
                 continuacao = self._buscar_com_tanque(direita=False)
                 fase = "tanque_esquerda"
+            elif orientacao == ESQUERDA_BAIXA:
+                continuacao = self._buscar_com_tanque(direita=True)
+                fase = "tanque_direita"
             elif orientacao == NIVEL:
                 continuacao, fase = self._buscar_com_omni()
             else:
