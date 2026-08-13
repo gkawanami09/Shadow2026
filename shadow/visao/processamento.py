@@ -37,6 +37,7 @@ from visao.vermelho import ConfirmadorVermelho, check_contour_size
 black_min = np.array(config.BLACK_MIN_DEFAULT)
 black_max_normal_top = np.array(config.BLACK_MAX_NORMAL_TOP_DEFAULT)
 black_max_normal_bottom = np.array(config.BLACK_MAX_NORMAL_BOTTOM_DEFAULT)
+black_max_ramp_down_top = np.array(config.BLACK_MAX_RAMP_DOWN_TOP_DEFAULT)
 green_min = np.array(config.GREEN_MIN_DEFAULT)
 green_max = np.array(config.GREEN_MAX_DEFAULT)
 red_min_1 = np.array(config.RED_MIN_1_DEFAULT)
@@ -46,7 +47,8 @@ red_max_2 = np.array(config.RED_MAX_2_DEFAULT)
 
 
 def update_color_values():
-    global black_max_normal_top, black_max_normal_bottom, green_min, green_max, \
+    global black_max_normal_top, black_max_normal_bottom, \
+        black_max_ramp_down_top, green_min, green_max, \
         red_min_1, red_max_1, red_min_2, red_max_2
 
     def read(name, fallback):
@@ -55,6 +57,10 @@ def update_color_values():
 
     black_max_normal_top = read('black_max_normal_top', config.BLACK_MAX_NORMAL_TOP_DEFAULT)
     black_max_normal_bottom = read('black_max_normal_bottom', config.BLACK_MAX_NORMAL_BOTTOM_DEFAULT)
+    black_max_ramp_down_top = read(
+        'black_max_ramp_down_top',
+        config.BLACK_MAX_RAMP_DOWN_TOP_DEFAULT,
+    )
 
     green_min = read('green_min', config.GREEN_MIN_DEFAULT)
     green_max = read('green_max', config.GREEN_MAX_DEFAULT)
@@ -63,6 +69,30 @@ def update_color_values():
     red_max_1 = read('red_max_1', config.RED_MAX_1_DEFAULT)
     red_min_2 = read('red_min_2', config.RED_MIN_2_DEFAULT)
     red_max_2 = read('red_max_2', config.RED_MAX_2_DEFAULT)
+
+
+def _has_black_ahead(mask):
+    """Há preto persistente no corredor central à frente do robô?
+
+    A mesma geometria avalia os dois perfis de preto: o normal, que orienta a
+    linha, e o específico da rampa. Uma barra transversal isolada não basta;
+    o preto precisa ocupar muitas linhas do corredor na direção de marcha.
+    """
+    if mask is None or mask.ndim != 2:
+        raise ValueError("_has_black_ahead exige uma mascara 2D")
+    height, width = mask.shape
+    ahead = mask[
+        0:int(height * config.GAP_AHEAD_Y_MAX),
+        int(width * config.GAP_AHEAD_X_MIN):int(
+            width * config.GAP_AHEAD_X_MAX),
+    ]
+    if not ahead.size:
+        return False
+    row_fill = np.count_nonzero(ahead, axis=1) / ahead.shape[1]
+    return bool(
+        np.mean(row_fill >= config.GAP_AHEAD_ROW_FILL)
+        >= config.GAP_AHEAD_ROW_PERSISTENCE
+    )
 
 
 def vision_loop(debug=False):
@@ -153,21 +183,25 @@ def vision_loop(debug=False):
             media_preto = float(np.mean(black_image))
             black_average.value = media_preto
 
-            # Continuidade material na direcao de marcha. Em vez de olhar so
-            # a area total, exige preto em muitas linhas horizontais do
-            # corredor central; assim uma faixa transversal de um L nao vira
-            # falsamente uma continuacao para frente.
-            ahead = black_image[
-                0:int(camera_y * config.GAP_AHEAD_Y_MAX),
-                int(camera_x * config.GAP_AHEAD_X_MIN):int(camera_x * config.GAP_AHEAD_X_MAX)
-            ]
-            if ahead.size:
-                row_fill = np.count_nonzero(ahead, axis=1) / ahead.shape[1]
-                linha_a_frente_frame = bool(
-                    np.mean(row_fill >= config.GAP_AHEAD_ROW_FILL)
-                    >= config.GAP_AHEAD_ROW_PERSISTENCE)
-            else:
-                linha_a_frente_frame = False
+            # A rampa tem seu proprio teto de preto, calibrado no grupo 3.
+            # Esta mascara nunca substitui a mascara normal da linha: ela so
+            # acrescenta um veto independente a entrada de resgate.
+            black_ramp_image = np.zeros_like(black_image)
+            black_ramp_image[:limite_topo] = cv2.inRange(
+                cv2_img[:limite_topo],
+                black_min,
+                black_max_ramp_down_top,
+            )
+            black_ramp_image[:limite_topo] = cv2.bitwise_and(
+                black_ramp_image[:limite_topo],
+                cv2.bitwise_not(green_image[:limite_topo]),
+            )
+
+            # Cada perfil procura continuidade por conta própria. Preto pelo
+            # teto normal ou pelo teto exclusivo da rampa significa que a
+            # linha continua depois da candidata a prata.
+            linha_a_frente_frame = _has_black_ahead(black_image)
+            preto_rampa_a_frente_frame = _has_black_ahead(black_ramp_image)
             line_ahead.value = linha_a_frente_frame
 
             # Recorta partes que não devem participar da decisão.
@@ -337,7 +371,8 @@ def vision_loop(debug=False):
             update_entry_silver(
                 entry_gate, cv2_img, frame_captured_at,
                 line_aligned=entrada_alinhada,
-                line_ahead=linha_a_frente_frame)
+                line_ahead=linha_a_frente_frame,
+                ramp_black_ahead=preto_rampa_a_frente_frame)
 
             processamento_ms = (
                 time.perf_counter() - inicio_processamento

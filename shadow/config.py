@@ -304,6 +304,11 @@ ENTRY_ALIGNMENT_HOLD_S = .50
 BLACK_MIN_DEFAULT = [0, 0, 0]
 BLACK_MAX_NORMAL_TOP_DEFAULT = [82, 83, 84]         # BGR
 BLACK_MAX_NORMAL_BOTTOM_DEFAULT = [133, 133, 135]   # BGR
+# Perfil independente da parte escura da rampa. Ele nao substitui o preto
+# normal que guia o robo: so e consultado como uma segunda prova de que ainda
+# existe linha preta alem da candidata a prata, antes de liberar o resgate.
+# Calibre pelo grupo 3 de `tools/calibrar_cores.py`.
+BLACK_MAX_RAMP_DOWN_TOP_DEFAULT = [27, 27, 26]      # BGR
 # Matizes MIGRADOS quando a troca R<->B da câmera de linha foi corrigida
 # (ver visao/captura.py). A conversão é exata: H_correto = 120 − H_trocado.
 # Antes: 58..98 na imagem trocada. Depois: 22..62 na imagem correta.

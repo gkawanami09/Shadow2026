@@ -30,85 +30,30 @@ Com o robô SOBRE a pista, na iluminação real da sala:
    cima** da imagem, sem o piso virar branco.
 2. **Grupo 2 — `black_max_normal_bottom`** (faixa próxima, 40-100 %): idem
    para a metade de baixo. É a região mais crítica — o POI vem daqui.
-3. **Grupo 4 — verde**: marcador verde sólido branco na máscara, resto preto.
+3. **Grupo 3 — `black_max_ramp_down_top`** (preto da rampa): posicione o
+   robô onde a linha continua depois da descida. Ajuste B/G/R para a linha
+   preta aparecer na máscara sem o piso da rampa ficar branco. Este perfil
+   não dirige o robô; ele apenas veta o resgate quando ainda há preto à frente.
+4. **Grupo 4 — verde**: marcador verde sólido branco na máscara, resto preto.
    Valide nas 4 posições de marcador.
-4. **Grupos 5/6 — vermelho**: as duas bandas de hue (0-10 e 170-180). A faixa
+5. **Grupos 5/6 — vermelho**: as duas bandas de hue (0-10 e 170-180). A faixa
    vermelha da pista deve encher a máscara; um objeto vermelho pequeno pode
    aparecer — não é problema (o gatilho exige 15000 px²).
 
-6. **Grupo 7 — prata da faixa de ENTRADA** (câmera de linha). Ver a seção
-   2.1 abaixo: este grupo tem um procedimento próprio.
-
 Salve cada grupo com `s`. Valide com `python3 shadow/main.py --vision-only --debug`.
 
-## 2.1 Faixa PRATA de entrada (grupo 7)
+## 2.1 Entrada no resgate: prata + contexto preto
 
-Este perfil é **independente** do prata da vítima. A vítima é vista pela
-câmera de resgate e seus limiares vivem em `config_resgate.py`; a faixa é
-vista pela câmera de linha e seus limiares vivem em `config.py` +
-`[color_values_line]`. Nunca copie um para o outro — são câmeras, alturas,
-distâncias e iluminações diferentes.
+O modelo reconhece a prata da entrada. Ele só inicia o resgate depois de dois
+frames alinhados e sem uma linha preta à frente. Essa linha é procurada tanto
+pelo perfil normal (grupos 1/2) como pelo perfil específico da rampa (grupo
+3). Portanto, teste os dois cenários depois de calibrar:
 
-Os valores em `config.py` (`ENTRY_SILVER_*`) são um ponto de partida
-conservador e **ainda não foram medidos com a fita real**. A calibração
-abaixo é obrigatória antes de confiar na entrada automática.
-
-Procedimento, com o robô sobre a pista e a fita prata colada no chão:
-
-1. abra `python3 -m shadow.tools.calibrar_cores` e tecle `7`;
-2. a janela mostra o frame em cima e a máscara embaixo. No frame aparecem
-   também a linha da ROI, a caixa do candidato e — o mais importante — o
-   **motivo da rejeição** quando ele não passa;
-3. ajuste `V min` até a fita ficar sólida na máscara e o piso não;
-4. ajuste `S max` para baixo até o piso colorido sair da máscara sem perder a
-   fita (prata é neutra: S baixo);
-5. aproxime e afaste o robô. A caixa deve ficar verde (`ACEITA`) na faixa de
-   distância em que o robô realmente chega à sala;
-6. salve com `s`.
-
-Leia o motivo quando a fita for rejeitada:
-
-| Motivo | Significado | O que ajustar |
-|---|---|---|
-| `sem_linha_cheia` | nenhuma linha horizontal atingiu o preenchimento mínimo | `V min`/`S max`, ou `ENTRY_SILVER_MIN_ROW_FILL` |
-| `estreita` | a fita não atravessa largura suficiente | aproxime; ou desça `ENTRY_SILVER_MIN_SPAN_RATIO` |
-| `espessa` | a máscara preencheu a ROI — normalmente o piso inteiro entrou | suba `V min` |
-| `compacta` | forma quase quadrada: é uma esfera, não uma fita | nada — é o veto funcionando |
-| `saturada` | a região tem cor demais para ser metal | suba `S max` com cuidado |
-| `sem_assinatura_reflexiva` | neutro e claro, mas sem brilho nem faixa dinâmica: papel branco | desça `ENTRY_SILVER_MIN_DYNAMIC_RANGE` só se a fita real for fosca |
-| `sem_contraste` | a fita ficou idêntica ao piso, em brilho E em textura | mude o ângulo do LED; ou desça `ENTRY_SILVER_MIN_SURROUND_CONTRAST` |
-
-### Quando o piso cinza tem o mesmo brilho da fita
-
-Esse foi o caso medido na arena real: piso e fita chegando os dois a
-V≈216-226 e S≈20-24. Nessa situação **HSV sozinho não separa** — a máscara
-engole o piso inteiro e o candidato morre em `espessa`.
-
-O que continua diferente é a **textura da luz**: metal concentra brilho em
-pontos, piso fosco é uniforme por mais claro que seja. O slider
-**`Reflexo min`** (só no grupo 7) filtra por isso, antes da geometria.
-
-Como ajustar: suba `Reflexo min` até o piso sair da máscara e sobrar só a
-fita. Se a fita sumir junto, desça. Zero desliga o filtro.
-
-Esse mesmo sinal também vale como contraste: se a fita e o piso tiverem o
-mesmo brilho mas texturas diferentes, o detector aceita pela textura. Só é
-rejeitado o que for igual nas **duas** coisas.
-| `linha_continua` | a linha preta segue à frente | correto: não é a entrada |
-
-Depois de calibrar, valide **sem** transição, com o replay:
-
-```bash
-python3 shadow/tools/replay_visao.py --perfil entrada --frames <positivos> --esperado positivo
-```
-
-```bash
-python3 shadow/tools/replay_visao.py --perfil entrada --frames <negativos> --esperado negativo
-```
-
-O conjunto de negativos precisa incluir piso branco, reflexo de LED, a
-vítima prateada, a faixa preta e luz sobre a linha. **Zero falsos positivos
-nesse conjunto** é o critério para liberar a entrada automática.
+1. no fim da rampa, o debug deve mostrar
+   `linha_preta_depois_da_prata` ou `preto_rampa_depois_da_prata`; o robô
+   continua o segue-linha;
+2. na entrada prata real, sem preto depois dela, o debug muda de `votando`
+   para `confirmada` no segundo frame; o resgate inicia.
 
 ## 2.2 Faixa PRETA de saída e triângulos (câmera de resgate)
 

@@ -5,6 +5,7 @@ Grupos disponíveis (tecle o número para trocar):
 
     1  preto da linha, teto superior
     2  preto da linha, teto inferior
+    3  preto da rampa (usado apenas para vetar falso resgate)
     4  verde dos marcadores
     5  vermelho, banda 1 (o vermelho cruza a origem do H)
     6  vermelho, banda 2
@@ -37,6 +38,7 @@ def read_ini(name, fallback):
 GROUPS = {
     "1": ("black_max_normal_top", "bgr_ceiling"),
     "2": ("black_max_normal_bottom", "bgr_ceiling"),
+    "3": ("black_max_ramp_down_top", "bgr_ceiling"),
     "4": ("green", "hsv_range"),
     "5": ("red_1", "hsv_range"),
     "6": ("red_2", "hsv_range"),
@@ -51,7 +53,8 @@ HSV_DEFAULTS = {"green_min": config.GREEN_MIN_DEFAULT, "green_max": config.GREEN
                 "red_min_2": config.RED_MIN_2_DEFAULT, "red_max_2": config.RED_MAX_2_DEFAULT}
 
 BGR_DEFAULTS = {"black_max_normal_top": config.BLACK_MAX_NORMAL_TOP_DEFAULT,
-                "black_max_normal_bottom": config.BLACK_MAX_NORMAL_BOTTOM_DEFAULT}
+                "black_max_normal_bottom": config.BLACK_MAX_NORMAL_BOTTOM_DEFAULT,
+                "black_max_ramp_down_top": config.BLACK_MAX_RAMP_DOWN_TOP_DEFAULT}
 
 
 def build_trackbars(group_name, mode):

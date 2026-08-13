@@ -39,6 +39,8 @@ class EntryInference:
     # ``None`` preserva os consumidores antigos; no percurso real sempre vem
     # ``True`` ou ``False`` da visao da linha.
     black_ahead: bool | None = None
+    # Mesmo contexto, mas medido pelo limiar de preto exclusivo da rampa.
+    ramp_black_ahead: bool | None = None
 
 
 class EntryModel:
@@ -230,7 +232,14 @@ class EntryModelWorker:
         self._thread.start()
         return self
 
-    def submit(self, frame, timestamp, line_aligned, black_ahead=None):
+    def submit(
+        self,
+        frame,
+        timestamp,
+        line_aligned,
+        black_ahead=None,
+        ramp_black_ahead=None,
+    ):
         # A cópia impede a câmera de reutilizar o buffer durante a inferência.
         with self._condition:
             self._pending = (
@@ -239,6 +248,7 @@ class EntryModelWorker:
                 float(timestamp),
                 bool(line_aligned),
                 black_ahead,
+                ramp_black_ahead,
             )
             self._condition.notify()
 
@@ -277,7 +287,7 @@ class EntryModelWorker:
                 if self._stopping:
                     return
                 (generation, frame, timestamp, line_aligned,
-                 black_ahead) = self._pending
+                 black_ahead, ramp_black_ahead) = self._pending
                 self._pending = None
             try:
                 started = time.perf_counter()
@@ -299,6 +309,7 @@ class EntryModelWorker:
                     detection,
                     inference_ms,
                     black_ahead,
+                    ramp_black_ahead,
                 )
 
 
@@ -339,16 +350,20 @@ class EntryGate:
             self._hits.append(False)
             self.last_reason = "faixa_sem_linha_alinhada"
             return False, inference.detection
-        if (
-            config.ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD
-            and inference.black_ahead is True
-        ):
+        black_source = (
+            "preto_rampa_depois_da_prata"
+            if inference.ramp_black_ahead is True
+            else "linha_preta_depois_da_prata"
+            if inference.black_ahead is True
+            else None
+        )
+        if config.ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD and black_source:
             # Se, após a prata, a linha preta continua no corredor central,
             # ainda estamos no percurso/rampa. Descarta inclusive o voto
             # anterior: uma amostra antes e outra depois do preto jamais
             # podem formar uma entrada de resgate.
             self._hits.clear()
-            self.last_reason = "linha_preta_depois_da_prata"
+            self.last_reason = black_source
             return False, inference.detection
         self._hits.append(True)
         fast = (
@@ -385,12 +400,21 @@ class EntryPipeline:
     def votes(self):
         return self.gate.votes
 
-    def submit(self, frame, timestamp, line_aligned, *, line_ahead=False):
+    def submit(
+        self,
+        frame,
+        timestamp,
+        line_aligned,
+        *,
+        line_ahead=False,
+        ramp_black_ahead=False,
+    ):
         self.worker.submit(
             frame,
             timestamp,
             line_aligned,
             bool(line_ahead),
+            bool(ramp_black_ahead),
         )
 
     def set_armed(self, armed):
@@ -430,6 +454,7 @@ def update_entry_silver(
     *,
     line_aligned=False,
     line_ahead=False,
+    ramp_black_ahead=False,
 ):
     """Entrega o frame ao YOLO e publica somente resultados prontos."""
     if entry_gate is None:
@@ -452,6 +477,7 @@ def update_entry_silver(
         captured_at,
         line_aligned,
         line_ahead=line_ahead,
+        ramp_black_ahead=ramp_black_ahead,
     )
     confirmed, detection = entry_gate.poll()
     entry_silver_detected.value = detection is not None

@@ -117,6 +117,35 @@ class EntryGateTests(unittest.TestCase):
             .06, True, detection, 0., black_ahead=False))[0])
         self.assertEqual(gate.votes, 1)
 
+    def test_preto_do_limiar_da_rampa_tambem_veta_o_resgate(self):
+        detection = EntryDetection((1, 2, 3, 4), .99)
+        gate = EntryGate()
+        for timestamp in (0., .03, .06):
+            confirmed, _ = gate.update(EntryInference(
+                timestamp,
+                True,
+                detection,
+                0.,
+                black_ahead=False,
+                ramp_black_ahead=True,
+            ))
+            self.assertFalse(confirmed)
+        self.assertEqual(gate.votes, 0)
+        self.assertEqual(
+            gate.last_reason,
+            "preto_rampa_depois_da_prata",
+        )
+
+    def test_limiar_de_preto_da_rampa_e_calibravel(self):
+        self.assertEqual(
+            config.BLACK_MAX_RAMP_DOWN_TOP_DEFAULT,
+            [27, 27, 26],
+        )
+        calibrador = (SHADOW_ROOT / "tools" / "calibrar_cores.py").read_text(
+            encoding="utf-8")
+        self.assertIn('"3": ("black_max_ramp_down_top", "bgr_ceiling")',
+                      calibrador)
+
     def test_reset_descarta_votos_e_o_timestamp_da_fase_anterior(self):
         detection = EntryDetection((1, 2, 3, 4), .7)
         gate = EntryGate()
