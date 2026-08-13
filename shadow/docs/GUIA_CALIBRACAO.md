@@ -58,6 +58,12 @@ calibrar:
    `validando_prata_parado` por um segundo e depois `confirmada`; só então o
    resgate inicia.
 
+O texto de debug ONNX PRATA mostra conf=atual/limiar: a confiança bruta do
+YOLO aparece inclusive quando a faixa ainda não atingiu o limiar. O limiar
+começa em .45; reduza no máximo até .40 somente se a prata real continuar
+abaixo disso, pois valores menores tornam mais provável aceitar claridade da
+rampa como candidata.
+
 ## 2.2 Faixa PRETA de saída e triângulos (câmera de resgate)
 
 Os limiares estão em `config_resgate.py` (`EXIT_BLACK_*`, `MARKER_*`). Eles

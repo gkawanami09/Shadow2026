@@ -107,6 +107,9 @@ class EntryModel:
         self._net = None
         self._ncnn = None
         self.active_backend = None
+        # Confianca bruta do melhor candidato, inclusive quando ainda fica
+        # abaixo do limiar e por isso nao vira uma deteccao.
+        self.last_confidence = None
 
     @staticmethod
     def _resolve_path(configured):
@@ -198,6 +201,7 @@ class EntryModel:
             raise RuntimeError("modelo de entrada não foi carregado")
         if frame_bgr is None or frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             raise ValueError("frame BGR inválido")
+        self.last_confidence = None
         import cv2
         height, width = frame_bgr.shape[:2]
         scale = min(self.input_size / width, self.input_size / height)
@@ -226,6 +230,7 @@ class EntryModel:
             raise RuntimeError("saída inesperada do modelo de entrada")
         index = int(np.argmax(output[:, 4]))
         confidence = float(output[index, 4])
+        self.last_confidence = confidence
         if confidence < self.min_confidence:
             return None
         center_x, center_y, box_width, box_height = output[index, :4]

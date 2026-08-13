@@ -428,11 +428,19 @@ def vision_loop(debug=False):
                         entry_gate.last_reason or "candidata")
                     confianca_entrada = (
                         entrada.confidence if entrada is not None else 0.)
+                    confianca_bruta = getattr(
+                        getattr(entry_gate, "model", None),
+                        "last_confidence",
+                        None,
+                    )
+                    if entrada is None and confianca_bruta is not None:
+                        confianca_entrada = confianca_bruta
                     cv2.putText(
                         cv2_img,
                         f"ONNX PRATA {entry_gate.votes}/"
                         f"{config.ENTRY_SILVER_VOTE_WINDOW} "
-                        f"conf={confianca_entrada:.2f} "
+                        f"conf={confianca_entrada:.2f}/"
+                        f"{config.ENTRY_MODEL_MIN_CONFIDENCE:.2f} "
                         f"{motivo_entrada}",
                         (5, 42),
                         cv2.FONT_HERSHEY_SIMPLEX,

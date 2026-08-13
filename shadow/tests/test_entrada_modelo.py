@@ -50,6 +50,22 @@ class EntryModelTests(unittest.TestCase):
         self.assertGreater(detection.bbox[2], 0)
         self.assertGreater(detection.bbox[3], 0)
 
+    def test_confianca_abaixo_do_limiar_fica_visivel_para_calibracao(self):
+        model = EntryModel(
+            backend="onnx", input_size=640, min_confidence=.45)
+        output = np.zeros((1, 5, 2), dtype=np.float32)
+        output[0, :, 0] = (320, 320, 200, 100, .44)
+        model._session = _Session(output)
+        model._input_name = "images"
+
+        detection = model.detect(np.zeros((252, 448, 3), dtype=np.uint8))
+
+        self.assertIsNone(detection)
+        self.assertAlmostEqual(model.last_confidence, .44, places=5)
+
+    def test_limiar_padrao_da_prata_prioriza_nao_perder_a_faixa(self):
+        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .45)
+
 
 class EntryGateTests(unittest.TestCase):
     def test_preto_que_leva_ate_a_prata_nao_veta_o_resgate(self):

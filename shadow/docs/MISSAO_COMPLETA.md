@@ -167,7 +167,7 @@ existindo com seus testes e volta a ser usado se
 | `ENTRY_SILVER_ENABLED` | `True` | liga a detecção da entrada |
 | `ENTRY_MODEL_PATH` | `modelos/entrada.onnx` | modelo da faixa prata |
 | `ENTRY_MODEL_INPUT` | `640` | tamanho de entrada do modelo |
-| `ENTRY_MODEL_MIN_CONFIDENCE` | `.60` | confiança mínima aceita |
+| `ENTRY_MODEL_MIN_CONFIDENCE` | `.45` | confiança mínima aceita; o debug mostra a confiança bruta e o limiar |
 | `ENTRY_SILVER_VOTES_NEEDED/VOTE_WINDOW` | `2` / `3` | confirmação temporal |
 | `ENTRY_LINE_MAX_ANGLE` | `18` | ângulo máximo para entrar alinhado |
 | `ENTRY_LINE_MAX_BOTTOM_ERROR_PX` | `55` | erro máximo do ponto inferior da linha |

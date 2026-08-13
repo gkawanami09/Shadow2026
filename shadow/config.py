@@ -269,7 +269,10 @@ ENTRY_MODEL_BACKEND = "auto"
 ENTRY_NCNN_MODEL_PATH = "modelos/entrada_416_ncnn_model"
 ENTRY_MODEL_INPUT = 640
 ENTRY_NCNN_MODEL_INPUT = 416
-ENTRY_MODEL_MIN_CONFIDENCE = .60
+# A faixa prata muda muito de brilho com a luz da pista. Aceita candidatos a
+# partir de 45%; a observacao parada por um segundo e o preto depois da caixa
+# continuam sendo as protecoes contra um falso resgate.
+ENTRY_MODEL_MIN_CONFIDENCE = .45
 # Limita o runtime do modelo para não disputar todos os núcleos com a linha.
 ENTRY_MODEL_THREADS = 2
 # A confiança do YOLO não é uma segunda evidência: toda candidata passa pela
