@@ -633,13 +633,13 @@ def control_loop():
                     and green_direction is None
                 ):
                     if entry_silver_reason.value in {
-                        "preto_rampa_timeout",
-                        "timeout_rampa_seguindo_linha",
+                        "preto_rampa_depois_da_prata_timeout",
+                        "linha_preta_depois_da_prata_timeout",
+                        "timeout_preto_seguindo_linha",
                     }:
-                        # O limiar exclusivo da rampa encontrou preto. Nao
-                        # reduza para a velocidade de candidatura: durante o
-                        # prazo o robo precisa simplesmente seguir a linha.
-                        status.value = 'Preto de rampa — seguindo linha'
+                        # A validacao de preto encontrou continuidade apos a
+                        # prata. Durante o prazo, siga a linha normalmente.
+                        status.value = 'Preto apos prata — seguindo linha'
                     else:
                         command_speed = min(
                             command_speed,

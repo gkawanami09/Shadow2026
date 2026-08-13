@@ -13,7 +13,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config  # noqa: E402
 from visao.entrada_missao import (  # noqa: E402
     EntryDetection, EntryGate, EntryInference, EntryModel, EntryPipeline,
-    has_black_after_entry_detection, has_ramp_black)
+    has_black_after_entry_detection)
 
 
 class _Session:
@@ -68,11 +68,12 @@ class EntryGateTests(unittest.TestCase):
 
         self.assertTrue(has_black_after_entry_detection(mask, detection))
 
-    def test_limiar_da_rampa_encontra_preto_sem_caixa_prata(self):
+    def test_preto_do_limiar_da_rampa_antes_da_prata_nao_veta(self):
         mask = np.zeros((100, 100), dtype=np.uint8)
-        mask[10:60, 40:60] = 255
+        mask[70:95, 40:60] = 255
+        detection = EntryDetection((40, 55, 20, 10), .8)
 
-        self.assertTrue(has_ramp_black(mask))
+        self.assertFalse(has_black_after_entry_detection(mask, detection))
 
     def test_deteccao_muito_confiavel_precisa_segundo_frame_por_padrao(self):
         detection = EntryDetection((1, 2, 3, 4), .95)
@@ -101,31 +102,33 @@ class EntryGateTests(unittest.TestCase):
         self.assertFalse(gate.update(EntryInference(.06, True, detection, 0.))[0])
         self.assertEqual(gate.last_reason, "votando")
 
-    def test_preto_depois_da_prata_na_rampa_veta_o_resgate(self):
+    def test_prata_com_linha_preta_renova_o_timeout(self):
         detection = EntryDetection((1, 2, 3, 4), .99)
         gate = EntryGate()
-        for timestamp in (0., .03, .06):
-            confirmed, _ = gate.update(EntryInference(
-                timestamp,
-                True,
-                detection,
-                0.,
-                black_ahead=True,
-            ))
-            self.assertFalse(confirmed)
-        self.assertEqual(gate.votes, 0)
+        self.assertFalse(gate.update(EntryInference(
+            0., True, detection, 0., black_ahead=True,
+        ))[0])
         self.assertEqual(
-            gate.last_reason,
-            "linha_preta_depois_da_prata",
-        )
+            gate.last_reason, "linha_preta_depois_da_prata_timeout")
+
+        self.assertFalse(gate.update(EntryInference(
+            .3, True, detection, 0., black_ahead=True,
+        ))[0])
+        self.assertFalse(gate.update(EntryInference(
+            .79, True, detection, 0., black_ahead=False,
+        ))[0])
+        self.assertEqual(gate.votes, 0)
+        self.assertEqual(gate.last_reason, "timeout_preto_seguindo_linha")
 
     def test_prata_sem_preto_depois_confirma_o_resgate(self):
         detection = EntryDetection((1, 2, 3, 4), .70)
         gate = EntryGate()
         self.assertFalse(gate.update(EntryInference(
-            0., True, detection, 0., black_ahead=False))[0])
+            0., True, detection, 0.,
+            black_ahead=False, ramp_black_ahead=False))[0])
         self.assertTrue(gate.update(EntryInference(
-            .03, True, detection, 0., black_ahead=False))[0])
+            .03, True, detection, 0.,
+            black_ahead=False, ramp_black_ahead=False))[0])
 
     def test_preto_entre_dois_positivos_zera_a_candidatura_anterior(self):
         detection = EntryDetection((1, 2, 3, 4), .70)
@@ -137,23 +140,28 @@ class EntryGateTests(unittest.TestCase):
         # O positivo posterior é um voto novo; não soma com o de antes do
         # trecho preto da rampa.
         self.assertFalse(gate.update(EntryInference(
-            .06, True, detection, 0., black_ahead=False))[0])
+            .52, True, detection, 0., black_ahead=False))[0])
+        self.assertEqual(gate.votes, 0)
+        self.assertFalse(gate.update(EntryInference(
+            .54, True, detection, 0., black_ahead=False))[0])
         self.assertEqual(gate.votes, 1)
 
-    def test_preto_do_limiar_da_rampa_da_um_segundo_de_segue_linha(self):
+    def test_prata_com_preto_da_rampa_bloqueia_por_meio_segundo(self):
         detection = EntryDetection((1, 2, 3, 4), .99)
         gate = EntryGate()
         self.assertFalse(gate.update(EntryInference(
             0., True, detection, 0.,
             black_ahead=False, ramp_black_ahead=True,
         ))[0])
-        self.assertEqual(gate.last_reason, "preto_rampa_timeout")
+        self.assertEqual(
+            gate.last_reason, "preto_rampa_depois_da_prata_timeout")
 
-        timeout = config.ENTRY_RAMP_BLACK_FOLLOW_TIMEOUT_S
+        timeout = config.ENTRY_BLACK_FOLLOW_TIMEOUT_S
+        self.assertEqual(timeout, .5)
         self.assertFalse(gate.update(EntryInference(
             timeout - .01, True, detection, 0., black_ahead=False,
         ))[0])
-        self.assertEqual(gate.last_reason, "timeout_rampa_seguindo_linha")
+        self.assertEqual(gate.last_reason, "timeout_preto_seguindo_linha")
 
         # Sem preto pelo limiar da rampa, uma prata real volta a votar depois
         # do timeout e confirma no segundo frame.
