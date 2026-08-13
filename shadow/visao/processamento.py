@@ -336,7 +336,8 @@ def vision_loop(debug=False):
             )
             update_entry_silver(
                 entry_gate, cv2_img, frame_captured_at,
-                line_aligned=entrada_alinhada)
+                line_aligned=entrada_alinhada,
+                line_ahead=linha_a_frente_frame)
 
             processamento_ms = (
                 time.perf_counter() - inicio_processamento

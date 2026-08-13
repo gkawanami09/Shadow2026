@@ -16,7 +16,7 @@ import numpy as np
 
 import config
 from shared.dados_compartilhados import (
-    entry_armed, entry_silver_confirmed, entry_silver_detected,
+    config_manager, entry_armed, entry_silver_confirmed, entry_silver_detected,
     entry_silver_reason, entry_silver_votes, mission_mode)
 
 
@@ -35,6 +35,11 @@ class EntryInference:
     line_aligned: bool
     detection: EntryDetection | None
     inference_ms: float
+    # ``None`` preserva os testes e consumidores antigos. No percurso real,
+    # o pipeline sempre publica ``True`` ou ``False`` depois de validar a
+    # geometria e a aparencia da fita prata no MESMO frame do YOLO.
+    stripe_detected: bool | None = None
+    stripe_reason: str = ""
 
 
 class EntryModel:
@@ -226,7 +231,8 @@ class EntryModelWorker:
         self._thread.start()
         return self
 
-    def submit(self, frame, timestamp, line_aligned):
+    def submit(self, frame, timestamp, line_aligned, stripe_detected=None,
+               stripe_reason=""):
         # A cópia impede a câmera de reutilizar o buffer durante a inferência.
         with self._condition:
             self._pending = (
@@ -234,6 +240,8 @@ class EntryModelWorker:
                 frame.copy(),
                 float(timestamp),
                 bool(line_aligned),
+                stripe_detected,
+                str(stripe_reason),
             )
             self._condition.notify()
 
@@ -271,7 +279,8 @@ class EntryModelWorker:
                     self._condition.wait()
                 if self._stopping:
                     return
-                generation, frame, timestamp, line_aligned = self._pending
+                (generation, frame, timestamp, line_aligned,
+                 stripe_detected, stripe_reason) = self._pending
                 self._pending = None
             try:
                 started = time.perf_counter()
@@ -288,7 +297,13 @@ class EntryModelWorker:
                     # fase seguinte.
                     continue
                 self._latest = EntryInference(
-                    timestamp, line_aligned, detection, inference_ms)
+                    timestamp,
+                    line_aligned,
+                    detection,
+                    inference_ms,
+                    stripe_detected,
+                    stripe_reason,
+                )
 
 
 class EntryGate:
@@ -328,6 +343,19 @@ class EntryGate:
             self._hits.append(False)
             self.last_reason = "faixa_sem_linha_alinhada"
             return False, inference.detection
+        if (
+            config.ENTRY_SILVER_GEOMETRY_ENABLED
+            and inference.stripe_detected is False
+        ):
+            # O modelo reconhece padrões parecidos com a entrada, mas a rampa
+            # pode conter exatamente esse tipo de imagem clara. A entrada
+            # só existe quando a imagem também possui uma fita prata fina,
+            # transversal e refletiva; este segundo detector é independente
+            # do YOLO e trabalha no mesmo frame.
+            self._hits.append(False)
+            motivo = inference.stripe_reason or "geometria_ausente"
+            self.last_reason = f"modelo_sem_faixa_prata:{motivo}"
+            return False, inference.detection
         self._hits.append(True)
         fast = (
             config.ENTRY_MODEL_ALLOW_SINGLE_FRAME_CONFIRMATION
@@ -348,8 +376,20 @@ class EntryPipeline:
         self.model = EntryModel().load()
         self.worker = EntryModelWorker(self.model).start()
         self.gate = EntryGate()
+        self.stripe_detector = self._build_stripe_detector()
         self.last_inference = None
         self._armed = False
+
+    @staticmethod
+    def _build_stripe_detector():
+        if not config.ENTRY_SILVER_GEOMETRY_ENABLED:
+            return None
+        # Import tardio: o portão unitário continua testável em uma máquina
+        # sem OpenCV, enquanto o processo real de visão (que já usa OpenCV)
+        # ganha a validação geométrica obrigatória.
+        from visao.faixa_entrada import EntrySilverDetector, load_bounds
+        hsv_min, hsv_max = load_bounds(config_manager)
+        return EntrySilverDetector(hsv_min=hsv_min, hsv_max=hsv_max)
 
     @property
     def last_detection(self):
@@ -363,8 +403,24 @@ class EntryPipeline:
     def votes(self):
         return self.gate.votes
 
-    def submit(self, frame, timestamp, line_aligned):
-        self.worker.submit(frame, timestamp, line_aligned)
+    def submit(self, frame, timestamp, line_aligned, *, line_ahead=False):
+        stripe_detected = None
+        stripe_reason = ""
+        if self.stripe_detector is not None:
+            stripe = self.stripe_detector.detect(
+                frame,
+                line_ahead=bool(line_ahead),
+                timestamp=timestamp,
+            )
+            stripe_detected = stripe is not None
+            stripe_reason = self.stripe_detector.last_reason
+        self.worker.submit(
+            frame,
+            timestamp,
+            line_aligned,
+            stripe_detected,
+            stripe_reason,
+        )
 
     def set_armed(self, armed):
         """Separa o rearme atual de inferencias/votos anteriores."""
@@ -396,7 +452,14 @@ def build_entry_gate():
     return pipeline
 
 
-def update_entry_silver(entry_gate, frame, captured_at, *, line_aligned=False):
+def update_entry_silver(
+    entry_gate,
+    frame,
+    captured_at,
+    *,
+    line_aligned=False,
+    line_ahead=False,
+):
     """Entrega o frame ao YOLO e publica somente resultados prontos."""
     if entry_gate is None:
         return
@@ -413,7 +476,12 @@ def update_entry_silver(entry_gate, frame, captured_at, *, line_aligned=False):
     # resultado apagar o único frame que confirmou a entrada.
     if entry_silver_confirmed.value:
         return
-    entry_gate.submit(frame, captured_at, line_aligned)
+    entry_gate.submit(
+        frame,
+        captured_at,
+        line_aligned,
+        line_ahead=line_ahead,
+    )
     confirmed, detection = entry_gate.poll()
     entry_silver_detected.value = detection is not None
     entry_silver_votes.value = entry_gate.votes

@@ -51,10 +51,8 @@ from controle.aproximacao_resgate import (  # noqa: E402
 from controle.busca_pulsada import make_search_controller  # noqa: E402
 from controle.coleta_resgate import BallPickupSequencer  # noqa: E402
 from controle.contador_verde_resgate import (  # noqa: E402
-    BUSCA_CONCLUIR,
-    BUSCA_REINICIAR,
     ContadorVerdeBusca,
-    decidir_apos_varredura,
+    tempo_busca_resgate_esgotado,
 )
 from controle.deposito_cinza_resgate import (  # noqa: E402
     SequenciadorDepositoCinza,
@@ -931,6 +929,9 @@ def main():
             if entrada_da_missao_concluida or not args.drive
             else inicio + cfg.RESCUE_ARM_DELAY_S
         )
+        fim_busca_resgate_em = (
+            armado_em + cfg.RESCUE_SEARCH_DURATION_S
+        )
         controlador = (
             None if args.drive
             else BallApproachController(start_time=armado_em))
@@ -1061,33 +1062,8 @@ def main():
                         print(
                             "[resgate] passagem verde "
                             f"{contador_verde.quantidade}/"
-                            f"{contador_verde.necessario}")
-                        if args.drive and contador_verde.completo:
-                            # A segunda passagem foi confirmada com o robo
-                            # parado durante SEARCH_OBSERVE. O painel ja esta
-                            # no quadro: primeiro centralizar e aproximar pela
-                            # camera; o ultrassonico continua desabilitado.
-                            if trabalhador is not None:
-                                trabalhador.reset_tracking()
-                            portao.reset()
-                            busca = None
-                            controlador = None
-                            controlador_verde = ControladorRetanguloVerde(
-                                start_time=agora,
-                            )
-                            monitor_chegada_verde = None
-                            proxima_atualizacao_ultrassom_verde = 0.0
-                            epoca_busca = None
-                            epoca_verde = (
-                                arduino.connection_epoch
-                                if arduino is not None else None
-                            )
-                            resultado_atual = None
-                            deteccao_atual = None
-                            ultimo_controle_ocioso = 0.0
-                            print(
-                                "[resgate] GREEN_ROUTE_START: segundo verde "
-                                "confirmado; alinhando primeiro pela camera")
+                            f"{contador_verde.necessario}; "
+                            "mantendo busca ate o fim dos 40 s")
 
             if (
                 controlador_saida is not None
@@ -1268,6 +1244,29 @@ def main():
                 comando = MotionCommand(
                     "ARMING",
                     detail=f"camera fluida; PARAR por mais {restante:.1f} s")
+            elif (
+                args.drive
+                and not coleta.started
+                and (
+                    busca is not None
+                    or controlador is not None
+                    or verificador_parede is not None
+                )
+                and tempo_busca_resgate_esgotado(
+                    armado_em, agora
+                )
+            ):
+                # O giro pode estar ativo neste instante. Primeiro escreve
+                # PARAR; a troca para a rota verde acontece somente depois do
+                # acknowledge da serial, mais abaixo.
+                comando = MotionCommand(
+                    "RESCUE_SEARCH_TIME_STOP",
+                    detail=(
+                        f"{cfg.RESCUE_SEARCH_DURATION_S:.0f} s de busca "
+                        "concluidos; parando para iniciar os depositos"
+                    ),
+                )
+                comando_atualizado = True
             elif verificador_parede is not None:
                 # Durante este teste as rodas obedecem somente ao pequeno
                 # deslocamento lateral do verificador. A deteccao continua
@@ -1626,7 +1625,42 @@ def main():
                         raise RuntimeError(
                             "comando de movimento nao foi enviado pela serial")
                     concluido_em = time.monotonic()
-                    if busca is not None:
+                    if comando.state == "RESCUE_SEARCH_TIME_STOP":
+                        # O limite venceu antes de iniciar uma coleta, ou
+                        # durante a aproximacao. A parada ja foi escrita; a
+                        # partir daqui nenhum alvo de vitima pode retomar as
+                        # rodas antes da rota de deposito.
+                        if trabalhador is not None:
+                            trabalhador.reset_tracking()
+                        portao.reset()
+                        if marcadores is not None:
+                            marcadores.reset()
+                        marcadores_atuais = {}
+                        busca = None
+                        controlador = None
+                        verificador_parede = None
+                        coleta_apos_teste_parede = None
+                        controlador_verde = ControladorRetanguloVerde(
+                            start_time=concluido_em,
+                        )
+                        monitor_chegada_verde = None
+                        proxima_atualizacao_ultrassom_verde = 0.0
+                        epoca_busca = None
+                        epoca_parede = None
+                        epoca_verde = arduino.connection_epoch
+                        resultado_atual = None
+                        deteccao_atual = None
+                        ultimo_controle_ocioso = 0.0
+                        comando = MotionCommand(
+                            "GREEN_ROUTE_START",
+                            detail=(
+                                f"{cfg.RESCUE_SEARCH_DURATION_S:.0f} s de "
+                                "busca concluidos; procurando e alinhando "
+                                "ao retangulo verde",
+                            ),
+                        )
+                        comando_atualizado = False
+                    elif busca is not None:
                         if busca.consume_tracking_reset():
                             if trabalhador is not None:
                                 trabalhador.reset_tracking()
@@ -2020,66 +2054,23 @@ def main():
                 and comando.state == busca.COMPLETE
                 and comando.terminal
             ):
+                # A volta completa continua delimitando a cobertura, mas nao
+                # encerra mais o resgate nem depende de ver o verde. Enquanto
+                # a janela total de 40 s estiver aberta, inicia outra volta.
                 varreduras_sem_vitima += 1
-                decisao_busca = decidir_apos_varredura(
-                    contador_verde, varreduras_sem_vitima)
-                if decisao_busca == BUSCA_CONCLUIR:
-                    if marcadores is None:
-                        comando = MotionCommand(
-                            "GREEN_FINAL_FAULT",
-                            detail=(
-                                "busca terminou, mas os marcadores foram "
-                                "desativados; robo parado"),
-                            terminal=True,
-                        )
-                    else:
-                        if trabalhador is not None:
-                            trabalhador.reset_tracking()
-                        portao.reset()
-                        busca = None
-                        controlador = None
-                        controlador_verde = ControladorRetanguloVerde(
-                            start_time=agora,
-                        )
-                        monitor_chegada_verde = None
-                        proxima_atualizacao_ultrassom_verde = 0.0
-                        epoca_busca = None
-                        epoca_verde = (
-                            arduino.connection_epoch
-                            if arduino is not None else None
-                        )
-                        resultado_atual = None
-                        deteccao_atual = None
-                        ultimo_controle_ocioso = 0.0
-                        comando = MotionCommand(
-                            "GREEN_ROUTE_START",
-                            detail=(
-                                "verde visto em duas passagens separadas e "
-                                "nenhuma vitima encontrada; "
-                                "alinhando ao retangulo verde pela camera"),
-                        )
-                        comando_atualizado = False
-                elif decisao_busca == BUSCA_REINICIAR:
-                    busca = make_search_controller(start_time=agora)
-                    epoca_busca = None
-                    ultimo_controle_ocioso = 0.0
-                    comando = MotionCommand(
-                        "SEARCH_RESTART",
-                        detail=(
-                            f"volta {varreduras_sem_vitima} sem vitima; "
-                            f"verde {contador_verde.quantidade}/"
-                            f"{contador_verde.necessario}; "
-                            "iniciando outra busca pulsada"),
-                    )
-                    comando_atualizado = False
-                else:
-                    comando = MotionCommand(
-                        "RESCUE_SEARCH_FAULT",
-                        detail=(
-                            "limite seguro de varreduras atingido sem duas "
-                            "passagens verdes; robo parado"),
-                        terminal=True,
-                    )
+                busca = make_search_controller(start_time=agora)
+                epoca_busca = None
+                ultimo_controle_ocioso = 0.0
+                restante = max(fim_busca_resgate_em - agora, 0.0)
+                comando = MotionCommand(
+                    "SEARCH_RESTART",
+                    detail=(
+                        f"volta {varreduras_sem_vitima} sem vitima; "
+                        f"faltam {restante:.1f} s dos "
+                        f"{cfg.RESCUE_SEARCH_DURATION_S:.0f} s de busca; "
+                        "iniciando outra busca pulsada"),
+                )
+                comando_atualizado = False
 
             if (
                 args.drive

@@ -78,6 +78,33 @@ class EntryGateTests(unittest.TestCase):
         self.assertFalse(gate.update(EntryInference(.06, True, detection, 0.))[0])
         self.assertEqual(gate.last_reason, "votando")
 
+    def test_modelo_na_rampa_sem_faixa_prata_nao_aciona_resgate(self):
+        detection = EntryDetection((1, 2, 3, 4), .99)
+        gate = EntryGate()
+        for timestamp in (0., .03, .06):
+            confirmed, _ = gate.update(EntryInference(
+                timestamp,
+                True,
+                detection,
+                0.,
+                stripe_detected=False,
+                stripe_reason="espessa",
+            ))
+            self.assertFalse(confirmed)
+        self.assertEqual(gate.votes, 0)
+        self.assertEqual(
+            gate.last_reason,
+            "modelo_sem_faixa_prata:espessa",
+        )
+
+    def test_modelo_e_faixa_prata_confirmam_juntos(self):
+        detection = EntryDetection((1, 2, 3, 4), .70)
+        gate = EntryGate()
+        self.assertFalse(gate.update(EntryInference(
+            0., True, detection, 0., stripe_detected=True))[0])
+        self.assertTrue(gate.update(EntryInference(
+            .03, True, detection, 0., stripe_detected=True))[0])
+
     def test_reset_descarta_votos_e_o_timestamp_da_fase_anterior(self):
         detection = EntryDetection((1, 2, 3, 4), .7)
         gate = EntryGate()

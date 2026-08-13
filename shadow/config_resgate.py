@@ -390,10 +390,14 @@ BALL_SEARCH_SECTORS = 9
 # quando o 360 temporizado nao fecha por escorregamento das rodas.
 BALL_SEARCH_TOTAL_TIMEOUT_S = 75.0
 
-# Fim da busca de vitimas. O verde so conta durante uma observacao parada da
-# busca pulsada. Varios frames seguidos do mesmo marcador valem uma aparicao e
-# cada varredura completa pode somar no maximo uma vez, mesmo se a deteccao
-# oscilar. Uma coleta e selecao concluidas zeram toda esta contagem.
+# Janela total da fase de busca de vitimas. Ela comeca somente depois do
+# armamento/entrada na sala e NAO reinicia ao coletar uma vitima. Ao vencer,
+# o robo para com seguranca e inicia a rota de deposito verde -> vermelho.
+RESCUE_SEARCH_DURATION_S = 40.0
+
+# Telemetria das passagens verdes durante a busca pulsada. O verde so conta
+# durante uma observacao parada; essas passagens nao encerram mais a busca —
+# o temporizador acima e a unica condicao para iniciar os depositos.
 RESCUE_GREEN_SIGHTINGS_REQUIRED = 2
 RESCUE_GREEN_REARM_FRAMES = 3
 # O rastreador ja exigiu tres aparicoes e a rota so comeca depois da segunda
@@ -401,9 +405,8 @@ RESCUE_GREEN_REARM_FRAMES = 3
 # depois da parada, desde que o painel esteja proximo e centralizado. Exigir
 # mais tres frames aqui prendia o robo em "confirmando 1/3" na arena.
 RESCUE_GREEN_CAMERA_NEAR_CONFIRM_FRAMES = 1
-# Se o verde nao puder ser confirmado, o robo nao pode girar para sempre.
-# Depois de tres voltas completas ele para em estado de falha, sem declarar
-# falsamente que terminou o resgate.
+# Compatibilidade com o contador de passagens antigo. A execucao principal
+# agora usa RESCUE_SEARCH_DURATION_S em vez de limitar voltas sem verde.
 RESCUE_SEARCH_MAX_EMPTY_SWEEPS = 3
 
 # Transporte ate o ponto de evacuacao. O marcador correto e imutavel durante
