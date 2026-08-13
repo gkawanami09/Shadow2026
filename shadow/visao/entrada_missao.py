@@ -16,8 +16,9 @@ import numpy as np
 
 import config
 from shared.dados_compartilhados import (
+    ENTRY_SILVER_BLACK_FOLLOW, ENTRY_SILVER_IDLE, ENTRY_SILVER_VALIDATING,
     entry_armed, entry_silver_confirmed, entry_silver_detected,
-    entry_silver_reason, entry_silver_votes, mission_mode)
+    entry_silver_reason, entry_silver_state, entry_silver_votes, mission_mode)
 
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
@@ -353,36 +354,136 @@ class EntryModelWorker:
 
 
 class EntryGate:
-    """Confirma o modelo apenas em capturas alinhadas à linha preta."""
+    """Valida a prata parada antes de entregar a sala ao resgate."""
+
+    IDLE = ENTRY_SILVER_IDLE
+    VALIDATING = ENTRY_SILVER_VALIDATING
+    BLACK_FOLLOW = ENTRY_SILVER_BLACK_FOLLOW
 
     def __init__(self):
         self._hits = deque(maxlen=config.ENTRY_SILVER_VOTE_WINDOW)
         self.last_detection = None
         self.last_reason = "início"
         self._last_timestamp = None
-        self._black_timeout_until = float("-inf")
+        self._state = self.IDLE
+        self._validation_started_at = None
+        self._black_follow_until = float("-inf")
 
     @property
     def votes(self):
         return sum(self._hits)
 
-    def reset(self):
-        """Esquece votos e caixas da fase de percurso anterior."""
+    @property
+    def state(self):
+        return self._state
+
+    @property
+    def is_validating(self):
+        return self._state == self.VALIDATING
+
+    def _clear_validation(self):
         self._hits.clear()
+        self._validation_started_at = None
+
+    def _start_black_follow(self, timestamp, source):
+        self._clear_validation()
+        self._state = self.BLACK_FOLLOW
+        self._black_follow_until = (
+            timestamp + config.ENTRY_BLACK_FOLLOW_TIMEOUT_S)
+        self.last_reason = f"{source}_seguindo_linha"
+
+    @staticmethod
+    def _black_source(inference):
+        if inference.ramp_black_ahead is True:
+            return "preto_rampa_depois_da_prata"
+        if inference.black_ahead is True:
+            return "linha_preta_depois_da_prata"
+        return None
+
+    def reset(self):
+        """Esquece votos, prazos e caixas da fase de percurso anterior."""
+        self._clear_validation()
         self.last_detection = None
         self.last_reason = "reiniciado"
         self._last_timestamp = None
-        self._black_timeout_until = float("-inf")
+        self._state = self.IDLE
+        self._black_follow_until = float("-inf")
 
-    def update(self, inference):
+    def tick(self, now):
+        """Expira estados mesmo se o worker ainda nao tiver outro resultado."""
+        now = float(now)
+        if self._state == self.VALIDATING:
+            if now - self._validation_started_at >= config.ENTRY_SILVER_VALIDATION_S:
+                # Sem uma nova leitura de prata nao existe prova suficiente
+                # para entrar. Libera o controle, mas nunca confirma.
+                self._clear_validation()
+                self._state = self.IDLE
+                self.last_reason = "validacao_prata_sem_resultado"
+        elif (self._state == self.BLACK_FOLLOW
+              and now >= self._black_follow_until):
+            self._state = self.IDLE
+            self._black_follow_until = float("-inf")
+            self.last_reason = "preto_apos_prata_liberado"
+        return self._state
+
+    def update(self, inference, now=None):
+        """Recebe uma inferencia pronta e usa sua chegada para os prazos.
+
+        O timestamp de captura so identifica o frame. Uma inferencia lenta nao
+        pode consumir o segundo de observacao antes de o controle parar o robo.
+        """
         if inference is None:
+            if now is not None:
+                self.tick(now)
             return False, self.last_detection
         if (self._last_timestamp is not None
                 and inference.timestamp <= self._last_timestamp):
             self.last_reason = "frame_repetido"
             return False, self.last_detection
         self._last_timestamp = inference.timestamp
-        self.last_detection = inference.detection
+        observed_at = (
+            inference.timestamp if now is None else float(now))
+        if inference.detection is not None:
+            self.last_detection = inference.detection
+
+        black_source = self._black_source(inference)
+        if config.ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD and black_source:
+            # Preto alem da caixa, pelos limiares normal ou de rampa, prova
+            # que ainda existe pista. Ele sempre vence uma candidata prata.
+            self._start_black_follow(observed_at, black_source)
+            return False, inference.detection
+
+        if self._state == self.BLACK_FOLLOW:
+            if observed_at < self._black_follow_until:
+                self.last_reason = "preto_apos_prata_seguindo_linha"
+                return False, inference.detection
+            self._state = self.IDLE
+            self._black_follow_until = float("-inf")
+
+        if self._state == self.VALIDATING:
+            if inference.detection is None:
+                # O robo esta parado: se a prata some da camera durante a
+                # observacao, falha fechado e nao entra no resgate.
+                self._clear_validation()
+                self._state = self.IDLE
+                self.last_reason = "prata_sumiu_na_validacao"
+                return False, None
+
+            self._hits.append(True)
+            elapsed = observed_at - self._validation_started_at
+            if elapsed + 1e-9 < config.ENTRY_SILVER_VALIDATION_S:
+                self.last_reason = "validando_prata_parado"
+                return False, inference.detection
+
+            confirmed = self.votes >= config.ENTRY_SILVER_VOTES_NEEDED
+            self._validation_started_at = None
+            self._state = self.IDLE
+            if not confirmed:
+                self._hits.clear()
+            self.last_reason = (
+                "confirmada" if confirmed else "prata_nao_confirmada")
+            return confirmed, inference.detection
+
         if inference.detection is None:
             self._hits.append(False)
             self.last_reason = "modelo_sem_faixa"
@@ -391,46 +492,16 @@ class EntryGate:
             self._hits.append(False)
             self.last_reason = "faixa_sem_linha_alinhada"
             return False, inference.detection
-        if (config.ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD
-                and inference.ramp_black_ahead is True):
-            # O limiar exclusivo da rampa encontrou preto alem da prata.
-            # Renova o bloqueio de 0,5 s sem acumular votos de resgate.
-            self._hits.clear()
-            self._black_timeout_until = (
-                inference.timestamp + config.ENTRY_BLACK_FOLLOW_TIMEOUT_S)
-            self.last_reason = "preto_rampa_depois_da_prata_timeout"
-            return False, inference.detection
-        if (config.ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD
-                and inference.timestamp < self._black_timeout_until
-                and inference.black_ahead is not True):
-            self._hits.clear()
-            self.last_reason = "timeout_preto_seguindo_linha"
-            return False, inference.detection
-        black_source = (
-            "linha_preta_depois_da_prata"
-            if inference.black_ahead is True else None
-        )
-        if config.ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD and black_source:
-            # Se, após a prata, a linha preta continua no corredor central,
-            # ainda estamos no percurso/rampa. Descarta inclusive o voto
-            # anterior: uma amostra antes e outra depois do preto jamais
-            # podem formar uma entrada de resgate.
-            self._hits.clear()
-            self._black_timeout_until = (
-                inference.timestamp + config.ENTRY_BLACK_FOLLOW_TIMEOUT_S)
-            self.last_reason = f"{black_source}_timeout"
-            return False, inference.detection
+
+        # O primeiro positivo alinhado manda o controle parar. Durante o
+        # segundo inteiro seguinte a linha pode desaparecer sob a prata; por
+        # isso o alinhamento e exigido apenas para iniciar esta observacao.
+        self._clear_validation()
         self._hits.append(True)
-        fast = (
-            config.ENTRY_MODEL_ALLOW_SINGLE_FRAME_CONFIRMATION
-            and inference.detection.confidence
-            >= config.ENTRY_MODEL_FAST_CONFIDENCE
-        )
-        confirmed = fast or self.votes >= config.ENTRY_SILVER_VOTES_NEEDED
-        self.last_reason = (
-            "confirmada_rapida" if fast
-            else "confirmada" if confirmed else "votando")
-        return confirmed, inference.detection
+        self._state = self.VALIDATING
+        self._validation_started_at = observed_at
+        self.last_reason = "validando_prata_parado"
+        return False, inference.detection
 
 
 class EntryPipeline:
@@ -454,6 +525,10 @@ class EntryPipeline:
     @property
     def votes(self):
         return self.gate.votes
+
+    @property
+    def state(self):
+        return self.gate.state
 
     def submit(
         self,
@@ -486,7 +561,9 @@ class EntryPipeline:
         inference = self.worker.poll()
         if inference is not None:
             self.last_inference = inference
-        return self.gate.update(inference)
+        # O Gate e dono dos prazos; ele nao compara o relogio de captura da
+        # visao com o relogio do processo de controle.
+        return self.gate.update(inference, now=time.perf_counter())
 
     def close(self):
         self.worker.close()
@@ -520,6 +597,7 @@ def update_entry_silver(
         entry_silver_confirmed.value = False
         entry_silver_votes.value = 0
         entry_silver_reason.value = "entrada desarmada"
+        entry_silver_state.value = ENTRY_SILVER_IDLE
         return
     entry_gate.set_armed(True)
     # A confirmação pertence ao processo de controle. Mantenha-a publicada
@@ -535,9 +613,12 @@ def update_entry_silver(
         ramp_black_mask=ramp_black_mask,
     )
     confirmed, detection = entry_gate.poll()
-    entry_silver_detected.value = detection is not None
+    state = getattr(entry_gate, "state", ENTRY_SILVER_IDLE)
+    entry_silver_detected.value = (
+        detection is not None or state == ENTRY_SILVER_VALIDATING)
     entry_silver_votes.value = entry_gate.votes
     entry_silver_reason.value = entry_gate.last_reason
+    entry_silver_state.value = state
     if confirmed and not entry_silver_confirmed.value:
         print("[visão] faixa PRATA confirmada pelo modelo "
               f"({entry_gate.votes}/{config.ENTRY_SILVER_VOTE_WINDOW} votos)")

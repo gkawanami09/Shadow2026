@@ -44,16 +44,19 @@ Salve cada grupo com `s`. Valide com `python3 shadow/main.py --vision-only --deb
 
 ## 2.1 Entrada no resgate: prata + contexto preto
 
-O modelo reconhece a prata da entrada. Ele só inicia o resgate depois de dois
-frames alinhados e sem uma linha preta à frente. Essa linha é procurada tanto
-pelo perfil normal (grupos 1/2) como pelo perfil específico da rampa (grupo
-3). Portanto, teste os dois cenários depois de calibrar:
+O modelo reconhece a prata da entrada. Ao primeiro frame alinhado e sem uma
+linha preta à frente, o robô para e observa a prata por um segundo inteiro.
+Essa linha é procurada tanto pelo perfil normal (grupos 1/2) como pelo perfil
+específico da rampa (grupo 3). Portanto, teste os dois cenários depois de
+calibrar:
 
 1. no fim da rampa, o debug deve mostrar
-   `linha_preta_depois_da_prata` ou `preto_rampa_depois_da_prata`; o robô
-   continua o segue-linha;
-2. na entrada prata real, sem preto depois dela, o debug muda de `votando`
-   para `confirmada` no segundo frame; o resgate inicia.
+   `linha_preta_depois_da_prata_seguindo_linha` ou
+   `preto_rampa_depois_da_prata_seguindo_linha`; o robô continua o
+   segue-linha por um segundo e não aceita nova prata nesse intervalo;
+2. na entrada prata real, sem preto depois dela, o debug mostra
+   `validando_prata_parado` por um segundo e depois `confirmada`; só então o
+   resgate inicia.
 
 ## 2.2 Faixa PRETA de saída e triângulos (câmera de resgate)
 

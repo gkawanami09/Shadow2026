@@ -333,6 +333,7 @@ class MissionSystem:
         self.shared.entry_silver_confirmed.value = False
         self.shared.entry_silver_votes.value = 0
         self.shared.entry_silver_reason.value = ""
+        self.shared.entry_silver_state.value = 0
         self.shared.rescue_requested.value = False
         self.shared.red_finished.value = False
         self.shared.status.value = "Reiniciando missao - aguardando Arduino"

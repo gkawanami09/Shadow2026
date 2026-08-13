@@ -34,9 +34,12 @@ from controle.direcao import init_steering, sleep_steering, steer
 from controle.retorno import turn_around
 from comunicacao_serial.arduino import Arduino
 from shared.dados_compartilhados import (add_time_value, empty_time_arr,
+                               ENTRY_SILVER_BLACK_FOLLOW,
+                               ENTRY_SILVER_IDLE, ENTRY_SILVER_VALIDATING,
                                entry_armed, entry_silver_confirmed,
                                entry_silver_detected, entry_silver_reason,
-                               entry_silver_votes, green_candidate,
+                               entry_silver_state, entry_silver_votes,
+                               green_candidate,
                                green_turn_target,
                                last_bottom_point,
                                last_bottom_point_y,
@@ -69,6 +72,7 @@ def _reset_entry_silver(reason):
     entry_silver_confirmed.value = False
     entry_silver_votes.value = 0
     entry_silver_reason.value = reason
+    entry_silver_state.value = ENTRY_SILVER_IDLE
 
 
 def control_loop():
@@ -149,6 +153,36 @@ def control_loop():
                 status.value = 'Arduino desconectado - aguardando reinicio'
                 print("[controle] Arduino desconectado; encerrando sessao")
                 return
+
+            # A confirmacao tem prioridade sobre qualquer outra manobra: este
+            # processo ainda e o dono seguro da serial e precisa parar antes
+            # de o supervisor abrir o resgate.
+            if (mission_mode.value and entry_armed.value
+                    and entry_silver_confirmed.value):
+                status.value = 'Faixa prata confirmada — entrando na sala'
+                print("[controle] faixa PRATA confirmada; entrando na sala")
+                _enter_rescue_zone(arduino)
+                rescue_requested.value = True
+                break
+
+            # Primeiro positivo prata: pare sem bloquear a visao. Ela continua
+            # recebendo frames por um segundo para procurar preto alem da
+            # caixa antes de liberar a entrada da sala.
+            if (mission_mode.value and entry_armed.value
+                    and entry_silver_state.value == ENTRY_SILVER_VALIDATING):
+                status.value = 'Prata candidata — parado validando'
+                steer()
+                sleep_steering(.02)
+                continue
+
+            # A confirmacao de preto depois da prata contradiz uma manobra de
+            # gap: ha linha de novo. Volte ao estado comum e mantenha o
+            # segue-linha enquanto o Gate bloqueia somente nova prata.
+            if (mission_mode.value and entry_armed.value
+                    and entry_silver_state.value == ENTRY_SILVER_BLACK_FOLLOW
+                    and line_status.value in {"gap_detected", "gap_avoid"}):
+                line_status.value = "line_detected"
+                min_line_size.value = MIN_LINE_SIZE_DEFAULT
 
             # A preferência pós-obstáculo não gira o robô sozinha. A visão
             # apenas desempata contornos transversais para a esquerda e o
@@ -269,16 +303,6 @@ def control_loop():
 
             # Faixa prata de entrada. Só existe no modo de missão completa;
             # rodando `shadow/main.py` sozinho este bloco nunca é atingido.
-            if (mission_mode.value and entry_armed.value
-                    and entry_silver_confirmed.value):
-                status.value = 'Faixa prata confirmada — entrando na sala'
-                print("[controle] faixa PRATA confirmada; entrando na sala")
-                # Para a inferência do modelo imediatamente. O subprocesso
-                # resgate só é aberto depois de a câmera de linha fechar.
-                _enter_rescue_zone(arduino)
-                rescue_requested.value = True
-                break
-
             # O 180 e uma manobra bloqueante: a visao continua recebendo
             # frames enquanto o controle gira e da a re de retomada. So
             # rearmamos a entrada depois de um trecho novo de segue-linha;
@@ -620,33 +644,9 @@ def control_loop():
                     pivot_best_error = camera_x
                     pivot_last_progress = now
 
-                # O primeiro positivo nunca entra na sala sozinho. Reduzir a
-                # velocidade enquanto a votação está aberta deixa a faixa
-                # real visível no frame seguinte; uma imagem clara no fim de
-                # uma rampa apenas causa uma desaceleração curta e não pede o
-                # handoff para o resgate.
-                if (
-                    mission_mode.value
-                    and entry_armed.value
-                    and entry_silver_detected.value
-                    and not entry_silver_confirmed.value
-                    and green_direction is None
-                ):
-                    if entry_silver_reason.value in {
-                        "preto_rampa_depois_da_prata_timeout",
-                        "linha_preta_depois_da_prata_timeout",
-                        "timeout_preto_seguindo_linha",
-                    }:
-                        # A validacao de preto encontrou continuidade apos a
-                        # prata. Durante o prazo, siga a linha normalmente.
-                        status.value = 'Preto apos prata — seguindo linha'
-                    else:
-                        command_speed = min(
-                            command_speed,
-                            config.ENTRY_CANDIDATE_SPEED,
-                        )
-                        status.value = 'Faixa prata candidata — confirmando'
-
+                # A candidata prata já foi tratada no início do ciclo: durante
+                # a observação o robô fica parado; quando aparece preto além da
+                # faixa este mesmo segue-linha continua em velocidade normal.
                 steer(angle, command_speed,
                       front_reverse_assist=front_reverse_assist,
                       rear_pivot_enabled=rear_pivot_enabled)

@@ -259,7 +259,8 @@ def vision_loop(debug=False):
             red_detected.value = confirmador_vermelho.atualizar(
                 candidato_vermelho_frame)
 
-            # Procura os marcadores verdes.
+            # Procura os marcadores verdes normalmente. A validacao da prata
+            # nao altera a logica de verde.
             candidato_verde_frame = any(
                 cv2.contourArea(contorno) > config.GREEN_MIN_AREA
                 for contorno in contours_grn
@@ -267,11 +268,13 @@ def vision_loop(debug=False):
             green_candidate.value = candidato_verde_frame
             if len(contours_grn) > 0:
                 turn_direction = check_green(
-                    contours_grn, black_image, debug_img=cv2_img if debug else None)
+                    contours_grn, black_image,
+                    debug_img=cv2_img if debug else None)
             else:
                 turn_direction = "straight"
 
-            time_turn_direction = latch_turn_direction(turn_direction, time_turn_direction)
+            time_turn_direction = latch_turn_direction(
+                turn_direction, time_turn_direction)
 
             # Escolhe o contorno correto da linha.
             if len(contours_blk) > 0:
@@ -354,8 +357,9 @@ def vision_loop(debug=False):
                 line_angle_y.value = -1
                 reset_gap_values()
 
-            # O modelo da entrada só roda na missão. Cada voto precisa do
-            # mesmo frame em que a linha preta foi encontrada e centralizada.
+            # O modelo da entrada só roda na missão. O primeiro candidato usa
+            # o mesmo frame em que a linha preta foi encontrada e centralizada;
+            # depois de parar, a prata pode naturalmente cobrir esse fim.
             linha_alinhada = (
                 linha_detectada_frame
                 and abs(angulo_frame) <= config.ENTRY_LINE_MAX_ANGLE

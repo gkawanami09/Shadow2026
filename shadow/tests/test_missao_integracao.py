@@ -135,6 +135,7 @@ class MissionRecoveryTests(unittest.TestCase):
             entry_silver_confirmed=valor(True),
             entry_silver_votes=valor(3),
             entry_silver_reason=valor("confirmada"),
+            entry_silver_state=valor(1),
             rescue_requested=valor(True),
             red_finished=valor(True),
             mission_mode=valor(True),
@@ -170,6 +171,7 @@ class MissionRecoveryTests(unittest.TestCase):
         self.assertFalse(compartilhado.entry_silver_detected.value)
         self.assertFalse(compartilhado.entry_silver_confirmed.value)
         self.assertEqual(compartilhado.entry_silver_votes.value, 0)
+        self.assertEqual(compartilhado.entry_silver_state.value, 0)
         self.assertFalse(compartilhado.rescue_requested.value)
         self.assertFalse(compartilhado.red_finished.value)
         self.assertEqual(compartilhado.turn_dir.value, "straight")
@@ -177,9 +179,10 @@ class MissionRecoveryTests(unittest.TestCase):
 
 
 class MissionEntryAdvanceTests(unittest.TestCase):
-    def test_entrada_prata_confirma_em_dois_de_tres_frames(self):
+    def test_entrada_prata_exige_votos_e_observacao_de_um_segundo(self):
         self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 2)
         self.assertEqual(config.ENTRY_SILVER_VOTE_WINDOW, 3)
+        self.assertEqual(config.ENTRY_SILVER_VALIDATION_S, 1.0)
 
     def test_avanco_da_entrada_tem_um_segundo_e_pwm_80(self):
         self.assertEqual(cfg.MISSION_ENTRY_FORWARD_S, 1.0)
@@ -295,6 +298,7 @@ class LineFollowerUnchangedTests(unittest.TestCase):
             entry_silver_confirmed,
             entry_silver_detected,
             entry_silver_reason,
+            entry_silver_state,
             entry_silver_votes,
         )
         from visao import entrada_missao
@@ -315,18 +319,21 @@ class LineFollowerUnchangedTests(unittest.TestCase):
         anterior_confirmada = entry_silver_confirmed.value
         anterior_votos = entry_silver_votes.value
         anterior_motivo = entry_silver_reason.value
+        anterior_estado = entry_silver_state.value
         try:
             entry_armed.value = False
             entry_silver_detected.value = True
             entry_silver_confirmed.value = True
             entry_silver_votes.value = 2
-            entry_silver_reason.value = "confirmada_rapida"
+            entry_silver_reason.value = "confirmada"
+            entry_silver_state.value = 1
             gate = GatePlaceholder()
             entrada_missao.update_entry_silver(gate, None, 0.0)
             self.assertFalse(entry_silver_detected.value)
             self.assertFalse(entry_silver_confirmed.value)
             self.assertEqual(entry_silver_votes.value, 0)
             self.assertEqual(entry_silver_reason.value, "entrada desarmada")
+            self.assertEqual(entry_silver_state.value, 0)
             self.assertEqual(gate.arm_states, [False])
         finally:
             entry_armed.value = anterior
@@ -334,6 +341,7 @@ class LineFollowerUnchangedTests(unittest.TestCase):
             entry_silver_confirmed.value = anterior_confirmada
             entry_silver_votes.value = anterior_votos
             entry_silver_reason.value = anterior_motivo
+            entry_silver_state.value = anterior_estado
 
 
 class PulsedSearchConfigTests(unittest.TestCase):

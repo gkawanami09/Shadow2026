@@ -272,32 +272,28 @@ ENTRY_NCNN_MODEL_INPUT = 416
 ENTRY_MODEL_MIN_CONFIDENCE = .60
 # Limita o runtime do modelo para não disputar todos os núcleos com a linha.
 ENTRY_MODEL_THREADS = 2
-# A confiança do YOLO não é uma segunda evidência: uma rampa clara pode ter
-# confiança alta mesmo sem ser a faixa de entrada. Por padrão, portanto,
-# nenhum frame isolado inicia o handoff. Esta chave existe somente para um
-# ensaio controlado em que a pista tenha sido validada sem falsos positivos.
-ENTRY_MODEL_ALLOW_SINGLE_FRAME_CONFIRMATION = False
-ENTRY_MODEL_FAST_CONFIDENCE = .82
+# A confiança do YOLO não é uma segunda evidência: toda candidata passa pela
+# observação parada de um segundo, inclusive se a confiança for alta.
 ENTRY_SILVER_VOTES_NEEDED = 2
 ENTRY_SILVER_VOTE_WINDOW = 3
 # Contexto da prata: a imagem clara no final da rampa só é um falso
 # candidato se a linha preta continuar DEPOIS dela, na direção de marcha.
 # Esta é uma evidência muito mais estável do que exigir que a faixa prata
 # tenha sempre a mesma textura/espessura na câmera. A entrada verdadeira
-# encerra a linha; portanto duas leituras do modelo sem preto adiante entram.
+# encerra a linha; ela precisa permanecer visível durante a observação parada.
 ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD = True
 # Ignora alguns pixels imediatamente acima da caixa prata para nao confundir
 # sua borda com a continuacao preta da rampa.
 ENTRY_BLACK_AFTER_SILVER_GUARD_RATIO = .03
-# Prata com preto alem da caixa ainda pertence ao percurso/rampa. Mantenha o
-# segue-linha por este periodo antes de aceitar nova candidatura de resgate.
-ENTRY_BLACK_FOLLOW_TIMEOUT_S = .5
-# Ao surgir o primeiro candidato, reduza a velocidade antes do segundo voto.
-# Assim a faixa verdadeira permanece no campo de visão tempo suficiente para
-# confirmar, sem reabrir o atalho perigoso de um único frame.
-ENTRY_CANDIDATE_SPEED = .40
-# Além do modelo, todos os votos precisam ter a linha preta rastreada e
-# centralizada. Isso evita entrar na sala com o robô atravessado na faixa.
+# Ao surgir uma prata sem preto alem dela, o robo para e observa por este
+# tempo. So depois desse intervalo a entrada pode ser confirmada.
+ENTRY_SILVER_VALIDATION_S = 1.0
+# Se houver preto alem da prata, mantenha o segue-linha e bloqueie apenas uma
+# nova candidatura prata por este periodo. Cada frame com preto renova o prazo.
+ENTRY_BLACK_FOLLOW_TIMEOUT_S = 1.0
+# Além do modelo, o primeiro voto precisa ter a linha preta rastreada e
+# centralizada. Isso evita parar atravessado na faixa; durante a observação a
+# prata pode cobrir o fim da linha.
 ENTRY_LINE_MAX_ANGLE = 18
 ENTRY_LINE_MAX_BOTTOM_ERROR_PX = 55
 # A faixa pode cobrir o fim da linha no frame seguinte. Conserva o último

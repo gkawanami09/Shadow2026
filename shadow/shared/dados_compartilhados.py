@@ -60,9 +60,14 @@ status = manager.Value("i", "Parado")
 mission_mode = Value("b", False)      # supervisor da missão no comando
 entry_armed = Value("b", True)        # procurar a faixa prata agora?
 entry_silver_detected = Value("b", False)   # candidato no frame atual
-entry_silver_confirmed = Value("b", False)  # votação 3-de-5 fechada
+entry_silver_confirmed = Value("b", False)  # observação prata validada
 entry_silver_votes = Value("i", 0)
 entry_silver_reason = manager.Value("i", "")  # motivo da última rejeição
+# Estado único publicado pela visão para sincronizar o controle e o verde.
+ENTRY_SILVER_IDLE = 0
+ENTRY_SILVER_VALIDATING = 1
+ENTRY_SILVER_BLACK_FOLLOW = 2
+entry_silver_state = Value("b", ENTRY_SILVER_IDLE)
 rescue_requested = Value("b", False)  # controle pediu o handoff
 red_finished = Value("b", False)      # faixa vermelha final cumprida
 timer = Timer()

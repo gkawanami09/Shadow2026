@@ -21,9 +21,10 @@ Os nomes abaixo são as constantes de `controle/missao.py::MissionState`.
 ```text
 FOLLOW_LINE
   └─ faixa prata candidata ──► ENTRY_SILVER_CANDIDATE
-                                 └─ votação 3-de-5 ──► VERIFY_ENTRY_SILVER
-                                      ├─ rejeitada ──► FOLLOW_LINE
-                                      └─ confirmada ─► ENTER_RESCUE_ZONE
+                                 └─ PARA E OBSERVA POR 1 s ──► VERIFY_ENTRY_SILVER
+                                      ├─ preto depois da prata ──► FOLLOW_LINE (nova prata bloqueada por 1 s)
+                                      ├─ prata sumiu ────────────► FOLLOW_LINE
+                                      └─ prata confirmada ───────► ENTER_RESCUE_ZONE
 ENTER_RESCUE_ZONE ──► STOP_AND_HANDOFF_TO_RESCUE ──► RESCUE_SCAN
                                                         │
    ┌────────────────────────────────────────────────────┘
@@ -126,8 +127,11 @@ construído — rodar `main.py` sozinho tem custo zero.
 Evidência conjunta exigida (`visao/entrada_missao.py`):
 
 1. `entrada.onnx` encontra a faixa prata com confiança mínima configurada;
-2. dois frames distintos confirmam o resultado;
-3. em ambos, a linha preta está detectada, centralizada e com ângulo pequeno.
+2. o primeiro frame precisa estar com a linha preta centralizada e com ângulo
+   pequeno; ele manda o controle parar;
+3. por um segundo, a prata continua visível e não pode haver preto além da
+   caixa dela, medido tanto pelo limiar normal quanto pelo limiar da rampa;
+4. há ao menos dois resultados positivos nessa observação.
 
 Após a confirmação, o processo de percurso para e libera câmera/serial. O
 processo `resgate.py` então faz o avanço reto já calibrado de 1 s e inicia os
