@@ -16,7 +16,7 @@ import numpy as np
 
 import config
 from shared.dados_compartilhados import (
-    config_manager, entry_armed, entry_silver_confirmed, entry_silver_detected,
+    entry_armed, entry_silver_confirmed, entry_silver_detected,
     entry_silver_reason, entry_silver_votes, mission_mode)
 
 
@@ -35,11 +35,10 @@ class EntryInference:
     line_aligned: bool
     detection: EntryDetection | None
     inference_ms: float
-    # ``None`` preserva os testes e consumidores antigos. No percurso real,
-    # o pipeline sempre publica ``True`` ou ``False`` depois de validar a
-    # geometria e a aparencia da fita prata no MESMO frame do YOLO.
-    stripe_detected: bool | None = None
-    stripe_reason: str = ""
+    # Preto no corredor central alem da candidata, no mesmo frame capturado.
+    # ``None`` preserva os consumidores antigos; no percurso real sempre vem
+    # ``True`` ou ``False`` da visao da linha.
+    black_ahead: bool | None = None
 
 
 class EntryModel:
@@ -231,8 +230,7 @@ class EntryModelWorker:
         self._thread.start()
         return self
 
-    def submit(self, frame, timestamp, line_aligned, stripe_detected=None,
-               stripe_reason=""):
+    def submit(self, frame, timestamp, line_aligned, black_ahead=None):
         # A cópia impede a câmera de reutilizar o buffer durante a inferência.
         with self._condition:
             self._pending = (
@@ -240,8 +238,7 @@ class EntryModelWorker:
                 frame.copy(),
                 float(timestamp),
                 bool(line_aligned),
-                stripe_detected,
-                str(stripe_reason),
+                black_ahead,
             )
             self._condition.notify()
 
@@ -280,7 +277,7 @@ class EntryModelWorker:
                 if self._stopping:
                     return
                 (generation, frame, timestamp, line_aligned,
-                 stripe_detected, stripe_reason) = self._pending
+                 black_ahead) = self._pending
                 self._pending = None
             try:
                 started = time.perf_counter()
@@ -301,8 +298,7 @@ class EntryModelWorker:
                     line_aligned,
                     detection,
                     inference_ms,
-                    stripe_detected,
-                    stripe_reason,
+                    black_ahead,
                 )
 
 
@@ -344,17 +340,15 @@ class EntryGate:
             self.last_reason = "faixa_sem_linha_alinhada"
             return False, inference.detection
         if (
-            config.ENTRY_SILVER_GEOMETRY_ENABLED
-            and inference.stripe_detected is False
+            config.ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD
+            and inference.black_ahead is True
         ):
-            # O modelo reconhece padrões parecidos com a entrada, mas a rampa
-            # pode conter exatamente esse tipo de imagem clara. A entrada
-            # só existe quando a imagem também possui uma fita prata fina,
-            # transversal e refletiva; este segundo detector é independente
-            # do YOLO e trabalha no mesmo frame.
-            self._hits.append(False)
-            motivo = inference.stripe_reason or "geometria_ausente"
-            self.last_reason = f"modelo_sem_faixa_prata:{motivo}"
+            # Se, após a prata, a linha preta continua no corredor central,
+            # ainda estamos no percurso/rampa. Descarta inclusive o voto
+            # anterior: uma amostra antes e outra depois do preto jamais
+            # podem formar uma entrada de resgate.
+            self._hits.clear()
+            self.last_reason = "linha_preta_depois_da_prata"
             return False, inference.detection
         self._hits.append(True)
         fast = (
@@ -376,20 +370,8 @@ class EntryPipeline:
         self.model = EntryModel().load()
         self.worker = EntryModelWorker(self.model).start()
         self.gate = EntryGate()
-        self.stripe_detector = self._build_stripe_detector()
         self.last_inference = None
         self._armed = False
-
-    @staticmethod
-    def _build_stripe_detector():
-        if not config.ENTRY_SILVER_GEOMETRY_ENABLED:
-            return None
-        # Import tardio: o portão unitário continua testável em uma máquina
-        # sem OpenCV, enquanto o processo real de visão (que já usa OpenCV)
-        # ganha a validação geométrica obrigatória.
-        from visao.faixa_entrada import EntrySilverDetector, load_bounds
-        hsv_min, hsv_max = load_bounds(config_manager)
-        return EntrySilverDetector(hsv_min=hsv_min, hsv_max=hsv_max)
 
     @property
     def last_detection(self):
@@ -404,22 +386,11 @@ class EntryPipeline:
         return self.gate.votes
 
     def submit(self, frame, timestamp, line_aligned, *, line_ahead=False):
-        stripe_detected = None
-        stripe_reason = ""
-        if self.stripe_detector is not None:
-            stripe = self.stripe_detector.detect(
-                frame,
-                line_ahead=bool(line_ahead),
-                timestamp=timestamp,
-            )
-            stripe_detected = stripe is not None
-            stripe_reason = self.stripe_detector.last_reason
         self.worker.submit(
             frame,
             timestamp,
             line_aligned,
-            stripe_detected,
-            stripe_reason,
+            bool(line_ahead),
         )
 
     def set_armed(self, armed):

@@ -280,34 +280,12 @@ ENTRY_MODEL_ALLOW_SINGLE_FRAME_CONFIRMATION = False
 ENTRY_MODEL_FAST_CONFIDENCE = .82
 ENTRY_SILVER_VOTES_NEEDED = 2
 ENTRY_SILVER_VOTE_WINDOW = 3
-# A faixa verdadeira é uma fita prateada transversal. O YOLO é mantido como
-# detector rápido, mas o handoff só pode acontecer se este validador geométrico
-# independente também enxergar a fita. Isso barra o piso claro no fim da
-# rampa, que pode parecer "resgate" para o modelo, sem rejeitar a prata real.
-ENTRY_SILVER_GEOMETRY_ENABLED = True
-ENTRY_SILVER_MIN_DEFAULT = [0, 0, 140]
-ENTRY_SILVER_MAX_DEFAULT = [180, 70, 255]
-ENTRY_SILVER_ROI_TOP = .55
-ENTRY_SILVER_ROI_BOTTOM = 1.0
-ENTRY_SILVER_MIN_ROW_FILL = .45
-ENTRY_SILVER_MIN_SPAN_RATIO = .70
-ENTRY_SILVER_MAX_SPAN_RATIO = 1.0
-ENTRY_SILVER_MIN_THICKNESS_RATIO = .04
-ENTRY_SILVER_MAX_THICKNESS_RATIO = .30
-ENTRY_SILVER_MIN_FILL_RATIO = .50
-ENTRY_SILVER_MIN_ASPECT = 3.5
-ENTRY_SILVER_LOCAL_WINDOW_PX = 7
-ENTRY_SILVER_MIN_LOCAL_RANGE = 18
-ENTRY_SILVER_FALLBACK_LOCAL_RANGE = 12
-ENTRY_SILVER_FALLBACK_MIN_CONFIDENCE = .60
-ENTRY_SILVER_MAX_SATURATION = 70.
-ENTRY_SILVER_MIN_DYNAMIC_RANGE = 26.
-ENTRY_SILVER_HIGHLIGHT_V = 205
-ENTRY_SILVER_MIN_HIGHLIGHT_FRACTION = .02
-ENTRY_SILVER_SURROUND_MARGIN_RATIO = .06
-ENTRY_SILVER_MIN_SURROUND_CONTRAST = 12.
-ENTRY_SILVER_MIN_CONFIDENCE = .45
-ENTRY_SILVER_REQUIRE_LINE_END = True
+# Contexto da prata: a imagem clara no final da rampa só é um falso
+# candidato se a linha preta continuar DEPOIS dela, na direção de marcha.
+# Esta é uma evidência muito mais estável do que exigir que a faixa prata
+# tenha sempre a mesma textura/espessura na câmera. A entrada verdadeira
+# encerra a linha; portanto duas leituras do modelo sem preto adiante entram.
+ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD = True
 # Ao surgir o primeiro candidato, reduza a velocidade antes do segundo voto.
 # Assim a faixa verdadeira permanece no campo de visão tempo suficiente para
 # confirmar, sem reabrir o atalho perigoso de um único frame.
