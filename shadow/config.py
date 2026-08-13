@@ -272,11 +272,18 @@ ENTRY_NCNN_MODEL_INPUT = 416
 ENTRY_MODEL_MIN_CONFIDENCE = .60
 # Limita o runtime do modelo para não disputar todos os núcleos com a linha.
 ENTRY_MODEL_THREADS = 2
-# Um único frame muito seguro não espera a segunda inferência: em velocidade
-# alta a faixa pode ficar no campo de visão por menos de dois ciclos do YOLO.
+# A confiança do YOLO não é uma segunda evidência: uma rampa clara pode ter
+# confiança alta mesmo sem ser a faixa de entrada. Por padrão, portanto,
+# nenhum frame isolado inicia o handoff. Esta chave existe somente para um
+# ensaio controlado em que a pista tenha sido validada sem falsos positivos.
+ENTRY_MODEL_ALLOW_SINGLE_FRAME_CONFIRMATION = False
 ENTRY_MODEL_FAST_CONFIDENCE = .82
 ENTRY_SILVER_VOTES_NEEDED = 2
 ENTRY_SILVER_VOTE_WINDOW = 3
+# Ao surgir o primeiro candidato, reduza a velocidade antes do segundo voto.
+# Assim a faixa verdadeira permanece no campo de visão tempo suficiente para
+# confirmar, sem reabrir o atalho perigoso de um único frame.
+ENTRY_CANDIDATE_SPEED = .40
 # Além do modelo, todos os votos precisam ter a linha preta rastreada e
 # centralizada. Isso evita entrar na sala com o robô atravessado na faixa.
 ENTRY_LINE_MAX_ANGLE = 18

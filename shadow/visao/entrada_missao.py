@@ -329,7 +329,11 @@ class EntryGate:
             self.last_reason = "faixa_sem_linha_alinhada"
             return False, inference.detection
         self._hits.append(True)
-        fast = inference.detection.confidence >= config.ENTRY_MODEL_FAST_CONFIDENCE
+        fast = (
+            config.ENTRY_MODEL_ALLOW_SINGLE_FRAME_CONFIRMATION
+            and inference.detection.confidence
+            >= config.ENTRY_MODEL_FAST_CONFIDENCE
+        )
         confirmed = fast or self.votes >= config.ENTRY_SILVER_VOTES_NEEDED
         self.last_reason = (
             "confirmada_rapida" if fast

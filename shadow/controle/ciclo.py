@@ -620,6 +620,24 @@ def control_loop():
                     pivot_best_error = camera_x
                     pivot_last_progress = now
 
+                # O primeiro positivo nunca entra na sala sozinho. Reduzir a
+                # velocidade enquanto a votação está aberta deixa a faixa
+                # real visível no frame seguinte; uma imagem clara no fim de
+                # uma rampa apenas causa uma desaceleração curta e não pede o
+                # handoff para o resgate.
+                if (
+                    mission_mode.value
+                    and entry_armed.value
+                    and entry_silver_detected.value
+                    and not entry_silver_confirmed.value
+                    and green_direction is None
+                ):
+                    command_speed = min(
+                        command_speed,
+                        config.ENTRY_CANDIDATE_SPEED,
+                    )
+                    status.value = 'Faixa prata candidata — confirmando'
+
                 steer(angle, command_speed,
                       front_reverse_assist=front_reverse_assist,
                       rear_pivot_enabled=rear_pivot_enabled)

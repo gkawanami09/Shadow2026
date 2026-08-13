@@ -51,12 +51,18 @@ class EntryModelTests(unittest.TestCase):
 
 
 class EntryGateTests(unittest.TestCase):
-    def test_uma_deteccao_muito_confiavel_confirma_na_hora(self):
+    def test_deteccao_muito_confiavel_precisa_segundo_frame_por_padrao(self):
         detection = EntryDetection((1, 2, 3, 4), .95)
         gate = EntryGate()
         confirmed, _ = gate.update(EntryInference(0., True, detection, 0.))
+        self.assertFalse(confirmed)
+        self.assertEqual(gate.last_reason, "votando")
+        confirmed, _ = gate.update(EntryInference(.03, True, detection, 0.))
         self.assertTrue(confirmed)
-        self.assertEqual(gate.last_reason, "confirmada_rapida")
+        self.assertEqual(gate.last_reason, "confirmada")
+
+    def test_atalho_de_um_frame_fica_desligado_por_padrao(self):
+        self.assertFalse(config.ENTRY_MODEL_ALLOW_SINGLE_FRAME_CONFIRMATION)
 
     def test_dois_frames_alinhados_confirmam(self):
         detection = EntryDetection((1, 2, 3, 4), .7)
