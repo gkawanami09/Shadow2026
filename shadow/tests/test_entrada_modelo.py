@@ -12,7 +12,8 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
 from visao.entrada_missao import (  # noqa: E402
-    EntryDetection, EntryGate, EntryInference, EntryModel, EntryPipeline)
+    EntryDetection, EntryGate, EntryInference, EntryModel, EntryPipeline,
+    has_black_after_entry_detection)
 
 
 class _Session:
@@ -51,6 +52,22 @@ class EntryModelTests(unittest.TestCase):
 
 
 class EntryGateTests(unittest.TestCase):
+    def test_preto_que_leva_ate_a_prata_nao_veta_o_resgate(self):
+        mask = np.zeros((100, 100), dtype=np.uint8)
+        # Black below the detection is the line approaching the silver strip.
+        mask[70:95, 40:60] = 255
+        detection = EntryDetection((40, 55, 20, 10), .8)
+
+        self.assertFalse(has_black_after_entry_detection(mask, detection))
+
+    def test_preto_alem_da_prata_veta_o_resgate(self):
+        mask = np.zeros((100, 100), dtype=np.uint8)
+        # At the top is the track beyond the silver strip in driving direction.
+        mask[10:45, 40:60] = 255
+        detection = EntryDetection((40, 55, 20, 10), .8)
+
+        self.assertTrue(has_black_after_entry_detection(mask, detection))
+
     def test_deteccao_muito_confiavel_precisa_segundo_frame_por_padrao(self):
         detection = EntryDetection((1, 2, 3, 4), .95)
         gate = EntryGate()

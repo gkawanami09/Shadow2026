@@ -196,12 +196,15 @@ def vision_loop(debug=False):
                 black_ramp_image[:limite_topo],
                 cv2.bitwise_not(green_image[:limite_topo]),
             )
+            # A mascara normal muda no segue-linha abaixo. Preserva a medida
+            # bruta para compara-la com a caixa prata deste mesmo frame.
+            entry_black_mask = black_image.copy()
+            entry_ramp_black_mask = black_ramp_image
 
-            # Cada perfil procura continuidade por conta própria. Preto pelo
-            # teto normal ou pelo teto exclusivo da rampa significa que a
-            # linha continua depois da candidata a prata.
+            # Esta leitura e exclusiva do detector de gap. O veto da prata
+            # usa as duas mascaras brutas, mas apenas acima da caixa que o
+            # YOLO encontrou no mesmo frame.
             linha_a_frente_frame = _has_black_ahead(black_image)
-            preto_rampa_a_frente_frame = _has_black_ahead(black_ramp_image)
             line_ahead.value = linha_a_frente_frame
 
             # Recorta partes que não devem participar da decisão.
@@ -371,8 +374,8 @@ def vision_loop(debug=False):
             update_entry_silver(
                 entry_gate, cv2_img, frame_captured_at,
                 line_aligned=entrada_alinhada,
-                line_ahead=linha_a_frente_frame,
-                ramp_black_ahead=preto_rampa_a_frente_frame)
+                black_mask=entry_black_mask,
+                ramp_black_mask=entry_ramp_black_mask)
 
             processamento_ms = (
                 time.perf_counter() - inicio_processamento

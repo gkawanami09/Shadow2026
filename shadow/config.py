@@ -286,6 +286,9 @@ ENTRY_SILVER_VOTE_WINDOW = 3
 # tenha sempre a mesma textura/espessura na câmera. A entrada verdadeira
 # encerra a linha; portanto duas leituras do modelo sem preto adiante entram.
 ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD = True
+# Ignora alguns pixels imediatamente acima da caixa prata para nao confundir
+# sua borda com a continuacao preta da rampa.
+ENTRY_BLACK_AFTER_SILVER_GUARD_RATIO = .03
 # Ao surgir o primeiro candidato, reduza a velocidade antes do segundo voto.
 # Assim a faixa verdadeira permanece no campo de visão tempo suficiente para
 # confirmar, sem reabrir o atalho perigoso de um único frame.

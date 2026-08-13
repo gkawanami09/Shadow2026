@@ -43,6 +43,41 @@ class EntryInference:
     ramp_black_ahead: bool | None = None
 
 
+def has_black_after_entry_detection(mask, detection):
+    """Returns black-line evidence beyond the silver detection.
+
+    The robot moves from the bottom toward the top of the camera image. Only
+    black above the YOLO box can be a continuation after the silver strip;
+    black below it is the approach line and must not reject a real rescue.
+    """
+    if detection is None or mask is None or mask.ndim != 2:
+        return False
+
+    height, width = mask.shape
+    if height == 0 or width == 0:
+        return False
+    try:
+        _x, silver_top, _box_width, _box_height = detection.bbox
+        silver_top = float(silver_top)
+    except (TypeError, ValueError):
+        return False
+
+    guard_px = max(
+        1, int(round(height * config.ENTRY_BLACK_AFTER_SILVER_GUARD_RATIO)))
+    after_end = min(height, max(0, int(np.floor(silver_top)) - guard_px))
+    x_start = int(width * config.GAP_AHEAD_X_MIN)
+    x_end = int(width * config.GAP_AHEAD_X_MAX)
+    after_silver = mask[:after_end, x_start:x_end]
+    if not after_silver.size:
+        return False
+
+    row_fill = np.count_nonzero(after_silver, axis=1) / after_silver.shape[1]
+    return bool(
+        np.mean(row_fill >= config.GAP_AHEAD_ROW_FILL)
+        >= config.GAP_AHEAD_ROW_PERSISTENCE
+    )
+
+
 class EntryModel:
     """YOLO de uma classe via NCNN, com contingência para ONNX Runtime."""
 
@@ -237,8 +272,8 @@ class EntryModelWorker:
         frame,
         timestamp,
         line_aligned,
-        black_ahead=None,
-        ramp_black_ahead=None,
+        black_mask=None,
+        ramp_black_mask=None,
     ):
         # A cópia impede a câmera de reutilizar o buffer durante a inferência.
         with self._condition:
@@ -247,8 +282,8 @@ class EntryModelWorker:
                 frame.copy(),
                 float(timestamp),
                 bool(line_aligned),
-                black_ahead,
-                ramp_black_ahead,
+                None if black_mask is None else black_mask.copy(),
+                None if ramp_black_mask is None else ramp_black_mask.copy(),
             )
             self._condition.notify()
 
@@ -287,12 +322,16 @@ class EntryModelWorker:
                 if self._stopping:
                     return
                 (generation, frame, timestamp, line_aligned,
-                 black_ahead, ramp_black_ahead) = self._pending
+                 black_mask, ramp_black_mask) = self._pending
                 self._pending = None
             try:
                 started = time.perf_counter()
                 detection = self.model.detect(frame)
                 inference_ms = (time.perf_counter() - started) * 1000.
+                black_ahead = has_black_after_entry_detection(
+                    black_mask, detection)
+                ramp_black_ahead = has_black_after_entry_detection(
+                    ramp_black_mask, detection)
             except Exception as error:  # surfaced in the vision process
                 with self._condition:
                     self._error = error
@@ -406,15 +445,15 @@ class EntryPipeline:
         timestamp,
         line_aligned,
         *,
-        line_ahead=False,
-        ramp_black_ahead=False,
+        black_mask=None,
+        ramp_black_mask=None,
     ):
         self.worker.submit(
             frame,
             timestamp,
             line_aligned,
-            bool(line_ahead),
-            bool(ramp_black_ahead),
+            black_mask,
+            ramp_black_mask,
         )
 
     def set_armed(self, armed):
@@ -453,8 +492,8 @@ def update_entry_silver(
     captured_at,
     *,
     line_aligned=False,
-    line_ahead=False,
-    ramp_black_ahead=False,
+    black_mask=None,
+    ramp_black_mask=None,
 ):
     """Entrega o frame ao YOLO e publica somente resultados prontos."""
     if entry_gate is None:
@@ -476,8 +515,8 @@ def update_entry_silver(
         frame,
         captured_at,
         line_aligned,
-        line_ahead=line_ahead,
-        ramp_black_ahead=ramp_black_ahead,
+        black_mask=black_mask,
+        ramp_black_mask=ramp_black_mask,
     )
     confirmed, detection = entry_gate.poll()
     entry_silver_detected.value = detection is not None
