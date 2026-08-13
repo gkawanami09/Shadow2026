@@ -13,7 +13,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config  # noqa: E402
 from visao.entrada_missao import (  # noqa: E402
     EntryDetection, EntryGate, EntryInference, EntryModel, EntryPipeline,
-    has_black_after_entry_detection)
+    has_black_after_entry_detection, has_ramp_black)
 
 
 class _Session:
@@ -67,6 +67,12 @@ class EntryGateTests(unittest.TestCase):
         detection = EntryDetection((40, 55, 20, 10), .8)
 
         self.assertTrue(has_black_after_entry_detection(mask, detection))
+
+    def test_limiar_da_rampa_encontra_preto_sem_caixa_prata(self):
+        mask = np.zeros((100, 100), dtype=np.uint8)
+        mask[10:60, 40:60] = 255
+
+        self.assertTrue(has_ramp_black(mask))
 
     def test_deteccao_muito_confiavel_precisa_segundo_frame_por_padrao(self):
         detection = EntryDetection((1, 2, 3, 4), .95)
@@ -134,24 +140,30 @@ class EntryGateTests(unittest.TestCase):
             .06, True, detection, 0., black_ahead=False))[0])
         self.assertEqual(gate.votes, 1)
 
-    def test_preto_do_limiar_da_rampa_tambem_veta_o_resgate(self):
+    def test_preto_do_limiar_da_rampa_da_um_segundo_de_segue_linha(self):
         detection = EntryDetection((1, 2, 3, 4), .99)
         gate = EntryGate()
-        for timestamp in (0., .03, .06):
-            confirmed, _ = gate.update(EntryInference(
-                timestamp,
-                True,
-                detection,
-                0.,
-                black_ahead=False,
-                ramp_black_ahead=True,
-            ))
-            self.assertFalse(confirmed)
-        self.assertEqual(gate.votes, 0)
-        self.assertEqual(
-            gate.last_reason,
-            "preto_rampa_depois_da_prata",
-        )
+        self.assertFalse(gate.update(EntryInference(
+            0., True, detection, 0.,
+            black_ahead=False, ramp_black_ahead=True,
+        ))[0])
+        self.assertEqual(gate.last_reason, "preto_rampa_timeout")
+
+        timeout = config.ENTRY_RAMP_BLACK_FOLLOW_TIMEOUT_S
+        self.assertFalse(gate.update(EntryInference(
+            timeout - .01, True, detection, 0., black_ahead=False,
+        ))[0])
+        self.assertEqual(gate.last_reason, "timeout_rampa_seguindo_linha")
+
+        # Sem preto pelo limiar da rampa, uma prata real volta a votar depois
+        # do timeout e confirma no segundo frame.
+        self.assertFalse(gate.update(EntryInference(
+            timeout + .01, True, detection, 0., black_ahead=False,
+        ))[0])
+        self.assertTrue(gate.update(EntryInference(
+            timeout + .04, True, detection, 0., black_ahead=False,
+        ))[0])
+        self.assertEqual(gate.votes, config.ENTRY_SILVER_VOTES_NEEDED)
 
     def test_limiar_de_preto_da_rampa_e_calibravel(self):
         self.assertEqual(

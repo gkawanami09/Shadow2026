@@ -632,11 +632,20 @@ def control_loop():
                     and not entry_silver_confirmed.value
                     and green_direction is None
                 ):
-                    command_speed = min(
-                        command_speed,
-                        config.ENTRY_CANDIDATE_SPEED,
-                    )
-                    status.value = 'Faixa prata candidata — confirmando'
+                    if entry_silver_reason.value in {
+                        "preto_rampa_timeout",
+                        "timeout_rampa_seguindo_linha",
+                    }:
+                        # O limiar exclusivo da rampa encontrou preto. Nao
+                        # reduza para a velocidade de candidatura: durante o
+                        # prazo o robo precisa simplesmente seguir a linha.
+                        status.value = 'Preto de rampa — seguindo linha'
+                    else:
+                        command_speed = min(
+                            command_speed,
+                            config.ENTRY_CANDIDATE_SPEED,
+                        )
+                        status.value = 'Faixa prata candidata — confirmando'
 
                 steer(angle, command_speed,
                       front_reverse_assist=front_reverse_assist,

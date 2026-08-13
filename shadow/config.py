@@ -289,6 +289,9 @@ ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD = True
 # Ignora alguns pixels imediatamente acima da caixa prata para nao confundir
 # sua borda com a continuacao preta da rampa.
 ENTRY_BLACK_AFTER_SILVER_GUARD_RATIO = .03
+# Ao aparecer preto no limiar exclusivo da rampa, mantenha o segue-linha por
+# este periodo antes de aceitar uma nova candidatura de prata.
+ENTRY_RAMP_BLACK_FOLLOW_TIMEOUT_S = 1.0
 # Ao surgir o primeiro candidato, reduza a velocidade antes do segundo voto.
 # Assim a faixa verdadeira permanece no campo de visão tempo suficiente para
 # confirmar, sem reabrir o atalho perigoso de um único frame.

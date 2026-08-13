@@ -78,6 +78,30 @@ def has_black_after_entry_detection(mask, detection):
     )
 
 
+def has_ramp_black(mask):
+    """Returns persistent black found by the ramp-only color threshold.
+
+    This check does not depend on the silver box: a ramp line can be partly
+    hidden by a false silver candidate, but it must still block rescue.
+    """
+    if mask is None or mask.ndim != 2:
+        return False
+
+    height, width = mask.shape
+    y_end = int(height * config.GAP_AHEAD_Y_MAX)
+    x_start = int(width * config.GAP_AHEAD_X_MIN)
+    x_end = int(width * config.GAP_AHEAD_X_MAX)
+    ramp_area = mask[:y_end, x_start:x_end]
+    if not ramp_area.size:
+        return False
+
+    row_fill = np.count_nonzero(ramp_area, axis=1) / ramp_area.shape[1]
+    return bool(
+        np.mean(row_fill >= config.GAP_AHEAD_ROW_FILL)
+        >= config.GAP_AHEAD_ROW_PERSISTENCE
+    )
+
+
 class EntryModel:
     """YOLO de uma classe via NCNN, com contingência para ONNX Runtime."""
 
@@ -330,8 +354,7 @@ class EntryModelWorker:
                 inference_ms = (time.perf_counter() - started) * 1000.
                 black_ahead = has_black_after_entry_detection(
                     black_mask, detection)
-                ramp_black_ahead = has_black_after_entry_detection(
-                    ramp_black_mask, detection)
+                ramp_black_ahead = has_ramp_black(ramp_black_mask)
             except Exception as error:  # surfaced in the vision process
                 with self._condition:
                     self._error = error
@@ -360,6 +383,7 @@ class EntryGate:
         self.last_detection = None
         self.last_reason = "início"
         self._last_timestamp = None
+        self._ramp_black_timeout_until = float("-inf")
 
     @property
     def votes(self):
@@ -371,6 +395,7 @@ class EntryGate:
         self.last_detection = None
         self.last_reason = "reiniciado"
         self._last_timestamp = None
+        self._ramp_black_timeout_until = float("-inf")
 
     def update(self, inference):
         if inference is None:
@@ -389,12 +414,24 @@ class EntryGate:
             self._hits.append(False)
             self.last_reason = "faixa_sem_linha_alinhada"
             return False, inference.detection
+        if (config.ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD
+                and inference.ramp_black_ahead is True):
+            # A mascara calibrada da rampa encontrou preto. Renova o prazo a
+            # cada frame para o robo seguir a linha durante um segundo inteiro
+            # apos o ultimo preto de rampa, sem acumular votos de resgate.
+            self._hits.clear()
+            self._ramp_black_timeout_until = (
+                inference.timestamp + config.ENTRY_RAMP_BLACK_FOLLOW_TIMEOUT_S)
+            self.last_reason = "preto_rampa_timeout"
+            return False, inference.detection
+        if (config.ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD
+                and inference.timestamp < self._ramp_black_timeout_until):
+            self._hits.clear()
+            self.last_reason = "timeout_rampa_seguindo_linha"
+            return False, inference.detection
         black_source = (
-            "preto_rampa_depois_da_prata"
-            if inference.ramp_black_ahead is True
-            else "linha_preta_depois_da_prata"
-            if inference.black_ahead is True
-            else None
+            "linha_preta_depois_da_prata"
+            if inference.black_ahead is True else None
         )
         if config.ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD and black_source:
             # Se, após a prata, a linha preta continua no corredor central,
