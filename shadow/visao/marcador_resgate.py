@@ -408,7 +408,7 @@ class MarkerDetector:
         # blob e mudaria a forma do candidato. O rigor cromatico fica no gate
         # por blob (MARKER_MIN_INSIDE_CHROMA), aplicado depois da geometria.
         mask[chroma < cfg.MARKER_MASK_MIN_CHROMA] = 0
-        roi_top = int(round(height * cfg.MARKER_ROI_TOP))
+        roi_top = int(round(height * self._roi_top()))
         mask[:roi_top, :] = 0
 
         open_size = _odd_kernel_size(
@@ -463,13 +463,13 @@ class MarkerDetector:
         frame_area = float(max(width * height, 1))
         area = float(cv2.contourArea(contour))
         area_ratio = area / frame_area
-        if area_ratio < cfg.MARKER_MIN_AREA_RATIO:
+        if area_ratio < self._min_area_ratio():
             return None, "area_small"
         if area_ratio > cfg.MARKER_MAX_AREA_RATIO:
             return None, "area_large"
 
         x, y, box_width, box_height = cv2.boundingRect(contour)
-        min_side = cfg.MARKER_MIN_SIDE_PX * scale
+        min_side = self._min_side_px() * scale
         if min(box_width, box_height) < min_side:
             return None, "side"
 
@@ -546,7 +546,7 @@ class MarkerDetector:
             cv2.MORPH_ELLIPSE, (ring_size, ring_size))
         expanded = cv2.dilate(contour_fill, ring_kernel)
         ring = cv2.subtract(expanded, contour_fill)
-        ring[:int(round(height * cfg.MARKER_ROI_TOP)), :] = 0
+        ring[:int(round(height * self._roi_top())), :] = 0
 
         inside_selector = cv2.bitwise_and(mask, contour_fill) > 0
         ring_selector = ring > 0
@@ -594,7 +594,7 @@ class MarkerDetector:
             / max(1.0 - cfg.MARKER_MIN_MASK_FILL, 1e-6)
         )
         area_score = _clip01(
-            area_ratio / max(cfg.MARKER_MIN_AREA_RATIO * 5.0, 1e-6))
+            area_ratio / max(self._min_area_ratio() * 5.0, 1e-6))
         # Cromaticidade e contraste somam 62% do peso: sao os unicos termos
         # com separacao medida (marcador 124-148 contra cadeira 63-79).
         confidence = (
@@ -625,6 +625,23 @@ class MarkerDetector:
             area,
             float(confidence),
         ), None
+
+    def _roi_top(self):
+        """Corte vertical especifico ao marcador atualmente procurado."""
+        if self.target_kind == "red":
+            return cfg.MARKER_RED_ROI_TOP
+        return cfg.MARKER_ROI_TOP
+
+    def _min_area_ratio(self):
+        """Mantem a geometria normal para verde e admite vermelho distante."""
+        if self.target_kind == "red":
+            return cfg.MARKER_RED_MIN_AREA_RATIO
+        return cfg.MARKER_MIN_AREA_RATIO
+
+    def _min_side_px(self):
+        if self.target_kind == "red":
+            return cfg.MARKER_RED_MIN_SIDE_PX
+        return cfg.MARKER_MIN_SIDE_PX
 
     def _chroma_map(self, frame_bgr):
         channels = frame_bgr.astype(np.float32)

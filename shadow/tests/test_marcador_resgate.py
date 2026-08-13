@@ -151,6 +151,27 @@ class MarkerDetectorTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result.confirmed)
 
+    def test_red_triangle_distant_above_generic_roi_is_confirmed(self):
+        """O vermelho distante nao pode depender da janela do verde."""
+        frame = triangle_frame(
+            "red",
+            # Todo o alvo fica acima dos 45% usados pelo verde e a area fica
+            # abaixo do minimo normal. Ainda e vermelho muito saturado e deve
+            # atravessar as tres confirmacoes temporais.
+            points=((320, 146), (312, 191), (328, 191)),
+        )
+
+        red = confirmed(MarkerDetector("red"), frame)
+        green = confirmed(MarkerDetector("green"), frame)
+
+        self.assertIsNotNone(red)
+        self.assertTrue(red.confirmed)
+        self.assertLess(
+            red.area / float(WIDTH * HEIGHT),
+            cfg.MARKER_MIN_AREA_RATIO,
+        )
+        self.assertIsNone(green)
+
     def test_wrong_target_color_is_never_returned(self):
         cases = (
             ("green", triangle_frame("red")),

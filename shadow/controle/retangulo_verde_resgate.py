@@ -156,6 +156,9 @@ class ControladorRetanguloVerde:
         self._chegada_por_ultrassom = False
         self._distancia_chegada_mm = None
         self._avanco_direto_iniciado_em = None
+        # So a rota final verde pode voltar a busca de vitimas. O vermelho
+        # continua usando a propria busca pulsada de deposito.
+        self._retomar_busca_pulsada = False
         if avanco_direto:
             self.iniciar_avanco_direto(now=start_time)
 
@@ -366,6 +369,8 @@ class ControladorRetanguloVerde:
             and self.navegacao.state == self.navegacao.LOST_STOP
         ):
             self.navegacao.mark_lost_stopped(now=agora)
+            if self.target_kind == "green":
+                self._retomar_busca_pulsada = True
             return True
         if (
             state == self.navegacao.ARRIVAL_STOP
@@ -385,6 +390,17 @@ class ControladorRetanguloVerde:
         if self.aproximacao_final:
             return False
         return self.navegacao.consume_tracking_reset()
+
+    def consume_retomada_busca_pulsada(self):
+        """Informa que um verde perdido deve invalidar a rota final atual.
+
+        O pedido so nasce depois que o comando de parada por perda foi escrito
+        no Arduino. Assim a troca para a busca de vitimas nunca pula a parada
+        segura que separa alinhamento de uma nova varredura.
+        """
+        solicitado = self._retomar_busca_pulsada
+        self._retomar_busca_pulsada = False
+        return solicitado
 
     def _sem_verde(self, agora, proporcao):
         if self._ultimo_verde_em is None:

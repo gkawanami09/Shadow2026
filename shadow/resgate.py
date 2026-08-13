@@ -1649,6 +1649,38 @@ def main():
                             marcadores_atuais = {}
                         controlador_verde.notify_command_written(
                             comando.state, concluido_em)
+                        if controlador_verde.consume_retomada_busca_pulsada():
+                            # O verde que levou ao alinhamento sumiu. Depois
+                            # da parada ja escrita acima, ele deixa de valer
+                            # como passagem: zera a evidencia e volta ao
+                            # mesmo ciclo pulso -> parar -> observar usado na
+                            # procura de vitimas.
+                            if trabalhador is not None:
+                                trabalhador.reset_tracking()
+                            portao.reset()
+                            if marcadores is not None:
+                                marcadores.reset()
+                            marcadores_atuais = {}
+                            contador_verde.reset()
+                            busca = make_search_controller(
+                                start_time=concluido_em)
+                            controlador = None
+                            controlador_verde = None
+                            monitor_chegada_verde = None
+                            proxima_atualizacao_ultrassom_verde = 0.0
+                            epoca_verde = None
+                            epoca_busca = None
+                            resultado_atual = None
+                            deteccao_atual = None
+                            ultimo_controle_ocioso = 0.0
+                            comando = MotionCommand(
+                                "GREEN_ROUTE_REJECTED",
+                                detail=(
+                                    "verde perdido apos alinhar; evidencia "
+                                    "zerada e retomando busca pulsada"
+                                ),
+                            )
+                            comando_atualizado = False
                     elif controlador_saida is not None:
                         if controlador_saida.consume_tracking_reset():
                             if portao_saida is not None:

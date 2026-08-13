@@ -782,6 +782,15 @@ MARKER_BASE_HEIGHT = 480
 # destino; o contorno pode tocar a linha, mas seu centro util fica na arena.
 MARKER_ROI_TOP = 0.45
 
+# O triangulo vermelho pode aparecer bem menor e mais alto quando o robo sai
+# do deposito verde. Ele e procurado somente nos frames parados dos pulsos e
+# ainda precisa passar por cromaticidade, contraste e tres frames distintos;
+# por isso pode usar uma janela vertical e uma geometria de aquisicao proprias
+# sem afrouxar a deteccao do verde nem aceitar um frame isolado.
+MARKER_RED_ROI_TOP = 0.28
+MARKER_RED_MIN_AREA_RATIO = 0.00030
+MARKER_RED_MIN_SIDE_PX = 6
+
 # HSV do OpenCV (H em 0..180). Vermelho cruza a origem e, por isso, usa duas
 # bandas. O contraste cromatico local abaixo continua obrigatorio: o HSV
 # sozinho nao aceita um banho uniforme de luz ciano/verde.

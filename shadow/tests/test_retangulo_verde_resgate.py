@@ -275,6 +275,28 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertEqual(
             round(avanco.speed * 120), cfg.RESCUE_GREEN_FINAL_PWM)
 
+    def test_verde_perdido_apos_alinhamento_pede_busca_pulsada(self):
+        controlador = ControladorRetanguloVerde(start_time=0.0)
+        controlador.navegacao.state = controlador.navegacao.ALIGN
+        controlador.navegacao._last_seen_at = 0.0
+
+        parar = controlador.update(
+            None,
+            FORMATO,
+            now=cfg.DEPOSIT_REACQUIRE_TIMEOUT_S,
+        )
+
+        self.assertEqual(parar.state, controlador.navegacao.LOST_STOP)
+        self.assertEqual(parar.angle, 190)
+        self.assertTrue(
+            controlador.notify_command_written(parar.state, now=1.0))
+        self.assertTrue(controlador.consume_retomada_busca_pulsada())
+        self.assertFalse(controlador.consume_retomada_busca_pulsada())
+        self.assertEqual(
+            controlador.navegacao.state,
+            controlador.navegacao.START,
+        )
+
     def test_programa_principal_nao_pula_alinhamento_visual(self):
         fonte = (SHADOW_ROOT / "resgate.py").read_text(encoding="utf-8")
 
