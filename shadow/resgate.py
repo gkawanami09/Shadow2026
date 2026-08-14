@@ -769,12 +769,6 @@ def _avancar_entrada_da_missao(args, arduino, acao_direcao):
     ):
         return False
 
-    if getattr(args, "entrada_ja_avancada", False):
-        print(
-            "[resgate] entrada ja avancou durante a validacao sem preto; "
-            "iniciando diretamente a busca giratoria")
-        return True
-
     epoca_serial = arduino.connection_epoch
     print(
         "[resgate] entrada da missao: avancando reto por "
@@ -878,9 +872,6 @@ def parse_args():
         help="desliga os marcadores e exercita so as vitimas")
     parser.add_argument(
         "--gerenciado-pela-missao", action="store_true",
-        help=argparse.SUPPRESS)
-    parser.add_argument(
-        "--entrada-ja-avancada", action="store_true",
         help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.video is not None and args.drive:

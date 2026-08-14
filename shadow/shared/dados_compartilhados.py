@@ -69,10 +69,6 @@ ENTRY_SILVER_VALIDATING = 1
 ENTRY_SILVER_BLACK_FOLLOW = 2
 entry_silver_state = Value("b", ENTRY_SILVER_IDLE)
 rescue_requested = Value("b", False)  # controle pediu o handoff
-# A entrada por ausência de preto já percorre a distância de transição
-# enquanto valida os 3 s. O resgate lê este sinal pelo supervisor para não
-# comandar um segundo avanço reto antes da busca.
-rescue_entry_forward_done = Value("b", False)
 red_finished = Value("b", False)      # faixa vermelha final cumprida
 timer = Timer()
 

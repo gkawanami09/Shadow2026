@@ -140,8 +140,6 @@ class MissionSystem:
         """Sobe visão (câmera 1) e controle (serial + LED aceso)."""
         self.shared.terminate.value = False
         self.shared.rescue_requested.value = False
-        if hasattr(self.shared, "rescue_entry_forward_done"):
-            self.shared.rescue_entry_forward_done.value = False
         self.shared.red_finished.value = False
         self.shared.mission_mode.value = True
 
@@ -264,10 +262,6 @@ class MissionSystem:
             "--policy", self.args.policy,
             "--gerenciado-pela-missao",
         ]
-        if bool(getattr(
-                getattr(self.shared, "rescue_entry_forward_done", None),
-                "value", False)):
-            comando.append("--entrada-ja-avancada")
         if self.args.debug:
             comando.append("--debug")
         print(f"[missão] iniciando o resgate: {' '.join(comando)}")
@@ -354,8 +348,6 @@ class MissionSystem:
         self.shared.entry_silver_reason.value = ""
         self.shared.entry_silver_state.value = 0
         self.shared.rescue_requested.value = False
-        if hasattr(self.shared, "rescue_entry_forward_done"):
-            self.shared.rescue_entry_forward_done.value = False
         self.shared.red_finished.value = False
         self.shared.status.value = "Reiniciando missao - aguardando Arduino"
 
