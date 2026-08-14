@@ -172,6 +172,31 @@ class MarkerDetectorTests(unittest.TestCase):
         )
         self.assertIsNone(green)
 
+    def test_triangles_small_and_distant_are_confirmed_after_three_frames(self):
+        """A deteccao distante nao pode exigir que o alvo ja esteja perto.
+
+        O tamanho fica abaixo do antigo minimo verde. A cor ainda e intensa,
+        o entorno e neutro e a confirmacao temporal continua obrigatoria.
+        """
+        for kind, points in (
+            ("green", ((320, 245), (312, 277), (328, 277))),
+            ("red", ((320, 170), (312, 202), (328, 202))),
+        ):
+            with self.subTest(kind=kind):
+                detector = MarkerDetector(kind)
+                frame = triangle_frame(kind, points=points)
+                first = detector.detect(frame, timestamp=0.0)
+                result = confirmed(detector, frame, start=0.1)
+
+                self.assertIsNotNone(first)
+                self.assertFalse(first.confirmed)
+                self.assertIsNotNone(result)
+                self.assertTrue(result.confirmed)
+                self.assertLess(
+                    result.area / float(WIDTH * HEIGHT),
+                    0.0015,
+                )
+
     def test_wrong_target_color_is_never_returned(self):
         cases = (
             ("green", triangle_frame("red")),

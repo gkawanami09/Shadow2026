@@ -20,11 +20,8 @@ Os nomes abaixo são as constantes de `controle/missao.py::MissionState`.
 
 ```text
 FOLLOW_LINE
-  └─ faixa prata candidata ──► ENTRY_SILVER_CANDIDATE
-                                 └─ PARA E OBSERVA POR 1 s ──► VERIFY_ENTRY_SILVER
-                                      ├─ preto depois da prata ──► FOLLOW_LINE (nova prata bloqueada por 1 s)
-                                      ├─ prata sumiu ────────────► FOLLOW_LINE
-                                      └─ prata confirmada ───────► ENTER_RESCUE_ZONE
+  └─ prata alinhada sem preto após a caixa ──► ENTER_RESCUE_ZONE
+  └─ preto depois da prata ──────────────────► FOLLOW_LINE (nova prata bloqueada por 1 s)
 ENTER_RESCUE_ZONE ──► STOP_AND_HANDOFF_TO_RESCUE ──► RESCUE_SCAN
                                                         │
    ┌────────────────────────────────────────────────────┘
@@ -127,11 +124,10 @@ construído — rodar `main.py` sozinho tem custo zero.
 Evidência conjunta exigida (`visao/entrada_missao.py`):
 
 1. `entrada.onnx` encontra a faixa prata com confiança mínima configurada;
-2. o primeiro frame precisa estar com a linha preta centralizada e com ângulo
-   pequeno; ele manda o controle parar;
-3. por um segundo, a prata continua visível e não pode haver preto além da
-   caixa dela, medido tanto pelo limiar normal quanto pelo limiar da rampa;
-4. há ao menos dois resultados positivos nessa observação.
+2. o frame precisa estar com a linha preta centralizada e com ângulo pequeno;
+3. não pode haver preto além da caixa dela, medido tanto pelo limiar normal
+   quanto pelo limiar da rampa;
+4. satisfeitas essas condições, um resultado positivo já confirma a entrada.
 
 Após a confirmação, o processo de percurso para e libera câmera/serial. O
 processo `resgate.py` então faz o avanço reto já calibrado de 1 s e inicia os
@@ -168,7 +164,7 @@ existindo com seus testes e volta a ser usado se
 | `ENTRY_MODEL_PATH` | `modelos/entrada.onnx` | modelo da faixa prata |
 | `ENTRY_MODEL_INPUT` | `640` | tamanho de entrada do modelo |
 | `ENTRY_MODEL_MIN_CONFIDENCE` | `.45` | confiança mínima aceita; o debug mostra a confiança bruta e o limiar |
-| `ENTRY_SILVER_VOTES_NEEDED/VOTE_WINDOW` | `2` / `3` | confirmação temporal |
+| `ENTRY_SILVER_VOTES_NEEDED/VOTE_WINDOW` | `1` / `3` | confirma no primeiro prata alinhado sem preto após a caixa |
 | `ENTRY_LINE_MAX_ANGLE` | `18` | ângulo máximo para entrar alinhado |
 | `ENTRY_LINE_MAX_BOTTOM_ERROR_PX` | `55` | erro máximo do ponto inferior da linha |
 | `ENTRY_ALIGNMENT_HOLD_S` | `.50` | conserva o último alinhamento ao a faixa cobrir a linha |

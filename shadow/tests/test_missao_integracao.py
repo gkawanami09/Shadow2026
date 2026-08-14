@@ -180,9 +180,9 @@ class MissionRecoveryTests(unittest.TestCase):
 
 class MissionEntryAdvanceTests(unittest.TestCase):
     def test_entrada_prata_exige_votos_e_observacao_de_um_segundo(self):
-        self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 2)
+        self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 1)
         self.assertEqual(config.ENTRY_SILVER_VOTE_WINDOW, 3)
-        self.assertEqual(config.ENTRY_SILVER_VALIDATION_S, 1.0)
+        self.assertEqual(config.ENTRY_SILVER_VALIDATION_S, 0.0)
 
     def test_avanco_da_entrada_tem_um_segundo_e_pwm_80(self):
         self.assertEqual(cfg.MISSION_ENTRY_FORWARD_S, 1.0)

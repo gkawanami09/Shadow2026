@@ -359,7 +359,7 @@ class EntryModelWorker:
 
 
 class EntryGate:
-    """Valida a prata parada antes de entregar a sala ao resgate."""
+    """Confirma a prata ou bloqueia quando a pista preta continua depois."""
 
     IDLE = ENTRY_SILVER_IDLE
     VALIDATING = ENTRY_SILVER_VALIDATING
@@ -434,8 +434,8 @@ class EntryGate:
     def update(self, inference, now=None):
         """Recebe uma inferencia pronta e usa sua chegada para os prazos.
 
-        O timestamp de captura so identifica o frame. Uma inferencia lenta nao
-        pode consumir o segundo de observacao antes de o controle parar o robo.
+        O timestamp de captura só identifica o frame. Quando a configuração
+        pede observação parada, o prazo começa na chegada da inferência.
         """
         if inference is None:
             if now is not None:
@@ -498,11 +498,18 @@ class EntryGate:
             self.last_reason = "faixa_sem_linha_alinhada"
             return False, inference.detection
 
-        # O primeiro positivo alinhado manda o controle parar. Durante o
-        # segundo inteiro seguinte a linha pode desaparecer sob a prata; por
-        # isso o alinhamento e exigido apenas para iniciar esta observacao.
+        # O alinhamento é exigido neste primeiro positivo para não entregar a
+        # sala com o robô atravessado na faixa.
         self._clear_validation()
         self._hits.append(True)
+        # Com a proteção de preto depois da caixa ativa, um único prata
+        # alinhado é suficiente. Isso evita o robô cruzar toda a faixa antes
+        # de obter uma segunda inferência. Se a configuração pedir mais de um
+        # voto, conserva o fluxo antigo de parar e observar.
+        if self.votes >= config.ENTRY_SILVER_VOTES_NEEDED:
+            self._state = self.IDLE
+            self.last_reason = "confirmada"
+            return True, inference.detection
         self._state = self.VALIDATING
         self._validation_started_at = observed_at
         self.last_reason = "validando_prata_parado"

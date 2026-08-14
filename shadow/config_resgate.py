@@ -781,10 +781,10 @@ FINAL_TRIANGLE_OVERLAY_BGR = {
 MARKER_BASE_WIDTH = 640
 MARKER_BASE_HEIGHT = 480
 
-# O codigo de referencia descarta aproximadamente os 45% superiores da camera
-# da zona. Aqui o mesmo corte impede roupa/cadeiras acima da parede de virar
-# destino; o contorno pode tocar a linha, mas seu centro util fica na arena.
-MARKER_ROI_TOP = 0.45
+# A faixa superior ainda fica fora da arena, mas um triangulo distante aparece
+# antes na metade alta da imagem. 0.35 deixa essa primeira aparicao entrar no
+# detector sem abrir a camera inteira para objetos do ambiente.
+MARKER_ROI_TOP = 0.35
 
 # O triangulo vermelho pode aparecer bem menor e mais alto quando o robo sai
 # do deposito verde. Ele e procurado somente nos frames parados dos pulsos e
@@ -792,8 +792,8 @@ MARKER_ROI_TOP = 0.45
 # por isso pode usar uma janela vertical e uma geometria de aquisicao proprias
 # sem afrouxar a deteccao do verde nem aceitar um frame isolado.
 MARKER_RED_ROI_TOP = 0.28
-MARKER_RED_MIN_AREA_RATIO = 0.00030
-MARKER_RED_MIN_SIDE_PX = 6
+MARKER_RED_MIN_AREA_RATIO = 0.00020
+MARKER_RED_MIN_SIDE_PX = 5
 
 # HSV do OpenCV (H em 0..180). Vermelho cruza a origem e, por isso, usa duas
 # bandas. O contraste cromatico local abaixo continua obrigatorio: o HSV
@@ -807,15 +807,18 @@ MARKER_RED_HSV_MAX_2 = (180, 255, 255)
 
 # Limpeza da mascara. Os tamanhos sao definidos na base 640x480 e escalados
 # automaticamente para o detector continuar equivalente em 320x240.
-MARKER_MORPH_OPEN_PX = 3
-MARKER_MORPH_CLOSE_PX = 5
+# A abertura 3x3 eliminava justamente os poucos pixels de um triangulo longe.
+# Os gates de area, cromaticidade, contraste local e tres frames consecutivos
+# continuam filtrando ruido; por isso a limpeza pode ser mais leve.
+MARKER_MORPH_OPEN_PX = 1
+MARKER_MORPH_CLOSE_PX = 3
 
 # Geometria do triangulo. A razao principal e area(hull) dividida pela area do
 # menor triangulo que envolve o hull: triangulos se aproximam de 1; circulos,
 # retangulos e manchas difusas ficam muito abaixo.
-MARKER_MIN_AREA_RATIO = 0.0015
+MARKER_MIN_AREA_RATIO = 0.00065
 MARKER_MAX_AREA_RATIO = 0.55
-MARKER_MIN_SIDE_PX = 9
+MARKER_MIN_SIDE_PX = 6
 
 # Um blob que encosta na borda LATERAL do quadro esta INCOMPLETO: parte dele
 # ficou fora da imagem e sua forma nao pode ser julgada. Medido nas capturas

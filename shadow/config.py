@@ -270,27 +270,27 @@ ENTRY_NCNN_MODEL_PATH = "modelos/entrada_416_ncnn_model"
 ENTRY_MODEL_INPUT = 640
 ENTRY_NCNN_MODEL_INPUT = 416
 # A faixa prata muda muito de brilho com a luz da pista. Aceita candidatos a
-# partir de 45%; a observacao parada por um segundo e o preto depois da caixa
-# continuam sendo as protecoes contra um falso resgate.
+# partir de 45%; a linha alinhada e o preto depois da caixa protegem contra
+# um falso resgate sem perder uma faixa atravessada em velocidade.
 ENTRY_MODEL_MIN_CONFIDENCE = .45
 # Limita o runtime do modelo para não disputar todos os núcleos com a linha.
 ENTRY_MODEL_THREADS = 2
-# A confiança do YOLO não é uma segunda evidência: toda candidata passa pela
-# observação parada de um segundo, inclusive se a confiança for alta.
-ENTRY_SILVER_VOTES_NEEDED = 2
+# Uma candidata alinhada entra imediatamente quando não há preto depois dela.
+# Para voltar à observação parada, aumente os votos e a duração abaixo juntos.
+ENTRY_SILVER_VOTES_NEEDED = 1
 ENTRY_SILVER_VOTE_WINDOW = 3
 # Contexto da prata: a imagem clara no final da rampa só é um falso
 # candidato se a linha preta continuar DEPOIS dela, na direção de marcha.
 # Esta é uma evidência muito mais estável do que exigir que a faixa prata
 # tenha sempre a mesma textura/espessura na câmera. A entrada verdadeira
-# encerra a linha; ela precisa permanecer visível durante a observação parada.
+# encerra a linha, portanto não deve haver preto além da caixa.
 ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD = True
 # Ignora alguns pixels imediatamente acima da caixa prata para nao confundir
 # sua borda com a continuacao preta da rampa.
 ENTRY_BLACK_AFTER_SILVER_GUARD_RATIO = .03
-# Ao surgir uma prata sem preto alem dela, o robo para e observa por este
-# tempo. So depois desse intervalo a entrada pode ser confirmada.
-ENTRY_SILVER_VALIDATION_S = 1.0
+# Com um voto a confirmação é imediata. Este valor só tem efeito quando a
+# configuração exigir mais de um voto, para voltar à observação parada.
+ENTRY_SILVER_VALIDATION_S = 0.0
 # Se houver preto alem da prata, mantenha o segue-linha e bloqueie apenas uma
 # nova candidatura prata por este periodo. Cada frame com preto renova o prazo.
 ENTRY_BLACK_FOLLOW_TIMEOUT_S = 1.0
