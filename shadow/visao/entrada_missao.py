@@ -79,6 +79,41 @@ def has_black_after_entry_detection(mask, detection):
     )
 
 
+def has_ramp_black_near_entry_detection(mask, detection):
+    """Detecta a barra preta larga da rampa próxima à falsa faixa prata.
+
+    A linha regular que chega à sala é estreita e central. Já a saída da
+    rampa aparece como uma barra transversal escura. Medir a largura em uma
+    janela grande separa as duas sem exigir outra inferência de prata.
+    """
+    if detection is None or mask is None or mask.ndim != 2:
+        return False
+    height, width = mask.shape
+    if height == 0 or width == 0:
+        return False
+    try:
+        _x, silver_top, _box_width, box_height = detection.bbox
+        silver_top = float(silver_top)
+        silver_bottom = silver_top + float(box_height)
+    except (TypeError, ValueError):
+        return False
+
+    margin = max(1, int(round(
+        height * config.ENTRY_RAMP_BLACK_NEAR_BOX_MARGIN_RATIO)))
+    y_start = max(0, int(np.floor(silver_top)) - margin)
+    y_end = min(height, int(np.ceil(silver_bottom)) + margin)
+    x_start = int(width * config.ENTRY_RAMP_BLACK_X_MIN)
+    x_end = int(width * config.ENTRY_RAMP_BLACK_X_MAX)
+    nearby = mask[y_start:y_end, x_start:x_end]
+    if not nearby.size:
+        return False
+    row_fill = np.count_nonzero(nearby, axis=1) / nearby.shape[1]
+    rows_required = max(1, int(round(
+        height * config.ENTRY_RAMP_BLACK_MIN_ROWS_RATIO)))
+    return bool(np.count_nonzero(
+        row_fill >= config.ENTRY_RAMP_BLACK_ROW_FILL) >= rows_required)
+
+
 class EntryModel:
     """YOLO de uma classe via NCNN, com contingência para ONNX Runtime."""
 
@@ -336,8 +371,16 @@ class EntryModelWorker:
                 inference_ms = (time.perf_counter() - started) * 1000.
                 black_ahead = has_black_after_entry_detection(
                     black_mask, detection)
-                ramp_black_ahead = has_black_after_entry_detection(
-                    ramp_black_mask, detection)
+                # A barra da rampa pode ficar um pouco mais clara que o teto
+                # exclusivo calibrado. A geometria transversal larga abaixo
+                # e' o discriminante; por isso aceita a evidencia de qualquer
+                # uma das duas mascaras, sem confundir a linha estreita real.
+                ramp_black_ahead = (
+                    has_ramp_black_near_entry_detection(
+                        black_mask, detection)
+                    or has_ramp_black_near_entry_detection(
+                        ramp_black_mask, detection)
+                )
             except Exception as error:  # surfaced in the vision process
                 with self._condition:
                     self._error = error

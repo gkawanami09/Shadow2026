@@ -288,6 +288,15 @@ ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD = True
 # Ignora alguns pixels imediatamente acima da caixa prata para nao confundir
 # sua borda com a continuacao preta da rampa.
 ENTRY_BLACK_AFTER_SILVER_GUARD_RATIO = .03
+# A saída da rampa forma uma faixa preta transversal e larga; a linha que
+# chega à entrada prata é estreita. Esta segunda medida usa somente a máscara
+# preta mais rígida da rampa e procura uma barra larga perto da caixa do YOLO.
+# Ela não acrescenta votos ou atraso à entrada verdadeira.
+ENTRY_RAMP_BLACK_X_MIN = .15
+ENTRY_RAMP_BLACK_X_MAX = .85
+ENTRY_RAMP_BLACK_ROW_FILL = .60
+ENTRY_RAMP_BLACK_MIN_ROWS_RATIO = .02
+ENTRY_RAMP_BLACK_NEAR_BOX_MARGIN_RATIO = .08
 # Com um voto a confirmação é imediata. Este valor só tem efeito quando a
 # configuração exigir mais de um voto, para voltar à observação parada.
 ENTRY_SILVER_VALIDATION_S = 0.0

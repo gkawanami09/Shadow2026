@@ -13,7 +13,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config  # noqa: E402
 from visao.entrada_missao import (  # noqa: E402
     EntryDetection, EntryGate, EntryInference, EntryModel, EntryPipeline,
-    has_black_after_entry_detection)
+    has_black_after_entry_detection, has_ramp_black_near_entry_detection)
 
 
 class _Session:
@@ -90,6 +90,20 @@ class EntryGateTests(unittest.TestCase):
         detection = EntryDetection((40, 55, 20, 10), .8)
 
         self.assertFalse(has_black_after_entry_detection(mask, detection))
+
+    def test_barra_preta_larga_da_rampa_perto_da_prata_veta(self):
+        mask = np.zeros((100, 100), dtype=np.uint8)
+        mask[42:55, 15:85] = 255
+        detection = EntryDetection((40, 55, 20, 12), .8)
+
+        self.assertTrue(has_ramp_black_near_entry_detection(mask, detection))
+
+    def test_linha_preta_estreita_na_entrada_nao_vira_barra_da_rampa(self):
+        mask = np.zeros((100, 100), dtype=np.uint8)
+        mask[10:70, 43:57] = 255
+        detection = EntryDetection((40, 55, 20, 12), .8)
+
+        self.assertFalse(has_ramp_black_near_entry_detection(mask, detection))
 
     def test_prata_alinhada_sem_preto_confirma_no_primeiro_frame(self):
         detection = EntryDetection((1, 2, 3, 4), .95)
