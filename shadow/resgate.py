@@ -459,6 +459,28 @@ def _preparar_deposito_cinza(vitimas_prata_resgatadas):
     return _preparar_deposito_final("green", vitimas_prata_resgatadas)
 
 
+def _recuperar_rota_deposito(controlador, agora):
+    """Recomeça a busca do marcador sem abandonar a sala de resgate.
+
+    Perder o retangulo durante a aproximação não significa que o depósito
+    acabou. A nova instância descarta votos, frames e timeout do marcador
+    antigo, mas a contagem de vítimas continua no laço principal do resgate.
+    """
+    marcador = controlador.target_kind
+    nome = "verde" if marcador == "green" else "vermelho"
+    novo_controlador = ControladorRetanguloVerde(
+        start_time=agora,
+        target_kind=marcador,
+    )
+    return novo_controlador, MotionCommand(
+        f"{marcador.upper()}_ROUTE_RECOVERY",
+        detail=(
+            f"rota do marcador {nome} perdeu a confirmacao; "
+            "permanecendo no resgate e procurando-o novamente"
+        ),
+    )
+
+
 def _proximo_marcador_deposito(marcador_atual):
     """Depois do verde vem o vermelho; depois do vermelho a rota termina."""
     if marcador_atual == "green":
@@ -2090,6 +2112,36 @@ def main():
                     if arduino is not None else None
                 )
                 ultimo_controle_ocioso = 0.0
+                comando_atualizado = False
+
+            # Uma falha visual do marcador (verde que saiu do quadro,
+            # timeout de aproximacao ou leitura ultrassonica invalida) nao
+            # pode devolver o robo ao segue-linha. Ele ja esta dentro da sala,
+            # possivelmente carregando todas as vitimas; recomece apenas a
+            # procura do MESMO destino e preserve esse inventario.
+            if (
+                args.drive
+                and controlador_verde is not None
+                and comando.terminal
+            ):
+                marcador_falhou = controlador_verde.target_kind
+                nome_marcador = (
+                    "verde" if marcador_falhou == "green" else "vermelho")
+                print(
+                    f"[resgate] rota do {nome_marcador} falhou "
+                    f"({comando.state}); permanecendo no resgate")
+                controlador_verde, comando = _recuperar_rota_deposito(
+                    controlador_verde,
+                    agora,
+                )
+                monitor_chegada_verde = None
+                proxima_atualizacao_ultrassom_verde = 0.0
+                epoca_verde = (
+                    arduino.connection_epoch if arduino is not None else None)
+                if marcadores is not None:
+                    marcadores.reset()
+                marcadores_atuais = {}
+                ultimo_controle_ocioso = agora
                 comando_atualizado = False
 
             if coleta_concluida is not None:

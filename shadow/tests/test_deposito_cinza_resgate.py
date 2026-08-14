@@ -17,6 +17,7 @@ from resgate import (  # noqa: E402
     _aplicar_acoes_deposito_cinza,
     _preparar_deposito_cinza,
     _preparar_deposito_final,
+    _recuperar_rota_deposito,
     _deposito_vermelho_libera_saida,
     _proximo_marcador_deposito,
 )
@@ -193,6 +194,20 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertEqual(comando.state, "BLACK_DEPOSIT_START")
         self.assertIn("preta", comando.detail)
         self.assertIn("vermelho", comando.detail)
+
+    def test_falha_do_marcador_recomeca_rota_sem_sair_do_resgate(self):
+        from controle.retangulo_verde_resgate import ControladorRetanguloVerde
+
+        anterior = ControladorRetanguloVerde(
+            start_time=10.0,
+            target_kind="green",
+        )
+        recuperado, comando = _recuperar_rota_deposito(anterior, 15.0)
+
+        self.assertIsNot(recuperado, anterior)
+        self.assertEqual(recuperado.target_kind, "green")
+        self.assertEqual(comando.state, "GREEN_ROUTE_RECOVERY")
+        self.assertFalse(comando.terminal)
 
     def test_avanco_e_re_antes_do_giro_usam_os_tempos_calibrados(self):
         sequenciador = SequenciadorDepositoCinza()
