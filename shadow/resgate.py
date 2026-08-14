@@ -468,6 +468,18 @@ def _proximo_marcador_deposito(marcador_atual):
     raise ValueError("marcador_atual deve ser green ou red")
 
 
+def _deposito_vermelho_libera_saida(deposito, passo):
+    """A saída só pode iniciar após o ciclo físico completo no vermelho."""
+    return bool(
+        deposito is not None
+        and passo is not None
+        and deposito.marcador_destino == "red"
+        and passo.state == deposito.CONCLUIDO
+        and passo.terminal
+        and deposito.deposito_fisico_comandado
+    )
+
+
 def _validar_inicio_coleta(
     comando,
     coleta,
@@ -1923,6 +1935,13 @@ def main():
                 and passo_deposito_cinza.terminal
             ):
                 marcador_concluido = deposito_cinza.marcador_destino
+                if not deposito_cinza.deposito_fisico_comandado:
+                    # Falha fechada: a sequencia nunca pode liberar a rota
+                    # seguinte (principalmente a saida) sem a abertura e a
+                    # restauracao da caçamba terem sido aceitas pela serial.
+                    raise RuntimeError(
+                        "sequencia de deposito terminou sem confirmar os "
+                        "comandos da cacamba; busca da saida bloqueada")
                 proximo_marcador = _proximo_marcador_deposito(
                     marcador_concluido)
                 if proximo_marcador is not None:
@@ -1976,6 +1995,12 @@ def main():
                 else:
                     # O reto final do deposito vermelho terminou. Somente
                     # agora a faixa de saida passa a existir para a visao.
+                    if not _deposito_vermelho_libera_saida(
+                        deposito_cinza, passo_deposito_cinza
+                    ):
+                        raise RuntimeError(
+                            "tentativa de iniciar a saida sem deposito "
+                            "vermelho fisicamente concluido")
                     print(
                         "[resgate] deposito vermelho concluido; "
                         "procurando e alinhando com a faixa de saida")

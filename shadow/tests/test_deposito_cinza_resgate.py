@@ -17,6 +17,7 @@ from resgate import (  # noqa: E402
     _aplicar_acoes_deposito_cinza,
     _preparar_deposito_cinza,
     _preparar_deposito_final,
+    _deposito_vermelho_libera_saida,
     _proximo_marcador_deposito,
 )
 
@@ -91,7 +92,7 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertIn("PRE_TURN_FORWARD_STOP", seguinte.state)
 
     def test_sequencia_completa_respeita_ordem_e_restaura_cacamba(self):
-        _sequenciador, passos, final = executar_sequencia()
+        sequenciador, passos, final = executar_sequencia()
         nomes = [passo.state for passo in passos]
 
         indice_giro = next(
@@ -126,6 +127,7 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertEqual(final.state, SequenciadorDepositoCinza.CONCLUIDO)
         self.assertTrue(final.terminal)
         self.assertEqual(final.angle, 190)
+        self.assertTrue(sequenciador.deposito_fisico_comandado)
 
     def test_vermelho_abre_e_restaura_a_cacamba_no_lado_oposto(self):
         sequenciador = SequenciadorDepositoCinza("red")
@@ -147,6 +149,34 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertEqual(deltas, [90, -90])
         self.assertEqual(final.state, "BLACK_DEPOSIT_COMPLETE")
         self.assertTrue(final.terminal)
+        self.assertTrue(sequenciador.deposito_fisico_comandado)
+
+    def test_saida_exige_deposito_vermelho_com_cacamba_comandada(self):
+        sequenciador = SequenciadorDepositoCinza("red")
+        final_antes_da_serial = sequenciador.update(now=0.0)
+
+        self.assertFalse(_deposito_vermelho_libera_saida(
+            sequenciador, final_antes_da_serial))
+
+        agora = 0.0
+        while True:
+            passo = sequenciador.update(now=agora)
+            if passo.terminal:
+                final = passo
+                break
+            duracao = sequenciador._etapas[sequenciador._indice].duracao
+            self.assertTrue(sequenciador.notify_command_written(
+                passo.state, now=agora))
+            agora += duracao
+
+        self.assertTrue(_deposito_vermelho_libera_saida(sequenciador, final))
+
+    def test_deposito_verde_nunca_libera_a_saida(self):
+        sequenciador, _passos, final = executar_sequencia()
+
+        self.assertTrue(sequenciador.deposito_fisico_comandado)
+        self.assertFalse(_deposito_vermelho_libera_saida(
+            sequenciador, final))
 
     def test_depois_do_verde_procura_vermelho_e_so_entao_encerra(self):
         self.assertEqual(_proximo_marcador_deposito("green"), "red")

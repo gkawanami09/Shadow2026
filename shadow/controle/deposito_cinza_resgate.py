@@ -58,6 +58,12 @@ class SequenciadorDepositoCinza:
         self._ativa = False
         self._prazo = None
         self._detalhe_falha = ""
+        # Estes dois reconhecimentos formam a permissao para a proxima fase.
+        # Em especial, a busca da saida jamais pode ser armada apenas porque
+        # os temporizadores terminaram: no deposito vermelho a caçamba precisa
+        # ter recebido tanto a abertura quanto a restauracao.
+        self._cacamba_aberta_comandada = False
+        self._cacamba_restaurada_comandada = False
 
     @property
     def terminal(self):
@@ -69,6 +75,14 @@ class SequenciadorDepositoCinza:
         return (
             self._indice > self._indice_abertura
             and self._indice <= self._indice_restauracao
+        )
+
+    @property
+    def deposito_fisico_comandado(self):
+        """Indica que abrir e restaurar a caçamba foram aceitos pela serial."""
+        return (
+            self._cacamba_aberta_comandada
+            and self._cacamba_restaurada_comandada
         )
 
     def update(self, now=None):
@@ -119,6 +133,10 @@ class SequenciadorDepositoCinza:
         if state != self._estado_pendente(etapa):
             return False
         agora = time.monotonic() if now is None else float(now)
+        if etapa.nome.startswith("BUCKET_OPEN_"):
+            self._cacamba_aberta_comandada = True
+        elif etapa.nome == "BUCKET_RESTORE":
+            self._cacamba_restaurada_comandada = True
         self._ativa = True
         self._prazo = agora + etapa.duracao
         return True
