@@ -212,12 +212,20 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
         self.assertFalse(controlador.ultrassom_habilitado)
         controlador.notify_command_written(encontrou.state, now=0.02)
 
-        alinhando = controlador.update(
+        primeira_confirmacao = controlador.update(
             marcador_verde(0.03, center_x=500),
             FORMATO,
             now=0.03,
             distancia_chegada_mm=30,
         )
+        alinhando = controlador.update(
+            marcador_verde(0.04, center_x=500),
+            FORMATO,
+            now=0.04,
+            distancia_chegada_mm=30,
+        )
+        self.assertEqual(
+            primeira_confirmacao.state, controlador.navegacao.VERIFY)
         self.assertEqual(alinhando.state, controlador.navegacao.ALIGN)
         self.assertEqual(alinhando.angle, 180)
         self.assertEqual(

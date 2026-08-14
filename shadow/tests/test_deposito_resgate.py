@@ -178,7 +178,7 @@ class DepositMarkerControllerTests(unittest.TestCase):
         self.assertEqual(encontrado.state, controller.TARGET_STOP)
 
         controller.mark_target_stopped(now=observando_em + 0.03)
-        centralizando = controller.update(
+        primeira_confirmacao = controller.update(
             marker(
                 observando_em + 0.04,
                 kind="red",
@@ -187,6 +187,16 @@ class DepositMarkerControllerTests(unittest.TestCase):
             FRAME_SHAPE,
             now=observando_em + 0.04,
         )
+        centralizando = controller.update(
+            marker(
+                observando_em + 0.05,
+                kind="red",
+                center_x=520.0,
+            ),
+            FRAME_SHAPE,
+            now=observando_em + 0.05,
+        )
+        self.assertEqual(primeira_confirmacao.state, controller.VERIFY)
         self.assertEqual(centralizando.state, controller.ALIGN)
 
     def test_vermelho_visivel_antes_do_primeiro_giro_e_preservado(self):
@@ -239,10 +249,30 @@ class DepositMarkerControllerTests(unittest.TestCase):
 
         old = controller.update(
             marker(0.09), FRAME_SHAPE, now=0.20)
-        acquired = controller.update(
+        primeira_confirmacao = controller.update(
             marker(0.21), FRAME_SHAPE, now=0.21)
+        acquired = controller.update(
+            marker(0.22), FRAME_SHAPE, now=0.22)
         self.assertEqual(old.state, controller.VERIFY)
+        self.assertEqual(primeira_confirmacao.state, controller.VERIFY)
         self.assertEqual(acquired.state, controller.APPROACH)
+
+    def test_falso_marcador_que_some_parado_retorna_ao_giro(self):
+        controller = DepositMarkerController("green", start_time=0.0)
+        stop = controller.update(marker(0.0), FRAME_SHAPE, now=0.0)
+        controller.mark_target_stopped(now=0.01)
+
+        primeiro = controller.update(marker(0.02), FRAME_SHAPE, now=0.02)
+        retomada = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=0.01 + cfg.DEPOSIT_SEARCH_VERIFY_TIMEOUT_S,
+        )
+
+        self.assertEqual(stop.state, controller.TARGET_STOP)
+        self.assertEqual(primeiro.state, controller.VERIFY)
+        self.assertEqual(retomada.state, controller.START)
+        self.assertEqual(retomada.angle, cfg.DEPOSIT_SEARCH_TANK_ANGLE)
 
     def test_align_direction_and_speed_are_gentle(self):
         for center_x, sign in ((520.0, 1), (120.0, -1)):
@@ -422,6 +452,7 @@ class DepositMarkerControllerTests(unittest.TestCase):
             now=(
                 cfg.DEPOSIT_SEARCH_FULL_TURN_S
                 + cfg.DEPOSIT_SEARCH_VERIFY_TIMEOUT_S
+                + .001
             ),
         )
 
@@ -452,6 +483,7 @@ class DepositMarkerControllerTests(unittest.TestCase):
             now=(
                 cfg.DEPOSIT_SEARCH_FULL_TURN_S
                 + cfg.DEPOSIT_SEARCH_VERIFY_TIMEOUT_S
+                + .001
             ),
         )
 

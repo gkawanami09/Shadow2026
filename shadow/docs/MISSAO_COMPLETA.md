@@ -163,7 +163,7 @@ existindo com seus testes e volta a ser usado se
 | `ENTRY_SILVER_ENABLED` | `True` | liga a detecção da entrada |
 | `ENTRY_MODEL_PATH` | `modelos/entrada.onnx` | modelo da faixa prata |
 | `ENTRY_MODEL_INPUT` | `640` | tamanho de entrada do modelo |
-| `ENTRY_MODEL_MIN_CONFIDENCE` | `.45` | confiança mínima aceita; o debug mostra a confiança bruta e o limiar |
+| `ENTRY_MODEL_MIN_CONFIDENCE` | `.30` | confiança mínima aceita; o veto de preto/rampa continua obrigatório |
 | `ENTRY_SILVER_VOTES_NEEDED/VOTE_WINDOW` | `1` / `3` | confirma no primeiro prata alinhado sem preto após a caixa |
 | `ENTRY_LINE_MAX_ANGLE` | `35` | ângulo máximo para entrar alinhado, tolerando o robô torto |
 | `ENTRY_LINE_MAX_BOTTOM_ERROR_PX` | `110` | erro máximo do ponto inferior da linha, tolerando deslocamento |

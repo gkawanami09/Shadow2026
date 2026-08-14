@@ -99,6 +99,8 @@ class DepositMarkerController:
         self._progress_error = None
         self._progress_width = None
         self._progress_bottom = None
+        self._verify_count = 0
+        self._last_verify_timestamp = None
         self._terminal_detail = ""
 
     @property
@@ -244,11 +246,20 @@ class DepositMarkerController:
                 captured_after=self._stopped_at,
             )
             if valid:
-                self._tentative_target = False
-                self._last_seen_at = now
-                self._reset_near()
-                return self._drive_to_target(
-                    detection, width, height, now)
+                if self._count_verify_frame(detection):
+                    self._tentative_target = False
+                    self._last_seen_at = now
+                    self._reset_near()
+                    return self._drive_to_target(
+                        detection, width, height, now)
+                return self._stop(
+                    self.state,
+                    "marcador reapareceu; confirmando parado "
+                    f"{self._verify_count}/"
+                    f"{cfg.DEPOSIT_VERIFY_CONFIRM_FRAMES}",
+                )
+
+            self._reset_verify()
 
             if (
                 self._stopped_at is not None
@@ -362,6 +373,7 @@ class DepositMarkerController:
         self._finish_rotation_segment(now)
         self.state = self.VERIFY
         self._stopped_at = now
+        self._reset_verify()
 
     def mark_full_turn_stopped(self, now=None):
         if self.state != self.TURN_STOP:
@@ -372,6 +384,7 @@ class DepositMarkerController:
         self._finish_rotation_segment(now)
         self.state = self.FINAL_VERIFY
         self._stopped_at = now
+        self._reset_verify()
 
     def mark_lost_stopped(self, now=None):
         if self.state != self.LOST_STOP:
@@ -383,6 +396,7 @@ class DepositMarkerController:
         self._stopped_at = now
         self._tracking_reset_requested = True
         self._reset_progress()
+        self._reset_verify()
 
     def mark_arrival_stopped(self, now=None):
         if self.state != self.ARRIVAL_STOP:
@@ -614,6 +628,7 @@ class DepositMarkerController:
         self.state = self.TARGET_STOP
         self._tentative_target = bool(tentative)
         self._reset_progress()
+        self._reset_verify()
         return self._stop(
             self.TARGET_STOP,
             (
@@ -678,6 +693,21 @@ class DepositMarkerController:
         self._near_count = 0
         self._near_first_at = None
         self._last_near_timestamp = None
+
+    def _reset_verify(self):
+        self._verify_count = 0
+        self._last_verify_timestamp = None
+
+    def _count_verify_frame(self, detection):
+        """Conta apenas imagens novas do marcador depois da parada."""
+        timestamp = float(detection.timestamp)
+        if (
+            self._last_verify_timestamp is None
+            or timestamp > self._last_verify_timestamp + 1e-9
+        ):
+            self._verify_count += 1
+            self._last_verify_timestamp = timestamp
+        return self._verify_count >= cfg.DEPOSIT_VERIFY_CONFIRM_FRAMES
 
     def _mark_active(self, now):
         if self._active_started_at is None:

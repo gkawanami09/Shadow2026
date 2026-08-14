@@ -270,9 +270,12 @@ ENTRY_NCNN_MODEL_PATH = "modelos/entrada_416_ncnn_model"
 ENTRY_MODEL_INPUT = 640
 ENTRY_NCNN_MODEL_INPUT = 416
 # A faixa prata muda muito de brilho e pode cruzar o quadro em poucos frames.
-# Aceita candidatos a partir de 35%; a linha alinhada e os vetos de preto
+# Aceita candidatos a partir de 30%; a linha alinhada e os vetos de preto
 # normal/rampa continuam obrigatorios antes de iniciar o resgate.
-ENTRY_MODEL_MIN_CONFIDENCE = .35
+ENTRY_MODEL_MIN_CONFIDENCE = .30
+# O YOLO leva mais que um periodo de camera. Guardar esta janela curta evita
+# perder os poucos frames da prata, mas o limite impede backlog indefinido.
+ENTRY_MODEL_PENDING_FRAMES = 12
 # Limita o runtime do modelo para não disputar todos os núcleos com a linha.
 ENTRY_MODEL_THREADS = 2
 # Uma candidata alinhada entra imediatamente quando não há preto depois dela.

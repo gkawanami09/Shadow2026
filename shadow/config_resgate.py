@@ -433,8 +433,12 @@ DEPOSIT_SEARCH_OBSERVE_FRAMES = BALL_SEARCH_OBSERVE_FRAMES
 DEPOSIT_SEARCH_OBSERVE_TIMEOUT_S = BALL_SEARCH_OBSERVE_TIMEOUT_S
 RED_DEPOSIT_SEARCH_TANK_SPEED = BALL_SEARCH_TANK_SPEED
 RED_DEPOSIT_SEARCH_FULL_TURN_S = BALL_SEARCH_FULL_TURN_S
-DEPOSIT_SEARCH_VERIFY_TIMEOUT_S = 1.00
-DEPOSIT_REACQUIRE_TIMEOUT_S = 0.60
+DEPOSIT_SEARCH_VERIFY_TIMEOUT_S = 0.45
+# O marcador precisa reaparecer em frames novos depois da parada. Assim um
+# falso verde visto no giro nao comanda o alinhamento, e se ele sumir o robo
+# volta rapidamente a procurar em vez de permanecer corrigindo no vazio.
+DEPOSIT_VERIFY_CONFIRM_FRAMES = 2
+DEPOSIT_REACQUIRE_TIMEOUT_S = 0.30
 # O transporte nunca pode comandar rodas indefinidamente. O limite global
 # comeca somente depois da primeira escrita serial de movimento; o watchdog
 # curto exige melhora de alinhamento, largura ou altura aparente do marcador.

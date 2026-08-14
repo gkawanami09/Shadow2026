@@ -295,7 +295,9 @@ class EntryModelWorker:
     def __init__(self, model):
         self.model = model
         self._condition = threading.Condition()
-        self._pending = None
+        # Janela limitada: preserva a faixa curta vista em alta velocidade sem
+        # deixar a inferencia acumular uma fila longa de imagens antigas.
+        self._pending = deque(maxlen=config.ENTRY_MODEL_PENDING_FRAMES)
         self._latest = None
         self._delivered_timestamp = None
         self._generation = 0
@@ -318,21 +320,21 @@ class EntryModelWorker:
     ):
         # A cópia impede a câmera de reutilizar o buffer durante a inferência.
         with self._condition:
-            self._pending = (
+            self._pending.append((
                 self._generation,
                 frame.copy(),
                 float(timestamp),
                 bool(line_aligned),
                 None if black_mask is None else black_mask.copy(),
                 None if ramp_black_mask is None else ramp_black_mask.copy(),
-            )
+            ))
             self._condition.notify()
 
     def reset(self):
         """Invalida trabalhos e resultados de uma fase anterior da pista."""
         with self._condition:
             self._generation += 1
-            self._pending = None
+            self._pending.clear()
             self._latest = None
             self._delivered_timestamp = None
             self._condition.notify_all()
@@ -351,20 +353,19 @@ class EntryModelWorker:
     def close(self):
         with self._condition:
             self._stopping = True
-            self._pending = None
+            self._pending.clear()
             self._condition.notify()
         self._thread.join(timeout=2.0)
 
     def _run(self):
         while True:
             with self._condition:
-                while self._pending is None and not self._stopping:
+                while not self._pending and not self._stopping:
                     self._condition.wait()
                 if self._stopping:
                     return
                 (generation, frame, timestamp, line_aligned,
-                 black_mask, ramp_black_mask) = self._pending
-                self._pending = None
+                 black_mask, ramp_black_mask) = self._pending.popleft()
             try:
                 started = time.perf_counter()
                 detection = self.model.detect(frame)

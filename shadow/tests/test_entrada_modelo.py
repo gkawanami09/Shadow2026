@@ -2,6 +2,8 @@
 
 import sys
 from pathlib import Path
+import threading
+import time
 import unittest
 
 import numpy as np
@@ -12,7 +14,8 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
 from visao.entrada_missao import (  # noqa: E402
-    EntryDetection, EntryGate, EntryInference, EntryModel, EntryPipeline,
+    EntryDetection, EntryGate, EntryInference, EntryModel, EntryModelWorker,
+    EntryPipeline,
     has_black_after_entry_detection, has_ramp_black_near_entry_detection)
 
 
@@ -64,7 +67,56 @@ class EntryModelTests(unittest.TestCase):
         self.assertAlmostEqual(model.last_confidence, .44, places=5)
 
     def test_limiar_padrao_da_prata_prioriza_nao_perder_a_faixa(self):
-        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .35)
+        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .30)
+
+
+class EntryModelWorkerTests(unittest.TestCase):
+    def test_janela_curta_preserva_frame_prata_enquanto_modelo_ocupado(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        class ModelFalso:
+            def detect(self, frame):
+                marker = int(frame[0, 0, 0])
+                if marker == 1:
+                    started.set()
+                    release.wait(timeout=1.0)
+                else:
+                    # Da tempo para o processo de visao consumir cada resultado.
+                    time.sleep(.01)
+                return (
+                    EntryDetection((20, 20, 40, 20), .80)
+                    if marker == 2 else None
+                )
+
+        worker = EntryModelWorker(ModelFalso()).start()
+        try:
+            worker.submit(np.full((24, 24, 3), 1, dtype=np.uint8), 1., True)
+            self.assertTrue(started.wait(timeout=.5))
+            # A prata aparece enquanto o primeiro frame ainda esta no modelo.
+            worker.submit(np.full((24, 24, 3), 2, dtype=np.uint8), 2., True)
+            for marker in range(3, 9):
+                worker.submit(
+                    np.full((24, 24, 3), marker, dtype=np.uint8),
+                    float(marker),
+                    True,
+                )
+            release.set()
+
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                inference = worker.poll()
+                if inference is not None and inference.timestamp == 2.0:
+                    self.assertIsNotNone(inference.detection)
+                    self.assertFalse(inference.black_ahead)
+                    self.assertFalse(inference.ramp_black_ahead)
+                    break
+                time.sleep(.005)
+            else:
+                self.fail("o frame de prata foi perdido pela fila do modelo")
+        finally:
+            release.set()
+            worker.close()
 
 
 class EntryGateTests(unittest.TestCase):
