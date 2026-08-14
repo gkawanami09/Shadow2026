@@ -106,9 +106,14 @@ TICK_S = 0.005
 EXIT_OK = 0
 EXIT_INCOMPLETE = 3
 EXIT_SEM_MODELO = 4
+EXIT_ARDUINO_DESCONECTADO = 5
 
 RETOMADA_FALHOU = "retomada_falhou"
 LINHA_NAO_ENCONTRADA = "linha_nao_encontrada"
+
+
+class ArduinoDisconnectedDuringRescue(RuntimeError):
+    """Sinaliza ao supervisor que a unica retomada permitida e por reconexao."""
 
 
 class VideoSource:
@@ -1002,7 +1007,7 @@ def main():
                 and arduino is not None
                 and not arduino.connected
             ):
-                raise RuntimeError(
+                raise ArduinoDisconnectedDuringRescue(
                     "Arduino desconectado durante o resgate; "
                     "reinicie a missao pelo percurso")
             pacote = captura.poll(sequencia_frame)
@@ -1063,7 +1068,7 @@ def main():
                             "[resgate] passagem verde "
                             f"{contador_verde.quantidade}/"
                             f"{contador_verde.necessario}; "
-                            "mantendo busca ate o fim dos 40 s")
+                            "mantendo busca ate o fim da janela configurada")
 
             if (
                 controlador_saida is not None
@@ -2056,7 +2061,7 @@ def main():
             ):
                 # A volta completa continua delimitando a cobertura, mas nao
                 # encerra mais o resgate nem depende de ver o verde. Enquanto
-                # a janela total de 40 s estiver aberta, inicia outra volta.
+                # a janela total estiver aberta, inicia outra volta.
                 varreduras_sem_vitima += 1
                 busca = make_search_controller(start_time=agora)
                 epoca_busca = None
@@ -2509,6 +2514,11 @@ def main():
 
             time.sleep(TICK_S)
 
+    except ArduinoDisconnectedDuringRescue as err:
+        # O supervisor pode rearmar a missao somente neste caso explicito.
+        # Qualquer outra falha termina parada, sem abrir o segue-linha.
+        codigo_saida = EXIT_ARDUINO_DESCONECTADO
+        print(f"[resgate] Arduino desconectado: {err}")
     except RuntimeError as err:
         print(f"[resgate] ERRO: {err}")
     except KeyboardInterrupt:

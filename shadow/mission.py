@@ -65,6 +65,23 @@ SHADOW_ROOT = Path(__file__).resolve().parent
 CHILD_JOIN_TIMEOUT_S = 6.0
 #: Códigos de saída do subprocesso de resgate, lidos pelo supervisor.
 RESCUE_EXIT_OK = 0
+RESCUE_EXIT_ARDUINO_DESCONECTADO = 5
+RESCUE_RETURN_COMPLETED = "completed"
+RESCUE_RETURN_RESTART_AFTER_ARDUINO = "restart_after_arduino"
+RESCUE_RETURN_STOPPED = "stopped"
+
+
+class RescueFailedSafely(RuntimeError):
+    """O resgate parou com falha; nao e permitido reabrir o segue-linha."""
+
+
+def rescue_return_action(returncode):
+    """Define a unica situacao em que uma falha pode rearmar o percurso."""
+    if int(returncode) == RESCUE_EXIT_OK:
+        return RESCUE_RETURN_COMPLETED
+    if int(returncode) == RESCUE_EXIT_ARDUINO_DESCONECTADO:
+        return RESCUE_RETURN_RESTART_AFTER_ARDUINO
+    return RESCUE_RETURN_STOPPED
 
 
 def iniciar_visao(debug):
@@ -504,10 +521,14 @@ def main():
                 coordinator.on_rescue_started()
 
                 returncode = system.wait_rescue()
-                if returncode != RESCUE_EXIT_OK:
+                rescue_action = rescue_return_action(returncode)
+                if rescue_action == RESCUE_RETURN_RESTART_AFTER_ARDUINO:
                     raise RuntimeError(
-                        f"resgate terminou com codigo {returncode}; "
-                        "reiniciando antes da faixa prata")
+                        "Arduino desconectado durante o resgate; "
+                        "reiniciando a missao pelo percurso")
+                if rescue_action == RESCUE_RETURN_STOPPED:
+                    raise RescueFailedSafely(
+                        f"resgate terminou com codigo {returncode}")
                 print("[missao] resgate concluido; voltando ao percurso")
 
                 HandoffExecutor(system, HANDOFF_TO_LINE).run()
@@ -515,6 +536,15 @@ def main():
 
             except KeyboardInterrupt:
                 raise
+            except RescueFailedSafely as err:
+                # Nunca interprete uma falha no resgate como uma saida
+                # confirmada. O robo permanece parado ate intervencao humana.
+                print(
+                    f"[missao] FALHA NO RESGATE: {err}. "
+                    "Robo parado; segue-linha nao sera reiniciado.")
+                coordinator.abort(str(err))
+                codigo = 1
+                return codigo
             except Exception as err:               # noqa: BLE001
                 print(f"[missao] tentativa interrompida: {err}")
                 coordinator.abort(str(err))

@@ -12,7 +12,7 @@ def tempo_busca_resgate_esgotado(inicio, agora, duracao=None):
     """Informa se a janela total de procura de vitimas chegou ao fim.
 
     O inicio e definido depois do armamento da sala. Usar uma funcao pura
-    deixa explicito que coletas e novas varreduras nao reiniciam os 40 s.
+    deixa explicito que coletas e novas varreduras nao reiniciam a janela.
     """
     if duracao is None:
         duracao = cfg.RESCUE_SEARCH_DURATION_S

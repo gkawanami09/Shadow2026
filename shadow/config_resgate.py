@@ -391,9 +391,10 @@ BALL_SEARCH_SECTORS = 9
 BALL_SEARCH_TOTAL_TIMEOUT_S = 75.0
 
 # Janela total da fase de busca de vitimas. Ela comeca somente depois do
-# armamento/entrada na sala e NAO reinicia ao coletar uma vitima. Ao vencer,
-# o robo para com seguranca e inicia a rota de deposito verde -> vermelho.
-RESCUE_SEARCH_DURATION_S = 40.0
+# armamento/entrada na sala e e criada de novo a cada nova execucao de
+# resgate; nao reinicia ao coletar uma vitima. Ao vencer, o robo para com
+# seguranca e inicia a rota de deposito verde -> vermelho.
+RESCUE_SEARCH_DURATION_S = 90.0
 
 # Telemetria das passagens verdes durante a busca pulsada. O verde so conta
 # durante uma observacao parada; essas passagens nao encerram mais a busca —

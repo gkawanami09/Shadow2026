@@ -16,6 +16,7 @@ from controle.contador_verde_resgate import (  # noqa: E402
     BUSCA_REINICIAR,
     ContadorVerdeBusca,
     decidir_apos_varredura,
+    tempo_busca_resgate_esgotado,
 )
 
 
@@ -26,6 +27,19 @@ class VerdeFalso:
 
 
 class ContadorVerdeBuscaTests(unittest.TestCase):
+    def test_janela_de_busca_dura_90_segundos_a_partir_da_entrada(self):
+        inicio_resgate = 100.0
+
+        self.assertEqual(cfg.RESCUE_SEARCH_DURATION_S, 90.0)
+        self.assertFalse(tempo_busca_resgate_esgotado(
+            inicio_resgate,
+            inicio_resgate + cfg.RESCUE_SEARCH_DURATION_S - .01,
+        ))
+        self.assertTrue(tempo_busca_resgate_esgotado(
+            inicio_resgate,
+            inicio_resgate + cfg.RESCUE_SEARCH_DURATION_S,
+        ))
+
     def test_frames_seguidos_do_mesmo_verde_contam_uma_vez(self):
         contador = ContadorVerdeBusca(necessario=2, frames_para_rearmar=3)
 
