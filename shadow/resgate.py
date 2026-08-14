@@ -132,6 +132,31 @@ def runtime_error_exit_code(args, arduino, current_exit_code):
     return current_exit_code
 
 
+def _aguardar_desligamento_do_arduino(arduino, motivo):
+    """Mantém o resgate parado até a placa ser desligada fisicamente.
+
+    Uma exceção durante uma fase física não pode transformar-se em retorno ao
+    segue-linha: ainda pode haver vítima presa ou depósito pendente. No modo
+    gerenciado a própria queda da placa é a única autorização para o
+    supervisor reiniciar a missão desde o percurso.
+    """
+    from controle.direcao import steer
+
+    try:
+        steer()
+    except (OSError, RuntimeError):
+        pass
+    print(
+        "[resgate] falha retida dentro do resgate; motores em PARAR. "
+        f"{motivo}. Desligue e religue o Arduino para reiniciar a missao.")
+    while arduino.connected:
+        # PING é inofensivo para os motores e permite notar a retirada do USB
+        # mesmo quando não há outro comando físico em andamento.
+        arduino.ping()
+        arduino.refresh(fail_closed=True)
+        time.sleep(0.25)
+
+
 class VideoSource:
     """Reprodução de vídeo gravado. Nunca aciona motores."""
 
@@ -2628,9 +2653,79 @@ def main():
                 if transicao_para_coleta:
                     time.sleep(TICK_S)
                     continue
+
+                # Falhas de visão antes de a garra começar a sequência física
+                # não invalidam a sala nem as vítimas já contadas. Volte ao
+                # giro de busca; encerrar aqui devolveria o processo ao
+                # supervisor, que não tem como saber em que yaw o robô ficou.
+                falha_antes_da_coleta = (
+                    args.drive
+                    and not coleta.started
+                    and (
+                        controlador is not None
+                        or verificador_parede is not None
+                    )
+                )
+                if falha_antes_da_coleta:
+                    print(
+                        f"[resgate] falha recuperavel {comando.state}; "
+                        "retomando a busca de vitimas sem sair da sala")
+                    if trabalhador is not None:
+                        trabalhador.reset_tracking()
+                    portao.reset()
+                    busca = make_search_controller(start_time=agora)
+                    controlador = None
+                    verificador_parede = None
+                    coleta_apos_teste_parede = None
+                    resultado_atual = None
+                    deteccao_atual = None
+                    epoca_busca = None
+                    epoca_parede = None
+                    ultimo_controle_ocioso = agora
+                    comando = MotionCommand(
+                        "SEARCH_RECOVERY",
+                        detail=(
+                            "falha visual antes da coleta; procurando "
+                            "novamente sem abandonar o resgate"),
+                    )
+                    time.sleep(TICK_S)
+                    continue
+
+                # A fase de saída só é criada depois dos dois depósitos. Se
+                # ela perder a faixa, procurar de novo é seguro e preserva a
+                # regra de que só a faixa preta confirmada libera a linha.
+                if args.drive and controlador_saida is not None:
+                    print(
+                        f"[saida] falha recuperavel {comando.state}; "
+                        "reiniciando a busca da faixa ainda dentro do resgate")
+                    controlador_saida = ExitPhaseController(start_time=agora)
+                    if portao_saida is not None:
+                        portao_saida.reset(now=agora)
+                    deteccao_saida = None
+                    faltas_saida = 0
+                    inicio_saida = agora
+                    epoca_saida = (
+                        arduino.connection_epoch if arduino is not None else None)
+                    ultimo_controle_ocioso = agora
+                    comando = MotionCommand(
+                        "EXIT_RECOVERY",
+                        detail=(
+                            "falha ao localizar a saida; retomando a busca "
+                            "sem liberar o segue-linha"),
+                    )
+                    time.sleep(TICK_S)
+                    continue
+
                 print(
                     f"[resgate] estado terminal {comando.state}; "
                     "motores parados")
+                if args.drive and args.gerenciado_pela_missao:
+                    _aguardar_desligamento_do_arduino(
+                        arduino,
+                        f"estado terminal {comando.state}",
+                    )
+                    raise ArduinoDisconnectedDuringRescue(
+                        "Arduino desligado apos falha retida no resgate")
                 if not args.debug or args.drive:
                     break
 
@@ -2642,9 +2737,23 @@ def main():
         codigo_saida = EXIT_ARDUINO_DESCONECTADO
         print(f"[resgate] Arduino desconectado: {err}")
     except RuntimeError as err:
-        codigo_saida = runtime_error_exit_code(
-            args, arduino, codigo_saida)
-        print(f"[resgate] ERRO: {err}")
+        # Em uma missão gerenciada, exceção de visão/serial não pode fechar o
+        # resgate e deixar o supervisor reabrir o segue-linha. Se a placa
+        # ainda responde, mantenha PARAR e aguarde o ciclo físico; se já caiu,
+        # devolva o código explícito de desconexão.
+        if (
+            args.drive
+            and args.gerenciado_pela_missao
+            and arduino is not None
+        ):
+            if arduino.connected:
+                _aguardar_desligamento_do_arduino(arduino, str(err))
+            codigo_saida = EXIT_ARDUINO_DESCONECTADO
+            print(f"[resgate] ERRO retido ate desconexao: {err}")
+        else:
+            codigo_saida = runtime_error_exit_code(
+                args, arduino, codigo_saida)
+            print(f"[resgate] ERRO: {err}")
     except KeyboardInterrupt:
         print("\n[resgate] Ctrl-C")
     finally:

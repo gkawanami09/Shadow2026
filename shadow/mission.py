@@ -380,6 +380,54 @@ class MissionSystem:
         time.sleep(config.MISSION_RECOVERY_DELAY_S)
         self.start_line_phase()
 
+    @staticmethod
+    def _portas_arduino_presentes():
+        """Retorna apenas portas que podem pertencer ao Arduino do robô.
+
+        Esta consulta não abre a serial nem envia comandos. Ela serve para o
+        supervisor distinguir uma falha do resgate de um ciclo físico de
+        desligar/ligar a placa.
+        """
+        try:
+            from serial.tools import list_ports
+        except ImportError:
+            return set()
+        prefixos = tuple(config.SERIAL_PORT_PREFIXES)
+        return {
+            porta.device
+            for porta in list_ports.comports()
+            if porta.device.startswith(prefixos)
+        }
+
+    def aguardar_ciclo_do_arduino(self, motivo):
+        """Não rearma o percurso até a placa ter sumido e reaparecido.
+
+        Depois que o resgate começou, um retorno inesperado não autoriza
+        devolver os motores ao segue-linha: a posição, as vítimas na garra e
+        a etapa física já não podem ser presumidas. O operador sinaliza que
+        reposicionou o robô fazendo o ciclo físico do Arduino.
+        """
+        viu_desconectado = not self._portas_arduino_presentes()
+        print(
+            "[missao] resgate interrompido; segue-linha bloqueado. "
+            f"{motivo}. Desligue e religue o Arduino para reiniciar.")
+        while True:
+            time.sleep(config.MISSION_RECOVERY_DELAY_S)
+            portas = self._portas_arduino_presentes()
+            if not portas:
+                viu_desconectado = True
+            elif viu_desconectado:
+                print("[missao] Arduino reconectado; reiniciando pelo percurso")
+                return
+
+    def aguardar_arduino_reconectado(self):
+        """Espera a reconexão depois que o próprio resgate detectou a queda."""
+        print(
+            "[missao] Arduino desconectado no resgate; aguardando "
+            "reconexao para reiniciar pelo percurso")
+        while not self._portas_arduino_presentes():
+            time.sleep(config.MISSION_RECOVERY_DELAY_S)
+
     # -- encerramento ----------------------------------------------------
     def shutdown(self):
         self.shared.terminate.value = True
@@ -519,17 +567,21 @@ def main():
                 returncode = system.wait_rescue()
                 rescue_action = rescue_return_action(returncode)
                 if rescue_action == RESCUE_RETURN_RESTART_AFTER_ARDUINO:
+                    system.aguardar_arduino_reconectado()
                     raise RuntimeError(
                         "Arduino desconectado durante o resgate; "
                         "reiniciando a missao pelo percurso")
                 if rescue_action == RESCUE_RETURN_STOPPED:
-                    # O supervisor e um servico persistente: uma falha do
-                    # resgate nunca pode encerrar a missao. Recomece do
-                    # percurso para liberar camera/serial e aguardar uma
-                    # nova conexao do Arduino.
+                    # Retorno diferente de zero não é uma saída válida da
+                    # sala. Antes isto levantava o segue-linha no ``except``
+                    # abaixo e o robô abandonava vítimas já coletadas. A
+                    # única autorização de reinício agora é o ciclo físico
+                    # da placa, observado sem abrir a serial.
+                    system.aguardar_ciclo_do_arduino(
+                        f"resgate terminou com codigo {returncode}")
                     raise RuntimeError(
                         f"resgate terminou com codigo {returncode}; "
-                        "reiniciando a missao pelo percurso")
+                        "Arduino foi desligado e religado; reiniciando")
                 print("[missao] resgate concluido; voltando ao percurso")
 
                 HandoffExecutor(system, HANDOFF_TO_LINE).run()
