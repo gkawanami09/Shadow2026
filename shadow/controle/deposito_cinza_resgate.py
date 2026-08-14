@@ -245,8 +245,15 @@ class SequenciadorDepositoCinza:
                 cfg.SILVER_DEPOSIT_BUCKET_SETTLE_S,
                 delta_abertura,
             ),
+            _Etapa(
+                "BUCKET_OPEN_WAIT",
+                "cacamba aberta; aguardando a vitima assentar antes da sacudida",
+                190,
+                0.0,
+                cfg.SILVER_DEPOSIT_BUCKET_OPEN_EXTRA_WAIT_S,
+            ),
         ]
-        self._indice_abertura = len(etapas) - 1
+        self._indice_abertura = len(etapas) - 2
 
         for repeticao in range(cfg.SILVER_DEPOSIT_SHAKE_REPETITIONS):
             numero = repeticao + 1

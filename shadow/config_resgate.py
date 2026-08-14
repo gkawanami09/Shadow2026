@@ -973,6 +973,10 @@ SILVER_DEPOSIT_REVERSE_SPEED = SILVER_DEPOSIT_REVERSE_PWM / 120.0
 SILVER_DEPOSIT_REVERSE_S = 3.0
 SILVER_DEPOSIT_BUCKET_OPEN_DELTA = -90
 SILVER_DEPOSIT_BUCKET_SETTLE_S = 0.60
+# Depois que a cacamba abriu e assentou, mantenha-a aberta mais um segundo
+# antes de iniciar as duas sacudidas de frente/re. Isso deixa a vitima cair
+# sem mudar o tempo da re longa que alinha no triangulo.
+SILVER_DEPOSIT_BUCKET_OPEN_EXTRA_WAIT_S = 1.0
 BLACK_DEPOSIT_BUCKET_OPEN_DELTA = 90
 SILVER_DEPOSIT_SHAKE_PWM = 80
 SILVER_DEPOSIT_SHAKE_SPEED = SILVER_DEPOSIT_SHAKE_PWM / 120.0

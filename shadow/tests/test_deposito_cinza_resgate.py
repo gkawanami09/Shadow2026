@@ -107,6 +107,10 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
             i for i, nome in enumerate(nomes) if "REVERSE_ALIGN" in nome)
         indice_abertura = next(
             i for i, nome in enumerate(nomes) if "BUCKET_OPEN_GREEN" in nome)
+        indice_espera_aberta = next(
+            i for i, nome in enumerate(nomes) if "BUCKET_OPEN_WAIT" in nome)
+        indice_primeira_sacudida = next(
+            i for i, nome in enumerate(nomes) if "SHAKE_FORWARD_1" in nome)
         indice_restauracao = next(
             i for i, nome in enumerate(nomes) if "BUCKET_RESTORE" in nome)
         indice_saida = next(
@@ -115,6 +119,8 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertLess(indice_pre_re, indice_giro)
         self.assertLess(indice_giro, indice_re)
         self.assertLess(indice_re, indice_abertura)
+        self.assertLess(indice_abertura, indice_espera_aberta)
+        self.assertLess(indice_espera_aberta, indice_primeira_sacudida)
         self.assertLess(indice_abertura, indice_restauracao)
         self.assertLess(indice_restauracao, indice_saida)
 
@@ -232,6 +238,19 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
             round(etapa.velocidade * 120),
             cfg.SILVER_DEPOSIT_REVERSE_PWM,
         )
+
+    def test_cacamba_aberta_espera_um_segundo_antes_da_sacudida(self):
+        sequenciador = SequenciadorDepositoCinza()
+        etapas = {etapa.nome: etapa for etapa in sequenciador._etapas}
+
+        espera = etapas["BUCKET_OPEN_WAIT"]
+        self.assertEqual(espera.angulo, 190)
+        self.assertEqual(espera.velocidade, 0.0)
+        self.assertEqual(
+            espera.duracao,
+            cfg.SILVER_DEPOSIT_BUCKET_OPEN_EXTRA_WAIT_S,
+        )
+        self.assertEqual(espera.duracao, 1.0)
 
     def test_sacudida_e_rapida_e_tem_parada_antes_de_inverter(self):
         sequenciador = SequenciadorDepositoCinza()
