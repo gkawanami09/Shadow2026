@@ -30,29 +30,9 @@ class PulsedCycleTests(unittest.TestCase):
     def setUp(self):
         self.search = PulsedBallSearchController(start_time=0.0)
 
-    def _liberar_primeiro_giro(self, inicio):
-        """Observa parado e devolve o primeiro comando de giro autorizado."""
-        parar = self.search.update(None, now=inicio)
-        self.assertEqual(parar.state, self.search.BRAKE)
-        self.assertEqual(parar.angle, 190)
-        self.search.notify_command_written(parar.state, now=inicio)
-
-        assentou = inicio + cfg.BALL_SEARCH_SETTLE_S
-        observando = self.search.update(None, now=assentou)
-        self.assertEqual(observando.state, self.search.OBSERVE)
-
-        liberou_em = assentou + cfg.BALL_SEARCH_OBSERVE_TIMEOUT_S
-        giro = self.search.update(None, now=liberou_em)
-        self.assertEqual(giro.state, self.search.START)
-        self.assertEqual(self.search.pulses, 0)
-        return liberou_em, giro
-
     def _pulso_completo(self, inicio):
         """Executa um pulso: gira, freia, assenta e chega em OBSERVE."""
-        if not self.search._initial_observation_complete:
-            inicio, command = self._liberar_primeiro_giro(inicio)
-        else:
-            command = self.search.update(None, now=inicio)
+        command = self.search.update(None, now=inicio)
         self.assertEqual(command.state, self.search.START)
         self.search.notify_command_written(command.state, now=inicio)
 
@@ -77,19 +57,13 @@ class PulsedCycleTests(unittest.TestCase):
         self.assertEqual(self.search.pulses, 1)
         self.assertIsNotNone(assentou)
 
-    def test_enxerga_vitima_antes_do_primeiro_giro(self):
+    def test_primeiro_comando_ja_inicia_o_giro_de_busca(self):
         inicio = 0.0
-        parar = self.search.update(None, now=inicio)
-        self.search.notify_command_written(parar.state, now=inicio)
-        assentou = inicio + cfg.BALL_SEARCH_SETTLE_S
-        self.search.update(None, now=assentou)
+        giro = self.search.update(None, now=inicio)
 
-        alvo = FakeDetection(timestamp=assentou + 0.01)
-        encontrado = self.search.update(alvo, now=assentou + 0.02)
-
-        self.assertEqual(encontrado.state, self.search.TARGET_STOP)
-        self.assertEqual(self.search.pulses, 0)
-        self.assertEqual(encontrado.angle, 190)
+        self.assertEqual(giro.state, self.search.START)
+        self.assertEqual(giro.angle, cfg.BALL_SEARCH_TANK_ANGLE)
+        self.assertEqual(giro.speed, cfg.BALL_SEARCH_TANK_SPEED)
 
     def test_o_giro_realmente_para_para_observar(self):
         assentou = self._pulso_completo(0.0)
@@ -98,7 +72,8 @@ class PulsedCycleTests(unittest.TestCase):
         self.assertEqual(command.speed, 0.0)
 
     def test_frames_do_giro_nao_sao_aceitos(self):
-        inicio, command = self._liberar_primeiro_giro(0.0)
+        inicio = 0.0
+        command = self.search.update(None, now=inicio)
         self.search.notify_command_written(command.state, now=inicio)
         self.search.update(None, now=inicio + 0.05)
         self.assertEqual(self.search.state, self.search.ROTATING)
@@ -122,7 +97,8 @@ class PulsedCycleTests(unittest.TestCase):
         self.assertEqual(command.target_kind, "silver")
 
     def test_candidato_durante_o_giro_freia_mas_nao_confirma(self):
-        inicio, command = self._liberar_primeiro_giro(0.0)
+        inicio = 0.0
+        command = self.search.update(None, now=inicio)
         self.search.notify_command_written(command.state, now=inicio)
         candidato = FakeDetection(
             confirmed=False, track_locked=False, timestamp=inicio + 0.05)
@@ -140,7 +116,8 @@ class PulsedCycleTests(unittest.TestCase):
         self.assertEqual(ainda.state, self.search.VERIFY)
 
     def test_falso_candidato_e_descartado_e_a_busca_retoma(self):
-        inicio, command = self._liberar_primeiro_giro(0.0)
+        inicio = 0.0
+        command = self.search.update(None, now=inicio)
         self.search.notify_command_written(command.state, now=inicio)
         candidato = FakeDetection(
             confirmed=False, track_locked=False, timestamp=inicio + 0.05)
@@ -177,7 +154,6 @@ class PulsedCycleTests(unittest.TestCase):
     def test_cobertura_completa_encerra_sem_laco_infinito(self):
         agora = 0.0
         # Força o acumulado de giro a ultrapassar o 360 calibrado.
-        self.search._initial_observation_complete = True
         self.search._rotation_elapsed_s = cfg.BALL_SEARCH_FULL_TURN_S
         assentou = self._pulso_completo(agora)
         agora = assentou + cfg.BALL_SEARCH_OBSERVE_TIMEOUT_S

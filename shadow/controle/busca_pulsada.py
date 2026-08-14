@@ -79,11 +79,9 @@ class PulsedBallSearchController:
         self._target_kind = None
         self._tentative_target = False
         self._tracking_reset_requested = False
-        # Antes do primeiro pulso o robo pode ja estar olhando diretamente
-        # para uma vitima. Nesse caso girar primeiro faria a camera perde-la.
-        # A primeira passagem por BRAKE -> SETTLE -> OBSERVE acontece parado;
-        # somente uma observacao vazia libera o giro.
-        self._initial_observation_complete = False
+        # A entrada da sala já termina com PARAR. O primeiro pulso começa
+        # logo depois desse ponto; a confirmação continua protegida nas pausas
+        # entre pulsos, sempre com frame novo após o assentamento.
         self.pulses = 0
 
     # -- estado ----------------------------------------------------------
@@ -171,11 +169,6 @@ class PulsedBallSearchController:
         return handler(detection, now)
 
     def _on_start(self, detection, now):
-        if not self._initial_observation_complete:
-            self.state = self.BRAKE
-            return self._stop(
-                self.BRAKE,
-                "parando para verificar a visao antes do primeiro giro")
         return self._tank(
             self.START, "iniciando pulso de busca em modo tanque")
 
@@ -212,10 +205,8 @@ class PulsedBallSearchController:
 
     def _on_observe(self, detection, now):
         if self._valid(detection, now, captured_after=self._settled_at):
-            self._initial_observation_complete = True
             return self._request_target_stop(detection)
         if self._plausible(detection, now, captured_after=self._settled_at):
-            self._initial_observation_complete = True
             return self._request_target_stop(detection, tentative=True)
 
         if (
@@ -237,7 +228,6 @@ class PulsedBallSearchController:
             >= cfg.BALL_SEARCH_OBSERVE_TIMEOUT_S - 1e-9
         )
         if observed_enough or timed_out:
-            self._initial_observation_complete = True
             if self._turn_finished():
                 self.state = self.FINAL_VERIFY
                 self._target_stopped_at = self._settled_at
