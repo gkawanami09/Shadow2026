@@ -16,6 +16,10 @@ from mission import (  # noqa: E402
     RESCUE_RETURN_STOPPED,
     rescue_return_action,
 )
+from resgate import (  # noqa: E402
+    EXIT_ARDUINO_DESCONECTADO,
+    runtime_error_exit_code,
+)
 
 
 class RescueReturnSafetyTests(unittest.TestCase):
@@ -33,6 +37,15 @@ class RescueReturnSafetyTests(unittest.TestCase):
         self.assertEqual(rescue_return_action(3), RESCUE_RETURN_STOPPED)
         self.assertEqual(rescue_return_action(4), RESCUE_RETURN_STOPPED)
         self.assertEqual(rescue_return_action(99), RESCUE_RETURN_STOPPED)
+
+    def test_falha_serial_tardia_do_resgate_reinicia_o_percurso(self):
+        args = type("Args", (), {"gerenciado_pela_missao": True})()
+        arduino = type("Arduino", (), {"connected": False})()
+
+        self.assertEqual(
+            runtime_error_exit_code(args, arduino, 3),
+            EXIT_ARDUINO_DESCONECTADO,
+        )
 
 
 if __name__ == "__main__":

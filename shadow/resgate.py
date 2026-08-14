@@ -116,6 +116,22 @@ class ArduinoDisconnectedDuringRescue(RuntimeError):
     """Sinaliza ao supervisor que a unica retomada permitida e por reconexao."""
 
 
+def runtime_error_exit_code(args, arduino, current_exit_code):
+    """Converte uma falha serial tardia em retorno recuperavel da missao.
+
+    Uma escrita pode descobrir que o cabo saiu antes do laco principal notar
+    ``connected=False``. No modo gerenciado, esse caso precisa voltar ao
+    percurso em vez de parecer uma falha generica do resgate.
+    """
+    if (
+        getattr(args, "gerenciado_pela_missao", False)
+        and arduino is not None
+        and not arduino.connected
+    ):
+        return EXIT_ARDUINO_DESCONECTADO
+    return current_exit_code
+
+
 class VideoSource:
     """Reprodução de vídeo gravado. Nunca aciona motores."""
 
@@ -2530,6 +2546,8 @@ def main():
         codigo_saida = EXIT_ARDUINO_DESCONECTADO
         print(f"[resgate] Arduino desconectado: {err}")
     except RuntimeError as err:
+        codigo_saida = runtime_error_exit_code(
+            args, arduino, codigo_saida)
         print(f"[resgate] ERRO: {err}")
     except KeyboardInterrupt:
         print("\n[resgate] Ctrl-C")

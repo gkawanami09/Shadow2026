@@ -71,10 +71,6 @@ RESCUE_RETURN_RESTART_AFTER_ARDUINO = "restart_after_arduino"
 RESCUE_RETURN_STOPPED = "stopped"
 
 
-class RescueFailedSafely(RuntimeError):
-    """O resgate parou com falha; nao e permitido reabrir o segue-linha."""
-
-
 def rescue_return_action(returncode):
     """Define a unica situacao em que uma falha pode rearmar o percurso."""
     if int(returncode) == RESCUE_EXIT_OK:
@@ -527,8 +523,13 @@ def main():
                         "Arduino desconectado durante o resgate; "
                         "reiniciando a missao pelo percurso")
                 if rescue_action == RESCUE_RETURN_STOPPED:
-                    raise RescueFailedSafely(
-                        f"resgate terminou com codigo {returncode}")
+                    # O supervisor e um servico persistente: uma falha do
+                    # resgate nunca pode encerrar a missao. Recomece do
+                    # percurso para liberar camera/serial e aguardar uma
+                    # nova conexao do Arduino.
+                    raise RuntimeError(
+                        f"resgate terminou com codigo {returncode}; "
+                        "reiniciando a missao pelo percurso")
                 print("[missao] resgate concluido; voltando ao percurso")
 
                 HandoffExecutor(system, HANDOFF_TO_LINE).run()
@@ -536,15 +537,6 @@ def main():
 
             except KeyboardInterrupt:
                 raise
-            except RescueFailedSafely as err:
-                # Nunca interprete uma falha no resgate como uma saida
-                # confirmada. O robo permanece parado ate intervencao humana.
-                print(
-                    f"[missao] FALHA NO RESGATE: {err}. "
-                    "Robo parado; segue-linha nao sera reiniciado.")
-                coordinator.abort(str(err))
-                codigo = 1
-                return codigo
             except Exception as err:               # noqa: BLE001
                 print(f"[missao] tentativa interrompida: {err}")
                 coordinator.abort(str(err))
