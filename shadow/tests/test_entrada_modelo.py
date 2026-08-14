@@ -67,7 +67,7 @@ class EntryModelTests(unittest.TestCase):
         self.assertAlmostEqual(model.last_confidence, .44, places=5)
 
     def test_limiar_padrao_da_prata_exige_confianca_maior(self):
-        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .55)
+        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .30)
 
     def test_caixa_pequena_ou_quadrada_nao_vira_prata(self):
         model = EntryModel(
@@ -81,6 +81,29 @@ class EntryModelTests(unittest.TestCase):
 
         self.assertIsNone(detection)
         self.assertAlmostEqual(model.last_confidence, .91, places=5)
+
+    def test_caixa_prata_pequena_mas_horizontal_e_aceita(self):
+        model = EntryModel(
+            backend="onnx", input_size=640, min_confidence=.3)
+        output = np.zeros((1, 5, 6), dtype=np.float32)
+        output[0, :, 0] = (320, 320, 90, 40, .50)
+        model._session = _Session(output)
+        model._input_name = "images"
+
+        detection = model.detect(np.zeros((252, 448, 3), dtype=np.uint8))
+
+        self.assertIsNotNone(detection)
+
+
+class _TwoVotesEntryGateTestCase(unittest.TestCase):
+    """Mantem os cenarios de observacao lenta independentemente do padrao."""
+
+    def setUp(self):
+        self._votes_needed = config.ENTRY_SILVER_VOTES_NEEDED
+        config.ENTRY_SILVER_VOTES_NEEDED = 2
+
+    def tearDown(self):
+        config.ENTRY_SILVER_VOTES_NEEDED = self._votes_needed
 
 
 class EntryModelWorkerTests(unittest.TestCase):
@@ -132,7 +155,7 @@ class EntryModelWorkerTests(unittest.TestCase):
             worker.close()
 
 
-class EntryGateTests(unittest.TestCase):
+class EntryGateTests(_TwoVotesEntryGateTestCase):
     def test_preto_que_leva_ate_a_prata_nao_veta_o_resgate(self):
         mask = np.zeros((100, 100), dtype=np.uint8)
         # Black below the detection is the line approaching the silver strip.
@@ -362,3 +385,18 @@ class EntryGateTests(unittest.TestCase):
         self.assertEqual(pipeline.gate.votes, 0)
         self.assertIsNone(pipeline.gate.last_detection)
         self.assertIsNone(pipeline.last_inference)
+
+
+class EntryGateDefaultConfigTests(unittest.TestCase):
+    def test_prata_alinhada_sem_preto_confirma_no_primeiro_frame(self):
+        self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 1)
+        gate = EntryGate()
+        detection = EntryDetection((1, 2, 20, 8), .50)
+
+        confirmed, _ = gate.update(EntryInference(
+            0., True, detection, 0.,
+            black_ahead=False, ramp_black_ahead=False,
+        ))
+
+        self.assertTrue(confirmed)
+        self.assertEqual(gate.last_reason, "confirmada")

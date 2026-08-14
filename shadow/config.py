@@ -270,21 +270,22 @@ ENTRY_MODEL_BACKEND = "auto"
 ENTRY_NCNN_MODEL_PATH = "modelos/entrada_416_ncnn_model"
 ENTRY_MODEL_INPUT = 640
 ENTRY_NCNN_MODEL_INPUT = 416
-# A entrada so aceita uma deteccao bem confiavel. O segundo voto distinto
-# abaixo evita que um falso positivo isolado do segue-linha vire resgate.
-ENTRY_MODEL_MIN_CONFIDENCE = .55
-# A faixa de entrada e transversal: caixas pequenas ou quase quadradas sao
-# objetos/manchas do percurso, nao uma faixa prata valida.
-ENTRY_SILVER_MIN_WIDTH_RATIO = .22
-ENTRY_SILVER_MIN_ASPECT_RATIO = 3.0
+# A faixa prata pode cruzar poucos frames quando o robo esta rapido. Aceita o
+# modelo a partir de 30%; a protecao real contra a rampa e o preto normal e o
+# preto exclusivo da rampa alem/ao redor da caixa, no mesmo frame.
+ENTRY_MODEL_MIN_CONFIDENCE = .30
+# A faixa vista torta ou distante fica menor e menos horizontal. Estes gates
+# continuam descartando manchas quase quadradas, sem perder a entrada rapida.
+ENTRY_SILVER_MIN_WIDTH_RATIO = .12
+ENTRY_SILVER_MIN_ASPECT_RATIO = 1.5
 # O YOLO leva mais que um periodo de camera. Guardar esta janela curta evita
 # perder os poucos frames da prata, mas o limite impede backlog indefinido.
 ENTRY_MODEL_PENDING_FRAMES = 12
 # Limita o runtime do modelo para não disputar todos os núcleos com a linha.
 ENTRY_MODEL_THREADS = 2
-# Duas leituras do YOLO sao obrigatorias antes da entrada. O primeiro voto
-# para brevemente para conferir; se o falso prata sumir, o robo segue linha.
-ENTRY_SILVER_VOTES_NEEDED = 2
+# Um unico prata alinhado sem preto depois da caixa inicia o resgate logo. A
+# rampa ainda e barrada antes deste voto pelos dois limiares de preto.
+ENTRY_SILVER_VOTES_NEEDED = 1
 ENTRY_SILVER_VOTE_WINDOW = 3
 # Contexto da prata: a imagem clara no final da rampa só é um falso
 # candidato se a linha preta continuar DEPOIS dela, na direção de marcha.

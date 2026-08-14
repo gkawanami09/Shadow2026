@@ -179,8 +179,8 @@ class MissionRecoveryTests(unittest.TestCase):
 
 
 class MissionEntryAdvanceTests(unittest.TestCase):
-    def test_entrada_prata_exige_dois_votos_para_evitar_falso_resgate(self):
-        self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 2)
+    def test_entrada_prata_rapida_usa_veto_preto_para_evitar_falso_resgate(self):
+        self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 1)
         self.assertEqual(config.ENTRY_SILVER_VOTE_WINDOW, 3)
         self.assertEqual(config.ENTRY_SILVER_VALIDATION_S, 0.0)
 
