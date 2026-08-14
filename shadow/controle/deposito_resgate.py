@@ -624,11 +624,16 @@ class DepositMarkerController:
         )
 
     def _plausible_target(self, detection, now, captured_after=None):
+        minimum_confidence = (
+            cfg.MARKER_RED_MIN_CONFIDENCE
+            if self.target_kind == "red"
+            else float(getattr(cfg, "MARKER_MIN_CONFIDENCE", 0.60))
+        )
         if (
             detection is None
             or detection.kind != self.target_kind
             or float(detection.confidence)
-            < float(getattr(cfg, "MARKER_MIN_CONFIDENCE", 0.60))
+            < minimum_confidence
         ):
             return False
         if (

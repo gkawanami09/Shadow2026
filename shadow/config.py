@@ -269,10 +269,10 @@ ENTRY_MODEL_BACKEND = "auto"
 ENTRY_NCNN_MODEL_PATH = "modelos/entrada_416_ncnn_model"
 ENTRY_MODEL_INPUT = 640
 ENTRY_NCNN_MODEL_INPUT = 416
-# A faixa prata muda muito de brilho com a luz da pista. Aceita candidatos a
-# partir de 45%; a linha alinhada e o preto depois da caixa protegem contra
-# um falso resgate sem perder uma faixa atravessada em velocidade.
-ENTRY_MODEL_MIN_CONFIDENCE = .45
+# A faixa prata muda muito de brilho e pode cruzar o quadro em poucos frames.
+# Aceita candidatos a partir de 35%; a linha alinhada e os vetos de preto
+# normal/rampa continuam obrigatorios antes de iniciar o resgate.
+ENTRY_MODEL_MIN_CONFIDENCE = .35
 # Limita o runtime do modelo para não disputar todos os núcleos com a linha.
 ENTRY_MODEL_THREADS = 2
 # Uma candidata alinhada entra imediatamente quando não há preto depois dela.

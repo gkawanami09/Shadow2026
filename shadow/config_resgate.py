@@ -800,18 +800,25 @@ MARKER_GREEN_MIN_CONFIDENCE = 0.58
 # ainda precisa passar por cromaticidade, contraste e tres frames distintos;
 # por isso pode usar uma janela vertical e uma geometria de aquisicao proprias
 # sem afrouxar a deteccao do verde nem aceitar um frame isolado.
-MARKER_RED_ROI_TOP = 0.28
-MARKER_RED_MIN_AREA_RATIO = 0.00020
-MARKER_RED_MIN_SIDE_PX = 5
+MARKER_RED_ROI_TOP = 0.24
+MARKER_RED_MIN_AREA_RATIO = 0.00012
+MARKER_RED_MIN_SIDE_PX = 4
+# O vermelho e procurado somente na rota exclusiva depois do verde. Por isso
+# pode ser mais sensivel quando ainda e pequeno/distante, sem enfraquecer o
+# perfil do marcador verde.
+MARKER_RED_MASK_MIN_CHROMA = 35.0
+MARKER_RED_MIN_INSIDE_CHROMA = 52.0
+MARKER_RED_MIN_CHROMA_CONTRAST = 18.0
+MARKER_RED_MIN_CONFIDENCE = 0.40
 
 # HSV do OpenCV (H em 0..180). Vermelho cruza a origem e, por isso, usa duas
 # bandas. O contraste cromatico local abaixo continua obrigatorio: o HSV
 # sozinho nao aceita um banho uniforme de luz ciano/verde.
 MARKER_GREEN_HSV_MIN = (45, 60, 30)
 MARKER_GREEN_HSV_MAX = (105, 255, 255)
-MARKER_RED_HSV_MIN_1 = (0, 65, 35)
-MARKER_RED_HSV_MAX_1 = (16, 255, 255)
-MARKER_RED_HSV_MIN_2 = (164, 65, 35)
+MARKER_RED_HSV_MIN_1 = (0, 55, 28)
+MARKER_RED_HSV_MAX_1 = (18, 255, 255)
+MARKER_RED_HSV_MIN_2 = (162, 55, 28)
 MARKER_RED_HSV_MAX_2 = (180, 255, 255)
 
 # Limpeza da mascara. Os tamanhos sao definidos na base 640x480 e escalados

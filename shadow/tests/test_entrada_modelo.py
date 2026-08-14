@@ -53,7 +53,7 @@ class EntryModelTests(unittest.TestCase):
     def test_confianca_abaixo_do_limiar_fica_visivel_para_calibracao(self):
         model = EntryModel(
             backend="onnx", input_size=640, min_confidence=.45)
-        output = np.zeros((1, 5, 2), dtype=np.float32)
+        output = np.zeros((1, 5, 6), dtype=np.float32)
         output[0, :, 0] = (320, 320, 200, 100, .44)
         model._session = _Session(output)
         model._input_name = "images"
@@ -64,7 +64,7 @@ class EntryModelTests(unittest.TestCase):
         self.assertAlmostEqual(model.last_confidence, .44, places=5)
 
     def test_limiar_padrao_da_prata_prioriza_nao_perder_a_faixa(self):
-        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .45)
+        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .35)
 
 
 class EntryGateTests(unittest.TestCase):

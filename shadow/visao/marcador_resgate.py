@@ -410,7 +410,7 @@ class MarkerDetector:
         # Limiar POR PIXEL: baixo de proposito. Subi-lo corroeria a borda do
         # blob e mudaria a forma do candidato. O rigor cromatico fica no gate
         # por blob (MARKER_MIN_INSIDE_CHROMA), aplicado depois da geometria.
-        mask[chroma < cfg.MARKER_MASK_MIN_CHROMA] = 0
+        mask[chroma < self._mask_min_chroma()] = 0
         roi_top = int(round(height * self._roi_top()))
         mask[:roi_top, :] = 0
 
@@ -581,13 +581,13 @@ class MarkerDetector:
             / max(1.0 - cfg.MARKER_MIN_COMPACTNESS, 1e-6)
         )
         contrast_score = _clip01(
-            (contrast - cfg.MARKER_MIN_CHROMA_CONTRAST) / 100.0)
+            (contrast - self._min_chroma_contrast()) / 100.0)
         # O zero da pontuacao e o limiar da MASCARA, nao o do gate. Se fosse o
         # do gate, endurecer o gate baixaria a confianca do proprio marcador
         # verdadeiro e ele cairia em "confidence" — foi exatamente o que
         # aconteceu ao medir com as capturas reais da arena.
         chroma_score = _clip01(
-            (inside_chroma - cfg.MARKER_MASK_MIN_CHROMA) / 140.0)
+            (inside_chroma - self._mask_min_chroma()) / 140.0)
         solidity_score = _clip01(
             (solidity - cfg.MARKER_MIN_SOLIDITY)
             / max(1.0 - cfg.MARKER_MIN_SOLIDITY, 1e-6)
@@ -659,17 +659,28 @@ class MarkerDetector:
     def _min_inside_chroma(self):
         if self.target_kind == "green":
             return cfg.MARKER_GREEN_MIN_INSIDE_CHROMA
+        if self.target_kind == "red":
+            return cfg.MARKER_RED_MIN_INSIDE_CHROMA
         return cfg.MARKER_MIN_INSIDE_CHROMA
 
     def _min_chroma_contrast(self):
         if self.target_kind == "green":
             return cfg.MARKER_GREEN_MIN_CHROMA_CONTRAST
+        if self.target_kind == "red":
+            return cfg.MARKER_RED_MIN_CHROMA_CONTRAST
         return cfg.MARKER_MIN_CHROMA_CONTRAST
 
     def _min_confidence(self):
         if self.target_kind == "green":
             return cfg.MARKER_GREEN_MIN_CONFIDENCE
+        if self.target_kind == "red":
+            return cfg.MARKER_RED_MIN_CONFIDENCE
         return cfg.MARKER_MIN_CONFIDENCE
+
+    def _mask_min_chroma(self):
+        if self.target_kind == "red":
+            return cfg.MARKER_RED_MASK_MIN_CHROMA
+        return cfg.MARKER_MASK_MIN_CHROMA
 
     def _chroma_map(self, frame_bgr):
         channels = frame_bgr.astype(np.float32)

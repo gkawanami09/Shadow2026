@@ -166,6 +166,23 @@ class MarkerDetectorTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result.confirmed)
 
+    def test_red_triangle_faded_and_distant_is_confirmed(self):
+        """O vermelho pequeno nao pode exigir a saturacao do alvo proximo."""
+        frame = base_frame()
+        cv2.fillPoly(
+            frame,
+            [np.asarray(((320, 225), (313, 255), (327, 255)),
+                        dtype=np.int32)],
+            (85, 85, 140),
+            lineType=cv2.LINE_AA,
+        )
+
+        result = confirmed(MarkerDetector("red"), frame)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertTrue(result.track_locked)
+
     def test_red_triangle_distant_above_generic_roi_is_confirmed(self):
         """O vermelho distante nao pode depender da janela do verde."""
         frame = triangle_frame(
