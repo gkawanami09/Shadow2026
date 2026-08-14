@@ -48,9 +48,8 @@ def has_black_after_entry_detection(mask, detection):
     """Returns black-line evidence beyond the silver detection.
 
     The robot moves from the bottom toward the top of the camera image. Only
-    black immediately above the YOLO box can be a continuation after the
-    silver strip; black below it or distant dark background must not reject a
-    real rescue.
+    black above the YOLO box can be a continuation after the silver strip;
+    black below it is the approach line and must not reject a real rescue.
     """
     if detection is None or mask is None or mask.ndim != 2:
         return False
@@ -67,12 +66,9 @@ def has_black_after_entry_detection(mask, detection):
     guard_px = max(
         1, int(round(height * config.ENTRY_BLACK_AFTER_SILVER_GUARD_RATIO)))
     after_end = min(height, max(0, int(np.floor(silver_top)) - guard_px))
-    max_distance_px = max(1, int(round(
-        height * config.ENTRY_BLACK_AFTER_SILVER_MAX_DISTANCE_RATIO)))
-    after_start = max(0, after_end - max_distance_px)
     x_start = int(width * config.GAP_AHEAD_X_MIN)
     x_end = int(width * config.GAP_AHEAD_X_MAX)
-    after_silver = mask[after_start:after_end, x_start:x_end]
+    after_silver = mask[:after_end, x_start:x_end]
     if not after_silver.size:
         return False
 
@@ -118,25 +114,6 @@ def has_ramp_black_near_entry_detection(mask, detection):
         row_fill >= config.ENTRY_RAMP_BLACK_ROW_FILL) >= rows_required)
 
 
-def entry_black_veto_mask(image, black_mask):
-    """Mantem somente o preto realmente escuro/neutro para a entrada.
-
-    Os limiares da linha precisam ser tolerantes para a camera seguir a
-    pista. Reutiliza-los diretamente no veto da prata fazia cinza, prata ou
-    reflexo colorido contarem como preto. Esta mascara e usada apenas para
-    decidir se existe linha depois da caixa do YOLO.
-    """
-    if image is None or black_mask is None:
-        return black_mask
-    channel_max = np.max(image, axis=2)
-    channel_min = np.min(image, axis=2)
-    neutral_dark = np.logical_and(
-        channel_max <= config.ENTRY_BLACK_AFTER_SILVER_MAX_BRIGHTNESS,
-        channel_max - channel_min <= config.ENTRY_BLACK_AFTER_SILVER_MAX_CHROMA,
-    )
-    return np.where(neutral_dark, black_mask, 0).astype(black_mask.dtype)
-
-
 class EntryModel:
     """YOLO de uma classe via NCNN, com contingência para ONNX Runtime."""
 
@@ -158,7 +135,7 @@ class EntryModel:
         self.input_size = int(
             config.ENTRY_MODEL_INPUT if input_size is None else input_size)
         self.min_confidence = float(
-            config.ENTRY_MODEL_TRIGGER_CONFIDENCE
+            config.ENTRY_MODEL_MIN_CONFIDENCE
             if min_confidence is None else min_confidence)
         self._session = None
         self._input_name = None
@@ -439,7 +416,6 @@ class EntryGate:
         self._last_timestamp = None
         self._state = self.IDLE
         self._validation_started_at = None
-        self._hint_validation = False
         self._black_follow_until = float("-inf")
 
     @property
@@ -457,12 +433,6 @@ class EntryGate:
     def _clear_validation(self):
         self._hits.clear()
         self._validation_started_at = None
-        self._hint_validation = False
-
-    def _validation_timeout(self):
-        if self._hint_validation:
-            return config.ENTRY_SILVER_HINT_VALIDATION_S
-        return config.ENTRY_SILVER_VALIDATION_S
 
     def _start_black_follow(self, timestamp, source):
         self._clear_validation()
@@ -492,15 +462,12 @@ class EntryGate:
         """Expira estados mesmo se o worker ainda nao tiver outro resultado."""
         now = float(now)
         if self._state == self.VALIDATING:
-            if now - self._validation_started_at >= self._validation_timeout():
+            if now - self._validation_started_at >= config.ENTRY_SILVER_VALIDATION_S:
                 # Sem uma nova leitura de prata nao existe prova suficiente
                 # para entrar. Libera o controle, mas nunca confirma.
-                was_hint = self._hint_validation
                 self._clear_validation()
                 self._state = self.IDLE
-                self.last_reason = (
-                    "sinal_prata_sem_confirmacao" if was_hint
-                    else "validacao_prata_sem_resultado")
+                self.last_reason = "validacao_prata_sem_resultado"
         elif (self._state == self.BLACK_FOLLOW
               and now >= self._black_follow_until):
             self._state = self.IDLE
@@ -544,24 +511,12 @@ class EntryGate:
 
         if self._state == self.VALIDATING:
             if inference.detection is None:
-                if self._hint_validation:
-                    # O sinal fraco que fez o robo parar pode sumir enquanto
-                    # a camera estabiliza. Aguarda uma leitura forte ate o
-                    # prazo, sem nunca converter esse sinal em resgate.
-                    self.last_reason = "sinal_prata_aguardando_confirmacao"
-                    return False, None
                 # O robo esta parado: se a prata some da camera durante a
                 # observacao, falha fechado e nao entra no resgate.
                 self._clear_validation()
                 self._state = self.IDLE
                 self.last_reason = "prata_sumiu_na_validacao"
                 return False, None
-
-            if (self._hint_validation
-                    and inference.detection.confidence
-                    < config.ENTRY_MODEL_MIN_CONFIDENCE):
-                self.last_reason = "sinal_prata_aguardando_confirmacao"
-                return False, inference.detection
 
             self._hits.append(True)
             elapsed = observed_at - self._validation_started_at
@@ -585,17 +540,6 @@ class EntryGate:
         if not inference.line_aligned:
             self._hits.append(False)
             self.last_reason = "faixa_sem_linha_alinhada"
-            return False, inference.detection
-
-        if inference.detection.confidence < config.ENTRY_MODEL_MIN_CONFIDENCE:
-            # O primeiro sinal fraco nao e suficiente para o resgate, mas
-            # parar aqui transforma os proximos frames em uma segunda chance
-            # real de o YOLO ver a faixa, mesmo quando o robo vinha rapido.
-            self._clear_validation()
-            self._state = self.VALIDATING
-            self._validation_started_at = observed_at
-            self._hint_validation = True
-            self.last_reason = "sinal_prata_parando_para_confirmar"
             return False, inference.detection
 
         # O alinhamento é exigido neste primeiro positivo para não entregar a
