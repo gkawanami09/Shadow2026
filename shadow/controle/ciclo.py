@@ -50,7 +50,8 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                mission_mode,
                                preferencia_linha_esquerda,
                                red_candidate, red_detected, red_finished,
-                               rescue_requested, status, terminate,
+                               rescue_entry_forward_done, rescue_requested,
+                               status, terminate,
                                timer, turn_dir,
                                vision_ready)
 
@@ -62,6 +63,7 @@ def _enter_rescue_zone(arduino):
     # de resgate reafirma o comando assim que abre a serial dele.
     arduino.led("APAGADO")
     entry_armed.value = False
+    rescue_entry_forward_done.value = False
     print("[controle] entrada confirmada; PARAR e LED APAGADO — "
           "resgate fará o avanço de 1 s")
 
@@ -78,11 +80,15 @@ def _enter_rescue_after_no_black(arduino):
         # aguardando o Arduino em uma nova instancia serial.
         return False
     entry_armed.value = False
+    # Os três segundos de validação foram percorridos reto já dentro da
+    # transição. A missão repassa isto ao resgate para ele começar diretamente
+    # pelo giro, sem um segundo avanço duplicado.
+    rescue_entry_forward_done.value = True
     _reset_entry_silver("entrada por ausencia de preto")
     print(
         "[controle] linha preta ausente por "
         f"{config.ENTRY_NO_BLACK_RESCUE_DELAY_S:.1f} s; PARAR e LED APAGADO "
-        "— resgate avançará 1 s antes dos giros")
+        "- resgate iniciara diretamente os giros")
     return True
 
 

@@ -225,6 +225,45 @@ class MissionEntryAdvanceTests(unittest.TestCase):
         )
         self.assertEqual(comandos, [()])
 
+    def test_entrada_sem_preto_nao_comanda_segundo_avanco_no_resgate(self):
+        args = SimpleNamespace(
+            drive=True,
+            gerenciado_pela_missao=True,
+            entrada_ja_avancada=True,
+        )
+        arduino = SimpleNamespace(connection_epoch=7)
+
+        with patch.object(resgate, "_mover_saida_por_tempo") as mover:
+            executou = resgate._avancar_entrada_da_missao(
+                args,
+                arduino,
+                lambda *_: True,
+            )
+
+        self.assertTrue(executou)
+        mover.assert_not_called()
+
+    def test_supervisor_informa_que_a_entrada_ja_avancou(self):
+        valor = lambda inicial: SimpleNamespace(value=inicial)
+        compartilhado = SimpleNamespace(
+            rescue_entry_forward_done=valor(True),
+        )
+        sistema = MissionSystem(
+            compartilhado,
+            motor_lock=None,
+            args=SimpleNamespace(
+                debug=False,
+                rescue_camera_index=0,
+                policy="nearest_valid",
+            ),
+        )
+
+        with patch("mission.subprocess.Popen") as iniciar:
+            sistema.start_rescue()
+
+        comando = iniciar.call_args.args[0]
+        self.assertIn("--entrada-ja-avancada", comando)
+
     def test_resgate_aberto_sozinho_nao_faz_o_avanco(self):
         args = SimpleNamespace(
             drive=True,
