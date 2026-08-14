@@ -296,6 +296,18 @@ class GreenRectangleDetectorTests(unittest.TestCase):
             self.assertIsNone(
                 detector.detect(frame, timestamp=indice * 0.1))
 
+    def test_objeto_ciano_largo_acima_do_piso_nao_vira_deposito(self):
+        """Replica o falso verde largo visto no debug da busca."""
+        frame = base_frame()
+        # E' horizontal, saturado e ciano como o painel real, mas termina
+        # acima do chao. Nao pode travar a navegacao para o deposito.
+        cv2.rectangle(frame, (0, 215), (340, 340), (131, 110, 31), -1)
+        detector = GreenRectangleDetector()
+
+        for indice in range(cfg.GREEN_RECTANGLE_ACQUIRE_HITS + 1):
+            self.assertIsNone(
+                detector.detect(frame, timestamp=indice * 0.1))
+
     def test_verde_ciano_moderado_e_confirmado_pelo_retangulo(self):
         hsv = np.uint8([[[85, 130, 180]]])
         cor_lavada = tuple(

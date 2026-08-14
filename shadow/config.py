@@ -303,14 +303,15 @@ ENTRY_SILVER_VALIDATION_S = 0.0
 # Se houver preto alem da prata, mantenha o segue-linha e bloqueie apenas uma
 # nova candidatura prata por este periodo. Cada frame com preto renova o prazo.
 ENTRY_BLACK_FOLLOW_TIMEOUT_S = 1.0
-# Além do modelo, o primeiro voto precisa ter a linha preta rastreada e
-# centralizada. Isso evita parar atravessado na faixa; durante a observação a
-# prata pode cobrir o fim da linha.
-ENTRY_LINE_MAX_ANGLE = 18
-ENTRY_LINE_MAX_BOTTOM_ERROR_PX = 55
+# Além do modelo, o primeiro voto precisa ter a linha preta rastreada. A
+# tolerância é propositalmente ampla: a faixa de prata deve poder iniciar o
+# resgate mesmo com o robô levemente torto ou deslocado. O veto de preto
+# (normal e de rampa) continua sendo a proteção contra uma falsa entrada.
+ENTRY_LINE_MAX_ANGLE = 35
+ENTRY_LINE_MAX_BOTTOM_ERROR_PX = 110
 # A faixa pode cobrir o fim da linha no frame seguinte. Conserva o último
 # alinhamento comprovado por este intervalo, sem aceitar uma linha antiga.
-ENTRY_ALIGNMENT_HOLD_S = .50
+ENTRY_ALIGNMENT_HOLD_S = .70
 
 # ----------------------------------------------------------------------------
 # Cores usadas quando uma chave não existe no config.ini

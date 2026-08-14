@@ -243,6 +243,9 @@ class GreenRectangleDetector:
         lado_minimo = cfg.GREEN_RECTANGLE_MIN_SIDE_PX * escala
         if min(largura_caixa, altura_caixa) < lado_minimo:
             return None, "side"
+        bottom_ratio = float(y + altura_caixa) / max(float(altura), 1.0)
+        if bottom_ratio < cfg.GREEN_RECTANGLE_MIN_BOTTOM_RATIO:
+            return None, "bottom"
         proporcao_horizontal = (
             float(largura_caixa) / max(float(altura_caixa), 1.0)
         )

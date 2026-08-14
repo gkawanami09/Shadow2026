@@ -1067,8 +1067,37 @@ def main():
                         print(
                             "[resgate] passagem verde "
                             f"{contador_verde.quantidade}/"
-                            f"{contador_verde.necessario}; "
-                            "mantendo busca ate o fim da janela configurada")
+                            f"{contador_verde.necessario}")
+                        if args.drive and contador_verde.completo:
+                            # A segunda passagem foi confirmada com o robo
+                            # parado em SEARCH_OBSERVE e nenhuma bolinha foi
+                            # travada pela busca. E seguro encerrar antes dos
+                            # 90 s e comecar a rota verde imediatamente.
+                            if trabalhador is not None:
+                                trabalhador.reset_tracking()
+                            portao.reset()
+                            busca = None
+                            controlador = None
+                            verificador_parede = None
+                            coleta_apos_teste_parede = None
+                            controlador_verde = ControladorRetanguloVerde(
+                                start_time=agora,
+                            )
+                            monitor_chegada_verde = None
+                            proxima_atualizacao_ultrassom_verde = 0.0
+                            epoca_busca = None
+                            epoca_parede = None
+                            epoca_verde = (
+                                arduino.connection_epoch
+                                if arduino is not None else None
+                            )
+                            resultado_atual = None
+                            deteccao_atual = None
+                            ultimo_controle_ocioso = 0.0
+                            print(
+                                "[resgate] GREEN_ROUTE_START: segundo verde "
+                                "confirmado sem bolinha; alinhando pela "
+                                "camera")
 
             if (
                 controlador_saida is not None
@@ -1886,6 +1915,19 @@ def main():
                         "iniciando procura pelo marcador vermelho")
                     deposito_cinza = None
                     epoca_deposito_cinza = None
+                    # A rota de deposito e exclusiva: depois de entregar no
+                    # verde, uma bolinha que apareca no quadro nao pode
+                    # reabrir busca/coleta. Ate o vermelho ser depositado, o
+                    # unico alvo que comanda as rodas e o marcador vermelho.
+                    busca = None
+                    controlador = None
+                    verificador_parede = None
+                    coleta_apos_teste_parede = None
+                    resultado_atual = None
+                    deteccao_atual = None
+                    if trabalhador is not None:
+                        trabalhador.reset_tracking()
+                    portao.reset()
                     if marcadores is None:
                         comando = MotionCommand(
                             "RED_FINAL_FAULT",

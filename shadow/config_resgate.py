@@ -396,9 +396,9 @@ BALL_SEARCH_TOTAL_TIMEOUT_S = 75.0
 # seguranca e inicia a rota de deposito verde -> vermelho.
 RESCUE_SEARCH_DURATION_S = 90.0
 
-# Telemetria das passagens verdes durante a busca pulsada. O verde so conta
-# durante uma observacao parada; essas passagens nao encerram mais a busca —
-# o temporizador acima e a unica condicao para iniciar os depositos.
+# Saida antecipada da busca: duas passagens verdes distintas, confirmadas com
+# o robo parado e sem uma bolinha travada, iniciam logo a rota de deposito.
+# Caso isso nao aconteca, o temporizador acima e o limite maximo da busca.
 RESCUE_GREEN_SIGHTINGS_REQUIRED = 2
 RESCUE_GREEN_REARM_FRAMES = 3
 # O rastreador ja exigiu tres aparicoes e a rota so comeca depois da segunda
@@ -919,6 +919,10 @@ GREEN_RECTANGLE_MIN_AREA_RATIO = 0.0025
 GREEN_RECTANGLE_MAX_AREA_RATIO = 0.45
 GREEN_RECTANGLE_MIN_SIDE_PX = 10
 GREEN_RECTANGLE_MIN_HORIZONTAL_ASPECT = 1.80
+# O painel de deposito fica rente ao piso. Objetos ciano que terminam acima
+# desta faixa (como o batente/parede visto no debug) sao apenas iluminacao ou
+# obstaculo e nunca podem iniciar a rota de aproximacao.
+GREEN_RECTANGLE_MIN_BOTTOM_RATIO = 0.74
 GREEN_RECTANGLE_MIN_SATURATION = 120.0
 GREEN_RECTANGLE_MIN_CHROMA = 40.0
 GREEN_RECTANGLE_MIN_SOLIDITY = 0.60
