@@ -49,7 +49,7 @@ OBSTACLE_FORWARD_PWM = 60
 OBSTACLE_LINE_SEARCH_PWM = 60
 OBSTACLE_LINE_SEARCH_TIMEOUT_S = 4.0
 OBSTACLE_LINE_CONFIRM_TIME_S = .10
-OBSTACLE_FORWARD_TIME_S = 2.8              # s avançando depois do lateral
+OBSTACLE_FORWARD_TIME_S = 2.6              # s avançando depois do lateral
 # Ao encontrar uma linha transversal, o segue-linha recebe preferência
 # temporária pelo ramo esquerdo, sem executar um giro tanque separado.
 OBSTACLE_LEFT_PREFERENCE_MIN_TIME_S = .20
