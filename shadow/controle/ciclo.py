@@ -72,7 +72,11 @@ def _enter_rescue_after_no_black(arduino):
     if terminate.value or not arduino.connected:
         return False
     status.value = 'Linha preta ausente — entrando no resgate'
-    arduino.led("APAGADO")
+    if arduino.led("APAGADO") is False or not arduino.connected:
+        # Sem confirmar o ultimo comando da sessao, nao pode existir handoff:
+        # o supervisor vera este filho terminar e reiniciara o percurso,
+        # aguardando o Arduino em uma nova instancia serial.
+        return False
     entry_armed.value = False
     _reset_entry_silver("entrada por ausencia de preto")
     print(
