@@ -86,7 +86,7 @@ class EntryModelTests(unittest.TestCase):
         model = EntryModel(
             backend="onnx", input_size=640, min_confidence=.3)
         output = np.zeros((1, 5, 6), dtype=np.float32)
-        output[0, :, 0] = (320, 320, 90, 40, .50)
+        output[0, :, 0] = (320, 320, 45, 25, .50)
         model._session = _Session(output)
         model._input_name = "images"
 

@@ -274,13 +274,17 @@ ENTRY_NCNN_MODEL_INPUT = 416
 # modelo a partir de 30%; a protecao real contra a rampa e o preto normal e o
 # preto exclusivo da rampa alem/ao redor da caixa, no mesmo frame.
 ENTRY_MODEL_MIN_CONFIDENCE = .30
-# A faixa vista torta ou distante fica menor e menos horizontal. Estes gates
-# continuam descartando manchas quase quadradas, sem perder a entrada rapida.
-ENTRY_SILVER_MIN_WIDTH_RATIO = .12
-ENTRY_SILVER_MIN_ASPECT_RATIO = 1.5
+# A faixa vista em velocidade pode aparecer pequena e inclinada. Ainda
+# recusamos uma caixa quadrada, mas nao exigimos que ela ja ocupe a pista.
+ENTRY_SILVER_MIN_WIDTH_RATIO = .05
+ENTRY_SILVER_MIN_ASPECT_RATIO = 1.1
 # O YOLO leva mais que um periodo de camera. Guardar esta janela curta evita
 # perder os poucos frames da prata, mas o limite impede backlog indefinido.
-ENTRY_MODEL_PENDING_FRAMES = 12
+# A faixa prata pode existir por poucos frames e a inferencia NCNN/ONNX leva
+# mais que um periodo da camera. A janela de 24 preserva esse evento curto;
+# cada resultado carrega a mascara preta do proprio frame, portanto nao abre
+# a entrada na rampa quando a resposta chega depois.
+ENTRY_MODEL_PENDING_FRAMES = 24
 # Limita o runtime do modelo para não disputar todos os núcleos com a linha.
 ENTRY_MODEL_THREADS = 2
 # Um unico prata alinhado sem preto depois da caixa inicia o resgate logo. A
