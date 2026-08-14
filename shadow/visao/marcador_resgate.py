@@ -649,7 +649,12 @@ class MarkerDetector:
         green = channels[:, :, 1]
         red = channels[:, :, 2]
         if self.target_kind == "green":
-            return green - np.maximum(red, blue)
+            # Nesta câmera o marcador verde pode chegar ciano (B ligeiramente
+            # acima de G). A primeira medida cobre verde normal; a segunda
+            # exige B e G acima de R, sem aceitar azul puro.
+            green_natural = green - np.maximum(red, blue)
+            green_cyan = np.minimum(blue, green) - red
+            return np.maximum(green_natural, green_cyan)
         return red - np.maximum(green, blue)
 
     def _select_candidate(self, candidates, scale):

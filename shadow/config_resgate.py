@@ -798,11 +798,11 @@ MARKER_RED_MIN_SIDE_PX = 5
 # HSV do OpenCV (H em 0..180). Vermelho cruza a origem e, por isso, usa duas
 # bandas. O contraste cromatico local abaixo continua obrigatorio: o HSV
 # sozinho nao aceita um banho uniforme de luz ciano/verde.
-MARKER_GREEN_HSV_MIN = (45, 60, 30)
-MARKER_GREEN_HSV_MAX = (105, 255, 255)
-MARKER_RED_HSV_MIN_1 = (0, 90, 50)
-MARKER_RED_HSV_MAX_1 = (12, 255, 255)
-MARKER_RED_HSV_MIN_2 = (168, 90, 50)
+MARKER_GREEN_HSV_MIN = (40, 45, 20)
+MARKER_GREEN_HSV_MAX = (120, 255, 255)
+MARKER_RED_HSV_MIN_1 = (0, 65, 35)
+MARKER_RED_HSV_MAX_1 = (16, 255, 255)
+MARKER_RED_HSV_MIN_2 = (164, 65, 35)
 MARKER_RED_HSV_MAX_2 = (180, 255, 255)
 
 # Limpeza da mascara. Os tamanhos sao definidos na base 640x480 e escalados
@@ -884,9 +884,12 @@ MARKER_RING_MIN_PIXELS = 24
 # mediana, cadeira vermelha do laboratorio 62 e 65. A folga e enorme e e
 # ela que permite afrouxar a geometria com seguranca.
 MARKER_MASK_MIN_CHROMA = 45.0
-MARKER_MIN_INSIDE_CHROMA = 90.0
-MARKER_MIN_CHROMA_CONTRAST = 30.0
-MARKER_MIN_CONFIDENCE = 0.58
+# O balanço de branco da câmera pode deslocar o verde para ciano e lavar o
+# vermelho. Ainda exigimos o blob mais cromático que o seu entorno e três
+# frames compatíveis, mas não descartamos o marcador real por pouca folga.
+MARKER_MIN_INSIDE_CHROMA = 70.0
+MARKER_MIN_CHROMA_CONTRAST = 25.0
+MARKER_MIN_CONFIDENCE = 0.50
 
 # Rastreamento temporal e espacial de um unico destino.
 MARKER_ACQUIRE_HITS = 3

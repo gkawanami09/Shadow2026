@@ -151,6 +151,37 @@ class MarkerDetectorTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result.confirmed)
 
+    def test_green_cyan_from_rescue_camera_is_confirmed(self):
+        """O balanço de branco pode deixar B um pouco maior que G."""
+        frame = base_frame()
+        cv2.fillPoly(
+            frame,
+            [np.asarray(((320, 190), (230, 400), (410, 400)),
+                        dtype=np.int32)],
+            (131, 110, 31),
+            lineType=cv2.LINE_AA,
+        )
+
+        result = confirmed(MarkerDetector("green"), frame)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+
+    def test_red_triangle_with_less_saturation_is_confirmed(self):
+        frame = base_frame()
+        cv2.fillPoly(
+            frame,
+            [np.asarray(((320, 190), (230, 400), (410, 400)),
+                        dtype=np.int32)],
+            (75, 75, 145),
+            lineType=cv2.LINE_AA,
+        )
+
+        result = confirmed(MarkerDetector("red"), frame)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+
     def test_red_triangle_distant_above_generic_roi_is_confirmed(self):
         """O vermelho distante nao pode depender da janela do verde."""
         frame = triangle_frame(
