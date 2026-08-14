@@ -211,9 +211,25 @@ class MarkerDetectorTests(unittest.TestCase):
         self.assertTrue(red.confirmed)
         self.assertLess(
             red.area / float(WIDTH * HEIGHT),
-            cfg.MARKER_GREEN_MIN_AREA_RATIO,
+            0.0015,
         )
         self.assertIsNone(green)
+
+    def test_green_triangle_distant_is_confirmed_before_middle_of_frame(self):
+        """O verde distante entra antes da metade sem perder os tres frames."""
+        frame = triangle_frame(
+            "green",
+            points=((320, 146), (312, 191), (328, 191)),
+        )
+
+        result = confirmed(MarkerDetector("green"), frame)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.confirmed)
+        self.assertLess(
+            result.area / float(WIDTH * HEIGHT),
+            0.0015,
+        )
 
     def test_triangles_small_and_distant_are_confirmed_after_three_frames(self):
         """A deteccao distante nao pode exigir que o alvo ja esteja perto.

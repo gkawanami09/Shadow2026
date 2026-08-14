@@ -785,16 +785,17 @@ FINAL_TRIANGLE_OVERLAY_BGR = {
 MARKER_BASE_WIDTH = 640
 MARKER_BASE_HEIGHT = 480
 
-# A faixa superior ainda fica fora da arena, mas um triangulo distante aparece
-# antes na metade alta da imagem. 0.35 deixa essa primeira aparicao entrar no
-# detector sem abrir a camera inteira para objetos do ambiente.
+# A faixa superior ainda fica fora da arena, mas o triangulo verde distante
+# aparece bem antes da metade da imagem. A janela abre a partir de 30%; o
+# filtro cromatico local, o contraste com o anel e tres frames consecutivos
+# continuam impedindo que um objeto verde isolado comande a rota.
 # Perfil histórico do triângulo verde (commit 8dacb4c, 07/08): era o que o
 # robô usava quando identificava o marcador verde de forma estável.
-MARKER_ROI_TOP = 0.45
+MARKER_ROI_TOP = 0.30
 MARKER_GREEN_MORPH_OPEN_PX = 3
 MARKER_GREEN_MORPH_CLOSE_PX = 5
-MARKER_GREEN_MIN_AREA_RATIO = 0.0015
-MARKER_GREEN_MIN_SIDE_PX = 9
+MARKER_GREEN_MIN_AREA_RATIO = 0.00045
+MARKER_GREEN_MIN_SIDE_PX = 5
 MARKER_GREEN_MIN_INSIDE_CHROMA = 90.0
 MARKER_GREEN_MIN_CHROMA_CONTRAST = 30.0
 MARKER_GREEN_MIN_CONFIDENCE = 0.58
