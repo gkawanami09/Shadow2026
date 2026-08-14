@@ -327,12 +327,8 @@ ENTRY_BLACK_FOLLOW_TIMEOUT_S = 1.0
 # boot sem linha, em curva, em marcador ou em manobra verde.
 ENTRY_NO_BLACK_RESCUE_TEST_ENABLED = True
 ENTRY_NO_BLACK_RESCUE_DELAY_S = 3.0
-# Antes do handoff o proprio segue-linha da re, sem o avanco de entrada que o
-# processo resgate normalmente executaria.
-ENTRY_NO_BLACK_RESCUE_REVERSE_S = 2.0
-ENTRY_NO_BLACK_RESCUE_REVERSE_PWM = 80
-ENTRY_NO_BLACK_RESCUE_REVERSE_SPEED = (
-    ENTRY_NO_BLACK_RESCUE_REVERSE_PWM / 120.0)
+# Ao confirmar, o controle apenas para e entrega a serial. O resgate preserva
+# seu avanço reto normal de 1 s antes de iniciar os giros de busca.
 # Além do modelo, o primeiro voto precisa ter a linha preta rastreada. A
 # tolerância é propositalmente ampla: a faixa de prata deve poder iniciar o
 # resgate mesmo com o robô levemente torto ou deslocado. O veto de preto

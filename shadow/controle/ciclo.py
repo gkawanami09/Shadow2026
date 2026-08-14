@@ -67,45 +67,18 @@ def _enter_rescue_zone(arduino):
 
 
 def _enter_rescue_after_no_black(arduino):
-    """Executa o teste de entrada: re temporizada e handoff sem avanco.
-
-    A contagem dos tres segundos e feita no laco principal, que ainda recebe
-    a visao. Aqui a serial continua pertencendo ao segue-linha ate a re
-    terminar; so entao ela e entregue ao processo de resgate.
-    """
-    epoca_serial = arduino.connection_epoch
-    deadline = time.monotonic() + config.ENTRY_NO_BLACK_RESCUE_REVERSE_S
-    status.value = 'Linha preta ausente — dando ré para entrar no resgate'
-    print(
-        "[controle] linha preta ausente por "
-        f"{config.ENTRY_NO_BLACK_RESCUE_DELAY_S:.1f} s; dando ré por "
-        f"{config.ENTRY_NO_BLACK_RESCUE_REVERSE_S:.1f} s")
-    try:
-        while time.monotonic() < deadline:
-            if (
-                terminate.value
-                or not arduino.connected
-                or arduino.connection_epoch != epoca_serial
-            ):
-                return False
-            if steer(200, config.ENTRY_NO_BLACK_RESCUE_REVERSE_SPEED) is False:
-                return False
-            sleep_steering(min(.05, deadline - time.monotonic()))
-    finally:
-        steer()
-
-    if (
-        terminate.value
-        or not arduino.connected
-        or arduino.connection_epoch != epoca_serial
-    ):
+    """Entrega a serial ao resgate apos a ausencia de preto confirmada."""
+    steer()
+    if terminate.value or not arduino.connected:
         return False
-    # O resgate sabe que este modo de teste ja posicionou o robo e, por isso,
-    # nao fara o avanco normal de um segundo.
+    status.value = 'Linha preta ausente — entrando no resgate'
     arduino.led("APAGADO")
     entry_armed.value = False
     _reset_entry_silver("entrada por ausencia de preto")
-    print("[controle] ré concluída; PARAR e LED APAGADO — resgate sem avanço")
+    print(
+        "[controle] linha preta ausente por "
+        f"{config.ENTRY_NO_BLACK_RESCUE_DELAY_S:.1f} s; PARAR e LED APAGADO "
+        "— resgate avançará 1 s antes dos giros")
     return True
 
 
