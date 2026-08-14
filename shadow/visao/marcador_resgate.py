@@ -412,9 +412,9 @@ class MarkerDetector:
         mask[:roi_top, :] = 0
 
         open_size = _odd_kernel_size(
-            cfg.MARKER_MORPH_OPEN_PX, scale)
+            self._morph_open_px(), scale)
         close_size = _odd_kernel_size(
-            cfg.MARKER_MORPH_CLOSE_PX, scale)
+            self._morph_close_px(), scale)
         if open_size > 1:
             kernel = cv2.getStructuringElement(
                 cv2.MORPH_ELLIPSE, (open_size, open_size))
@@ -559,9 +559,9 @@ class MarkerDetector:
         inside_chroma = float(np.median(chroma[inside_selector]))
         outside_chroma = float(np.median(chroma[ring_selector]))
         contrast = inside_chroma - outside_chroma
-        if inside_chroma < cfg.MARKER_MIN_INSIDE_CHROMA:
+        if inside_chroma < self._min_inside_chroma():
             return None, "chroma"
-        if contrast < cfg.MARKER_MIN_CHROMA_CONTRAST:
+        if contrast < self._min_chroma_contrast():
             return None, "contrast"
 
         # Na rota de chegada a forma nao foi julgada, entao ela nao pode nem
@@ -605,7 +605,7 @@ class MarkerDetector:
             + 0.09 * compactness_score
             + 0.05 * area_score
         )
-        if confidence < cfg.MARKER_MIN_CONFIDENCE:
+        if confidence < self._min_confidence():
             return None, "confidence"
 
         moments = cv2.moments(contour)
@@ -636,12 +636,37 @@ class MarkerDetector:
         """Mantem a geometria normal para verde e admite vermelho distante."""
         if self.target_kind == "red":
             return cfg.MARKER_RED_MIN_AREA_RATIO
-        return cfg.MARKER_MIN_AREA_RATIO
+        return cfg.MARKER_GREEN_MIN_AREA_RATIO
 
     def _min_side_px(self):
         if self.target_kind == "red":
             return cfg.MARKER_RED_MIN_SIDE_PX
-        return cfg.MARKER_MIN_SIDE_PX
+        return cfg.MARKER_GREEN_MIN_SIDE_PX
+
+    def _morph_open_px(self):
+        if self.target_kind == "green":
+            return cfg.MARKER_GREEN_MORPH_OPEN_PX
+        return cfg.MARKER_MORPH_OPEN_PX
+
+    def _morph_close_px(self):
+        if self.target_kind == "green":
+            return cfg.MARKER_GREEN_MORPH_CLOSE_PX
+        return cfg.MARKER_MORPH_CLOSE_PX
+
+    def _min_inside_chroma(self):
+        if self.target_kind == "green":
+            return cfg.MARKER_GREEN_MIN_INSIDE_CHROMA
+        return cfg.MARKER_MIN_INSIDE_CHROMA
+
+    def _min_chroma_contrast(self):
+        if self.target_kind == "green":
+            return cfg.MARKER_GREEN_MIN_CHROMA_CONTRAST
+        return cfg.MARKER_MIN_CHROMA_CONTRAST
+
+    def _min_confidence(self):
+        if self.target_kind == "green":
+            return cfg.MARKER_GREEN_MIN_CONFIDENCE
+        return cfg.MARKER_MIN_CONFIDENCE
 
     def _chroma_map(self, frame_bgr):
         channels = frame_bgr.astype(np.float32)
@@ -649,12 +674,7 @@ class MarkerDetector:
         green = channels[:, :, 1]
         red = channels[:, :, 2]
         if self.target_kind == "green":
-            # Nesta câmera o marcador verde pode chegar ciano (B ligeiramente
-            # acima de G). A primeira medida cobre verde normal; a segunda
-            # exige B e G acima de R, sem aceitar azul puro.
-            green_natural = green - np.maximum(red, blue)
-            green_cyan = np.minimum(blue, green) - red
-            return np.maximum(green_natural, green_cyan)
+            return green - np.maximum(red, blue)
         return red - np.maximum(green, blue)
 
     def _select_candidate(self, candidates, scale):

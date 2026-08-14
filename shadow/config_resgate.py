@@ -784,7 +784,16 @@ MARKER_BASE_HEIGHT = 480
 # A faixa superior ainda fica fora da arena, mas um triangulo distante aparece
 # antes na metade alta da imagem. 0.35 deixa essa primeira aparicao entrar no
 # detector sem abrir a camera inteira para objetos do ambiente.
-MARKER_ROI_TOP = 0.35
+# Perfil histórico do triângulo verde (commit 8dacb4c, 07/08): era o que o
+# robô usava quando identificava o marcador verde de forma estável.
+MARKER_ROI_TOP = 0.45
+MARKER_GREEN_MORPH_OPEN_PX = 3
+MARKER_GREEN_MORPH_CLOSE_PX = 5
+MARKER_GREEN_MIN_AREA_RATIO = 0.0015
+MARKER_GREEN_MIN_SIDE_PX = 9
+MARKER_GREEN_MIN_INSIDE_CHROMA = 90.0
+MARKER_GREEN_MIN_CHROMA_CONTRAST = 30.0
+MARKER_GREEN_MIN_CONFIDENCE = 0.58
 
 # O triangulo vermelho pode aparecer bem menor e mais alto quando o robo sai
 # do deposito verde. Ele e procurado somente nos frames parados dos pulsos e
@@ -798,8 +807,8 @@ MARKER_RED_MIN_SIDE_PX = 5
 # HSV do OpenCV (H em 0..180). Vermelho cruza a origem e, por isso, usa duas
 # bandas. O contraste cromatico local abaixo continua obrigatorio: o HSV
 # sozinho nao aceita um banho uniforme de luz ciano/verde.
-MARKER_GREEN_HSV_MIN = (40, 45, 20)
-MARKER_GREEN_HSV_MAX = (120, 255, 255)
+MARKER_GREEN_HSV_MIN = (45, 60, 30)
+MARKER_GREEN_HSV_MAX = (105, 255, 255)
 MARKER_RED_HSV_MIN_1 = (0, 65, 35)
 MARKER_RED_HSV_MAX_1 = (16, 255, 255)
 MARKER_RED_HSV_MIN_2 = (164, 65, 35)

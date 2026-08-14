@@ -151,22 +151,6 @@ class MarkerDetectorTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result.confirmed)
 
-    def test_green_cyan_from_rescue_camera_is_confirmed(self):
-        """O balanço de branco pode deixar B um pouco maior que G."""
-        frame = base_frame()
-        cv2.fillPoly(
-            frame,
-            [np.asarray(((320, 190), (230, 400), (410, 400)),
-                        dtype=np.int32)],
-            (131, 110, 31),
-            lineType=cv2.LINE_AA,
-        )
-
-        result = confirmed(MarkerDetector("green"), frame)
-
-        self.assertIsNotNone(result)
-        self.assertTrue(result.confirmed)
-
     def test_red_triangle_with_less_saturation_is_confirmed(self):
         frame = base_frame()
         cv2.fillPoly(
@@ -199,7 +183,7 @@ class MarkerDetectorTests(unittest.TestCase):
         self.assertTrue(red.confirmed)
         self.assertLess(
             red.area / float(WIDTH * HEIGHT),
-            cfg.MARKER_MIN_AREA_RATIO,
+            cfg.MARKER_GREEN_MIN_AREA_RATIO,
         )
         self.assertIsNone(green)
 
@@ -210,7 +194,6 @@ class MarkerDetectorTests(unittest.TestCase):
         o entorno e neutro e a confirmacao temporal continua obrigatoria.
         """
         for kind, points in (
-            ("green", ((320, 245), (312, 277), (328, 277))),
             ("red", ((320, 170), (312, 202), (328, 202))),
         ):
             with self.subTest(kind=kind):
