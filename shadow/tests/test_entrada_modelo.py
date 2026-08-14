@@ -43,7 +43,7 @@ class EntryModelTests(unittest.TestCase):
         model = EntryModel(
             backend="onnx", input_size=640, min_confidence=.6)
         output = np.zeros((1, 5, 6), dtype=np.float32)
-        output[0, :, 0] = (320, 320, 200, 100, .91)
+        output[0, :, 0] = (320, 320, 300, 80, .91)
         output[0, :, 1] = (10, 10, 10, 10, .2)
         model._session = _Session(output)
         model._input_name = "images"
@@ -67,7 +67,20 @@ class EntryModelTests(unittest.TestCase):
         self.assertAlmostEqual(model.last_confidence, .44, places=5)
 
     def test_limiar_padrao_da_prata_exige_confianca_maior(self):
-        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .45)
+        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .55)
+
+    def test_caixa_pequena_ou_quadrada_nao_vira_prata(self):
+        model = EntryModel(
+            backend="onnx", input_size=640, min_confidence=.5)
+        output = np.zeros((1, 5, 6), dtype=np.float32)
+        output[0, :, 0] = (320, 320, 80, 80, .91)
+        model._session = _Session(output)
+        model._input_name = "images"
+
+        detection = model.detect(np.zeros((252, 448, 3), dtype=np.uint8))
+
+        self.assertIsNone(detection)
+        self.assertAlmostEqual(model.last_confidence, .91, places=5)
 
 
 class EntryModelWorkerTests(unittest.TestCase):

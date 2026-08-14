@@ -271,7 +271,11 @@ ENTRY_MODEL_INPUT = 640
 ENTRY_NCNN_MODEL_INPUT = 416
 # A entrada so aceita uma deteccao bem confiavel. O segundo voto distinto
 # abaixo evita que um falso positivo isolado do segue-linha vire resgate.
-ENTRY_MODEL_MIN_CONFIDENCE = .45
+ENTRY_MODEL_MIN_CONFIDENCE = .55
+# A faixa de entrada e transversal: caixas pequenas ou quase quadradas sao
+# objetos/manchas do percurso, nao uma faixa prata valida.
+ENTRY_SILVER_MIN_WIDTH_RATIO = .22
+ENTRY_SILVER_MIN_ASPECT_RATIO = 3.0
 # O YOLO leva mais que um periodo de camera. Guardar esta janela curta evita
 # perder os poucos frames da prata, mas o limite impede backlog indefinido.
 ENTRY_MODEL_PENDING_FRAMES = 12

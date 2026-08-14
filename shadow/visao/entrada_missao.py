@@ -271,8 +271,16 @@ class EntryModel:
         center_x, center_y, box_width, box_height = output[index, :4]
         x = (float(center_x) - float(box_width) / 2 - offset_x) / scale
         y = (float(center_y) - float(box_height) / 2 - offset_y) / scale
+        box_width = float(box_width) / scale
+        box_height = float(box_height) / scale
+        # O modelo pode dar confianca alta para reflexos e objetos claros da
+        # pista. A entrada real sempre e uma faixa larga, horizontal.
+        if (box_width < width * config.ENTRY_SILVER_MIN_WIDTH_RATIO
+                or box_width / max(1., box_height)
+                < config.ENTRY_SILVER_MIN_ASPECT_RATIO):
+            return None
         return EntryDetection(
-            bbox=(x, y, float(box_width) / scale, float(box_height) / scale),
+            bbox=(x, y, box_width, box_height),
             confidence=confidence)
 
     def _run_ncnn(self, input_tensor):
