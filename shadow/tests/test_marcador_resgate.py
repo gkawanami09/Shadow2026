@@ -78,6 +78,17 @@ class MarkerColorMaskTests(unittest.TestCase):
 
         self.assertGreater(np.count_nonzero(masks["green"][:100]), 0)
 
+    def test_laranja_nao_entra_na_mascara_vermelha(self):
+        hsv = np.zeros((40, 80, 3), dtype=np.uint8)
+        hsv[:, :40] = (3, 220, 180)
+        hsv[:, 40:] = (14, 220, 180)
+        frame = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+        red = color_masks(frame)["red"]
+
+        self.assertGreater(np.mean(red[:, :40]), 250)
+        self.assertEqual(np.count_nonzero(red[:, 40:]), 0)
+
     def test_invalid_frame_is_rejected(self):
         with self.assertRaises(ValueError):
             color_masks(np.zeros((40, 40), dtype=np.uint8))
@@ -346,6 +357,20 @@ class GreenRectangleDetectorTests(unittest.TestCase):
         self.assertTrue(resultado.confirmed)
         self.assertTrue(resultado.track_locked)
         self.assertEqual(resultado.kind, "green")
+
+    def test_painel_verde_ciano_escuro_e_confirmado(self):
+        # Painel escuro visto na arena: ainda e verde-ciano, mas sua
+        # cromaticidade e menor que o painel iluminado usado antigamente.
+        frame = base_frame()
+        cv2.rectangle(frame, (100, 270), (540, 440), (65, 75, 45), -1)
+        detector = GreenRectangleDetector()
+
+        resultado = None
+        for indice in range(cfg.GREEN_RECTANGLE_ACQUIRE_HITS):
+            resultado = detector.detect(frame, timestamp=indice * 0.1)
+
+        self.assertIsNotNone(resultado)
+        self.assertTrue(resultado.confirmed)
 
     def test_placa_clara_azulada_da_captura_nao_vira_verde(self):
         frame = base_frame()

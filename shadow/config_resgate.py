@@ -818,11 +818,14 @@ MARKER_RED_MIN_CONFIDENCE = 0.40
 # HSV do OpenCV (H em 0..180). Vermelho cruza a origem e, por isso, usa duas
 # bandas. O contraste cromatico local abaixo continua obrigatorio: o HSV
 # sozinho nao aceita um banho uniforme de luz ciano/verde.
-MARKER_GREEN_HSV_MIN = (45, 60, 30)
-MARKER_GREEN_HSV_MAX = (105, 255, 255)
+# O painel real desta arena e verde-ciano bem escuro. A mascara pode ser mais
+# ampla pois o retangulo ainda exige base no piso, forma horizontal, area e
+# tres frames novos antes de comandar a aproximacao.
+MARKER_GREEN_HSV_MIN = (35, 40, 12)
+MARKER_GREEN_HSV_MAX = (115, 255, 255)
 MARKER_RED_HSV_MIN_1 = (0, 55, 28)
-MARKER_RED_HSV_MAX_1 = (18, 255, 255)
-MARKER_RED_HSV_MIN_2 = (162, 55, 28)
+MARKER_RED_HSV_MAX_1 = (8, 255, 255)
+MARKER_RED_HSV_MIN_2 = (172, 55, 28)
 MARKER_RED_HSV_MAX_2 = (180, 255, 255)
 
 # Limpeza da mascara. Os tamanhos sao definidos na base 640x480 e escalados
@@ -934,8 +937,8 @@ GREEN_RECTANGLE_MIN_HORIZONTAL_ASPECT = 1.80
 # desta faixa (como o batente/parede visto no debug) sao apenas iluminacao ou
 # obstaculo e nunca podem iniciar a rota de aproximacao.
 GREEN_RECTANGLE_MIN_BOTTOM_RATIO = 0.74
-GREEN_RECTANGLE_MIN_SATURATION = 120.0
-GREEN_RECTANGLE_MIN_CHROMA = 40.0
+GREEN_RECTANGLE_MIN_SATURATION = 80.0
+GREEN_RECTANGLE_MIN_CHROMA = 20.0
 GREEN_RECTANGLE_MIN_SOLIDITY = 0.60
 GREEN_RECTANGLE_MIN_COMPACTNESS = 0.25
 GREEN_RECTANGLE_ACQUIRE_HITS = 3
