@@ -35,6 +35,8 @@ class BallPickupSequencer:
     """Prende, eleva e libera a esfera conforme a cor confirmada."""
 
     IDLE = "PICKUP_IDLE"
+    GRIPPERS_PREPARE_PENDING = "PICKUP_GRIPPERS_PREPARE_PENDING"
+    GRIPPERS_PREPARE_WAIT = "PICKUP_GRIPPERS_PREPARE"
     PRE_FORWARD_START = "PICKUP_PRE_FORWARD_START"
     PRE_FORWARD_PENDING = "PICKUP_PRE_FORWARD_PENDING"
     PRE_FORWARD_LEAD = "PICKUP_PRE_FORWARD"
@@ -69,7 +71,7 @@ class BallPickupSequencer:
     COMPLETE = "PICKUP_COMPLETE"
     FAULT = "PICKUP_FAULT"
 
-    def __init__(self):
+    def __init__(self, grippers_prepositioned=True):
         self.state = self.IDLE
         self._deadline = None
         self._kind = None
@@ -81,6 +83,7 @@ class BallPickupSequencer:
         self._terminal_detail = ""
         self._release_mode = "deposit"
         self._wall_mode = False
+        self._grippers_prepositioned = bool(grippers_prepositioned)
 
     @property
     def started(self):
@@ -114,7 +117,11 @@ class BallPickupSequencer:
         # A garra desce antes de qualquer movimento. O avanco que antes era
         # dividido em 1 s levantada + 1 s abaixada passa inteiro para depois
         # da descida, preservando a distancia total.
-        self.state = self.FUTABA_START
+        self.state = (
+            self.FUTABA_START
+            if self._grippers_prepositioned
+            else self.GRIPPERS_PREPARE_PENDING
+        )
         return True
 
     def update(self, now=None):
@@ -125,6 +132,26 @@ class BallPickupSequencer:
                 self.IDLE,
                 "coleta ainda nao iniciada",
             )
+
+        if self.state == self.GRIPPERS_PREPARE_PENDING:
+            return PickupStep(
+                self.GRIPPERS_PREPARE_PENDING,
+                "posicionando as garras em -10/+10 graus antes da descida",
+                gripper_action=(
+                    cfg.BALL_PICKUP_INITIAL_LEFT_DELTA,
+                    cfg.BALL_PICKUP_INITIAL_RIGHT_DELTA,
+                ),
+            )
+
+        if self.state == self.GRIPPERS_PREPARE_WAIT:
+            if now < self._deadline:
+                return PickupStep(
+                    self.GRIPPERS_PREPARE_WAIT,
+                    "aguardando as garras assentarem antes de baixar",
+                )
+            self.state = self.FUTABA_START
+            self._deadline = None
+            return self.update(now=now)
 
         if self.state == self.PRE_FORWARD_START:
             self.state = self.PRE_FORWARD_PENDING
@@ -630,6 +657,10 @@ class BallPickupSequencer:
     def mark_grippers_started(self, now=None):
         """Confirma um lote de garras e inicia seu tempo fisico."""
         now = time.monotonic() if now is None else float(now)
+        if self.state == self.GRIPPERS_PREPARE_PENDING:
+            self.state = self.GRIPPERS_PREPARE_WAIT
+            self._deadline = now + cfg.BALL_PICKUP_GRIPPER_SETTLE_S
+            return
         if self.state == self.GRIPPERS_START:
             self.state = self.GRIPPERS_WAIT
             if self._gripper_close_index >= len(
@@ -717,7 +748,7 @@ class BallPickupSequencer:
         return "esfera preta; abrindo primeiro a garra direita"
 
     def _restore_action(self):
-        """Volta aos extremos iniciais considerando o clamp 0..180."""
+        """Retorna as duas garras exatamente para a base de 0 graus."""
         if self._kind == "silver":
             return 0, -cfg.BALL_PICKUP_RIGHT_DELTA
         return (
@@ -732,9 +763,13 @@ class BallPickupSequencer:
         if captura <= 0 or passo <= 0:
             raise ValueError("passos das garras devem ser positivos")
 
+        # O fechamento termina no mesmo ponto fisico de antes (-55/+55),
+        # partindo agora da pre-abertura -10/+10.
         restantes = [
-            int(cfg.BALL_PICKUP_LEFT_DELTA),
-            int(cfg.BALL_PICKUP_RIGHT_DELTA),
+            int(cfg.BALL_PICKUP_LEFT_DELTA)
+            - int(cfg.BALL_PICKUP_INITIAL_LEFT_DELTA),
+            int(cfg.BALL_PICKUP_RIGHT_DELTA)
+            - int(cfg.BALL_PICKUP_INITIAL_RIGHT_DELTA),
         ]
         acoes = []
 

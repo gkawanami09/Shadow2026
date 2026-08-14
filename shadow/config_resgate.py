@@ -220,6 +220,11 @@ BALL_CRESCENT_TOKEN_TTL_S = 0.80
 BALL_PICKUP_FUTABA_POWER = -20
 BALL_PICKUP_FUTABA_MS = 1500
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
+# O firmware inicia em esquerda=180 e direita=0. Para aproximar as duas
+# garras 10 graus do centro, a esquerda usa sinal negativo e a direita
+# positivo. Apos cada liberacao elas voltam exatamente a esta base (0 delta).
+BALL_PICKUP_INITIAL_LEFT_DELTA = -10
+BALL_PICKUP_INITIAL_RIGHT_DELTA = 10
 BALL_PICKUP_LEFT_DELTA = -55
 BALL_PICKUP_RIGHT_DELTA = 55
 BALL_PICKUP_PRE_FORWARD_S = 1.00

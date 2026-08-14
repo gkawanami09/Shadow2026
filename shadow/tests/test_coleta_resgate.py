@@ -191,6 +191,13 @@ class BallPickupSequencerTests(unittest.TestCase):
             (cfg.BALL_PICKUP_LEFT_DELTA, cfg.BALL_PICKUP_RIGHT_DELTA),
             (-55, 55),
         )
+        self.assertEqual(
+            (
+                cfg.BALL_PICKUP_INITIAL_LEFT_DELTA,
+                cfg.BALL_PICKUP_INITIAL_RIGHT_DELTA,
+            ),
+            (-10, 10),
+        )
         self.assertEqual(cfg.BALL_PICKUP_RELEASE_DELTA, 70)
         self.assertEqual(
             cfg.BALL_PICKUP_FORWARD_LEAD_S,
@@ -228,6 +235,29 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertEqual(cfg.BALL_PICKUP_WIGGLE_DELTA, 40)
         self.assertEqual(cfg.BALL_PICKUP_WIGGLE_REPETITIONS, 2)
         self.assertEqual(cfg.BALL_PICKUP_GRIPPER_CAPTURE_DEGREES, 40)
+
+    def test_proxima_coleta_prepara_garras_antes_de_abaixar(self):
+        pickup = BallPickupSequencer(grippers_prepositioned=False)
+        self.assertTrue(pickup.start("silver"))
+
+        preparo = pickup.update(now=1.0)
+        self.assertEqual(preparo.state, pickup.GRIPPERS_PREPARE_PENDING)
+        self.assertEqual(
+            preparo.gripper_action,
+            (
+                cfg.BALL_PICKUP_INITIAL_LEFT_DELTA,
+                cfg.BALL_PICKUP_INITIAL_RIGHT_DELTA,
+            ),
+        )
+
+        pickup.mark_grippers_started(now=1.0)
+        baixando = pickup.update(
+            now=1.0 + cfg.BALL_PICKUP_GRIPPER_SETTLE_S)
+        self.assertEqual(baixando.state, pickup.FUTABA_PENDING)
+        self.assertEqual(
+            baixando.futaba_action,
+            (cfg.BALL_PICKUP_FUTABA_POWER, cfg.BALL_PICKUP_FUTABA_MS),
+        )
         self.assertEqual(cfg.BALL_PICKUP_GRIPPER_CAPTURE_INTERVAL_S, 0.04)
         self.assertEqual(cfg.BALL_PICKUP_GRIPPER_STEP_DEGREES, 15)
         self.assertEqual(cfg.BALL_PICKUP_GRIPPER_STEP_INTERVAL_S, 0.05)
@@ -312,11 +342,17 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertEqual(len(movimentos), 4)
         self.assertEqual(
             sum(acao[0] for acao in movimentos),
-            cfg.BALL_PICKUP_LEFT_DELTA,
+            (
+                cfg.BALL_PICKUP_LEFT_DELTA
+                - cfg.BALL_PICKUP_INITIAL_LEFT_DELTA
+            ),
         )
         self.assertEqual(
             sum(acao[1] for acao in movimentos),
-            cfg.BALL_PICKUP_RIGHT_DELTA,
+            (
+                cfg.BALL_PICKUP_RIGHT_DELTA
+                - cfg.BALL_PICKUP_INITIAL_RIGHT_DELTA
+            ),
         )
         self.assertTrue(all(
             (acao[0] == 0) != (acao[1] == 0)
@@ -745,7 +781,14 @@ class PickupSerialRecoveryTests(unittest.TestCase):
         self.assertTrue(nova.started)
         self.assertEqual(nova.target_kind, "silver")
         self.assertFalse(nova._wall_mode)
-        self.assertEqual(nova.state, nova.FUTABA_START)
+        self.assertEqual(nova.state, nova.GRIPPERS_PREPARE_PENDING)
+        self.assertEqual(
+            nova.update(now=clock.monotonic()).gripper_action,
+            (
+                cfg.BALL_PICKUP_INITIAL_LEFT_DELTA,
+                cfg.BALL_PICKUP_INITIAL_RIGHT_DELTA,
+            ),
+        )
         self.assertIn(("lado", 0, 0), arduino.calls)
         self.assertIn((
             "futaba",

@@ -382,7 +382,7 @@ def _recuperar_coleta_apos_reinicio(
         raise RuntimeError(
             "nao foi possivel parar o Futaba depois da recuperacao")
 
-    nova_coleta = BallPickupSequencer()
+    nova_coleta = BallPickupSequencer(grippers_prepositioned=False)
     if not nova_coleta.start(tipo, wall_mode=False):
         raise RuntimeError("nao foi possivel reiniciar a coleta normal")
     return nova_coleta, epoca
@@ -743,6 +743,24 @@ def _avancar_entrada_da_missao(args, arduino, acao_direcao):
     return True
 
 
+def _posicionar_garras_inicio_resgate(args, arduino):
+    """Posiciona as garras antes da primeira busca por vitimas."""
+    if not args.drive or arduino is None:
+        return False
+    epoca_serial = arduino.connection_epoch
+    if arduino.garras(
+        cfg.BALL_PICKUP_INITIAL_LEFT_DELTA,
+        cfg.BALL_PICKUP_INITIAL_RIGHT_DELTA,
+    ) is False or (
+        not arduino.connected
+        or arduino.connection_epoch != epoca_serial
+    ):
+        raise RuntimeError(
+            "nao foi possivel posicionar as garras no inicio do resgate")
+    print("[resgate] garras iniciais: esquerda=-10, direita=+10 graus")
+    return True
+
+
 def _confirmar_saida_com_camera_linha(
     arduino,
     debug=False,
@@ -951,6 +969,7 @@ def main():
         if not args.sem_marcadores:
             marcadores = MarkerPair()
 
+        _posicionar_garras_inicio_resgate(args, arduino)
         entrada_da_missao_concluida = _avancar_entrada_da_missao(
             args,
             arduino,
@@ -2083,7 +2102,7 @@ def main():
                 varreduras_sem_vitima = 0
                 tentativas_recuperacao_coleta = 0
                 epoca_coleta = None
-                coleta = BallPickupSequencer()
+                coleta = BallPickupSequencer(grippers_prepositioned=False)
                 if trabalhador is not None:
                     trabalhador.reset_tracking()
                 portao.reset()
