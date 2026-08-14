@@ -196,7 +196,7 @@ class BallPickupSequencerTests(unittest.TestCase):
                 cfg.BALL_PICKUP_INITIAL_LEFT_DELTA,
                 cfg.BALL_PICKUP_INITIAL_RIGHT_DELTA,
             ),
-            (-10, 10),
+            (-20, 20),
         )
         self.assertEqual(cfg.BALL_PICKUP_RELEASE_DELTA, 70)
         self.assertEqual(
@@ -337,9 +337,9 @@ class BallPickupSequencerTests(unittest.TestCase):
         movimentos = list(pickup._gripper_close_actions)
         self.assertEqual(
             movimentos[:2],
-            [(-40, 0), (0, 40)],
+            [(-35, 0), (0, 35)],
         )
-        self.assertEqual(len(movimentos), 4)
+        self.assertEqual(len(movimentos), 2)
         self.assertEqual(
             sum(acao[0] for acao in movimentos),
             (
@@ -458,7 +458,7 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertEqual(close.motor_action, "")
         self.assertEqual(
             close.gripper_action,
-            (-cfg.BALL_PICKUP_GRIPPER_CAPTURE_DEGREES, 0),
+            (-35, 0),
         )
         actions = [close]
         _ack_step(pickup, close, now)
@@ -499,7 +499,7 @@ class BallPickupSequencerTests(unittest.TestCase):
         self.assertEqual(close.motor_action, "stop")
         self.assertEqual(
             close.gripper_action,
-            (-cfg.BALL_PICKUP_GRIPPER_CAPTURE_DEGREES, 0),
+            (-35, 0),
         )
 
     def test_release_is_blocked_while_carrying_until_marker_arrival(self):

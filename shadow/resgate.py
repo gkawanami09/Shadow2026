@@ -757,7 +757,7 @@ def _posicionar_garras_inicio_resgate(args, arduino):
     ):
         raise RuntimeError(
             "nao foi possivel posicionar as garras no inicio do resgate")
-    print("[resgate] garras iniciais: esquerda=-10, direita=+10 graus")
+    print("[resgate] garras iniciais: esquerda=-20, direita=+20 graus")
     return True
 
 

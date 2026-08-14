@@ -136,7 +136,7 @@ class BallPickupSequencer:
         if self.state == self.GRIPPERS_PREPARE_PENDING:
             return PickupStep(
                 self.GRIPPERS_PREPARE_PENDING,
-                "posicionando as garras em -10/+10 graus antes da descida",
+                "posicionando as garras em -20/+20 graus antes da descida",
                 gripper_action=(
                     cfg.BALL_PICKUP_INITIAL_LEFT_DELTA,
                     cfg.BALL_PICKUP_INITIAL_RIGHT_DELTA,
@@ -764,7 +764,7 @@ class BallPickupSequencer:
             raise ValueError("passos das garras devem ser positivos")
 
         # O fechamento termina no mesmo ponto fisico de antes (-55/+55),
-        # partindo agora da pre-abertura -10/+10.
+        # partindo agora da pre-abertura -20/+20.
         restantes = [
             int(cfg.BALL_PICKUP_LEFT_DELTA)
             - int(cfg.BALL_PICKUP_INITIAL_LEFT_DELTA),
