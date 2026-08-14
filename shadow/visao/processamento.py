@@ -27,7 +27,8 @@ from shared.dados_compartilhados import (add_time_value, black_average,
 from visao import linha as line_module
 from visao import verde as green_module
 from visao.captura import LineCamera
-from visao.entrada_missao import build_entry_gate, update_entry_silver
+from visao.entrada_missao import (
+    build_entry_gate, entry_black_veto_mask, update_entry_silver)
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.linha import calculate_angle, determine_correct_line
 from visao.verde import check_green, latch_turn_direction
@@ -198,8 +199,13 @@ def vision_loop(debug=False):
             )
             # A mascara normal muda no segue-linha abaixo. Preserva a medida
             # bruta para compara-la com a caixa prata deste mesmo frame.
-            entry_black_mask = black_image.copy()
-            entry_ramp_black_mask = black_ramp_image
+            # O veto da entrada nao pode usar o teto amplo do segue-linha
+            # puro: prata/cinza sob iluminacao colorida tambem cairia nele.
+            # A geometria posterior continua igual, mas com preto neutro e
+            # realmente escuro nos dois perfis (normal e rampa).
+            entry_black_mask = entry_black_veto_mask(cv2_img, black_image)
+            entry_ramp_black_mask = entry_black_veto_mask(
+                cv2_img, black_ramp_image)
 
             # Esta leitura e exclusiva do detector de gap. O veto da prata
             # usa as duas mascaras brutas, mas apenas acima da caixa que o
@@ -439,8 +445,9 @@ def vision_loop(debug=False):
                         cv2_img,
                         f"ONNX PRATA {entry_gate.votes}/"
                         f"{config.ENTRY_SILVER_VOTE_WINDOW} "
-                        f"conf={confianca_entrada:.2f}/"
-                        f"{config.ENTRY_MODEL_MIN_CONFIDENCE:.2f} "
+                        f"conf={confianca_entrada:.2f} "
+                        f"gat={config.ENTRY_MODEL_TRIGGER_CONFIDENCE:.2f} "
+                        f"ent={config.ENTRY_MODEL_MIN_CONFIDENCE:.2f} "
                         f"{motivo_entrada}",
                         (5, 42),
                         cv2.FONT_HERSHEY_SIMPLEX,

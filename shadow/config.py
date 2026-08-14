@@ -270,8 +270,9 @@ ENTRY_NCNN_MODEL_PATH = "modelos/entrada_416_ncnn_model"
 ENTRY_MODEL_INPUT = 640
 ENTRY_NCNN_MODEL_INPUT = 416
 # A faixa prata muda muito de brilho e pode cruzar o quadro em poucos frames.
-# Aceita candidatos a partir de 30%; a linha alinhada e os vetos de preto
-# normal/rampa continuam obrigatorios antes de iniciar o resgate.
+# Um sinal mais fraco apenas para o robo parar e confirmar evita perder a
+# faixa em alta velocidade. A entrada em si exige a confianca maior abaixo.
+ENTRY_MODEL_TRIGGER_CONFIDENCE = .15
 ENTRY_MODEL_MIN_CONFIDENCE = .30
 # O YOLO leva mais que um periodo de camera. Guardar esta janela curta evita
 # perder os poucos frames da prata, mas o limite impede backlog indefinido.
@@ -291,6 +292,15 @@ ENTRY_REJECT_SILVER_WITH_BLACK_AHEAD = True
 # Ignora alguns pixels imediatamente acima da caixa prata para nao confundir
 # sua borda com a continuacao preta da rampa.
 ENTRY_BLACK_AFTER_SILVER_GUARD_RATIO = .03
+# So conta a continuidade preta logo depois da caixa. Escuro distante no
+# fundo da camera nao representa a pista depois da faixa prata.
+ENTRY_BLACK_AFTER_SILVER_MAX_DISTANCE_RATIO = .10
+# Estes dois limites sao exclusivos do veto da entrada. A linha usa seus
+# limiares normais; aqui um pixel so conta como preto se for escuro E quase
+# neutro. Isso impede piso/cinza/prata iluminado de virar "preto" e vetar uma
+# faixa prata que o YOLO reconheceu corretamente.
+ENTRY_BLACK_AFTER_SILVER_MAX_BRIGHTNESS = 70
+ENTRY_BLACK_AFTER_SILVER_MAX_CHROMA = 25
 # A saída da rampa forma uma faixa preta transversal e larga; a linha que
 # chega à entrada prata é estreita. Esta segunda medida usa somente a máscara
 # preta mais rígida da rampa e procura uma barra larga perto da caixa do YOLO.
@@ -303,6 +313,10 @@ ENTRY_RAMP_BLACK_NEAR_BOX_MARGIN_RATIO = .08
 # Com um voto a confirmação é imediata. Este valor só tem efeito quando a
 # configuração exigir mais de um voto, para voltar à observação parada.
 ENTRY_SILVER_VALIDATION_S = 0.0
+# Um sinal inicial entre TRIGGER e MIN nao inicia o resgate. Ele para o robo
+# por esta janela para o modelo obter uma leitura forte da mesma faixa. Se ela
+# nao chegar, o robo volta a seguir a linha sem entrar.
+ENTRY_SILVER_HINT_VALIDATION_S = .80
 # Se houver preto alem da prata, mantenha o segue-linha e bloqueie apenas uma
 # nova candidatura prata por este periodo. Cada frame com preto renova o prazo.
 ENTRY_BLACK_FOLLOW_TIMEOUT_S = 1.0
@@ -326,7 +340,7 @@ BLACK_MAX_NORMAL_BOTTOM_DEFAULT = [133, 133, 135]   # BGR
 # normal que guia o robo: so e consultado como uma segunda prova de que ainda
 # existe linha preta alem da candidata a prata, antes de liberar o resgate.
 # Calibre pelo grupo 3 de `tools/calibrar_cores.py`.
-BLACK_MAX_RAMP_DOWN_TOP_DEFAULT = [27, 27, 26]      # BGR
+BLACK_MAX_RAMP_DOWN_TOP_DEFAULT = [60, 60, 60]      # BGR
 # Matizes MIGRADOS quando a troca R<->B da câmera de linha foi corrigida
 # (ver visao/captura.py). A conversão é exata: H_correto = 120 − H_trocado.
 # Antes: 58..98 na imagem trocada. Depois: 22..62 na imagem correta.

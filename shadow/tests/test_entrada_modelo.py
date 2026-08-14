@@ -15,7 +15,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config  # noqa: E402
 from visao.entrada_missao import (  # noqa: E402
     EntryDetection, EntryGate, EntryInference, EntryModel, EntryModelWorker,
-    EntryPipeline,
+    EntryPipeline, entry_black_veto_mask,
     has_black_after_entry_detection, has_ramp_black_near_entry_detection)
 
 
@@ -68,6 +68,12 @@ class EntryModelTests(unittest.TestCase):
 
     def test_limiar_padrao_da_prata_prioriza_nao_perder_a_faixa(self):
         self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .30)
+
+    def test_modelo_aceita_sinal_antes_da_confianca_de_entrada(self):
+        self.assertEqual(
+            EntryModel().min_confidence,
+            config.ENTRY_MODEL_TRIGGER_CONFIDENCE,
+        )
 
 
 class EntryModelWorkerTests(unittest.TestCase):
@@ -130,11 +136,36 @@ class EntryGateTests(unittest.TestCase):
 
     def test_preto_alem_da_prata_veta_o_resgate(self):
         mask = np.zeros((100, 100), dtype=np.uint8)
-        # At the top is the track beyond the silver strip in driving direction.
-        mask[10:45, 40:60] = 255
+        # Preto imediatamente depois da prata, na direcao de marcha.
+        mask[44:52, 40:60] = 255
         detection = EntryDetection((40, 55, 20, 10), .8)
 
         self.assertTrue(has_black_after_entry_detection(mask, detection))
+
+    def test_preto_distante_no_fundo_nao_veta_o_resgate(self):
+        mask = np.zeros((100, 100), dtype=np.uint8)
+        mask[10:35, 40:60] = 255
+        detection = EntryDetection((40, 55, 20, 10), .8)
+
+        self.assertFalse(has_black_after_entry_detection(mask, detection))
+
+    def test_cinza_prata_iluminado_nao_vira_preto_do_veto(self):
+        image = np.full((100, 100, 3), (112, 110, 112), dtype=np.uint8)
+        mask = np.full((100, 100), 255, dtype=np.uint8)
+        detection = EntryDetection((40, 55, 20, 10), .8)
+
+        veto_mask = entry_black_veto_mask(image, mask)
+
+        self.assertFalse(has_black_after_entry_detection(veto_mask, detection))
+
+    def test_preto_neutro_escuro_continua_vetando(self):
+        image = np.full((100, 100, 3), (35, 40, 38), dtype=np.uint8)
+        mask = np.full((100, 100), 255, dtype=np.uint8)
+        detection = EntryDetection((40, 55, 20, 10), .8)
+
+        veto_mask = entry_black_veto_mask(image, mask)
+
+        self.assertTrue(has_black_after_entry_detection(veto_mask, detection))
 
     def test_preto_do_limiar_da_rampa_antes_da_prata_nao_veta(self):
         mask = np.zeros((100, 100), dtype=np.uint8)
@@ -187,6 +218,48 @@ class EntryGateTests(unittest.TestCase):
         detection = EntryDetection((1, 2, 3, 4), .7)
         gate = EntryGate()
         self.assertTrue(gate.update(EntryInference(0., True, detection, 0.))[0])
+
+    def test_sinal_fraco_para_e_leitura_forte_confirma(self):
+        weak = EntryDetection((1, 2, 3, 4), .16)
+        strong = EntryDetection((1, 2, 3, 4), .36)
+        gate = EntryGate()
+
+        self.assertFalse(gate.update(
+            EntryInference(0., True, weak, 0., black_ahead=False),
+            now=10.,
+        )[0])
+        self.assertEqual(gate.state, EntryGate.VALIDATING)
+        self.assertEqual(gate.last_reason, "sinal_prata_parando_para_confirmar")
+
+        self.assertTrue(gate.update(
+            EntryInference(.05, True, strong, 0., black_ahead=False),
+            now=10.05,
+        )[0])
+        self.assertEqual(gate.last_reason, "confirmada")
+
+    def test_sinal_fraco_com_preto_da_rampa_nao_para_para_entrar(self):
+        weak = EntryDetection((1, 2, 3, 4), .16)
+        gate = EntryGate()
+
+        self.assertFalse(gate.update(EntryInference(
+            0., True, weak, 0., black_ahead=False, ramp_black_ahead=True,
+        ), now=10.)[0])
+        self.assertEqual(gate.state, EntryGate.BLACK_FOLLOW)
+
+    def test_sinal_fraco_sem_leitura_forte_libera_a_linha(self):
+        weak = EntryDetection((1, 2, 3, 4), .16)
+        gate = EntryGate()
+        gate.update(EntryInference(0., True, weak, 0.), now=10.)
+
+        self.assertFalse(gate.update(
+            None, now=10. + config.ENTRY_SILVER_HINT_VALIDATION_S - .01,
+        )[0])
+        self.assertEqual(gate.state, EntryGate.VALIDATING)
+        self.assertFalse(gate.update(
+            None, now=10. + config.ENTRY_SILVER_HINT_VALIDATION_S,
+        )[0])
+        self.assertEqual(gate.state, EntryGate.IDLE)
+        self.assertEqual(gate.last_reason, "sinal_prata_sem_confirmacao")
 
     def test_modelo_sem_alinhamento_nao_aciona_resgate(self):
         detection = EntryDetection((1, 2, 3, 4), .7)
@@ -289,7 +362,7 @@ class EntryGateTests(unittest.TestCase):
     def test_limiar_de_preto_da_rampa_e_calibravel(self):
         self.assertEqual(
             config.BLACK_MAX_RAMP_DOWN_TOP_DEFAULT,
-            [27, 27, 26],
+            [60, 60, 60],
         )
         calibrador = (SHADOW_ROOT / "tools" / "calibrar_cores.py").read_text(
             encoding="utf-8")

@@ -163,7 +163,11 @@ existindo com seus testes e volta a ser usado se
 | `ENTRY_SILVER_ENABLED` | `True` | liga a detecção da entrada |
 | `ENTRY_MODEL_PATH` | `modelos/entrada.onnx` | modelo da faixa prata |
 | `ENTRY_MODEL_INPUT` | `640` | tamanho de entrada do modelo |
-| `ENTRY_MODEL_MIN_CONFIDENCE` | `.30` | confiança mínima aceita; o veto de preto/rampa continua obrigatório |
+| `ENTRY_MODEL_TRIGGER_CONFIDENCE` | `.15` | sinal inicial: para o robô e abre uma confirmação curta |
+| `ENTRY_MODEL_MIN_CONFIDENCE` | `.30` | confiança que confirma o resgate; o veto de preto/rampa continua obrigatório |
+| `ENTRY_SILVER_HINT_VALIDATION_S` | `.80` | tempo parado para o sinal inicial virar confirmação ou ser descartado |
+| `ENTRY_BLACK_AFTER_SILVER_MAX_DISTANCE_RATIO` | `.10` | só procura a continuação da linha perto da faixa, não no fundo do quadro |
+| `ENTRY_BLACK_AFTER_SILVER_MAX_BRIGHTNESS/CHROMA` | `70` / `25` | preto exclusivo do veto: escuro e neutro, sem confundir prata/cinza |
 | `ENTRY_SILVER_VOTES_NEEDED/VOTE_WINDOW` | `1` / `3` | confirma no primeiro prata alinhado sem preto após a caixa |
 | `ENTRY_LINE_MAX_ANGLE` | `35` | ângulo máximo para entrar alinhado, tolerando o robô torto |
 | `ENTRY_LINE_MAX_BOTTOM_ERROR_PX` | `110` | erro máximo do ponto inferior da linha, tolerando deslocamento |
