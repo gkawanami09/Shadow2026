@@ -261,7 +261,11 @@ VISION_READY_TIMEOUT = 15                 # s que o controle espera a visao no b
 # câmera de resgate, de outro ângulo, com outra iluminação e outro tamanho
 # aparente. Misturar os dois perfis foi explicitamente evitado.
 #
-ENTRY_SILVER_ENABLED = True
+# Teste temporario de entrada: nesta configuracao a entrada pelo YOLO prata
+# fica completamente desligada. O controle entra no resgate pela ausencia de
+# preto configurada logo abaixo. Para voltar ao modelo, ponha este valor em
+# ``True`` e desligue ``ENTRY_NO_BLACK_RESCUE_TEST_ENABLED``.
+ENTRY_SILVER_ENABLED = False
 # `entrada.onnx` é um YOLO de uma classe, exportado em 640×640.
 ENTRY_MODEL_PATH = "modelos/entrada.onnx"
 # Export NCNN 416×416 do mesmo `entrada.pt`. No Pi, NCNN é mais adequado ao
@@ -315,6 +319,20 @@ ENTRY_SILVER_VALIDATION_S = 0.0
 # Se houver preto alem da prata, mantenha o segue-linha e bloqueie apenas uma
 # nova candidatura prata por este periodo. Cada frame com preto renova o prazo.
 ENTRY_BLACK_FOLLOW_TIMEOUT_S = 1.0
+# ---------------------------------------------------------------------------
+# Teste de entrada sem prata -- SOMENTE na missao completa
+# ---------------------------------------------------------------------------
+# Depois de ter seguido uma linha preta, se ela desaparecer enquanto o robo
+# estiver reto por este tempo, entra no resgate. O temporizador nao conta no
+# boot sem linha, em curva, em marcador ou em manobra verde.
+ENTRY_NO_BLACK_RESCUE_TEST_ENABLED = True
+ENTRY_NO_BLACK_RESCUE_DELAY_S = 3.0
+# Antes do handoff o proprio segue-linha da re, sem o avanco de entrada que o
+# processo resgate normalmente executaria.
+ENTRY_NO_BLACK_RESCUE_REVERSE_S = 2.0
+ENTRY_NO_BLACK_RESCUE_REVERSE_PWM = 80
+ENTRY_NO_BLACK_RESCUE_REVERSE_SPEED = (
+    ENTRY_NO_BLACK_RESCUE_REVERSE_PWM / 120.0)
 # Além do modelo, o primeiro voto precisa ter a linha preta rastreada. A
 # tolerância é propositalmente ampla: a faixa de prata deve poder iniciar o
 # resgate mesmo com o robô levemente torto ou deslocado. O veto de preto

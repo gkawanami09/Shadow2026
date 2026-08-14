@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cv2  # noqa: E402
 
+import config  # noqa: E402
 import config_resgate as cfg  # noqa: E402
 from controle.aproximacao_resgate import (  # noqa: E402
     BallApproachController,
@@ -721,6 +722,15 @@ def _avancar_entrada_da_missao(args, arduino, acao_direcao):
         and arduino is not None
     ):
         return False
+
+    if config.ENTRY_NO_BLACK_RESCUE_TEST_ENABLED:
+        # A ré aconteceu no processo que ainda era dono seguro da serial. Um
+        # avanço adicional aqui desfaria justamente o posicionamento do teste.
+        print(
+            "[resgate] entrada por ausência de preto: "
+            "pulando avanço inicial")
+        acao_direcao()
+        return True
 
     epoca_serial = arduino.connection_epoch
     print(

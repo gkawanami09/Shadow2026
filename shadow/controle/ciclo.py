@@ -66,6 +66,49 @@ def _enter_rescue_zone(arduino):
           "resgate fará o avanço de 1 s")
 
 
+def _enter_rescue_after_no_black(arduino):
+    """Executa o teste de entrada: re temporizada e handoff sem avanco.
+
+    A contagem dos tres segundos e feita no laco principal, que ainda recebe
+    a visao. Aqui a serial continua pertencendo ao segue-linha ate a re
+    terminar; so entao ela e entregue ao processo de resgate.
+    """
+    epoca_serial = arduino.connection_epoch
+    deadline = time.monotonic() + config.ENTRY_NO_BLACK_RESCUE_REVERSE_S
+    status.value = 'Linha preta ausente — dando ré para entrar no resgate'
+    print(
+        "[controle] linha preta ausente por "
+        f"{config.ENTRY_NO_BLACK_RESCUE_DELAY_S:.1f} s; dando ré por "
+        f"{config.ENTRY_NO_BLACK_RESCUE_REVERSE_S:.1f} s")
+    try:
+        while time.monotonic() < deadline:
+            if (
+                terminate.value
+                or not arduino.connected
+                or arduino.connection_epoch != epoca_serial
+            ):
+                return False
+            if steer(200, config.ENTRY_NO_BLACK_RESCUE_REVERSE_SPEED) is False:
+                return False
+            sleep_steering(min(.05, deadline - time.monotonic()))
+    finally:
+        steer()
+
+    if (
+        terminate.value
+        or not arduino.connected
+        or arduino.connection_epoch != epoca_serial
+    ):
+        return False
+    # O resgate sabe que este modo de teste ja posicionou o robo e, por isso,
+    # nao fara o avanco normal de um segundo.
+    arduino.led("APAGADO")
+    entry_armed.value = False
+    _reset_entry_silver("entrada por ausencia de preto")
+    print("[controle] ré concluída; PARAR e LED APAGADO — resgate sem avanço")
+    return True
+
+
 def _reset_entry_silver(reason):
     """Descarta qualquer candidatura de prata antes de mudar de percurso."""
     entry_silver_detected.value = False
@@ -116,6 +159,8 @@ def control_loop():
     iteration_limit_time = time.perf_counter()
     max_iterations = CONTROL_MAX_ITERATIONS
     line_missing_since = None
+    black_line_seen = False
+    no_black_since = None
     gap_retry_after = 0.0
     pivot_sign = 0
     pivot_best_error = camera_x
@@ -157,7 +202,8 @@ def control_loop():
             # A confirmacao tem prioridade sobre qualquer outra manobra: este
             # processo ainda e o dono seguro da serial e precisa parar antes
             # de o supervisor abrir o resgate.
-            if (mission_mode.value and entry_armed.value
+            if (config.ENTRY_SILVER_ENABLED
+                    and mission_mode.value and entry_armed.value
                     and entry_silver_confirmed.value):
                 status.value = 'Faixa prata confirmada — entrando na sala'
                 print("[controle] faixa PRATA confirmada; entrando na sala")
@@ -168,7 +214,8 @@ def control_loop():
             # Primeiro positivo prata: pare sem bloquear a visao. Ela continua
             # recebendo frames por um segundo para procurar preto alem da
             # caixa antes de liberar a entrada da sala.
-            if (mission_mode.value and entry_armed.value
+            if (config.ENTRY_SILVER_ENABLED
+                    and mission_mode.value and entry_armed.value
                     and entry_silver_state.value == ENTRY_SILVER_VALIDATING):
                 status.value = 'Prata candidata — parado validando'
                 steer()
@@ -178,7 +225,8 @@ def control_loop():
             # A confirmacao de preto depois da prata contradiz uma manobra de
             # gap: ha linha de novo. Volte ao estado comum e mantenha o
             # segue-linha enquanto o Gate bloqueia somente nova prata.
-            if (mission_mode.value and entry_armed.value
+            if (config.ENTRY_SILVER_ENABLED
+                    and mission_mode.value and entry_armed.value
                     and entry_silver_state.value == ENTRY_SILVER_BLACK_FOLLOW
                     and line_status.value in {"gap_detected", "gap_avoid"}):
                 line_status.value = "line_detected"
@@ -325,13 +373,60 @@ def control_loop():
 
             # Estado normal do segue-linha.
             if line_status.value == "line_detected":
+                now = time.monotonic()
+                if line_detected.value:
+                    # Nunca inicie o teste apenas porque a camera acabou de
+                    # ligar sem a linha no campo. Primeiro a linha precisa ter
+                    # sido vista nesta fase do percurso.
+                    black_line_seen = True
+                    no_black_since = None
 
-                gap_allowed = GAP_ENABLED and time.monotonic() >= gap_retry_after
+                test_no_black_active = (
+                    config.ENTRY_NO_BLACK_RESCUE_TEST_ENABLED
+                    and mission_mode.value
+                    and entry_armed.value
+                )
+                can_count_no_black = (
+                    test_no_black_active
+                    and black_line_seen
+                    and not line_detected.value
+                    and not line_ahead.value
+                    and turn_dir.value == "straight"
+                    and not preferencia_linha_esquerda.value
+                    and not green_candidate.value
+                    and not red_candidate.value
+                    and not red_detected.value
+                    and green_direction is None
+                )
+                if can_count_no_black:
+                    if no_black_since is None:
+                        no_black_since = now
+                        print(
+                            "[controle] sem preto em reta; validando "
+                            f"{config.ENTRY_NO_BLACK_RESCUE_DELAY_S:.1f} s")
+                    elif (
+                        now - no_black_since
+                        >= config.ENTRY_NO_BLACK_RESCUE_DELAY_S
+                    ):
+                        if _enter_rescue_after_no_black(arduino):
+                            rescue_requested.value = True
+                        break
+                else:
+                    no_black_since = None
+
+                # Durante este teste, ausencia de preto e o proprio gatilho
+                # de entrada. Nao a transforme antes em uma manobra de gap,
+                # que impediria a contagem de completar os tres segundos.
+                gap_allowed = (
+                    GAP_ENABLED
+                    and not test_no_black_active
+                    and now >= gap_retry_after
+                )
                 if (gap_allowed and not line_detected.value
                         and not line_ahead.value):
                     if line_missing_since is None:
-                        line_missing_since = time.monotonic()
-                    elif time.monotonic() - line_missing_since >= GAP_MISSING_CONFIRM_TIME:
+                        line_missing_since = now
+                    elif now - line_missing_since >= GAP_MISSING_CONFIRM_TIME:
                         line_status.value = "gap_detected"
                         line_missing_since = None
                 else:

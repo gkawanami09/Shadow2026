@@ -179,10 +179,16 @@ class MissionRecoveryTests(unittest.TestCase):
 
 
 class MissionEntryAdvanceTests(unittest.TestCase):
-    def test_entrada_prata_rapida_usa_veto_preto_para_evitar_falso_resgate(self):
-        self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 1)
-        self.assertEqual(config.ENTRY_SILVER_VOTE_WINDOW, 3)
-        self.assertEqual(config.ENTRY_SILVER_VALIDATION_S, 0.0)
+    def test_teste_desliga_modelo_prata_e_configura_entrada_por_sem_preto(self):
+        self.assertFalse(config.ENTRY_SILVER_ENABLED)
+        self.assertTrue(config.ENTRY_NO_BLACK_RESCUE_TEST_ENABLED)
+        self.assertEqual(config.ENTRY_NO_BLACK_RESCUE_DELAY_S, 3.0)
+        self.assertEqual(config.ENTRY_NO_BLACK_RESCUE_REVERSE_S, 2.0)
+        self.assertEqual(config.ENTRY_NO_BLACK_RESCUE_REVERSE_PWM, 80)
+        self.assertAlmostEqual(
+            config.ENTRY_NO_BLACK_RESCUE_REVERSE_SPEED * 120,
+            config.ENTRY_NO_BLACK_RESCUE_REVERSE_PWM,
+        )
 
     def test_avanco_da_entrada_tem_um_segundo_e_pwm_80(self):
         self.assertEqual(cfg.MISSION_ENTRY_FORWARD_S, 1.0)
@@ -192,7 +198,7 @@ class MissionEntryAdvanceTests(unittest.TestCase):
             cfg.MISSION_ENTRY_FORWARD_PWM,
         )
 
-    def test_missao_avanca_e_para_antes_da_busca(self):
+    def test_teste_sem_preto_pula_avanco_da_entrada(self):
         args = SimpleNamespace(
             drive=True,
             gerenciado_pela_missao=True,
@@ -215,15 +221,36 @@ class MissionEntryAdvanceTests(unittest.TestCase):
             )
 
         self.assertTrue(executou)
+        mover.assert_not_called()
+        self.assertEqual(comandos, [()])
+
+    def test_missao_avanca_quando_teste_sem_preto_esta_desligado(self):
+        args = SimpleNamespace(
+            drive=True,
+            gerenciado_pela_missao=True,
+        )
+        arduino = SimpleNamespace(connection_epoch=7)
+
+        with patch.object(
+            config,
+            "ENTRY_NO_BLACK_RESCUE_TEST_ENABLED",
+            False,
+        ), patch.object(resgate, "_mover_saida_por_tempo") as mover:
+            executou = resgate._avancar_entrada_da_missao(
+                args,
+                arduino,
+                lambda *_: True,
+            )
+
+        self.assertTrue(executou)
         mover.assert_called_once_with(
             arduino,
-            direcao,
+            unittest.mock.ANY,
             0,
             cfg.MISSION_ENTRY_FORWARD_SPEED,
             cfg.MISSION_ENTRY_FORWARD_S,
             7,
         )
-        self.assertEqual(comandos, [()])
 
     def test_resgate_aberto_sozinho_nao_faz_o_avanco(self):
         args = SimpleNamespace(
