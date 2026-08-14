@@ -334,7 +334,9 @@ BLACK_MAX_RAMP_DOWN_TOP_DEFAULT = [27, 27, 26]      # BGR
 # (ver visao/captura.py). A conversão é exata: H_correto = 120 − H_trocado.
 # Antes: 58..98 na imagem trocada. Depois: 22..62 na imagem correta.
 # S e V não mudam — trocar dois canais não altera máximo nem mínimo.
-GREEN_MIN_DEFAULT = [22, 95, 39]                    # HSV (era H=58)
+# Perfil para marcador verde escuro: aceita brilho baixo, mas exige bastante
+# saturacao para nao confundir sombra/cinza da pista com verde.
+GREEN_MIN_DEFAULT = [18, 105, 20]                   # HSV (era H=58)
 GREEN_MAX_DEFAULT = [62, 255, 255]                  # HSV (era H=98)
 RED_MIN_1_DEFAULT = [0, 100, 90]                    # HSV
 RED_MAX_1_DEFAULT = [10, 255, 255]                  # HSV
