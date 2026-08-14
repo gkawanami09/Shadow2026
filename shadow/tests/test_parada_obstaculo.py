@@ -7,6 +7,7 @@ import unittest
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
+import config  # noqa: E402
 from controle.parada_obstaculo import (  # noqa: E402
     MonitorObstaculo,
     avancar_ate_linha,
@@ -244,6 +245,10 @@ class MonitorObstaculoTests(unittest.TestCase):
 
 
 class DesvioObstaculoTests(unittest.TestCase):
+    def test_duracoes_padrao_avancam_lateral_e_frente(self):
+        self.assertEqual(config.OBSTACLE_LATERAL_TIME_S, 1.8)
+        self.assertEqual(config.OBSTACLE_FORWARD_TIME_S, 2.8)
+
     def test_lateral_avanco_e_retorno_lateral_direita(self):
         arduino = ArduinoMovimentoFalso()
         relogio = RelogioFalso()
@@ -270,7 +275,7 @@ class DesvioObstaculoTests(unittest.TestCase):
         self.assertEqual([], [comando for comando in arduino.comandos
                               if comando[0] == "lado"])
         self.assertEqual(arduino.comandos[-1], ("parar",))
-        self.assertAlmostEqual(relogio.tempo, 5.0)
+        self.assertAlmostEqual(relogio.tempo, 6.4)
         self.assertTrue(
             all(
                 comando[0] in ("parar", "rodas", "lado", "refresh")

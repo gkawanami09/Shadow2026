@@ -89,12 +89,23 @@ class FaixasCalibradasTests(unittest.TestCase):
     def test_verde_escuro_saturado_e_aceito_sem_aceitar_cinza_escuro(self):
         minimo = np.array(config.GREEN_MIN_DEFAULT, dtype=np.uint8)
         maximo = np.array(config.GREEN_MAX_DEFAULT, dtype=np.uint8)
-        verde_escuro = np.uint8([[[35, 180, 24]]])
+        verde_escuro = np.uint8([[[70, 70, 16]]])
         cinza_escuro = np.uint8([[[35, 50, 24]]])
 
         self.assertEqual(int(cv2.inRange(verde_escuro, minimo, maximo)[0, 0]),
                          255)
         self.assertEqual(int(cv2.inRange(cinza_escuro, minimo, maximo)[0, 0]),
+                         0)
+
+    def test_laranja_nao_e_aceito_como_vermelho(self):
+        low_min = np.array(config.RED_MIN_1_DEFAULT, dtype=np.uint8)
+        low_max = np.array(config.RED_MAX_1_DEFAULT, dtype=np.uint8)
+        vermelho = np.uint8([[[3, 190, 150]]])
+        laranja = np.uint8([[[12, 220, 180]]])
+
+        self.assertEqual(int(cv2.inRange(vermelho, low_min, low_max)[0, 0]),
+                         255)
+        self.assertEqual(int(cv2.inRange(laranja, low_min, low_max)[0, 0]),
                          0)
 
     def test_verde_e_vermelho_nao_se_sobrepoem(self):

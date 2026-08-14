@@ -42,14 +42,14 @@ OBSTACLE_CONFIRM_WINDOW_S = .20
 OBSTACLE_MIN_VALID_MM = 1
 OBSTACLE_MAX_VALID_MM = 4000
 OBSTACLE_LATERAL_PWM = 60                  # translação com rodas omnidirecionais
-OBSTACLE_LATERAL_TIME_S = 1.5              # s deslizando para a esquerda
+OBSTACLE_LATERAL_TIME_S = 1.8              # s: ida e volta laterais
 OBSTACLE_FORWARD_PWM = 60
 # Utilitario independente para ensaios/reaproximacao de obstaculo. Nao faz
 # parte da logica especial de saida do resgate.
 OBSTACLE_LINE_SEARCH_PWM = 60
 OBSTACLE_LINE_SEARCH_TIMEOUT_S = 4.0
 OBSTACLE_LINE_CONFIRM_TIME_S = .10
-OBSTACLE_FORWARD_TIME_S = 2.0              # s avançando depois do lateral
+OBSTACLE_FORWARD_TIME_S = 2.8              # s avançando depois do lateral
 # Ao encontrar uma linha transversal, o segue-linha recebe preferência
 # temporária pelo ramo esquerdo, sem executar um giro tanque separado.
 OBSTACLE_LEFT_PREFERENCE_MIN_TIME_S = .20
@@ -334,11 +334,13 @@ BLACK_MAX_RAMP_DOWN_TOP_DEFAULT = [27, 27, 26]      # BGR
 # (ver visao/captura.py). A conversão é exata: H_correto = 120 − H_trocado.
 # Antes: 58..98 na imagem trocada. Depois: 22..62 na imagem correta.
 # S e V não mudam — trocar dois canais não altera máximo nem mínimo.
-# Perfil para marcador verde escuro: aceita brilho baixo, mas exige bastante
-# saturacao para nao confundir sombra/cinza da pista com verde.
-GREEN_MIN_DEFAULT = [18, 105, 20]                   # HSV (era H=58)
-GREEN_MAX_DEFAULT = [62, 255, 255]                  # HSV (era H=98)
-RED_MIN_1_DEFAULT = [0, 100, 90]                    # HSV
-RED_MAX_1_DEFAULT = [10, 255, 255]                  # HSV
-RED_MIN_2_DEFAULT = [170, 100, 100]                 # HSV
+# Marcador verde sob pouca luz perde saturacao e pode deslocar um pouco o
+# matiz. A area/forma do triangulo ainda e validada depois desta mascara.
+GREEN_MIN_DEFAULT = [15, 60, 12]                     # HSV (era H=58)
+GREEN_MAX_DEFAULT = [75, 255, 255]                   # HSV (era H=98)
+# Laranja ocupa o fim da banda baixa do HSV. Vermelho fica restrito aos tons
+# proximos de 0 ou 180, com cor e brilho suficientes para nao pegar laranja.
+RED_MIN_1_DEFAULT = [0, 125, 100]                    # HSV
+RED_MAX_1_DEFAULT = [7, 255, 255]                    # HSV
+RED_MIN_2_DEFAULT = [173, 125, 100]                  # HSV
 RED_MAX_2_DEFAULT = [180, 255, 255]                 # HSV
