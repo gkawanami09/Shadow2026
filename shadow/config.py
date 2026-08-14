@@ -42,7 +42,8 @@ OBSTACLE_CONFIRM_WINDOW_S = .20
 OBSTACLE_MIN_VALID_MM = 1
 OBSTACLE_MAX_VALID_MM = 4000
 OBSTACLE_LATERAL_PWM = 60                  # translação com rodas omnidirecionais
-OBSTACLE_LATERAL_TIME_S = 1.8              # s: ida e volta laterais
+OBSTACLE_LATERAL_TIME_S = 1.8              # s: desvio lateral de ida
+OBSTACLE_RETURN_LATERAL_TIME_S = 1.6       # s: retorno lateral apos o reto
 OBSTACLE_FORWARD_PWM = 60
 # Utilitario independente para ensaios/reaproximacao de obstaculo. Nao faz
 # parte da logica especial de saida do resgate.

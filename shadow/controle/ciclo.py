@@ -251,7 +251,8 @@ def control_loop():
                     f"{distancia_cm:.1f} cm; esquerda por "
                     f"{config.OBSTACLE_LATERAL_TIME_S:.1f} s e frente por "
                     f"{config.OBSTACLE_FORWARD_TIME_S:.1f} s; retorno "
-                    "lateral à direita pelo mesmo tempo")
+                    "lateral à direita por "
+                    f"{config.OBSTACLE_RETURN_LATERAL_TIME_S:.1f} s")
                 try:
                     desviar_obstaculo(
                         arduino,

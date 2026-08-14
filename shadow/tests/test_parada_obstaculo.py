@@ -247,6 +247,7 @@ class MonitorObstaculoTests(unittest.TestCase):
 class DesvioObstaculoTests(unittest.TestCase):
     def test_duracoes_padrao_avancam_lateral_e_frente(self):
         self.assertEqual(config.OBSTACLE_LATERAL_TIME_S, 1.8)
+        self.assertEqual(config.OBSTACLE_RETURN_LATERAL_TIME_S, 1.6)
         self.assertEqual(config.OBSTACLE_FORWARD_TIME_S, 2.2)
 
     def test_lateral_avanco_e_retorno_lateral_direita(self):
@@ -275,7 +276,7 @@ class DesvioObstaculoTests(unittest.TestCase):
         self.assertEqual([], [comando for comando in arduino.comandos
                               if comando[0] == "lado"])
         self.assertEqual(arduino.comandos[-1], ("parar",))
-        self.assertAlmostEqual(relogio.tempo, 5.8)
+        self.assertAlmostEqual(relogio.tempo, 5.6)
         self.assertTrue(
             all(
                 comando[0] in ("parar", "rodas", "lado", "refresh")

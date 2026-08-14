@@ -14,6 +14,7 @@ from config import (
     OBSTACLE_HISTORY_SIZE,
     OBSTACLE_LATERAL_PWM,
     OBSTACLE_LATERAL_TIME_S,
+    OBSTACLE_RETURN_LATERAL_TIME_S,
     OBSTACLE_LINE_CONFIRM_TIME_S,
     OBSTACLE_LINE_SEARCH_PWM,
     OBSTACLE_LINE_SEARCH_TIMEOUT_S,
@@ -161,6 +162,7 @@ def desviar_obstaculo(
     arduino,
     pwm_lateral=OBSTACLE_LATERAL_PWM,
     duracao_lateral_s=OBSTACLE_LATERAL_TIME_S,
+    duracao_retorno_lateral_s=OBSTACLE_RETURN_LATERAL_TIME_S,
     pwm_avanco=OBSTACLE_FORWARD_PWM,
     duracao_avanco_s=OBSTACLE_FORWARD_TIME_S,
     deve_encerrar=None,
@@ -242,7 +244,7 @@ def desviar_obstaculo(
                     -pwm_lateral,
                     pwm_lateral,
                 ),
-                duracao_lateral_s,
+                duracao_retorno_lateral_s,
                 "o retorno lateral à direita",
             )
     finally:
