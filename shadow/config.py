@@ -229,7 +229,8 @@ T_SWEEP_RIGHT = .35                       # s — varredura direita na busca do 
 SWEEP_SPEED = .6                          # velocidade da varredura temporizada
 LINE_SEARCH_CREEP = 1.2                   # avanco final procurando linha
 T_180 = .82                               # s — teste mostrou .70 s ~= 90°; inicia perto de 105°
-T_180_BLIND_EXTRA = .30                   # s extras girando à direita sem procurar linha
+# Calibracao do segue-linha: reduz 0,2 s do complemento cego do giro de 180.
+T_180_BLIND_EXTRA = .10                   # s extras girando à direita sem procurar linha
 T_180_SPEED = .7                          # velocidade do pivot de 180°
 T_180_TEST_STOP = False                   # True isola e para definitivamente apos o giro cego
 T_180_SEARCH_SPEED = .4                   # procura devagar para nao atravessar a linha entre frames

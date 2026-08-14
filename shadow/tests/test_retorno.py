@@ -37,6 +37,7 @@ class RetornoTests(unittest.TestCase):
             self.assertEqual(next_direction, "r")
             durations = [call.args[0] for call in sleep.call_args_list]
             self.assertIn(config.T_180_BLIND_EXTRA, durations)
+            self.assertEqual(config.T_180_BLIND_EXTRA, .10)
             self.assertIn(config.TURN_AROUND_REVERSE, durations)
             self.assertEqual(config.TURN_AROUND_REVERSE, .15)
         finally:
