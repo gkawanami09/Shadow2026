@@ -66,8 +66,8 @@ class EntryModelTests(unittest.TestCase):
         self.assertIsNone(detection)
         self.assertAlmostEqual(model.last_confidence, .44, places=5)
 
-    def test_limiar_padrao_da_prata_prioriza_nao_perder_a_faixa(self):
-        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .30)
+    def test_limiar_padrao_da_prata_exige_confianca_maior(self):
+        self.assertEqual(config.ENTRY_MODEL_MIN_CONFIDENCE, .45)
 
 
 class EntryModelWorkerTests(unittest.TestCase):
@@ -157,20 +157,24 @@ class EntryGateTests(unittest.TestCase):
 
         self.assertFalse(has_ramp_black_near_entry_detection(mask, detection))
 
-    def test_prata_alinhada_sem_preto_confirma_no_primeiro_frame(self):
+    def test_prata_alinhada_sem_preto_confirma_em_dois_frames(self):
         detection = EntryDetection((1, 2, 3, 4), .95)
         gate = EntryGate()
         confirmed, _ = gate.update(EntryInference(0., True, detection, 0.))
-        self.assertTrue(confirmed)
-        self.assertFalse(gate.is_validating)
+        self.assertFalse(confirmed)
+        self.assertTrue(gate.is_validating)
         self.assertEqual(gate.votes, 1)
+        confirmed, _ = gate.update(EntryInference(.01, True, detection, 0.))
+        self.assertTrue(confirmed)
         self.assertEqual(gate.last_reason, "confirmada")
 
     def test_confirmacao_rapida_usa_chegada_do_resultado(self):
         detection = EntryDetection((1, 2, 3, 4), .95)
         gate = EntryGate()
-        self.assertTrue(gate.update(
+        self.assertFalse(gate.update(
             EntryInference(10., True, detection, 0.), now=100.)[0])
+        self.assertTrue(gate.update(
+            EntryInference(10.01, True, detection, 0.), now=100.01)[0])
 
     def test_modelo_sem_faixa_nao_confirma(self):
         gate = EntryGate()
@@ -179,21 +183,23 @@ class EntryGateTests(unittest.TestCase):
         self.assertEqual(gate.state, EntryGate.IDLE)
         self.assertEqual(gate.last_reason, "modelo_sem_faixa")
 
-    def test_confirmacao_rapida_e_configuravel(self):
-        self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 1)
+    def test_confirmacao_em_dois_frames_e_configuravel(self):
+        self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 2)
         self.assertEqual(config.ENTRY_SILVER_VALIDATION_S, 0.0)
 
-    def test_um_frame_sem_preto_basta_para_confirmar(self):
+    def test_um_frame_sem_preto_nao_basta_para_confirmar(self):
         detection = EntryDetection((1, 2, 3, 4), .7)
         gate = EntryGate()
-        self.assertTrue(gate.update(EntryInference(0., True, detection, 0.))[0])
+        self.assertFalse(gate.update(EntryInference(0., True, detection, 0.))[0])
+        self.assertTrue(gate.update(EntryInference(.01, True, detection, 0.))[0])
 
     def test_modelo_sem_alinhamento_nao_aciona_resgate(self):
         detection = EntryDetection((1, 2, 3, 4), .7)
         gate = EntryGate()
         self.assertFalse(gate.update(EntryInference(0., False, detection, 0.))[0])
         self.assertFalse(gate.update(EntryInference(.03, False, detection, 0.))[0])
-        self.assertTrue(gate.update(EntryInference(.06, True, detection, 0.))[0])
+        self.assertFalse(gate.update(EntryInference(.06, True, detection, 0.))[0])
+        self.assertTrue(gate.update(EntryInference(.07, True, detection, 0.))[0])
         self.assertEqual(gate.last_reason, "confirmada")
 
     def test_prata_com_linha_preta_renova_o_timeout(self):
@@ -215,11 +221,14 @@ class EntryGateTests(unittest.TestCase):
         self.assertEqual(gate.last_reason, "preto_apos_prata_seguindo_linha")
         self.assertEqual(gate.state, EntryGate.BLACK_FOLLOW)
 
-    def test_prata_sem_preto_depois_confirma_o_resgate_no_primeiro_frame(self):
+    def test_prata_sem_preto_depois_confirma_o_resgate_em_dois_frames(self):
         detection = EntryDetection((1, 2, 3, 4), .70)
         gate = EntryGate()
-        self.assertTrue(gate.update(EntryInference(
+        self.assertFalse(gate.update(EntryInference(
             0., True, detection, 0.,
+            black_ahead=False, ramp_black_ahead=False))[0])
+        self.assertTrue(gate.update(EntryInference(
+            .01, True, detection, 0.,
             black_ahead=False, ramp_black_ahead=False))[0])
 
     def test_prata_sem_alinhamento_nao_entra(self):
@@ -237,9 +246,11 @@ class EntryGateTests(unittest.TestCase):
             0., True, detection, 0., black_ahead=True))[0])
         # O positivo posterior é um voto novo; não soma com o de antes do
         # trecho preto da rampa.
-        self.assertTrue(gate.update(EntryInference(
+        self.assertFalse(gate.update(EntryInference(
             1.02, True, detection, 0., black_ahead=False))[0])
         self.assertEqual(gate.votes, 1)
+        self.assertTrue(gate.update(EntryInference(
+            1.03, True, detection, 0., black_ahead=False))[0])
 
     def test_prata_com_preto_da_rampa_bloqueia_nova_prata_por_um_segundo(self):
         detection = EntryDetection((1, 2, 3, 4), .99)
@@ -260,8 +271,11 @@ class EntryGateTests(unittest.TestCase):
 
         # Sem preto pelo limiar da rampa, uma prata real volta a votar depois
         # do timeout, para por um segundo e so entao confirma.
-        self.assertTrue(gate.update(EntryInference(
+        self.assertFalse(gate.update(EntryInference(
             timeout + .01, True, detection, 0., black_ahead=False,
+        ))[0])
+        self.assertTrue(gate.update(EntryInference(
+            timeout + .02, True, detection, 0., black_ahead=False,
         ))[0])
         self.assertEqual(gate.votes, config.ENTRY_SILVER_VOTES_NEEDED)
 
@@ -309,7 +323,8 @@ class EntryGateTests(unittest.TestCase):
         self.assertEqual(gate.state, EntryGate.IDLE)
         # O novo trecho da pista pode comecar com timestamp menor no replay
         # ou em uma nova sessao de camera: ele nao herda o frame anterior.
-        self.assertTrue(gate.update(EntryInference(.1, True, detection, 0.))[0])
+        self.assertFalse(gate.update(EntryInference(.1, True, detection, 0.))[0])
+        self.assertTrue(gate.update(EntryInference(.11, True, detection, 0.))[0])
 
     def test_rearme_invalida_o_worker_e_zera_o_portao_uma_unica_vez(self):
         class WorkerFalso:
