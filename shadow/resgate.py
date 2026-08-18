@@ -35,7 +35,6 @@ import argparse
 from collections import deque
 import math
 from pathlib import Path
-import subprocess
 import sys
 import time
 
@@ -527,6 +526,40 @@ def _deposito_vermelho_libera_saida(deposito, passo):
     )
 
 
+def _saida_concluida_libera_missao(args, codigo_saida, comando):
+    """Distingue o único terminal normal dos terminais recuperáveis/fatais."""
+    return bool(
+        args.drive
+        and codigo_saida == EXIT_OK
+        and comando.state == "EXIT_BLACK_CONFIRMED"
+        and comando.terminal
+    )
+
+
+def _iniciar_busca_segura(arduino, start_time=None, accepts_kind=None):
+    """Cria uma busca somente depois de substituir movimento antigo por PARAR."""
+    if arduino is not None and arduino.parar() is False:
+        raise RuntimeError(
+            "nao foi possivel parar antes de iniciar a busca de bolinhas")
+    return make_search_controller(
+        start_time=start_time,
+        accepts_kind=accepts_kind,
+    )
+
+
+def _validar_comando_da_busca(comando):
+    """Impede que um estado de busca envie frente, ré ou rodas livres."""
+    angulos_permitidos = (190, cfg.BALL_SEARCH_TANK_ANGLE)
+    if (
+        comando.wheel_speeds is not None
+        or comando.angle not in angulos_permitidos
+    ):
+        raise RuntimeError(
+            "comando proibido durante a busca de bolinhas: "
+            f"estado={comando.state}, angulo={comando.angle}, "
+            f"rodas={comando.wheel_speeds}")
+
+
 def _validar_inicio_coleta(
     comando,
     coleta,
@@ -826,14 +859,6 @@ def _confirmar_saida_com_camera_linha(
     )
 
 
-def _iniciar_segue_linha(debug=False):
-    comando = [sys.executable, str(Path(__file__).resolve().parent / "main.py")]
-    if debug:
-        comando.append("--debug")
-    print(f"[saida] iniciando segue-linha: {' '.join(comando)}")
-    return subprocess.call(comando, cwd=str(Path(__file__).resolve().parent))
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
@@ -847,10 +872,6 @@ def parse_args():
     parser.add_argument(
         "--target", choices=("any", "black", "silver"), default="any",
         help="tipo de vitima aceito (padrao: any)")
-    parser.add_argument(
-        "--policy", choices=("nearest_valid", "silver_first"),
-        default="nearest_valid",
-        help=argparse.SUPPRESS)
     parser.add_argument(
         "--drive", action="store_true",
         help=(
@@ -917,8 +938,9 @@ def novo_portao_saida(modelo_saida=None):
     return BlackExitGate(detector=detector), modelo_saida
 
 
-def main():
-    args = parse_args()
+def main(args=None):
+    if args is None:
+        args = parse_args()
     fonte = None
     arduino = None
     trava = None
@@ -962,7 +984,6 @@ def main():
     coleta_apos_teste_parede = None
     amostras_captura = deque(maxlen=60)
     instantes_deteccao = deque(maxlen=30)
-    iniciar_segue_linha = False
     codigo_saida = EXIT_INCOMPLETE if args.drive else EXIT_OK
 
     detector = preparar_detector_de_vitimas(args)
@@ -1035,7 +1056,7 @@ def main():
             None if args.drive
             else BallApproachController(start_time=armado_em))
         busca = (
-            make_search_controller(start_time=armado_em)
+            _iniciar_busca_segura(arduino, start_time=armado_em)
             if args.drive else None)
         coleta = BallPickupSequencer()
         comando = MotionCommand(
@@ -1627,7 +1648,7 @@ def main():
                 if trabalhador is not None:
                     trabalhador.reset_tracking()
                 portao.reset()
-                busca = make_search_controller(start_time=agora)
+                busca = _iniciar_busca_segura(arduino, start_time=agora)
                 controlador = None
                 resultado_atual = None
                 deteccao_atual = None
@@ -1640,6 +1661,12 @@ def main():
             movimento_enviado = None
             if args.drive and arduino is not None and comando_atualizado:
                 from controle.direcao import steer
+                if busca is not None:
+                    try:
+                        _validar_comando_da_busca(comando)
+                    except RuntimeError:
+                        steer()
+                        raise
                 if passo_coleta is not None:
                     erro_coleta = _aplicar_acoes_coleta(
                         passo_coleta,
@@ -2186,7 +2213,7 @@ def main():
                 if marcadores is not None:
                     marcadores.reset()
                     marcadores_atuais = {}
-                busca = make_search_controller(start_time=agora)
+                busca = _iniciar_busca_segura(arduino, start_time=agora)
                 controlador = None
                 resultado_atual = None
                 deteccao_atual = None
@@ -2210,7 +2237,7 @@ def main():
                 # encerra mais o resgate nem depende de ver o verde. Enquanto
                 # a janela total estiver aberta, inicia outra volta.
                 varreduras_sem_vitima += 1
-                busca = make_search_controller(start_time=agora)
+                busca = _iniciar_busca_segura(arduino, start_time=agora)
                 epoca_busca = None
                 ultimo_controle_ocioso = 0.0
                 restante = max(fim_busca_resgate_em - agora, 0.0)
@@ -2386,7 +2413,6 @@ def main():
                     epoca_saida = None
                     inicio_saida = None
                     codigo_saida = EXIT_OK
-                    iniciar_segue_linha = True
                     comando = MotionCommand(
                         "EXIT_BLACK_CONFIRMED",
                         detail=(
@@ -2654,6 +2680,14 @@ def main():
                     time.sleep(TICK_S)
                     continue
 
+                saida_concluida = _saida_concluida_libera_missao(
+                    args, codigo_saida, comando)
+                if saida_concluida:
+                    print(
+                        "[resgate] deposito e saida concluidos; devolvendo "
+                        "o controle para mission.py")
+                    break
+
                 # Falhas de visão antes de a garra começar a sequência física
                 # não invalidam a sala nem as vítimas já contadas. Volte ao
                 # giro de busca; encerrar aqui devolveria o processo ao
@@ -2673,7 +2707,7 @@ def main():
                     if trabalhador is not None:
                         trabalhador.reset_tracking()
                     portao.reset()
-                    busca = make_search_controller(start_time=agora)
+                    busca = _iniciar_busca_segura(arduino, start_time=agora)
                     controlador = None
                     verificador_parede = None
                     coleta_apos_teste_parede = None
@@ -2756,6 +2790,8 @@ def main():
             print(f"[resgate] ERRO: {err}")
     except KeyboardInterrupt:
         print("\n[resgate] Ctrl-C")
+        if args.gerenciado_pela_missao:
+            raise
     finally:
         # PARAR vem antes de encerrar worker e camera, inclusive em excecao.
         if arduino is not None:
@@ -2792,9 +2828,12 @@ def main():
         print(
             "[resgate] encerrado com PARAR" if args.drive
             else "[resgate] encerrado; motores nunca foram habilitados")
-    if iniciar_segue_linha and not args.gerenciado_pela_missao:
-        return _iniciar_segue_linha(debug=args.debug)
     return codigo_saida
+
+
+def executar_resgate(args):
+    """Entrada usada por ``mission.py`` sem criar outro programa."""
+    return main(args)
 
 
 if __name__ == "__main__":

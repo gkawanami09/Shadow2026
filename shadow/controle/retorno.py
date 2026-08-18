@@ -10,7 +10,7 @@ from config import (T_180, T_180_BLIND_EXTRA, T_180_CONFIRM_TIME, T_180_EXIT_BOT
                     camera_x)
 from controle.direcao import sleep_steering, steer
 from shared.dados_compartilhados import (last_bottom_point, line_detected, line_size,
-                               status, terminate, timer)
+                               status, terminate)
 
 
 def turn_around(_last_turn_dir):

@@ -178,7 +178,7 @@ class PulsedCycleTests(unittest.TestCase):
 
 class PolicyFilterTests(unittest.TestCase):
     def test_politica_pode_recusar_uma_cor(self):
-        """silver_first: a preta não pode travar enquanto faltar prata."""
+        """Um filtro de estratégia pode recusar uma cor sem travar nela."""
         search = PulsedBallSearchController(
             start_time=0.0, accepts_kind=lambda kind: kind == "silver")
         command = search.update(None, now=0.0)

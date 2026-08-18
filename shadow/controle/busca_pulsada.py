@@ -66,7 +66,7 @@ class PulsedBallSearchController:
         now = time.monotonic() if start_time is None else float(start_time)
         self.state = self.START
         self._created_at = now
-        #: Filtro opcional de cor vindo da política da missão (silver_first).
+        #: Filtro opcional de cor para diagnósticos e futuras estratégias.
         self._accepts_kind = accepts_kind
         self._rotation_started_at = None
         self._rotation_elapsed_s = 0.0

@@ -1,12 +1,9 @@
 # Arquitetura do Shadow2026
 
-O percurso e o resgate são programas separados. Eles nunca devem rodar ao
-mesmo tempo porque compartilham a serial e os motores.
-
-Desde a missão completa existe um terceiro programa, `shadow/mission.py`, que
-alterna entre os dois automaticamente. Ele não substitui nenhum deles: o
-percurso e o resgate continuam funcionando isolados, exatamente como antes, e
-continuam sendo a forma recomendada de depurar cada metade.
+`shadow/mission.py` é o controlador central da execução autônoma. Ele é a
+única autoridade sobre os estados globais, permanece ativo durante a prova e
+chama diretamente a rotina de resgate. `main.py` e `resgate.py` continuam como
+diagnósticos isolados e nunca devem rodar juntos nem ao lado de `mission.py`.
 
 A ordem da troca (qual câmera fecha antes de qual abrir, quando a serial muda
 de dono, quando o LED apaga) é o contrato de segurança da missão e está
@@ -14,7 +11,8 @@ documentada em **`MISSAO_COMPLETA.md`**.
 
 ## Segue-linha
 
-`shadow/main.py` inicia dois processos:
+No diagnóstico isolado, `shadow/main.py` inicia dois processos. Na missão,
+`mission.py` inicia os mesmos alvos e supervisiona sua prontidão:
 
 ```text
 main.py
@@ -84,18 +82,21 @@ O resgate possui:
 mission.py
 ├── fase percurso: sobe visão (câmera 1) + controle (serial, LED aceso)
 ├── handoff: encerra os filhos, confirma que morreram, libera a trava
-└── fase resgate: subprocesso resgate.py (câmera 0, serial, LED apagado)
+├── fase resgate: chamada direta (câmera 0, serial, LED apagado)
+└── finalização: confirma saída, limpa estado e retoma o percurso
 ```
 
-- `controle/missao.py`: máquina de estados, inventário das três vítimas e a
-  ordem declarada do handoff;
+- `mission.py::EstadoMissao`: estados globais e transições permitidas;
+- `controle/missao.py`: políticas e ordem declarada do handoff;
 - `visao/entrada_missao.py`: modelo `entrada.onnx` para a faixa prata,
-  executado somente no processo de visão do percurso durante a missão;
+  executado somente no processo de visão do percurso quando habilitado (o
+  perfil atual de bancada usa o gatilho temporário de ausência de preto);
 - `visao/faixa_transversal.py`: geometria comum às duas faixas e a votação
   temporal com histerese e cooldown.
 
-Sem `--drive`, o programa mantém os motores parados e serve apenas para
-conferir a visão.
+O estado `RESGATE` não pode transicionar diretamente para `SEGUE_LINHA`.
+Somente `FINALIZANDO_RESGATE`, após depósito e saída confirmados, libera o
+handoff normal. Falhas ficam paradas no resgate ou entram em `RECONECTANDO`.
 
 ## Arduino
 

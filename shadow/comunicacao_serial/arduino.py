@@ -191,7 +191,7 @@ class Arduino:
         # O Uno reinicia com o LED aceso ao reabrir a USB. Guardar o modo
         # desejado permite restaura-lo automaticamente numa reconexao.
         self._desired_led_mode = modo
-        self._send_aux_cmd(f"LED {modo}")
+        return self._send_aux_cmd(f"LED {modo}")
 
     def distancia_ultrassom(self, timeout=0.2):
         """Solicita uma leitura e retorna a distancia em mm, ou None sem eco."""
@@ -481,8 +481,14 @@ class Arduino:
             # uma porta incorreta sem perder fragmentos normais.
             if len(self._rx_buffer) > 4096:
                 self._rx_buffer.clear()
-        except (serial.SerialException, OSError):
+        except (serial.SerialException, OSError) as err:
+            print(f"[serial] erro de leitura ({err}); conexao encerrada")
             self._connected = False
+            if self._ser is not None:
+                try:
+                    self._ser.close()
+                except (serial.SerialException, OSError):
+                    pass
 
     def _route_line(self, line):
         if line.startswith("OK RAMPA "):

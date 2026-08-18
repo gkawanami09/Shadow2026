@@ -70,6 +70,47 @@ class MissionDebugWindowTests(unittest.TestCase):
         self.assertEqual(processos[-1].name, "shadow-debug-linha")
 
 
+class MissionReadinessTests(unittest.TestCase):
+    class FilhoFalso:
+        def __init__(self, vivo=True):
+            self.vivo = vivo
+
+        def is_alive(self):
+            return self.vivo
+
+    @staticmethod
+    def _sistema(status="Inicializando percurso", filho_vivo=True):
+        valor = lambda inicial: SimpleNamespace(value=inicial)
+        compartilhado = SimpleNamespace(
+            status=valor(status),
+            rescue_requested=valor(False),
+            red_finished=valor(False),
+            terminate=valor(False),
+        )
+        sistema = MissionSystem(
+            compartilhado,
+            motor_lock=None,
+            args=SimpleNamespace(debug=False),
+        )
+        sistema.children = [
+            MissionReadinessTests.FilhoFalso(filho_vivo)]
+        return sistema, compartilhado
+
+    def test_percurso_so_fica_pronto_com_filhos_vivos_e_status_pronto(self):
+        sistema, _ = self._sistema(
+            status="Shadow2026 pronto - aguardando linha")
+        self.assertTrue(sistema.wait_line_ready())
+
+    def test_filho_morto_durante_inicio_forca_recuperacao(self):
+        sistema, _ = self._sistema(filho_vivo=False)
+        self.assertFalse(sistema.wait_line_ready())
+
+    def test_faixa_vermelha_final_encerra_a_fase(self):
+        sistema, compartilhado = self._sistema(status="Seguindo linha")
+        compartilhado.red_finished.value = True
+        self.assertEqual(sistema.wait_line_phase(), "finished")
+
+
 class MissionLineResumeTests(unittest.TestCase):
     def test_retomada_apaga_memoria_lateral_e_prefere_ramo_reto(self):
         valor = lambda inicial: SimpleNamespace(value=inicial)

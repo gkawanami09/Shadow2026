@@ -57,19 +57,21 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
 
 def _enter_rescue_zone(arduino):
     """Entrega a câmera/serial ao resgate, que faz seu avanço de 1 segundo."""
-    steer()
+    if steer() is False or not arduino.connected:
+        return False
     # O LED só pode ser apagado enquanto esta serial ainda existe. O processo
     # de resgate reafirma o comando assim que abre a serial dele.
-    arduino.led("APAGADO")
+    if arduino.led("APAGADO") is False or not arduino.connected:
+        return False
     entry_armed.value = False
     print("[controle] entrada confirmada; PARAR e LED APAGADO — "
           "resgate fará o avanço de 1 s")
+    return True
 
 
 def _enter_rescue_after_no_black(arduino):
     """Entrega a serial ao resgate apos a ausencia de preto confirmada."""
-    steer()
-    if terminate.value or not arduino.connected:
+    if steer() is False or terminate.value or not arduino.connected:
         return False
     status.value = 'Linha preta ausente — entrando no resgate'
     if arduino.led("APAGADO") is False or not arduino.connected:
@@ -121,13 +123,29 @@ def control_loop():
         if not arduino.connected:
             status.value = 'Arduino desconectado - aguardando reinicio'
             print("[controle] Arduino desconectado durante a espera da visao")
+            try:
+                steer()
+            finally:
+                arduino.close()
             return
         if time.perf_counter() - wait_start > VISION_READY_TIMEOUT:
-            print("[controle] AVISO: visão não ficou pronta em "
-                  f"{VISION_READY_TIMEOUT} s — seguindo mesmo assim")
-            break
+            status.value = 'Camera indisponivel - aguardando reinicio'
+            print("[controle] visao nao ficou pronta em "
+                  f"{VISION_READY_TIMEOUT} s; reiniciando sem mover")
+            try:
+                steer()
+            finally:
+                arduino.close()
+            return
         arduino.refresh()
         time.sleep(.05)
+
+    if terminate.value:
+        try:
+            steer()
+        finally:
+            arduino.close()
+        return
 
     line_status.value = "line_detected"
     status.value = "Shadow2026 pronto — aguardando linha"
@@ -210,8 +228,11 @@ def control_loop():
                     and entry_silver_confirmed.value):
                 status.value = 'Faixa prata confirmada — entrando na sala'
                 print("[controle] faixa PRATA confirmada; entrando na sala")
-                _enter_rescue_zone(arduino)
-                rescue_requested.value = True
+                if _enter_rescue_zone(arduino):
+                    rescue_requested.value = True
+                else:
+                    status.value = (
+                        'Falha serial na entrada - reiniciando missao')
                 break
 
             # Primeiro positivo prata: pare sem bloquear a visao. Ela continua
@@ -759,10 +780,10 @@ def control_loop():
                 stop_for_red()
                 if mission_mode.value and not entry_armed.value:
                     # A sala de resgate já ficou para trás: esta é a faixa
-                    # vermelha final da prova. O supervisor reinicia a missão.
+                    # vermelha final da prova. O supervisor encerra a missão.
                     red_finished.value = True
-                    status.value = 'Faixa vermelha final — reiniciando missão'
-                    print("[controle] faixa vermelha final; reiniciando missão")
+                    status.value = 'Faixa vermelha final — prova concluida'
+                    print("[controle] faixa vermelha final; prova concluida")
                     break
                 line_status.value = "line_detected"
                 continue

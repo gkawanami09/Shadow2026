@@ -2,13 +2,21 @@
 
 Código do robô Shadow para a OBR. A pasta principal é `shadow/`.
 
-O projeto possui dois programas separados:
+O comando autônomo da prova é o controlador central:
+
+```bash
+python3 shadow/mission.py
+```
+
+Ele permanece ativo do boot ao vermelho final e coordena, sem abrir outro
+programa, as duas rotinas:
 
 - `shadow/main.py`: segue a linha, lê verde e vermelho e trata gap;
 - `shadow/resgate.py`: encontra a vítima, aproxima e executa a coleta.
 
-Os dois programas não devem ser executados ao mesmo tempo, pois usam as
-câmeras, os motores e a mesma conexão serial.
+`main.py` e `resgate.py` são entradas de diagnóstico isolado. Não os execute
+ao mesmo tempo nem em paralelo com `mission.py`, pois usam as câmeras, os
+motores e a mesma conexão serial.
 
 ## Instalação
 
@@ -21,7 +29,7 @@ python3 -m pip install -r shadow/requirements.txt --break-system-packages
 `picamera2` e `libcamera` devem ser instalados pelos pacotes do Raspberry Pi OS,
 como explicado em `shadow/RUNBOOK.md`.
 
-## Segue-linha
+## Diagnóstico do segue-linha
 
 ```bash
 python3 shadow/main.py
@@ -29,7 +37,7 @@ python3 shadow/main.py --debug
 python3 shadow/main.py --vision-only --debug
 ```
 
-## Resgate
+## Diagnóstico do resgate
 
 Primeiro teste sem liberar os motores:
 

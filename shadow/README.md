@@ -13,14 +13,21 @@ Esta pasta contém todo o código executado pela Raspberry Pi.
 
 ## Programas
 
-O segue-linha usa:
+Para a missão autônoma completa, use:
+
+```bash
+python3 shadow/mission.py
+```
+
+`mission.py` é a única autoridade de estado e executa percurso, entrada,
+resgate, saída e retorno à linha. Para diagnosticar apenas o segue-linha:
 
 ```bash
 python3 shadow/main.py
 python3 shadow/main.py --debug
 ```
 
-O resgate usa:
+Para diagnosticar apenas o resgate:
 
 ```bash
 python3 shadow/resgate.py --camera-index 0 --debug
@@ -32,8 +39,8 @@ rejeitam madeira, sombras e triângulos. Depois da coleta, prata é levada ao
 triângulo verde e preta ao vermelho; o movimento de garra só é liberado depois
 da chegada confirmada.
 
-Os dois programas não podem rodar ao mesmo tempo porque compartilham os
-motores e a conexão serial.
+Os diagnósticos não podem rodar juntos nem em paralelo com `mission.py` porque
+compartilham os motores e a conexão serial.
 
 ## Organização
 

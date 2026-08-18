@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Supervisor da missão completa: percurso → sala de resgate → percurso.
+"""Controlador central da missão: percurso → sala de resgate → percurso.
 
-Este programa NÃO substitui ``main.py`` nem ``resgate.py``. Ele os coordena.
-Os dois continuam funcionando isolados, exatamente como antes, e continuam
-sendo a forma recomendada de depurar cada metade separadamente.
+``mission.py`` permanece vivo durante toda a rodada e é a única autoridade
+que decide se o robô está no segue-linha, na entrada, no resgate ou se está
+recuperando a conexão. ``main.py`` e ``resgate.py`` continuam úteis para testes
+isolados, mas não iniciam um ao outro durante a missão completa.
 
 Modelo de propriedade do hardware
 ---------------------------------
@@ -13,8 +14,9 @@ mutuamente exclusivas:
 
 * **percurso** — dois processos filhos (visão da câmera 1 + controle da
   serial), com o LED aceso, exatamente como ``main.py``;
-* **resgate** — um subprocesso ``resgate.py --drive`` que é dono da câmera 0,
-  da serial e da trava, com o LED apagado.
+* **resgate** — a função principal de ``resgate.py`` roda dentro deste
+  processo, depois que os filhos do percurso morreram, e assume a câmera 0,
+  a serial e a trava com o LED apagado.
 
 Entre as duas existe o handoff, cuja ORDEM é o contrato de segurança da
 missão. Essa ordem está declarada em ``controle/missao.py``
@@ -39,8 +41,8 @@ processo anterior ainda vivo.
 """
 
 import argparse
+from enum import Enum
 import signal
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -54,21 +56,76 @@ from controle.missao import (  # noqa: E402
     HANDOFF_TO_LINE,
     HANDOFF_TO_RESCUE,
     HandoffExecutor,
-    MissionCoordinator,
-    MissionState,
-    VALID_POLICIES,
-    POLICY_NEAREST_VALID,
 )
 
 
-SHADOW_ROOT = Path(__file__).resolve().parent
 CHILD_JOIN_TIMEOUT_S = 6.0
-#: Códigos de saída do subprocesso de resgate, lidos pelo supervisor.
+#: Códigos devolvidos pela rotina de resgate ao controlador central.
 RESCUE_EXIT_OK = 0
 RESCUE_EXIT_ARDUINO_DESCONECTADO = 5
 RESCUE_RETURN_COMPLETED = "completed"
 RESCUE_RETURN_RESTART_AFTER_ARDUINO = "restart_after_arduino"
 RESCUE_RETURN_STOPPED = "stopped"
+
+
+class EstadoMissao(str, Enum):
+    """Estados de alto nível; somente ``mission.py`` pode alterá-los."""
+
+    INICIALIZANDO = "INICIALIZANDO"
+    SEGUE_LINHA = "SEGUE_LINHA"
+    ENTRADA_RESGATE = "ENTRADA_RESGATE"
+    RESGATE = "RESGATE"
+    FINALIZANDO_RESGATE = "FINALIZANDO_RESGATE"
+    RECONECTANDO = "RECONECTANDO"
+    ENCERRADO = "ENCERRADO"
+
+
+TRANSICOES_PERMITIDAS = {
+    EstadoMissao.INICIALIZANDO: {
+        EstadoMissao.SEGUE_LINHA,
+        EstadoMissao.RECONECTANDO,
+        EstadoMissao.ENCERRADO,
+    },
+    EstadoMissao.SEGUE_LINHA: {
+        EstadoMissao.ENTRADA_RESGATE,
+        EstadoMissao.RECONECTANDO,
+        EstadoMissao.ENCERRADO,
+    },
+    EstadoMissao.ENTRADA_RESGATE: {
+        EstadoMissao.RESGATE,
+        EstadoMissao.RECONECTANDO,
+        EstadoMissao.ENCERRADO,
+    },
+    EstadoMissao.RESGATE: {
+        EstadoMissao.FINALIZANDO_RESGATE,
+        EstadoMissao.RECONECTANDO,
+        EstadoMissao.ENCERRADO,
+    },
+    EstadoMissao.FINALIZANDO_RESGATE: {
+        EstadoMissao.SEGUE_LINHA,
+        EstadoMissao.RECONECTANDO,
+        EstadoMissao.ENCERRADO,
+    },
+    EstadoMissao.RECONECTANDO: {
+        EstadoMissao.SEGUE_LINHA,
+        EstadoMissao.RECONECTANDO,
+        EstadoMissao.ENCERRADO,
+    },
+    EstadoMissao.ENCERRADO: set(),
+}
+
+
+def mudar_estado(estado_atual, novo_estado, motivo=""):
+    """Valida e registra toda troca de modo da missão."""
+    if novo_estado == estado_atual:
+        return estado_atual
+    if novo_estado not in TRANSICOES_PERMITIDAS[estado_atual]:
+        raise RuntimeError(
+            f"transicao de missao proibida: {estado_atual.value} -> "
+            f"{novo_estado.value}")
+    sufixo = f" ({motivo})" if motivo else ""
+    print(f"[MISSION] Estado: {novo_estado.value}{sufixo}")
+    return novo_estado
 
 
 def rescue_return_action(returncode):
@@ -131,17 +188,52 @@ class MissionSystem:
         self.motor_lock = motor_lock
         self.args = args
         self.children = []
-        self.rescue_process = None
+        self.resgate_ativo = False
+        self.argumentos_resgate = None
         self.rescue_returncode = None
         self._lock_held = True
+
+    def _definir_compartilhado(self, nome, valor):
+        campo = getattr(self.shared, nome, None)
+        if campo is not None:
+            campo.value = valor
+
+    def _limpar_deteccoes_percurso(self):
+        """Remove frames, votos e decisões que não valem na nova fase."""
+        valores = {
+            "vision_ready": False,
+            "line_detected": False,
+            "line_ahead": False,
+            "line_angle": 0,
+            "line_angle_y": -1,
+            "line_size": 0.0,
+            "last_bottom_point": config.camera_x / 2,
+            "last_bottom_point_y": 0,
+            "line_status": "line_detected",
+            "turn_dir": "straight",
+            "green_turn_target": 0,
+            "preferencia_linha_esquerda": False,
+            "red_detected": False,
+            "red_candidate": False,
+            "green_candidate": False,
+            "gap_angle": 0.0,
+            "gap_center_x": -180.0,
+            "gap_center_y": -1.0,
+            "gap_end_width": -1.0,
+            "black_average": 0.0,
+        }
+        for nome, valor in valores.items():
+            self._definir_compartilhado(nome, valor)
 
     # -- ciclo de vida do percurso ---------------------------------------
     def start_line_phase(self):
         """Sobe visão (câmera 1) e controle (serial + LED aceso)."""
         self.shared.terminate.value = False
+        self._definir_compartilhado("vision_ready", False)
         self.shared.rescue_requested.value = False
         self.shared.red_finished.value = False
         self.shared.mission_mode.value = True
+        self._definir_compartilhado("status", "Inicializando percurso")
 
         vision = Process(
             target=iniciar_visao, args=(self.args.debug,), name="shadow-visao")
@@ -158,6 +250,23 @@ class MissionSystem:
             debug.start()
             self.children.append(debug)
         print("[missão] percurso ativo: câmera 1 e serial com os filhos")
+
+    def wait_line_ready(self):
+        """Espera a câmera e a serial ficarem prontas sem travar para sempre."""
+        prazo = time.monotonic() + (
+            config.SERIAL_HANDSHAKE_TIMEOUT
+            + config.VISION_READY_TIMEOUT
+            + 2.0
+        )
+        while time.monotonic() < prazo:
+            if not all(child.is_alive() for child in self.children):
+                return False
+            texto = str(self.shared.status.value).lower()
+            if "pronto" in texto or "seguindo linha" in texto:
+                return True
+            time.sleep(.05)
+        raise RuntimeError(
+            "camera/Arduino nao ficaram prontos dentro do prazo de inicio")
 
     def wait_line_phase(self):
         """Bloqueia até o handoff, o fim da prova ou a morte de um filho.
@@ -232,7 +341,7 @@ class MissionSystem:
             self._lock_held = False
 
     def acquire_rescue_motor_lock(self):
-        """O subprocesso de resgate adquire a própria trava.
+        """A rotina de resgate adquire a própria trava.
 
         O supervisor apenas garante que a dele já foi liberada — caso
         contrário o resgate falharia ao iniciar, com a mensagem correta.
@@ -254,32 +363,40 @@ class MissionSystem:
         return True
 
     def start_rescue(self):
-        comando = [
-            sys.executable,
-            str(SHADOW_ROOT / "resgate.py"),
-            "--drive",
-            "--camera-index", str(self.args.rescue_camera_index),
-            "--policy", self.args.policy,
-            "--gerenciado-pela-missao",
-        ]
-        if self.args.debug:
-            comando.append("--debug")
-        print(f"[missão] iniciando o resgate: {' '.join(comando)}")
-        self.rescue_process = subprocess.Popen(comando, cwd=str(SHADOW_ROOT))
+        """Prepara a chamada direta; nenhuma outra aplicação é iniciada."""
+        self.argumentos_resgate = argparse.Namespace(
+            camera_index=self.args.rescue_camera_index,
+            target="any",
+            drive=True,
+            debug=self.args.debug,
+            video=None,
+            sem_vitimas=False,
+            sem_marcadores=False,
+            gerenciado_pela_missao=True,
+        )
+        self.resgate_ativo = True
+        self.rescue_returncode = None
+        print("[missão] iniciando a rotina de resgate dentro de mission.py")
 
     def wait_rescue(self):
-        if self.rescue_process is None:
+        if not self.resgate_ativo or self.argumentos_resgate is None:
             raise RuntimeError("o resgate não foi iniciado")
-        self.rescue_returncode = self.rescue_process.wait()
-        self.rescue_process = None
+        from resgate import executar_resgate
+
+        try:
+            self.rescue_returncode = executar_resgate(
+                self.argumentos_resgate)
+        finally:
+            self.resgate_ativo = False
+            self.argumentos_resgate = None
         return self.rescue_returncode
 
     # -- passos do handoff de volta ao percurso ---------------------------
     def close_rescue_camera(self):
         """A câmera 0 é fechada no ``finally`` do ``resgate.py``."""
-        if self.rescue_process is not None:
+        if self.resgate_ativo:
             raise RuntimeError(
-                "o processo de resgate ainda está vivo; "
+                "a rotina de resgate ainda esta ativa; "
                 "a câmera de linha não pode abrir")
 
     def acquire_line_motor_lock(self):
@@ -302,22 +419,11 @@ class MissionSystem:
     def _preparar_retomada_linha(self):
         """Apaga decisoes antigas antes do primeiro frame pos-resgate.
 
-        A terceira linha ja foi confirmada pelo processo de resgate, ainda com
+        A terceira linha ja foi confirmada pela rotina de resgate, ainda com
         a camera inferior aberta. Aqui apenas zeramos memorias antigas antes
         de iniciar o segue-linha normal.
         """
-        self.shared.vision_ready.value = False
-        self.shared.line_detected.value = False
-        self.shared.line_ahead.value = False
-        self.shared.line_angle.value = 0
-        self.shared.line_angle_y.value = -1
-        self.shared.line_size.value = 0.0
-        self.shared.last_bottom_point.value = config.camera_x / 2
-        self.shared.last_bottom_point_y.value = 0
-        self.shared.line_status.value = "line_detected"
-        self.shared.turn_dir.value = "straight"
-        self.shared.green_turn_target.value = 0
-        self.shared.preferencia_linha_esquerda.value = False
+        self._limpar_deteccoes_percurso()
         self.shared.line_crop.value = config.LINE_CROP_NORMAL
         self.shared.min_line_size.value = config.MIN_LINE_SIZE_DEFAULT
 
@@ -327,18 +433,7 @@ class MissionSystem:
 
     def _preparar_nova_tentativa(self):
         """Volta todos os dados ao inicio da missao, antes da faixa prata."""
-        self.shared.vision_ready.value = False
-        self.shared.line_detected.value = False
-        self.shared.line_ahead.value = False
-        self.shared.line_angle.value = 0
-        self.shared.line_angle_y.value = -1
-        self.shared.line_size.value = 0.0
-        self.shared.last_bottom_point.value = config.camera_x / 2
-        self.shared.last_bottom_point_y.value = 0
-        self.shared.line_status.value = "line_detected"
-        self.shared.turn_dir.value = "straight"
-        self.shared.green_turn_target.value = 0
-        self.shared.preferencia_linha_esquerda.value = False
+        self._limpar_deteccoes_percurso()
         self.shared.line_crop.value = config.LINE_CROP_INITIAL
         self.shared.min_line_size.value = config.MIN_LINE_SIZE_DEFAULT
         self.shared.entry_armed.value = True
@@ -352,15 +447,10 @@ class MissionSystem:
         self.shared.status.value = "Reiniciando missao - aguardando Arduino"
 
     def _encerrar_resgate_para_recuperacao(self):
-        if self.rescue_process is None:
-            return
-        self.rescue_process.terminate()
-        try:
-            self.rescue_process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self.rescue_process.kill()
-            self.rescue_process.wait(timeout=1)
-        self.rescue_process = None
+        # A chamada de resgate e sincrona. Quando a execucao chega aqui, o
+        # ``finally`` dela ja fechou camera, serial, workers e trava.
+        self.resgate_ativo = False
+        self.argumentos_resgate = None
 
     def reiniciar_missao_do_percurso(self, motivo):
         """Fecha a tentativa atual e sobe outra, sempre antes da prata."""
@@ -374,9 +464,7 @@ class MissionSystem:
             self.motor_lock.acquire()
             self._lock_held = True
         self._preparar_nova_tentativa()
-        print(
-            "[missao] reposicione o robo antes da faixa prata e religue o "
-            "Arduino; o percurso sera iniciado automaticamente")
+        print("[missao] recursos limpos; tentando iniciar o percurso")
         time.sleep(config.MISSION_RECOVERY_DELAY_S)
         self.start_line_phase()
 
@@ -431,13 +519,8 @@ class MissionSystem:
     # -- encerramento ----------------------------------------------------
     def shutdown(self):
         self.shared.terminate.value = True
-        if self.rescue_process is not None:
-            self.rescue_process.terminate()
-            try:
-                self.rescue_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.rescue_process.kill()
-            self.rescue_process = None
+        self.resgate_ativo = False
+        self.argumentos_resgate = None
         if self.children:
             self.join_line_children()
         if self._lock_held:
@@ -465,11 +548,6 @@ def parse_args():
     parser.add_argument(
         "--debug", action="store_true",
         help="repassa --debug para as duas fases")
-    parser.add_argument(
-        "--policy", choices=VALID_POLICIES, default=POLICY_NEAREST_VALID,
-        help=(
-            "ordem de resgate das vítimas; 'silver_first' prioriza as duas "
-            "vivas (vantagem no mundial), 'nearest_valid' é o padrão OBR"))
     parser.add_argument(
         "--rescue-camera-index", type=int, default=None,
         help="índice da câmera de resgate (padrão: config_resgate)")
@@ -499,56 +577,77 @@ def main():
     import shared.dados_compartilhados as shared
 
     shm = _criar_memoria_debug() if args.debug else None
-    coordinator = MissionCoordinator(policy=args.policy)
     system = MissionSystem(shared, motor_lock, args)
     codigo = 0
     tentativas = 1
+    estado_atual = EstadoMissao.INICIALIZANDO
+    primeira_partida = True
+
+    def iniciar_percurso_ate_pronto(motivo):
+        """Tenta recuperar câmera/serial sem deixar ``mission.py`` morrer."""
+        nonlocal estado_atual, primeira_partida, tentativas
+        while True:
+            try:
+                print(f"[missao] iniciando tentativa {tentativas}")
+                if primeira_partida:
+                    primeira_partida = False
+                    system.start_line_phase()
+                else:
+                    system.reiniciar_missao_do_percurso(motivo)
+                if not system.wait_line_ready():
+                    raise RuntimeError(
+                        "um processo terminou durante a inicializacao")
+                estado_atual = mudar_estado(
+                    estado_atual,
+                    EstadoMissao.SEGUE_LINHA,
+                    "camera e Arduino prontos",
+                )
+                return
+            except KeyboardInterrupt:
+                raise
+            except Exception as erro_recuperacao:  # noqa: BLE001
+                print(
+                    "[missao] ainda aguardando recursos para reiniciar: "
+                    f"{erro_recuperacao}")
+                if estado_atual != EstadoMissao.RECONECTANDO:
+                    estado_atual = mudar_estado(
+                        estado_atual,
+                        EstadoMissao.RECONECTANDO,
+                        str(erro_recuperacao),
+                    )
+                tentativas += 1
+                time.sleep(config.MISSION_RECOVERY_DELAY_S)
 
     try:
-        print(f"[missao] iniciando tentativa {tentativas}")
-        try:
-            system.start_line_phase()
-        except Exception as erro_inicio:           # noqa: BLE001
-            print(f"[missao] nao foi possivel iniciar: {erro_inicio}")
-            coordinator.abort(str(erro_inicio))
-            tentativas += 1
-            while True:
-                try:
-                    print(f"[missao] iniciando tentativa {tentativas}")
-                    system.reiniciar_missao_do_percurso(str(erro_inicio))
-                    coordinator = MissionCoordinator(policy=args.policy)
-                    break
-                except KeyboardInterrupt:
-                    raise
-                except Exception as erro_recuperacao:  # noqa: BLE001
-                    print(
-                        "[missao] ainda aguardando recursos para "
-                        f"reiniciar: {erro_recuperacao}")
-                    time.sleep(config.MISSION_RECOVERY_DELAY_S)
+        iniciar_percurso_ate_pronto("inicializacao")
         while True:
             try:
                 resultado = system.wait_line_phase()
+
+                if resultado == "finished":
+                    print(
+                        "[missao] faixa vermelha final alcancada; "
+                        "prova concluida")
+                    estado_atual = mudar_estado(
+                        estado_atual,
+                        EstadoMissao.ENCERRADO,
+                        "faixa vermelha final alcancada",
+                    )
+                    break
 
                 if resultado == "quit":
                     # No modo debug, q/Esc fecha a janela e sinaliza
                     # ``terminate``. Isso nao pode encerrar a missao da
                     # Raspberry: a tentativa e simplesmente refeita.
-                    print("[missao] sinal de parada recebido; reiniciando")
+                    motivo = "sinal de parada da fase de percurso"
+                    print(f"[missao] {motivo}; reiniciando")
                     tentativas += 1
-                    system.reiniciar_missao_do_percurso(
-                        "sinal de parada da fase de percurso")
-                    coordinator = MissionCoordinator(policy=args.policy)
-                    continue
-
-                if resultado == "finished":
-                    coordinator.on_red_finish()
-                    print(
-                        "[missao] faixa vermelha final alcancada; "
-                        "reiniciando a missao automaticamente")
-                    tentativas += 1
-                    system.reiniciar_missao_do_percurso(
-                        "faixa vermelha final alcancada")
-                    coordinator = MissionCoordinator(policy=args.policy)
+                    estado_atual = mudar_estado(
+                        estado_atual,
+                        EstadoMissao.RECONECTANDO,
+                        motivo,
+                    )
+                    iniciar_percurso_ate_pronto(motivo)
                     continue
 
                 if resultado == "child_died":
@@ -557,59 +656,87 @@ def main():
                             "um processo do percurso terminou; "
                             "reiniciando antes da faixa prata")
 
-                coordinator.on_entry_candidate()
-                coordinator.on_entry_confirmed()
-                coordinator.on_zone_entered()
+                estado_atual = mudar_estado(
+                    estado_atual,
+                    EstadoMissao.ENTRADA_RESGATE,
+                    "entrada do resgate confirmada",
+                )
                 print("[missao] faixa PRATA confirmada; executando o handoff")
                 HandoffExecutor(system, HANDOFF_TO_RESCUE).run()
-                coordinator.on_rescue_started()
+                estado_atual = mudar_estado(
+                    estado_atual,
+                    EstadoMissao.RESGATE,
+                    "segue-linha encerrado e motores entregues ao resgate",
+                )
 
                 returncode = system.wait_rescue()
                 rescue_action = rescue_return_action(returncode)
                 if rescue_action == RESCUE_RETURN_RESTART_AFTER_ARDUINO:
                     system.aguardar_arduino_reconectado()
-                    raise RuntimeError(
-                        "Arduino desconectado durante o resgate; "
-                        "reiniciando a missao pelo percurso")
+                    motivo = "Arduino reconectado depois de cair no resgate"
+                    estado_atual = mudar_estado(
+                        estado_atual,
+                        EstadoMissao.RECONECTANDO,
+                        motivo,
+                    )
+                    tentativas += 1
+                    iniciar_percurso_ate_pronto(motivo)
+                    continue
                 if rescue_action == RESCUE_RETURN_STOPPED:
-                    # Retorno diferente de zero não é uma saída válida da
-                    # sala. Antes isto levantava o segue-linha no ``except``
-                    # abaixo e o robô abandonava vítimas já coletadas. A
-                    # única autorização de reinício agora é o ciclo físico
-                    # da placa, observado sem abrir a serial.
+                    # Um erro comum permanece em RESGATE. Somente o ciclo
+                    # físico do Arduino autoriza limpar a tentativa.
                     system.aguardar_ciclo_do_arduino(
                         f"resgate terminou com codigo {returncode}")
-                    raise RuntimeError(
+                    motivo = (
                         f"resgate terminou com codigo {returncode}; "
-                        "Arduino foi desligado e religado; reiniciando")
+                        "Arduino foi reiniciado")
+                    estado_atual = mudar_estado(
+                        estado_atual,
+                        EstadoMissao.RECONECTANDO,
+                        motivo,
+                    )
+                    tentativas += 1
+                    iniciar_percurso_ate_pronto(motivo)
+                    continue
+
+                estado_atual = mudar_estado(
+                    estado_atual,
+                    EstadoMissao.FINALIZANDO_RESGATE,
+                    "deposito vermelho e saida concluidos",
+                )
                 print("[missao] resgate concluido; voltando ao percurso")
 
                 HandoffExecutor(system, HANDOFF_TO_LINE).run()
-                coordinator.state = MissionState.FOLLOW_LINE
+                if not system.wait_line_ready():
+                    raise RuntimeError(
+                        "segue-linha terminou durante a retomada")
+                estado_atual = mudar_estado(
+                    estado_atual,
+                    EstadoMissao.SEGUE_LINHA,
+                    "deposito concluido e linha retomada",
+                )
 
             except KeyboardInterrupt:
                 raise
             except Exception as err:               # noqa: BLE001
                 print(f"[missao] tentativa interrompida: {err}")
-                coordinator.abort(str(err))
+                if estado_atual in (
+                    EstadoMissao.ENTRADA_RESGATE,
+                    EstadoMissao.RESGATE,
+                ):
+                    # Depois da entrada confirmada nenhum erro comum pode
+                    # devolver os motores ao segue-linha.
+                    system.aguardar_ciclo_do_arduino(str(err))
                 tentativas += 1
-                while True:
-                    try:
-                        print(f"[missao] iniciando tentativa {tentativas}")
-                        system.reiniciar_missao_do_percurso(str(err))
-                        coordinator = MissionCoordinator(policy=args.policy)
-                        break
-                    except KeyboardInterrupt:
-                        raise
-                    except Exception as erro_recuperacao:  # noqa: BLE001
-                        print(
-                            "[missao] ainda aguardando recursos para "
-                            f"reiniciar: {erro_recuperacao}")
-                        time.sleep(config.MISSION_RECOVERY_DELAY_S)
+                estado_atual = mudar_estado(
+                    estado_atual,
+                    EstadoMissao.RECONECTANDO,
+                    str(err),
+                )
+                iniciar_percurso_ate_pronto(str(err))
 
     except KeyboardInterrupt:
         print("\n[missao] Ctrl-C - encerrando...")
-        coordinator.abort("Ctrl-C")
         codigo = 130
     finally:
         system.shutdown()
@@ -619,11 +746,10 @@ def main():
                 shm.unlink()
             except FileNotFoundError:
                 pass
-        inventory = coordinator.inventory
-        print(
-            f"[missao] estado final: {coordinator.state} | "
-            f"prata {inventory.silver_deposited}/2, "
-            f"preta {inventory.black_deposited}/1")
+        if estado_atual != EstadoMissao.ENCERRADO:
+            estado_atual = mudar_estado(
+                estado_atual, EstadoMissao.ENCERRADO)
+        print(f"[missao] estado final: {estado_atual.value}")
     return codigo
 
 

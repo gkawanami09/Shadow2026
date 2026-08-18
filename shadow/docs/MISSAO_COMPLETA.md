@@ -3,20 +3,30 @@
 Este documento descreve a camada que coordena as duas metades do Shadow. Ele
 complementa `ARQUITETURA.md`, que continua descrevendo cada metade isolada.
 
-## 1. Por que existe um supervisor
+## 1. Por que existe um controlador central
 
 `main.py` e `resgate.py` funcionam bem, mas **não podem coexistir**: disputam
-a mesma serial, o mesmo Arduino e os mesmos motores. Até agora a troca entre
-eles era manual. O supervisor `mission.py` faz essa troca sozinho, e o faz
-numa ordem fixa e testada.
+a mesma serial, o mesmo Arduino e os mesmos motores. `mission.py` faz essa
+troca numa ordem fixa e testada, permanece ativo durante toda a rodada e chama
+o resgate diretamente, sem criar outro programa.
 
-Nada foi substituído. `main.py` e `resgate.py` continuam sendo a forma
-recomendada de depurar cada metade separadamente, e continuam se comportando
-exatamente como antes quando executados sozinhos.
+`main.py` e `resgate.py` continuam sendo entradas de diagnóstico de cada
+metade, mas não devem ser executados em paralelo com a missão.
 
 ## 2. Máquina de estados
 
-Os nomes abaixo são as constantes de `controle/missao.py::MissionState`.
+Os estados globais efetivos ficam em `mission.py::EstadoMissao`:
+
+```text
+INICIALIZANDO → SEGUE_LINHA → ENTRADA_RESGATE → RESGATE
+RESGATE → FINALIZANDO_RESGATE → SEGUE_LINHA
+qualquer falha recuperável → RECONECTANDO → SEGUE_LINHA
+faixa vermelha final ou Ctrl-C → ENCERRADO
+```
+
+`RESGATE → SEGUE_LINHA` é uma transição proibida. O caminho normal exige
+`FINALIZANDO_RESGATE`, liberado somente pela saída preta confirmada depois dos
+depósitos. Os nomes abaixo descrevem os subestados internos do resgate:
 
 ```text
 FOLLOW_LINE
@@ -56,7 +66,7 @@ RESCUE_SCAN ──► TARGET_BRAKE ──► TARGET_VERIFY ──► TARGET_LOCK
                                     FOLLOW_LINE ──► RED_FINISH
 ```
 
-Regras que a máquina garante, e que são testadas em `tests/test_missao.py`:
+Regras garantidas pelos controladores reais e pelos testes de resgate:
 
 - **uma vítima por vez.** Com uma esfera presa, travar outro alvo é recusado
   com erro. Não existe modo "guardar três": não há cesto validado no robô.
@@ -101,7 +111,7 @@ propriedades, não a lista literal.
 Sobre o LED: o regulamento interno manda apagá-lo antes do resgate, mas
 apagar o LED **exige a serial**. Por isso ele é apagado no passo 2, que é o
 último instante em que a serial do percurso existe, e reafirmado no passo 11
-pelo processo de resgate. Os dois estão explícitos na lista.
+pela rotina de resgate. Os dois estão explícitos na lista.
 
 Onde o passo acontece dentro de um filho, o supervisor o implementa como
 **verificação**: ele confirma que o filho realmente terminou (e portanto que
@@ -130,7 +140,7 @@ Evidência conjunta exigida (`visao/entrada_missao.py`):
 4. satisfeitas essas condições, um resultado positivo já confirma a entrada.
 
 Após a confirmação, o processo de percurso para e libera câmera/serial. O
-processo `resgate.py` então faz o avanço reto já calibrado de 1 s e inicia os
+a rotina de `resgate.py` então faz o avanço reto já calibrado de 1 s e inicia os
 giros de busca. O modelo de entrada não roda durante o resgate.
 
 ## 5. Busca pulsada
@@ -160,7 +170,8 @@ existindo com seus testes e volta a ser usado se
 
 | Parâmetro | Padrão | Papel |
 |---|---|---|
-| `ENTRY_SILVER_ENABLED` | `True` | liga a detecção da entrada |
+| `ENTRY_SILVER_ENABLED` | `False` | perfil atual desliga temporariamente o modelo de prata |
+| `ENTRY_NO_BLACK_RESCUE_TEST_ENABLED` | `True` | perfil de bancada entra após 3 s sem preto em reta |
 | `ENTRY_MODEL_PATH` | `modelos/entrada.onnx` | modelo da faixa prata |
 | `ENTRY_MODEL_INPUT` | `640` | tamanho de entrada do modelo |
 | `ENTRY_MODEL_MIN_CONFIDENCE` | `.30` | confiança mínima aceita; o veto de preto/rampa continua obrigatório |
@@ -236,18 +247,12 @@ Missão completa:
 python3 shadow/mission.py
 ```
 
-Missão completa priorizando as vítimas vivas (mundial):
-
-```bash
-python3 shadow/mission.py --policy silver_first
-```
-
 ## 8. Limitações reais
 
 Declaradas para não serem descobertas em competição:
 
-1. **Nada aqui foi testado no robô.** Todo o trabalho é offline: 356 testes
-   automatizados e replay sintético. Nenhuma afirmação sobre comportamento
+1. **Nada aqui foi testado no robô nesta auditoria.** O trabalho é offline:
+   testes automatizados e replay sintético. Nenhuma afirmação sobre comportamento
    físico foi verificada.
 2. **Os limiares da faixa prata não foram medidos com a fita real.** São um
    ponto de partida conservador. `GUIA_CALIBRACAO.md` §2.1 é obrigatório.
@@ -317,7 +322,7 @@ seguinte. Em toda fase, mantenha parada de emergência ao alcance.
 
 | # | Teste | Como | Critério de aprovação |
 |---|---|---|---|
-| 1 | suíte automatizada | `python3 -m unittest discover -s shadow/tests -p "test_*.py"` | 360/360 |
+| 1 | suíte automatizada | `python3 -m unittest discover -s shadow/tests -p "test_*.py"` | todos os testes disponíveis passam |
 | 2 | replay de frames reais | `replay_visao.py --perfil entrada/saida/vitima` | zero falsos positivos nos negativos |
 | 3 | visão ao vivo sem motores | `main.py --vision-only --debug` e `resgate.py --debug` | imagem fluida, sem backlog |
 | 4 | benchmark no Pi | `benchmark_visao.py --camera --segundos 20` | atraso p95 < `BALL_FRAME_STALE_S` |

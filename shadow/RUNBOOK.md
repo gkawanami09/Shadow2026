@@ -153,26 +153,26 @@ Coloque o robô numa linha reta e rode `python3 shadow/main.py --debug`.
 
 ```bash
 cd ~/Overengineering-squared-RoboCup
-python3 shadow/main.py
+python3 shadow/mission.py
 ```
 
-O que acontece: ~2 s inicializando câmera e serial (a 1ª execução pós-boot
-compila o cache do Numba e demora mais), aparece
-`Shadow2026 ready — awaiting line`, e o robô passa a seguir qualquer linha sob
-a câmera. Status em português no terminal (`Seguindo Linha`,
-`Orientando no gap`, `Parada por vermelho: N s restantes`…).
-**Ctrl-C para tudo de forma limpa** (PARAR é enviado ao Uno na saída).
-Headless: funciona sem monitor/display.
+O controlador espera câmera e Arduino ficarem prontos, segue a linha, confirma
+a entrada, entrega o hardware à rotina de resgate e só retoma o percurso depois
+do depósito e da saída preta confirmados. A faixa vermelha final encerra a
+prova. Se câmera ou serial falharem no boot, ele continua tentando; se o
+Arduino cair no meio da execução, para e reinicia a tentativa quando a conexão
+voltar. **Ctrl-C para tudo de forma limpa**. Headless: funciona sem display.
 
 ## 10. Execução com debug
 
 ```bash
-python3 shadow/main.py --debug
+python3 shadow/mission.py --debug
 ```
 
-Igual à operação normal + janela única com o frame anotado (contorno, POI,
-geometria do gap, retângulo do vermelho, fps, status). `q` na janela ou
-Ctrl-C encerra. Há também `--vision-only --debug` (só visão, motores parados).
+Igual à operação normal, com as janelas anotadas das fases ativas. Para
+diagnóstico sem motores do segue-linha, use
+`python3 shadow/main.py --vision-only --debug`; para visão isolada do resgate,
+use `python3 shadow/resgate.py --debug`.
 
 ## 11. Autostart no boot (opcional)
 
@@ -180,14 +180,14 @@ Crie `/etc/systemd/system/shadow-line.service`:
 
 ```ini
 [Unit]
-Description=Shadow2026 line follower
+Description=Shadow2026 autonomous mission
 After=multi-user.target
 
 [Service]
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/Overengineering-squared-RoboCup
-ExecStart=/usr/bin/python3 shadow/main.py
+ExecStart=/usr/bin/python3 shadow/mission.py
 Restart=on-failure
 RestartSec=3
 
@@ -223,14 +223,11 @@ journalctl -u shadow-line -f                      # logs
 | Oscila em linha reta | Ganho alto | Suba `max_turn_angle` (seção 8) |
 | 1ª execução muito lenta | Compilação Numba (uma vez) | Esperar; cache persiste |
 
-## 13. O que NÃO está implementado (fora de escopo)
+## 13. Limitações conhecidas
 
-Herdado da lista do dossiê (Seção 8) — pontos de extensão futuros:
-
-- Faixa prateada / entrada da zona de resgate (silver AI)
-- Zona de evacuação, vítimas, YOLO/TPU, segunda câmera
-- IMU (rampas por giroscópio, giros com feedback de yaw)
-- Obstáculos e sensores IR de distância; gangorra (seesaw)
-- Garra/servos, kit de resgate, LEDs, GUI touchscreen
+- IMU não integrada: giros de 90°/180° e a busca 360° usam visão/tempo;
+- obstáculos, gangorra e sensores IR não fazem parte deste stack;
+- a calibração final de câmeras, cores, tempos e servos deve ser validada
+  no robô e na iluminação da arena.
 
 Giros de 90°/180° são por visão/tempo, sem giroscópio.
