@@ -168,6 +168,8 @@ def control_loop():
     preferencia_esquerda_inicio = 0.
     preferencia_esquerda_alinhada_desde = None
     entry_rearm_after = None
+    estado_rampa = "PLANO"
+    proxima_consulta_rampa = 0.
 
     try:
         while not terminate.value:
@@ -175,6 +177,30 @@ def control_loop():
                 status.value = 'Arduino desconectado - aguardando reinicio'
                 print("[controle] Arduino desconectado; encerrando sessao")
                 return
+
+            # A inclinacao vem do MPU no Arduino. A consulta e nao bloqueante:
+            # enquanto uma resposta chega, o segue-linha continua enviando os
+            # comandos normais e alimentando o watchdog do Uno.
+            if (config.RAMPA_HABILITADA
+                    and hasattr(arduino, "iniciar_rampa")
+                    and hasattr(arduino, "poll_rampa")):
+                agora_rampa = time.monotonic()
+                concluida, leitura_rampa = arduino.poll_rampa()
+                if concluida:
+                    novo_estado = "PLANO"
+                    novo_angulo = 0.
+                    if leitura_rampa is not None:
+                        novo_estado, novo_angulo = leitura_rampa
+                    if novo_estado != estado_rampa:
+                        print(
+                            "[controle] rampa "
+                            f"{estado_rampa.lower()} -> {novo_estado.lower()} "
+                            f"({novo_angulo:+.1f} graus)")
+                    estado_rampa = novo_estado
+                if agora_rampa >= proxima_consulta_rampa:
+                    arduino.iniciar_rampa()
+                    proxima_consulta_rampa = (
+                        agora_rampa + config.RAMPA_CONSULTA_INTERVALO_S)
 
             # A confirmacao tem prioridade sobre qualquer outra manobra: este
             # processo ainda e o dono seguro da serial e precisa parar antes
@@ -510,6 +536,10 @@ def control_loop():
 
                 velocidade_base = get_speed(line_angle.value)
                 command_speed = velocidade_base
+                if estado_rampa == "SUBINDO":
+                    command_speed = config.RAMPA_SUBIDA_SPEED
+                elif estado_rampa == "DESCENDO":
+                    command_speed = config.RAMPA_DESCIDA_SPEED
                 if config.RETA_RAPIDA_HABILITADA:
                     permitir_reta_rapida = (
                         green_direction is None

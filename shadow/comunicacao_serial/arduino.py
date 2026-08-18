@@ -23,6 +23,11 @@ class Arduino:
         self._ultra_ready = False
         self._ultra_value = None
         self._ultra_response_received = False
+        self._rampa_pending = False
+        self._rampa_deadline = 0.0
+        self._rampa_ready = False
+        self._rampa_estado = None
+        self._rampa_angulo = None
         self._manual_pending = False
         self._manual_response = None
         self._reconexao_automatica = True
@@ -86,6 +91,7 @@ class Arduino:
         self._connection_epoch += 1
         self._rx_buffer.clear()
         self.cancelar_ultrassom()
+        self.cancelar_rampa()
         self._manual_pending = False
         self._manual_response = None
 
@@ -246,6 +252,68 @@ class Arduino:
         self._ultra_value = None
         self._ultra_response_received = False
         self._ultra_deadline = 0.0
+
+    def iniciar_rampa(self, timeout=None):
+        """Solicita o estado de rampa sem bloquear o segue-linha.
+
+        O firmware responde ``OK RAMPA ESTADO=<...> ANGULO=<...>``. A leitura
+        e separada dos comandos de motor para que o keepalive continue sendo o
+        ultimo movimento enviado.
+        """
+        if timeout is None:
+            timeout = config.RAMPA_RESPOSTA_TIMEOUT_S
+        timeout = float(timeout)
+        if timeout <= 0:
+            raise ValueError("timeout da rampa deve ser positivo")
+        self._drain()
+        if (
+            not self._connected
+            or self._rampa_pending
+            or self._rampa_ready
+        ):
+            return False
+
+        self._rampa_pending = True
+        self._rampa_deadline = time.monotonic() + timeout
+        self._rampa_estado = None
+        self._rampa_angulo = None
+        self._write_line("RAMPA")
+        if not self._connected:
+            self._rampa_pending = False
+            return False
+        return True
+
+    def poll_rampa(self):
+        """Retorna ``(concluido, (estado, angulo))`` sem esperar a serial.
+
+        Quando nao houver resposta valida, retorna ``(True, None)``. O
+        controle trata isso como plano, preservando a velocidade normal.
+        """
+        self._drain()
+        now = time.monotonic()
+        if self._rampa_pending and (
+            not self._connected or now >= self._rampa_deadline
+        ):
+            self._rampa_pending = False
+            self._rampa_ready = True
+            self._rampa_estado = None
+            self._rampa_angulo = None
+
+        if not self._rampa_ready:
+            return False, None
+        estado, angulo = self._rampa_estado, self._rampa_angulo
+        self._rampa_ready = False
+        self._rampa_estado = None
+        self._rampa_angulo = None
+        return True, None if estado is None else (estado, angulo)
+
+    def cancelar_rampa(self):
+        """Descarta a consulta de inclinacao pendente ou ja recebida."""
+        self._rampa_pending = False
+        self._rampa_ready = False
+        self._rampa_estado = None
+        self._rampa_angulo = None
+        self._rampa_deadline = 0.0
 
     def futaba(self, potencia, tempo_ms):
         """Aciona o servo continuo com potencia -100..100 por ate 3000 ms."""
@@ -417,6 +485,26 @@ class Arduino:
             self._connected = False
 
     def _route_line(self, line):
+        if line.startswith("OK RAMPA "):
+            if self._rampa_pending:
+                campos = dict(
+                    campo.split("=", 1)
+                    for campo in line.split()[2:]
+                    if "=" in campo
+                )
+                estado = campos.get("ESTADO")
+                try:
+                    angulo = float(campos["ANGULO"])
+                except (KeyError, ValueError):
+                    estado = None
+                    angulo = None
+                if estado not in ("PLANO", "SUBINDO", "DESCENDO"):
+                    estado = None
+                self._rampa_estado = estado
+                self._rampa_angulo = angulo
+                self._rampa_pending = False
+                self._rampa_ready = True
+                return
         if line.startswith("OK ULTRASSOM "):
             if self._ultra_pending:
                 try:

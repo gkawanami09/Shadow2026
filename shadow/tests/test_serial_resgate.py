@@ -69,6 +69,11 @@ class RescueSerialLedTests(unittest.TestCase):
         arduino._ultra_ready = False
         arduino._ultra_value = None
         arduino._ultra_response_received = False
+        arduino._rampa_pending = False
+        arduino._rampa_deadline = 0.0
+        arduino._rampa_ready = False
+        arduino._rampa_estado = None
+        arduino._rampa_angulo = None
         arduino._manual_pending = False
         arduino._manual_response = None
         return arduino
@@ -210,6 +215,25 @@ class RescueSerialLedTests(unittest.TestCase):
 
         self.assertEqual(arduino.poll_ultrassom(), (True, None))
         self.assertFalse(arduino.ultima_leitura_ultrassom_respondeu)
+
+    def test_ramp_response_is_non_blocking_and_preserves_motor_command(self):
+        arduino = self._connected_arduino()
+        arduino._last_cmd = "LADO 80 80"
+
+        self.assertTrue(arduino.iniciar_rampa(timeout=0.05))
+        self.assertEqual(arduino._ser.writes, [b"RAMPA\n"])
+        self.assertEqual(arduino._last_cmd, "LADO 80 80")
+
+        arduino._ser.feed(b"OK RAMPA ESTADO=SUBINDO ANGULO=8.25\n")
+        self.assertEqual(arduino.poll_rampa(), (True, ("SUBINDO", 8.25)))
+        self.assertEqual(arduino.poll_rampa(), (False, None))
+
+    def test_malformed_ramp_response_falls_back_to_no_reading(self):
+        arduino = self._connected_arduino()
+        self.assertTrue(arduino.iniciar_rampa(timeout=0.05))
+        arduino._ser.feed(b"OK RAMPA ESTADO=INDEFINIDO ANGULO=nao\n")
+
+        self.assertEqual(arduino.poll_rampa(), (True, None))
 
     def test_manual_serial_command_still_receives_routed_reply(self):
         arduino = self._connected_arduino()

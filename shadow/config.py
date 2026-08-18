@@ -96,6 +96,18 @@ LINE_FOLLOW_PWM = 80
 LINE_FOLLOW_SPEED = LINE_FOLLOW_PWM / MAX_PWM
 LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair brevemente da imagem
 
+# Rampa lida pelo MPU6050 do Arduino. A consulta e assincrona, portanto nao
+# interrompe os comandos de movimento nem o watchdog. A correcao proporcional
+# do segue-linha recebe a propria velocidade abaixo; assim, ela escala junto
+# com o PWM em subida e descida.
+RAMPA_HABILITADA = True
+RAMPA_CONSULTA_INTERVALO_S = .10
+RAMPA_RESPOSTA_TIMEOUT_S = .20
+RAMPA_SUBIDA_PWM = 120
+RAMPA_DESCIDA_PWM = 50
+RAMPA_SUBIDA_SPEED = RAMPA_SUBIDA_PWM / MAX_PWM
+RAMPA_DESCIDA_SPEED = RAMPA_DESCIDA_PWM / MAX_PWM
+
 # O segue-linha usa PWM 80 diretamente. O controlador adaptativo permanece no
 # projeto para uma calibração futura, mas não participa dos comandos atuais.
 RETA_RAPIDA_HABILITADA = False
