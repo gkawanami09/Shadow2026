@@ -38,7 +38,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description=(
             "Testa a saida pos-vermelho: avanco curto, giro de 90 graus, "
-            "alinhamento lateral, camera do verde e translacao direita."))
+            "tres passagens de parede e camera do verde apos a primeira."))
     parser.add_argument(
         "--camera-index",
         type=int,
@@ -82,10 +82,10 @@ def main(argv=None):
         )
         if resultado == "saida_concluida":
             print(
-                "[saida] triangulo verde tratado e translacao final direita "
-                "concluida; robo parado")
+                "[saida] triangulo verde tratado e tres passagens concluidas; "
+                "robo parado")
             return EXIT_OK
-        print("[saida] alinhamento interrompido; robo parado")
+        print("[saida] rota de saida interrompida; robo parado")
         return EXIT_FALHA_MANOBRA
     except KeyboardInterrupt:
         print("\n[saida] interrompida; robo parado")

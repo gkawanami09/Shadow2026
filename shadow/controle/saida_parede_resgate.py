@@ -1,16 +1,12 @@
-"""Manobra curta apos o deposito vermelho.
+"""Rota de parede apos o deposito vermelho.
 
-Esta rotina deliberadamente nao procura a saida. Ela so afasta o robo do
-marcador vermelho, gira 90 graus para a direita pelo MPU e usa o ultrassom
-lateral direito para regular a distancia da parede. Ao terminar o
-alinhamento, afasta lateralmente para a esquerda ate o sensor direito marcar
-ao menos 120 mm e faz a verificacao visual do triangulo verde. Depois disso,
-avanca reto ate encontrar a parede frontal a 118 mm. Entao
-avanca em curva, mantendo a frente como referencia e movimentando mais a
-traseira. Com o ultrassom lateral direito estavel por um segundo, translada a direita
-por meio segundo e encerra a manobra. A camera frontal ja foi fechada antes
-de o robo mover: se confirmou um triangulo verde, ele gira 45 graus para a
-esquerda e entao executa essa aproximacao e o alinhamento.
+Depois do avanco curto e do giro inicial de 90 graus, cada passagem segue a
+mesma ordem: avanco ate 118 mm no ultrassom frontal, pivo traseiro ate o
+lateral estabilizar (ou completar 2 s), translacao para a direita e
+afastamento para a esquerda ate o lateral marcar ao menos 120 mm. A camera
+frontal, com LED apagado, abre somente depois da primeira passagem. Se ela
+confirmar o triangulo verde, o robo faz mais duas passagens e para apos o
+ultimo afastamento a 120 mm.
 """
 
 from dataclasses import dataclass
@@ -29,34 +25,33 @@ class ResultadoSondaLinha:
 
 
 class ControladorSaidaParede:
-    """Gira, alinha, procura o verde e repete uma unica rota de parede."""
+    """Executa a rota pos-vermelho em tres passagens de parede."""
 
     ZERAR_MPU = "EXIT_PAREDE_ZERAR_MPU"
     AFASTAR_VERMELHO = "EXIT_PAREDE_AFASTAR_VERMELHO"
     ASSENTAR_INICIAL = "EXIT_PAREDE_ASSENTAR_INICIAL"
     GIRO_INICIAL_DIREITA = "EXIT_PAREDE_GIRO_INICIAL_DIREITA"
-    ALINHAR_DIREITA = "EXIT_PAREDE_ALINHAR_DIREITA"
-    CORRIGIR_YAW_ALINHAMENTO = "EXIT_PAREDE_CORRIGIR_YAW_ALINHAMENTO"
-    AFASTAR_ESQUERDA_INICIAL = "EXIT_PAREDE_AFASTAR_ESQUERDA_INICIAL"
-    CORRIGIR_YAW_AFASTAMENTO_INICIAL = (
-        "EXIT_PAREDE_CORRIGIR_YAW_AFASTAMENTO_INICIAL"
+    AFASTAR_ESQUERDA_120 = "EXIT_PAREDE_AFASTAR_ESQUERDA_120"
+    CORRIGIR_YAW_AFASTAMENTO_ESQUERDA = (
+        "EXIT_PAREDE_CORRIGIR_YAW_AFASTAMENTO_ESQUERDA"
     )
     AVANCAR_ATE_PAREDE_FRENTE = "EXIT_PAREDE_AVANCAR_ATE_FRENTE"
     CORRIGIR_YAW_AVANCO_FRENTE = "EXIT_PAREDE_CORRIGIR_YAW_FRENTE"
     PIVO_TRASEIRO_ESTABILIZAR = "EXIT_PAREDE_PIVO_TRASEIRO_ESTABILIZAR"
-    TRANSLADAR_DIREITA_FINAL = "EXIT_PAREDE_TRANSLADAR_DIREITA_FINAL"
+    TRANSLADAR_DIREITA = "EXIT_PAREDE_TRANSLADAR_DIREITA"
     VERIFICAR_TRIANGULO_VERDE = "EXIT_PAREDE_VERIFICAR_TRIANGULO_VERDE"
     AGUARDAR_MPU_TRIANGULO_VERDE = "EXIT_PAREDE_AGUARDAR_MPU_TRIANGULO_VERDE"
-    GIRO_TRIANGULO_VERDE = "EXIT_PAREDE_GIRO_TRIANGULO_VERDE"
     SAIDA_CONCLUIDA = "EXIT_PAREDE_SAIDA_CONCLUIDA"
     FALHA = "EXIT_PAREDE_FALHA"
 
+    _DESTINO_CAMERA = "CAMERA"
+    _DESTINO_AVANCO = "AVANCO"
+    _DESTINO_PARAR = "PARAR"
+
     _ESTADOS_GIRO = {
         GIRO_INICIAL_DIREITA,
-        CORRIGIR_YAW_ALINHAMENTO,
-        CORRIGIR_YAW_AFASTAMENTO_INICIAL,
+        CORRIGIR_YAW_AFASTAMENTO_ESQUERDA,
         CORRIGIR_YAW_AVANCO_FRENTE,
-        GIRO_TRIANGULO_VERDE,
     }
 
     def __init__(self, start_time=None):
@@ -77,8 +72,7 @@ class ControladorSaidaParede:
 
         self._lateral_mm = None
         self._lateral_em = None
-        self._lateral_em_antes_alinhamento = None
-        self._lateral_em_antes_afastamento_inicial = None
+        self._lateral_em_antes_afastamento = None
         self._frente_mm = None
         self._frente_em = None
         self._frente_em_antes_avanco = None
@@ -88,9 +82,10 @@ class ControladorSaidaParede:
         self._estavel_desde_pivo = None
         self._translacao_por_timeout_pivo = False
         self._triangulo_verde_confirmado = False
-        self._triangulo_verde_tratado = False
-        self._yaw_em_antes_giro_verde = None
+        self._yaw_em_antes_retomada_verde = None
         self._tentativas_correcao = 0
+        self._passagens_direita_concluidas = 0
+        self._destino_apos_afastamento = None
 
     @property
     def terminal(self):
@@ -180,7 +175,7 @@ class ControladorSaidaParede:
         if self.state == self.SAIDA_CONCLUIDA:
             return self._parado(
                 self.SAIDA_CONCLUIDA,
-                "triangulo verde tratado, leitura lateral estabilizada e translacao final concluida; robo parado",
+                "triangulo verde tratado e tres passagens de parede concluidas; robo parado",
                 terminal=True,
             )
         if self.state == self.FALHA:
@@ -235,151 +230,85 @@ class ControladorSaidaParede:
                     + 90.0 * self._sinal_yaw_por_giro_direita)
             if self._giro_concluido():
                 self._heading_parede = self._alvo_yaw
-                self._entrar_alinhamento(agora)
+                # O proximo marco e exclusivamente a parede frontal a 118 mm;
+                # nao ha alinhamento lateral logo apos os 90 graus.
+                self._entrar_avanco_frente(agora)
                 return self.atualizar(agora)
             return self._girar(
                 self.GIRO_INICIAL_DIREITA,
                 "girando 90 graus a direita pelo MPU",
             )
 
-        if self.state == self.ALINHAR_DIREITA:
-            # Nunca usa uma leitura feita antes de o chassi completar o giro:
-            # depois de 90 graus, o ultrassom passou a olhar para outra parede.
-            if not self._lateral_fresca(agora):
-                if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
-                    return self._falhar(
-                        "ultrassom lateral sem leitura nova apos o giro", agora)
-                return self._parado(
-                    self.ALINHAR_DIREITA,
-                    "giro concluido; aguardando ultrassom lateral novo",
-                )
-            if self._lateral_mm is None:
-                return self._falhar("parede direita nao encontrada", agora)
-            if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_ALINHAMENTO_S:
-                return self._falhar("timeout ao alinhar a distancia da parede", agora)
-
-            erro_distancia = (
-                self._lateral_mm - cfg.SAIDA_PAREDE_DISTANCIA_ALVO_ALINHAMENTO_MM)
-            if abs(erro_distancia) <= cfg.SAIDA_PAREDE_TOLERANCIA_ALINHAMENTO_MM:
-                # Antes de abrir a camera, cria espaco entre a parede direita
-                # e o chassi. A propria leitura que concluiu o alinhamento e
-                # suficiente quando ela ja e >= 120 mm; nao ha motivo para
-                # transladar sem necessidade.
-                if (
-                    self._lateral_mm
-                    >= cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_CAMERA_MM
-                ):
-                    self._entrar_verificacao_triangulo_verde(agora)
-                else:
-                    self._entrar_afastamento_esquerda_inicial(agora)
-                return self.atualizar(agora)
-            if not self._mpu_fresco(agora):
-                return self._falhar("MPU sem leitura durante alinhamento lateral", agora)
-            if self._erro_heading() > cfg.SAIDA_PAREDE_TOLERANCIA_TRANSLACAO_YAW_GRAUS:
-                self._tentativas_correcao += 1
-                if self._tentativas_correcao > cfg.SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO:
-                    return self._falhar("yaw nao voltou ao rumo durante alinhamento", agora)
-                self._preparar_giro_para(
-                    self._heading_parede,
-                    self.CORRIGIR_YAW_ALINHAMENTO,
-                    agora,
-                )
-                return self.atualizar(agora)
-            self._tentativas_correcao = 0
-            if erro_distancia > 0:
-                return self._lateral(
-                    self.ALINHAR_DIREITA,
-                    direita=True,
-                    detalhe="parede distante; transladando para a direita",
-                )
-            return self._lateral(
-                self.ALINHAR_DIREITA,
-                direita=False,
-                detalhe="parede proxima; transladando para a esquerda",
-            )
-
-        if self.state == self.CORRIGIR_YAW_ALINHAMENTO:
-            if self._giro_concluido():
-                self._entrar_alinhamento(agora)
-                return self.atualizar(agora)
-            return self._girar(
-                self.CORRIGIR_YAW_ALINHAMENTO,
-                "corrigindo yaw antes de continuar o alinhamento lateral",
-            )
-
-        if self.state == self.AFASTAR_ESQUERDA_INICIAL:
-            # A primeira leitura do alinhamento apenas decide se esse
-            # afastamento e necessario. As proximas leituras sao obrigatorias
-            # para comandar o deslocamento com o valor lateral atual.
-            if not self._lateral_fresca_desde_afastamento_inicial(agora):
+        if self.state == self.AFASTAR_ESQUERDA_120:
+            if not self._lateral_fresca_desde_afastamento(agora):
                 if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
                     return self._falhar(
                         "ultrassom lateral sem leitura nova durante o "
-                        "afastamento inicial para a esquerda",
+                        "afastamento para a esquerda",
                         agora,
                     )
                 return self._parado(
-                    self.AFASTAR_ESQUERDA_INICIAL,
-                    "alinhamento inicial concluido; aguardando ultrassom "
+                    self.AFASTAR_ESQUERDA_120,
+                    "translacao direita concluida; aguardando ultrassom "
                     "lateral novo para afastar a esquerda",
                 )
             if self._lateral_mm is None:
                 return self._falhar(
                     "ultrassom lateral respondeu sem eco durante o "
-                    "afastamento inicial para a esquerda",
+                    "afastamento para a esquerda",
                     agora,
                 )
             if (
                 self._lateral_mm
-                >= cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_CAMERA_MM
+                >= cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_MM
             ):
-                self._entrar_verificacao_triangulo_verde(agora)
+                self._executar_destino_apos_afastamento(agora)
                 return self.atualizar(agora)
             if (
                 self._tempo_decorrido(agora)
-                >= cfg.SAIDA_PAREDE_TIMEOUT_AFASTAMENTO_ESQUERDA_INICIAL_S
+                >= cfg.SAIDA_PAREDE_TIMEOUT_AFASTAMENTO_ESQUERDA_S
             ):
                 return self._falhar(
                     "timeout ao afastar a esquerda ate "
-                    f"{cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_CAMERA_MM} mm "
+                    f"{cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_MM} mm "
                     f"da parede direita (ultima leitura={self._lateral_mm} mm)",
                     agora,
                 )
             if not self._mpu_fresco(agora):
                 return self._falhar(
-                    "MPU sem leitura durante afastamento inicial para a esquerda",
+                    "MPU sem leitura durante afastamento para a esquerda",
                     agora,
                 )
             if self._erro_heading() > cfg.SAIDA_PAREDE_TOLERANCIA_TRANSLACAO_YAW_GRAUS:
                 self._tentativas_correcao += 1
                 if self._tentativas_correcao > cfg.SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO:
                     return self._falhar(
-                        "yaw nao voltou ao rumo durante afastamento inicial",
+                        "yaw nao voltou ao rumo durante afastamento para a esquerda",
                         agora,
                     )
                 self._preparar_giro_para(
                     self._heading_parede,
-                    self.CORRIGIR_YAW_AFASTAMENTO_INICIAL,
+                    self.CORRIGIR_YAW_AFASTAMENTO_ESQUERDA,
                     agora,
                 )
                 return self.atualizar(agora)
             self._tentativas_correcao = 0
             return self._lateral(
-                self.AFASTAR_ESQUERDA_INICIAL,
+                self.AFASTAR_ESQUERDA_120,
                 direita=False,
                 detalhe=(
                     "lateral abaixo de "
-                    f"{cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_CAMERA_MM} mm; "
+                    f"{cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_MM} mm; "
                     "transladando para a esquerda com yaw monitorado"
                 ),
             )
 
-        if self.state == self.CORRIGIR_YAW_AFASTAMENTO_INICIAL:
+        if self.state == self.CORRIGIR_YAW_AFASTAMENTO_ESQUERDA:
             if self._giro_concluido():
-                self._entrar_afastamento_esquerda_inicial(agora)
+                self._entrar_afastamento_esquerda(agora)
                 return self.atualizar(agora)
             return self._girar(
-                self.CORRIGIR_YAW_AFASTAMENTO_INICIAL,
+                self.CORRIGIR_YAW_AFASTAMENTO_ESQUERDA,
                 "corrigindo yaw antes de continuar o afastamento a esquerda",
             )
 
@@ -387,12 +316,12 @@ class ControladorSaidaParede:
             if not self._frente_fresca(agora):
                 if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
                     return self._falhar(
-                        "ultrassom frontal sem leitura nova apos alinhamento",
+                        "ultrassom frontal sem leitura nova antes do avanco",
                         agora,
                     )
                 return self._parado(
                     self.AVANCAR_ATE_PAREDE_FRENTE,
-                    "alinhamento concluido; aguardando ultrassom frontal novo",
+                    "aguardando ultrassom frontal novo antes do avanco",
                 )
             if self._frente_mm is None:
                 # ``None`` aqui e uma resposta valida ``OK ULTRASSOM -1``:
@@ -446,11 +375,10 @@ class ControladorSaidaParede:
 
         if self.state == self.VERIFICAR_TRIANGULO_VERDE:
             if self._triangulo_verde_confirmado:
-                self._triangulo_verde_tratado = True
                 # O frame confirmado pode ser o ultimo antes de fechar a
-                # camera. Nunca usa esse yaw para iniciar o giro: aguarda uma
-                # leitura feita depois do fechamento, com o chassi parado.
-                self._yaw_em_antes_giro_verde = self._yaw_em
+                # camera. O robo fica parado ate haver uma leitura nova do
+                # MPU, garantindo que a camera foi liberada antes do avanco.
+                self._yaw_em_antes_retomada_verde = self._yaw_em
                 self._entrar(self.AGUARDAR_MPU_TRIANGULO_VERDE, agora)
                 return self.atualizar(agora)
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S:
@@ -464,7 +392,7 @@ class ControladorSaidaParede:
             )
 
         if self.state == self.AGUARDAR_MPU_TRIANGULO_VERDE:
-            if not self._mpu_fresco_depois_giro_verde(agora):
+            if not self._mpu_fresco_depois_retomada_verde(agora):
                 if self._tempo_decorrido(agora) >= (
                     cfg.SAIDA_PAREDE_TIMEOUT_MPU_APOS_CAMERA_S
                 ):
@@ -476,31 +404,8 @@ class ControladorSaidaParede:
                     self.AGUARDAR_MPU_TRIANGULO_VERDE,
                     "triangulo verde confirmado; camera fechando e aguardando yaw novo",
                 )
-            if self._sinal_yaw_por_giro_direita is None:
-                return self._falhar(
-                    "sentido do yaw ausente para girar no triangulo verde",
-                    agora,
-                )
-            # A rota ja esta com a parede no lado direito: o desvio pelo
-            # triangulo verde e fisicamente para a esquerda, independente do
-            # sinal eletrico que o MPU use para a direita.
-            self._alvo_yaw = self._normalizar(
-                self._yaw
-                - cfg.SAIDA_PAREDE_GIRO_TRIANGULO_VERDE_GRAUS
-                * self._sinal_yaw_por_giro_direita
-            )
-            self._entrar(self.GIRO_TRIANGULO_VERDE, agora)
+            self._entrar_avanco_frente(agora)
             return self.atualizar(agora)
-
-        if self.state == self.GIRO_TRIANGULO_VERDE:
-            if self._giro_concluido():
-                self._heading_parede = self._alvo_yaw
-                self._entrar_avanco_frente(agora)
-                return self.atualizar(agora)
-            return self._girar(
-                self.GIRO_TRIANGULO_VERDE,
-                "triangulo verde confirmado; girando 45 graus para a esquerda",
-            )
 
         if self.state == self.PIVO_TRASEIRO_ESTABILIZAR:
             if not self._lateral_fresca_desde_pivo(agora):
@@ -524,11 +429,11 @@ class ControladorSaidaParede:
                 >= cfg.SAIDA_PAREDE_TEMPO_ESTABILIDADE_LATERAL_S
             ):
                 self._translacao_por_timeout_pivo = False
-                self._entrar(self.TRANSLADAR_DIREITA_FINAL, agora)
+                self._entrar(self.TRANSLADAR_DIREITA, agora)
                 return self.atualizar(agora)
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S:
                 self._translacao_por_timeout_pivo = True
-                self._entrar(self.TRANSLADAR_DIREITA_FINAL, agora)
+                self._entrar(self.TRANSLADAR_DIREITA, agora)
                 return self.atualizar(agora)
             toque_frente_direita_pwm = self._toque_frente_direita_pwm(agora)
             detalhe = (
@@ -546,14 +451,23 @@ class ControladorSaidaParede:
                 toque_frente_direita_pwm=toque_frente_direita_pwm,
             )
 
-        if self.state == self.TRANSLADAR_DIREITA_FINAL:
+        if self.state == self.TRANSLADAR_DIREITA:
             if self._tempo_decorrido(agora) >= (
                 cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S
             ):
-                if self._triangulo_verde_tratado:
-                    self._entrar(self.SAIDA_CONCLUIDA, agora)
-                else:
-                    self._entrar_verificacao_triangulo_verde(agora)
+                self._passagens_direita_concluidas += 1
+                destinos = {
+                    1: self._DESTINO_CAMERA,
+                    2: self._DESTINO_AVANCO,
+                    3: self._DESTINO_PARAR,
+                }
+                destino = destinos.get(self._passagens_direita_concluidas)
+                if destino is None:
+                    return self._falhar(
+                        "quantidade inesperada de passagens de parede",
+                        agora,
+                    )
+                self._entrar_afastamento_esquerda(agora, destino)
                 return self.atualizar(agora)
             detalhe = (
                 "lateral oscilou por tempo demais; transladando para a direita "
@@ -562,24 +476,34 @@ class ControladorSaidaParede:
                 "leitura lateral estavel; transladando para a direita por 0,5 s"
             )
             return self._lateral(
-                self.TRANSLADAR_DIREITA_FINAL,
+                self.TRANSLADAR_DIREITA,
                 direita=True,
                 pwm=cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
                 detalhe=detalhe,
             )
 
-        return self._falhar(f"estado de alinhamento desconhecido: {self.state}", agora)
+        return self._falhar(f"estado de rota desconhecido: {self.state}", agora)
 
-    def _entrar_alinhamento(self, agora):
-        self._lateral_em_antes_alinhamento = self._lateral_em
-        self._entrar(self.ALINHAR_DIREITA, agora)
-
-    def _entrar_afastamento_esquerda_inicial(self, agora):
-        # O valor que concluiu o alinhamento pode estar abaixo de 120 mm.
-        # Guarda seu timestamp para exigir uma leitura nova antes de mover.
-        self._lateral_em_antes_afastamento_inicial = self._lateral_em
+    def _entrar_afastamento_esquerda(self, agora, destino=None):
+        # A leitura que concluiu a translacao direita nao pode concluir esta
+        # etapa: exige uma leitura lateral nova feita ja com o chassi parado.
+        if destino is not None:
+            self._destino_apos_afastamento = destino
+        self._lateral_em_antes_afastamento = self._lateral_em
         self._tentativas_correcao = 0
-        self._entrar(self.AFASTAR_ESQUERDA_INICIAL, agora)
+        self._entrar(self.AFASTAR_ESQUERDA_120, agora)
+
+    def _executar_destino_apos_afastamento(self, agora):
+        if self._destino_apos_afastamento == self._DESTINO_CAMERA:
+            self._entrar_verificacao_triangulo_verde(agora)
+            return
+        if self._destino_apos_afastamento == self._DESTINO_AVANCO:
+            self._entrar_avanco_frente(agora)
+            return
+        if self._destino_apos_afastamento == self._DESTINO_PARAR:
+            self._entrar(self.SAIDA_CONCLUIDA, agora)
+            return
+        self._falhar("destino ausente apos afastamento lateral", agora)
 
     def _entrar_avanco_frente(self, agora):
         self._frente_em_antes_avanco = self._frente_em
@@ -684,7 +608,7 @@ class ControladorSaidaParede:
     @staticmethod
     def _lateral(estado, direita, detalhe, pwm=None):
         if pwm is None:
-            pwm = cfg.SAIDA_PAREDE_PWM_TRANSLACAO_ALINHAMENTO
+            pwm = cfg.SAIDA_PAREDE_PWM_TRANSLACAO_ESQUERDA
         pwm = int(pwm)
         rodas = (pwm, -pwm, -pwm, pwm) if direita else (-pwm, pwm, pwm, -pwm)
         return MotionCommand(estado, detail=detalhe, wheel_speeds=rodas)
@@ -696,26 +620,18 @@ class ControladorSaidaParede:
             and agora - self._yaw_em <= cfg.SAIDA_PAREDE_TIMEOUT_MPU_S
         )
 
-    def _mpu_fresco_depois_giro_verde(self, agora):
+    def _mpu_fresco_depois_retomada_verde(self, agora):
         return (
             self._mpu_fresco(agora)
-            and self._yaw_em_antes_giro_verde is not None
-            and self._yaw_em > self._yaw_em_antes_giro_verde
+            and self._yaw_em_antes_retomada_verde is not None
+            and self._yaw_em > self._yaw_em_antes_retomada_verde
         )
 
-    def _lateral_fresca(self, agora):
+    def _lateral_fresca_desde_afastamento(self, agora):
         return (
             self._lateral_em is not None
-            and self._lateral_em_antes_alinhamento is not None
-            and self._lateral_em > self._lateral_em_antes_alinhamento
-            and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
-        )
-
-    def _lateral_fresca_desde_afastamento_inicial(self, agora):
-        return (
-            self._lateral_em is not None
-            and self._lateral_em_antes_afastamento_inicial is not None
-            and self._lateral_em > self._lateral_em_antes_afastamento_inicial
+            and self._lateral_em_antes_afastamento is not None
+            and self._lateral_em > self._lateral_em_antes_afastamento
             and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
         )
 
@@ -869,7 +785,7 @@ def executar_alinhamento_parede(
                 not arduino.connected
                 or arduino.connection_epoch != epoca_serial
             ):
-                raise RuntimeError("serial mudou durante o alinhamento de saida")
+                raise RuntimeError("serial mudou durante a rota de saida")
 
             monitor_sensores.atualizar_controlador(controlador, agora)
             if controlador.usa_camera_triangulo_verde:
@@ -942,7 +858,7 @@ def executar_alinhamento_parede(
             ):
                 salvar_debug_verde(comando.detail)
 
-            # A camera frontal e fechada antes do giro/avanco seguinte. Isso
+            # A camera frontal e fechada antes do avanco seguinte. Isso
             # deixa so um pipeline de imagem ativo e impede processamento
             # concorrente com a camera de segue-linha em qualquer handoff.
             if not controlador.usa_camera_triangulo_verde and fonte_verde is not None:
@@ -979,7 +895,7 @@ def executar_alinhamento_parede(
                     toque_frente_direita_pwm=comando.toque_frente_direita_pwm,
                 )
             if enviado is False:
-                raise RuntimeError("comando de alinhamento nao foi enviado")
+                raise RuntimeError("comando da rota de saida nao foi enviado")
             controlador.notificar_comando_escrito(comando.state, time.monotonic())
 
             if comando.terminal:

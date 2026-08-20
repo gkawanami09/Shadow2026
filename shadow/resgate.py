@@ -2160,9 +2160,8 @@ def main(args=None):
                             comando = MotionCommand(
                                 "EXIT_WALL_SEQUENCE_DONE",
                                 detail=(
-                                    "giro, alinhamento, parede frontal e "
-                                    "triangulo verde, curva traseira e "
-                                    "translacao direita concluidos; robo parado"),
+                                    "giro, tres passagens de parede e "
+                                    "triangulo verde concluidos; robo parado"),
                                 terminal=True,
                             )
                         else:
@@ -2170,7 +2169,7 @@ def main(args=None):
                             comando = MotionCommand(
                                 "EXIT_WALL_FAILED",
                                 detail=(
-                                    "giro, alinhamento ou avanco ate a parede "
+                                    "giro, avanco, pivo ou afastamento lateral "
                                     "nao foi concluido com seguranca"),
                                 terminal=True,
                             )

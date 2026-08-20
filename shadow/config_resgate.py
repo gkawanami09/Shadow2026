@@ -806,28 +806,19 @@ SAIDA_PAREDE_INTERVALO_ULTRASSOM_S = 0.07
 SAIDA_PAREDE_TIMEOUT_ULTRASSOM_S = 0.12
 SAIDA_PAREDE_TIMEOUT_SENSOR_S = 0.45
 
-# Depois do giro inicial, o robo translada ate ficar a 125 mm da parede
-# lateral direita. A margem evita oscilar entre os dois sentidos por poucos
-# milimetros de ruido do HC-SR04; em seguida comeca o avanco frontal.
-SAIDA_PAREDE_DISTANCIA_ALVO_ALINHAMENTO_MM = 125
-SAIDA_PAREDE_TOLERANCIA_ALINHAMENTO_MM = 15
-SAIDA_PAREDE_PWM_TRANSLACAO_ALINHAMENTO = 45
-SAIDA_PAREDE_TIMEOUT_ALINHAMENTO_S = 2.0
-
-# Ainda no primeiro canto, depois de se alinhar a parede direita, o robo
-# precisa abrir espaco para a camera frontal enxergar o triangulo. Enquanto a
-# lateral estiver abaixo de 120 mm, ele translada para a esquerda com o yaw
-# monitorado pelo MPU. O teto impede movimento lateral infinito caso uma parede
-# ou sensor defeituoso nunca permita atingir a distancia solicitada.
-SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_CAMERA_MM = 120
-SAIDA_PAREDE_TIMEOUT_AFASTAMENTO_ESQUERDA_INICIAL_S = 2.0
-
-# Quando o alinhamento lateral termina, avanca reto ate o HC-SR04 frontal
-# indicar a parede a 118 mm ou menos. O teto de tempo e uma guarda fisica:
-# sem eco ou sem parede o robo para, em vez de atravessar a arena inteira.
+# Apos os 90 graus, o primeiro movimento e reto ate o HC-SR04 frontal indicar
+# a parede a 118 mm ou menos. O teto de tempo e uma guarda fisica: sem eco ou
+# sem parede o robo para, em vez de atravessar a arena inteira.
 SAIDA_PAREDE_DISTANCIA_FRENTE_FINAL_MM = 118
 SAIDA_PAREDE_AVANCO_ATE_FRENTE_PWM = 45
 SAIDA_PAREDE_TIMEOUT_AVANCO_FRENTE_S = 4.0
+
+# Depois de cada translacao direita, o robo abre espaco para a proxima
+# passagem transladando para a esquerda. A distancia e confirmada pelo lateral
+# direito e o yaw e mantido pelo MPU para impedir que a ponta do robo entorte.
+SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_MM = 120
+SAIDA_PAREDE_PWM_TRANSLACAO_ESQUERDA = 45
+SAIDA_PAREDE_TIMEOUT_AFASTAMENTO_ESQUERDA_S = 2.0
 
 # Ao chegar a parede frontal, o robo avanca em arco para a esquerda, com a
 # frente como ponto de apoio e a traseira conduzindo a curva. O angulo fica
@@ -846,7 +837,7 @@ SAIDA_PAREDE_PERIODO_TOQUE_FRENTE_DIREITA_S = 0.40
 SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_LATERAL_MM = 5
 SAIDA_PAREDE_TEMPO_ESTABILIDADE_LATERAL_S = 0.5
 # Depois de 2 s com leituras laterais validas, mas oscilantes, a manobra nao
-# falha: faz a translacao direita planejada e segue para a verificacao visual.
+# falha: faz a translacao direita planejada e segue para a proxima etapa.
 SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 2.0
 
 # Com a distancia lateral ja estabilizada, sai do contato para a direita.
@@ -854,12 +845,11 @@ SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 2.0
 SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA = 100
 SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S = 0.50
 
-# Logo depois do afastamento inicial para a esquerda, a camera frontal procura
-# o triangulo verde com LED apagado. Um verde confirmado leva a uma unica curva
-# fisica de 45 graus para a esquerda; a sequencia de parede e translacao e
-# entao executada uma vez.
+# Depois da primeira sequencia completa de frente, pivo, direita e esquerda,
+# a camera frontal procura o triangulo verde com LED apagado. Um verde
+# confirmado inicia duas sequencias adicionais identicas; nao ha giro de 45
+# graus nesta rota.
 SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S = 3.0
-SAIDA_PAREDE_GIRO_TRIANGULO_VERDE_GRAUS = 45.0
 # Fechar a camera pode demorar algumas centenas de milissegundos. Depois da
 # confirmacao do verde, o chassi fica parado e espera um yaw NOVO antes de
 # mover; este teto e deliberadamente maior que o timeout normal do MPU.
