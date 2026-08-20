@@ -356,10 +356,10 @@ class ControladorSaidaParede:
                 )
             return MotionCommand(
                 self.PIVO_TRASEIRO_ESTABILIZAR,
-                angle=180,
+                angle=-180,
                 speed=cfg.SAIDA_PAREDE_PWM_PIVO_TRASEIRO / 120.0,
                 detail=(
-                    "pivo para a direita com frente ancorada; "
+                    "pivo para a esquerda com frente ancorada; "
                     f"frontal={self._frente_mm} mm"
                 ),
                 pivo_traseiro=True,

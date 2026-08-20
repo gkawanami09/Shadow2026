@@ -822,7 +822,7 @@ SAIDA_PAREDE_AVANCO_ATE_FRENTE_PWM = 45
 SAIDA_PAREDE_TIMEOUT_AVANCO_FRENTE_S = 4.0
 
 # Ao chegar a parede frontal, o robo mantem a frente como ponto de apoio e
-# gira somente a traseira para a direita. A confirmacao exige leituras
+# gira somente a traseira para a esquerda. A confirmacao exige leituras
 # consecutivas praticamente iguais durante um segundo; a tolerancia absorve
 # o ruido normal de poucos milimetros do HC-SR04.
 SAIDA_PAREDE_PWM_PIVO_TRASEIRO = 45
