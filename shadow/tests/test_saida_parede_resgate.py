@@ -76,7 +76,7 @@ class SaidaParedeResgateTests(unittest.TestCase):
         controlador, _ = self._chegar_ao_alinhamento(yaw_final=270)
         self.assertEqual(controlador.heading_parede, 270.0)
 
-    def test_apoia_a_frente_e_para_so_apos_um_segundo_estavel(self):
+    def test_apoia_a_frente_e_translada_so_apos_um_segundo_lateral_estavel(self):
         controlador, instante = self._chegar_ao_alinhamento()
         comando = self._passo(controlador, instante + 0.01, yaw=90, lateral=200)
         self.assertEqual(comando.wheel_speeds, (45, -45, -45, 45))
@@ -101,6 +101,7 @@ class SaidaParedeResgateTests(unittest.TestCase):
             controlador, instante + 0.16, yaw=90, lateral=130, frente=118)
         self.assertFalse(comando.terminal)
         self.assertEqual(controlador.state, controlador.PIVO_TRASEIRO_ESTABILIZAR)
+        self.assertEqual(controlador.lado_ultrassom_atual, "LATERAL")
         self.assertEqual(comando.speed, 0.0)
 
         comando = self._passo(
@@ -156,7 +157,7 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertEqual(controlador.state, controlador.SAIDA_CONCLUIDA)
         self.assertEqual(comando.speed, 0.0)
 
-    def test_reinicia_o_segundo_estavel_quando_o_frontal_variar_demais(self):
+    def test_reinicia_o_segundo_estavel_quando_o_lateral_variar_demais(self):
         controlador, instante = self._chegar_ao_alinhamento()
         self._passo(
             controlador, instante + 0.01, yaw=90, lateral=125, frente=400)
@@ -169,28 +170,27 @@ class SaidaParedeResgateTests(unittest.TestCase):
             controlador,
             instante + 0.55,
             yaw=90,
-            lateral=125,
-            frente=116 + cfg.SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_FRENTE_MM + 1,
+            lateral=125 + cfg.SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_LATERAL_MM + 1,
         )
         self.assertFalse(comando.terminal)
         comando = self._passo(
-            controlador, instante + 1.15, yaw=90, lateral=125, frente=122)
+            controlador, instante + 1.15, yaw=90, lateral=131, frente=122)
         self.assertFalse(comando.terminal)
         comando = self._passo(
-            controlador, instante + 1.61, yaw=90, lateral=125, frente=123)
+            controlador, instante + 1.61, yaw=90, lateral=131, frente=123)
         self.assertFalse(comando.terminal)
         self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_FINAL)
         comando = self._passo(
             controlador,
             instante + 1.61 + cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.01,
             yaw=90,
-            lateral=125,
+            lateral=131,
             frente=123,
         )
         self.assertTrue(comando.terminal)
         self.assertEqual(controlador.state, controlador.SAIDA_CONCLUIDA)
 
-    def test_falha_se_o_frontal_nao_der_leitura_nova_para_o_pivo(self):
+    def test_falha_se_o_lateral_nao_der_leitura_nova_para_o_pivo(self):
         controlador, instante = self._chegar_ao_alinhamento()
         self._passo(
             controlador, instante + 0.01, yaw=90, lateral=125, frente=400)
@@ -200,8 +200,7 @@ class SaidaParedeResgateTests(unittest.TestCase):
             controlador,
             instante + 0.08 + cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S + 0.01,
             yaw=90,
-            lateral=125,
-            enviar_frente=False,
+            enviar_lateral=False,
         )
         self.assertTrue(comando.terminal)
         self.assertEqual(controlador.state, controlador.FALHA)

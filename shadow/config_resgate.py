@@ -833,11 +833,13 @@ SAIDA_PAREDE_ANGULO_CURVA_TRASEIRA = -100
 SAIDA_PAREDE_PWM_TOQUE_FRENTE_DIREITA = 35
 SAIDA_PAREDE_DURACAO_TOQUE_FRENTE_DIREITA_S = 0.10
 SAIDA_PAREDE_PERIODO_TOQUE_FRENTE_DIREITA_S = 0.40
-SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_FRENTE_MM = 5
-SAIDA_PAREDE_TEMPO_ESTABILIDADE_FRENTE_S = 1.0
+# A confirmacao de alinhamento e feita pela parede lateral direita; o frontal
+# ja cumpriu seu papel ao limitar a aproximacao antes da curva.
+SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_LATERAL_MM = 5
+SAIDA_PAREDE_TEMPO_ESTABILIDADE_LATERAL_S = 1.0
 SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 3.0
 
-# Com a frente ja estabilizada, sai do contato lateralmente para a direita.
+# Com a distancia lateral ja estabilizada, sai do contato para a direita.
 # Usa a mesma intensidade da translacao curta inicial, por 0,5 s exatos.
 SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA = 100
 SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S = 0.50

@@ -5,7 +5,7 @@ marcador vermelho, gira 90 graus para a direita pelo MPU e usa o ultrassom
 lateral direito para regular a distancia da parede. Ao terminar o
 alinhamento, avanca reto ate encontrar a parede frontal a 118 mm. Entao
 avanca em curva, mantendo a frente como referencia e movimentando mais a
-traseira. Com o ultrassom frontal estavel por um segundo, translada a direita
+traseira. Com o ultrassom lateral direito estavel por um segundo, translada a direita
 por meio segundo e para.
 """
 
@@ -68,9 +68,9 @@ class ControladorSaidaParede:
         self._frente_mm = None
         self._frente_em = None
         self._frente_em_antes_avanco = None
-        self._frente_em_antes_pivo = None
-        self._frente_em_processada_pivo = None
-        self._frente_referencia_pivo_mm = None
+        self._lateral_em_antes_pivo = None
+        self._lateral_em_processada_pivo = None
+        self._lateral_referencia_pivo_mm = None
         self._estavel_desde_pivo = None
         self._tentativas_correcao = 0
 
@@ -91,7 +91,6 @@ class ControladorSaidaParede:
         if self.state in {
             self.AVANCAR_ATE_PAREDE_FRENTE,
             self.CORRIGIR_YAW_AVANCO_FRENTE,
-            self.PIVO_TRASEIRO_ESTABILIZAR,
         }:
             return "FRENTE"
         return "LATERAL"
@@ -329,37 +328,37 @@ class ControladorSaidaParede:
             )
 
         if self.state == self.PIVO_TRASEIRO_ESTABILIZAR:
-            if not self._frente_fresca_desde_pivo(agora):
+            if not self._lateral_fresca_desde_pivo(agora):
                 if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
                     return self._falhar(
-                        "ultrassom frontal sem leitura nova durante pivo traseiro",
+                        "ultrassom lateral sem leitura nova durante pivo traseiro",
                         agora,
                     )
                 return self._parado(
                     self.PIVO_TRASEIRO_ESTABILIZAR,
-                    "parede frontal atingida; aguardando leitura nova para o pivo",
+                    "parede frontal atingida; aguardando lateral novo para o pivo",
                 )
-            if self._frente_mm is None:
+            if self._lateral_mm is None:
                 return self._falhar(
-                    "ultrassom frontal respondeu sem eco durante pivo traseiro",
+                    "ultrassom lateral respondeu sem eco durante pivo traseiro",
                     agora,
                 )
-            self._atualizar_estabilidade_frontal(agora)
+            self._atualizar_estabilidade_lateral(agora)
             if self._estavel_desde_pivo is not None and (
                 agora - self._estavel_desde_pivo
-                >= cfg.SAIDA_PAREDE_TEMPO_ESTABILIDADE_FRENTE_S
+                >= cfg.SAIDA_PAREDE_TEMPO_ESTABILIDADE_LATERAL_S
             ):
                 self._entrar(self.TRANSLADAR_DIREITA_FINAL, agora)
                 return self.atualizar(agora)
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S:
                 return self._falhar(
-                    "timeout: ultrassom frontal nao estabilizou durante pivo traseiro",
+                    "timeout: ultrassom lateral nao estabilizou durante pivo traseiro",
                     agora,
                 )
             toque_frente_direita_pwm = self._toque_frente_direita_pwm(agora)
             detalhe = (
                 "avancando em curva para a esquerda com frente priorizada; "
-                f"frontal={self._frente_mm} mm"
+                f"lateral={self._lateral_mm} mm"
             )
             if toque_frente_direita_pwm:
                 detalhe += "; toque na dianteira direita"
@@ -382,7 +381,7 @@ class ControladorSaidaParede:
                 self.TRANSLADAR_DIREITA_FINAL,
                 direita=True,
                 pwm=cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
-                detalhe="leitura frontal estavel; transladando para a direita por 0,5 s",
+                detalhe="leitura lateral estavel; transladando para a direita por 0,5 s",
             )
 
         return self._falhar(f"estado de alinhamento desconhecido: {self.state}", agora)
@@ -398,25 +397,25 @@ class ControladorSaidaParede:
     def _entrar_pivo_traseiro(self, agora):
         # A leitura que encontrou a parede so inicia a fase. A estabilidade
         # precisa ser provada por leituras novas, feitas ja com o pivo ativo.
-        self._frente_em_antes_pivo = self._frente_em
-        self._frente_em_processada_pivo = None
-        self._frente_referencia_pivo_mm = None
+        self._lateral_em_antes_pivo = self._lateral_em
+        self._lateral_em_processada_pivo = None
+        self._lateral_referencia_pivo_mm = None
         self._estavel_desde_pivo = None
         self._entrar(self.PIVO_TRASEIRO_ESTABILIZAR, agora)
 
-    def _atualizar_estabilidade_frontal(self, agora):
-        if self._frente_em == self._frente_em_processada_pivo:
+    def _atualizar_estabilidade_lateral(self, agora):
+        if self._lateral_em == self._lateral_em_processada_pivo:
             return
-        medida_atual = self._frente_mm
-        if self._frente_referencia_pivo_mm is None:
-            self._frente_referencia_pivo_mm = medida_atual
+        medida_atual = self._lateral_mm
+        if self._lateral_referencia_pivo_mm is None:
+            self._lateral_referencia_pivo_mm = medida_atual
             self._estavel_desde_pivo = agora
-        elif abs(medida_atual - self._frente_referencia_pivo_mm) > (
-            cfg.SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_FRENTE_MM
+        elif abs(medida_atual - self._lateral_referencia_pivo_mm) > (
+            cfg.SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_LATERAL_MM
         ):
-            self._frente_referencia_pivo_mm = medida_atual
+            self._lateral_referencia_pivo_mm = medida_atual
             self._estavel_desde_pivo = agora
-        self._frente_em_processada_pivo = self._frente_em
+        self._lateral_em_processada_pivo = self._lateral_em
 
     def _toque_frente_direita_pwm(self, agora):
         if not self._comando_aceito:
@@ -519,12 +518,12 @@ class ControladorSaidaParede:
             and agora - self._frente_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
         )
 
-    def _frente_fresca_desde_pivo(self, agora):
+    def _lateral_fresca_desde_pivo(self, agora):
         return (
-            self._frente_em is not None
-            and self._frente_em_antes_pivo is not None
-            and self._frente_em > self._frente_em_antes_pivo
-            and agora - self._frente_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
+            self._lateral_em is not None
+            and self._lateral_em_antes_pivo is not None
+            and self._lateral_em > self._lateral_em_antes_pivo
+            and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
         )
 
     def _tempo_decorrido(self, agora):
