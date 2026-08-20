@@ -1,10 +1,9 @@
-"""Saida do resgate seguindo a parede direita, sem mapa previo da arena.
+"""Saida de teste do resgate seguindo a parede direita, sem mapa previo.
 
-Esta maquina de estados existe separada do segue-linha e da antiga busca
-frontal de faixa. A camera frontal (LED apagado) so confirma triangulos; a
-camera de linha e aberta exclusivamente depois de uma abertura lateral ja
-preparada. Toda falha de sensor, yaw ou serial deve ser tratada pelo chamador
-como parada, nunca como autorizacao para avancar.
+A rota atual usa exclusivamente MPU e os dois ultrassons: apos o deposito
+vermelho ela alinha o chassi, percorre cantos com parede frontal e lateral, e
+para ao confirmar uma abertura direita. Nao desvia de triangulos nem entra na
+abertura nesta versao. Toda falha de sensor, yaw ou serial deve parar o robo.
 """
 
 from dataclasses import dataclass
@@ -29,6 +28,8 @@ class ControladorSaidaParede:
     AFASTAR_VERMELHO = "EXIT_PAREDE_AFASTAR_VERMELHO"
     ASSENTAR_INICIAL = "EXIT_PAREDE_ASSENTAR_INICIAL"
     GIRO_INICIAL_DIREITA = "EXIT_PAREDE_GIRO_INICIAL_DIREITA"
+    TRANSLADAR_DIREITA_INICIAL = "EXIT_PAREDE_ALINHAR_INICIAL_DIREITA"
+    CORRIGIR_YAW_TRANSLACAO_INICIAL = "EXIT_PAREDE_CORRIGIR_YAW_INICIAL"
     SEGUIR_PAREDE = "EXIT_PAREDE_SEGUIR_DIREITA"
     PARAR_TRIANGULO = "EXIT_PAREDE_PARAR_TRIANGULO"
     DESVIAR_TRIANGULO = "EXIT_PAREDE_DESVIAR_TRIANGULO"
@@ -51,12 +52,14 @@ class ControladorSaidaParede:
     TRANSLADAR_DIREITA = "EXIT_PAREDE_TRANSLADAR_DIREITA"
     ABRIR_CAMERA_FRONTAL = "EXIT_PAREDE_ABRIR_CAMERA_FRONTAL"
     IGNORAR_ABERTURA = "EXIT_PAREDE_IGNORAR_ABERTURA"
+    ABERTURA_ENCONTRADA = "EXIT_PAREDE_ABERTURA_ENCONTRADA"
     SUCESSO = "EXIT_PAREDE_PRETO_CONFIRMADO"
     FALHA = "EXIT_PAREDE_FALHA"
 
     _ESTADOS_TEMPORIZADOS = {
         AFASTAR_VERMELHO,
         ASSENTAR_INICIAL,
+        TRANSLADAR_DIREITA_INICIAL,
         PARAR_TRIANGULO,
         PASSAR_TRIANGULO,
         PARAR_PAREDE,
@@ -70,6 +73,7 @@ class ControladorSaidaParede:
     }
     _ESTADOS_GIRO_MONITORADO = {
         GIRO_INICIAL_DIREITA,
+        CORRIGIR_YAW_TRANSLACAO_INICIAL,
         DESVIAR_TRIANGULO,
         RETORNAR_TRIANGULO,
         GIRO_PAREDE_ESQUERDA,
@@ -109,13 +113,14 @@ class ControladorSaidaParede:
         self._triangulo_visivel = False
         self._ultimo_triangulo_em = -float("inf")
         self._tentativas_translacao = 0
+        self._tempo_translacao_inicial_restante = 0.0
         self._giros_parede = 0
         self._tempo_recuo_sonda = cfg.SAIDA_PAREDE_RECUO_MINIMO_S
         self._sonda_iniciada = False
 
     @property
     def terminal(self):
-        return self.state in (self.SUCESSO, self.FALHA)
+        return self.state in (self.ABERTURA_ENCONTRADA, self.SUCESSO, self.FALHA)
 
     @property
     def solicita_zerar_mpu(self):
@@ -241,6 +246,12 @@ class ControladorSaidaParede:
         agora = time.monotonic() if now is None else float(now)
         if self.state == self.SUCESSO:
             return MotionCommand(self.SUCESSO, detail="faixa preta confirmada", terminal=True)
+        if self.state == self.ABERTURA_ENCONTRADA:
+            return MotionCommand(
+                self.ABERTURA_ENCONTRADA,
+                detail="abertura direita confirmada; robo parado para validacao",
+                terminal=True,
+            )
         if self.state == self.FALHA:
             return MotionCommand(self.FALHA, detail=self._detalhe_falha, terminal=True)
 
@@ -294,26 +305,68 @@ class ControladorSaidaParede:
                     return self._girar_direita_para_calibrar()
             if self._giro_concluido(agora):
                 self._heading_parede = self._alvo_yaw
-                self._entrar(self.SEGUIR_PAREDE, agora)
+                self._tentativas_translacao = 0
+                self._tempo_translacao_inicial_restante = (
+                    cfg.SAIDA_PAREDE_TRANSLACAO_INICIAL_DIREITA_S)
+                self._entrar(self.TRANSLADAR_DIREITA_INICIAL, agora)
                 return self.atualizar(agora)
             return self._girar(self.GIRO_INICIAL_DIREITA, "girando 90 graus a direita para seguir a parede")
 
-        if self.state == self.SEGUIR_PAREDE:
-            if self._frente_proxima >= cfg.SAIDA_PAREDE_CONFIRMACOES_PAREDE:
-                self._entrar(self.PARAR_PAREDE, agora)
+        if self.state == self.TRANSLADAR_DIREITA_INICIAL:
+            if (
+                self._tempo_translacao_inicial_restante <= 0.0
+                or self._tempo_decorrido(agora)
+                >= self._tempo_translacao_inicial_restante
+            ):
+                self._entrar(self.SEGUIR_PAREDE, agora)
                 return self.atualizar(agora)
             if (
-                self._triangulo_visivel
-                and agora - self._ultimo_triangulo_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
-                and agora - self._inicio_estado >= cfg.SAIDA_PAREDE_COOLDOWN_TRIANGULO_S
+                self._erro_heading()
+                > cfg.SAIDA_PAREDE_TOLERANCIA_TRANSLACAO_YAW_GRAUS
             ):
-                self._entrar(self.PARAR_TRIANGULO, agora)
+                self._tempo_translacao_inicial_restante = max(
+                    self._tempo_translacao_inicial_restante
+                    - self._tempo_decorrido(agora),
+                    0.0,
+                )
+                self._tentativas_translacao += 1
+                if (
+                    self._tentativas_translacao
+                    > cfg.SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO
+                ):
+                    return self._falhar(
+                        "yaw saiu da tolerancia na translacao inicial direita")
+                self._preparar_giro_para(
+                    self._heading_parede,
+                    self.CORRIGIR_YAW_TRANSLACAO_INICIAL,
+                    agora,
+                )
                 return self.atualizar(agora)
+            return self._lateral(
+                self.TRANSLADAR_DIREITA_INICIAL,
+                esquerda=False,
+                pwm=cfg.SAIDA_PAREDE_PWM_TRANSLACAO_INICIAL,
+                detalhe="transladando 0,5 s a direita para alinhar inicialmente",
+            )
+
+        if self.state == self.CORRIGIR_YAW_TRANSLACAO_INICIAL:
+            if self._giro_concluido(agora):
+                self._entrar(self.TRANSLADAR_DIREITA_INICIAL, agora)
+                return self.atualizar(agora)
+            return self._girar(
+                self.CORRIGIR_YAW_TRANSLACAO_INICIAL,
+                "corrigindo yaw antes de retomar translacao inicial",
+            )
+
+        if self.state == self.SEGUIR_PAREDE:
             if (
                 self._parede_lateral_confirmada
                 and self._lateral_aberta >= cfg.SAIDA_PAREDE_CONFIRMACOES_ABERTURA
             ):
-                self._entrar(self.PARAR_ABERTURA, agora)
+                self._entrar(self.ABERTURA_ENCONTRADA, agora)
+                return self.atualizar(agora)
+            if self._frente_proxima >= cfg.SAIDA_PAREDE_CONFIRMACOES_PAREDE:
+                self._entrar(self.PARAR_PAREDE, agora)
                 return self.atualizar(agora)
             return self._frente(self.SEGUIR_PAREDE, int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120)), "seguindo parede direita")
 
@@ -349,10 +402,25 @@ class ControladorSaidaParede:
             return self._girar(self.RETORNAR_TRIANGULO, "voltando ao rumo da parede")
 
         if self.state == self.PARAR_PAREDE:
-            if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_ASSENTAMENTO_S:
+            if (
+                self._parede_lateral_confirmada
+                and self._lateral_aberta >= cfg.SAIDA_PAREDE_CONFIRMACOES_ABERTURA
+            ):
+                self._entrar(self.ABERTURA_ENCONTRADA, agora)
+                return self.atualizar(agora)
+            if (
+                self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_ASSENTAMENTO_S
+                and self._lateral_parede >= cfg.SAIDA_PAREDE_CONFIRMACOES_PAREDE
+            ):
                 self._preparar_giro(-90.0, self.GIRO_PAREDE_ESQUERDA, agora)
                 return self.atualizar(agora)
-            return self._parado(self.PARAR_PAREDE, "parede a frente confirmada; parando")
+            if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
+                return self._falhar(
+                    "parede frontal sem parede lateral confirmada; nao girou")
+            return self._parado(
+                self.PARAR_PAREDE,
+                "parede a frente; aguardando confirmacao de parede lateral",
+            )
 
         if self.state == self.GIRO_PAREDE_ESQUERDA:
             if self._giro_concluido(agora):
@@ -556,13 +624,12 @@ class ControladorSaidaParede:
                     and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
                 )
                 return frente_fresca and lateral_fresca
-            if self.state == self.ALINHAR_DIREITA_APOS_GIRO:
-                lateral_fresca = (
-                    self._lateral_em is not None
-                    and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
-                )
-                return lateral_fresca
             return frente_fresca
+        if self.state == self.ALINHAR_DIREITA_APOS_GIRO:
+            return (
+                self._lateral_em is not None
+                and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
+            )
         return True
 
     def _preparar_giro(self, delta, estado, agora):
@@ -637,8 +704,8 @@ class ControladorSaidaParede:
             detail=detalhe,
         )
 
-    def _lateral(self, estado, esquerda, detalhe):
-        pwm = int(cfg.SAIDA_PAREDE_PWM_TRANSLACAO)
+    def _lateral(self, estado, esquerda, detalhe, pwm=None):
+        pwm = int(cfg.SAIDA_PAREDE_PWM_TRANSLACAO if pwm is None else pwm)
         rodas = (
             (-pwm, pwm, pwm, -pwm)
             if esquerda else (pwm, -pwm, -pwm, pwm)

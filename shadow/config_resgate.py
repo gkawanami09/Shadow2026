@@ -784,6 +784,11 @@ SAIDA_PAREDE_LADO = "DIREITA"
 SAIDA_PAREDE_AVANCO_APOS_VERMELHO_PWM = 55
 SAIDA_PAREDE_AVANCO_APOS_VERMELHO_S = 0.35
 SAIDA_PAREDE_ASSENTAMENTO_S = 0.12
+# Depois do primeiro giro a direita, a translacao e fixa: ela coloca o robo
+# junto da parede direita antes do primeiro trecho reto. E uma manobra de
+# teste deliberadamente curta; o MPU continua vigiando qualquer rotacao.
+SAIDA_PAREDE_PWM_TRANSLACAO_INICIAL = 100
+SAIDA_PAREDE_TRANSLACAO_INICIAL_DIREITA_S = 0.50
 
 # Yaw relativo do MPU6050. O comando MPU ZERO e enviado com o chassi parado
 # antes do primeiro giro; nao tratar esse valor como uma bussola absoluta.
