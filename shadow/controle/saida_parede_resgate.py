@@ -3,7 +3,9 @@
 Esta rotina deliberadamente nao procura a saida. Ela so afasta o robo do
 marcador vermelho, gira 90 graus para a direita pelo MPU e usa o ultrassom
 lateral direito para regular a distancia da parede. Ao terminar o
-alinhamento, avanca reto ate encontrar a parede frontal a 118 mm e para.
+alinhamento, avanca reto ate encontrar a parede frontal a 118 mm. Entao
+mantem a frente como pivô, movimenta a traseira e so para quando o ultrassom
+frontal estiver estavel por um segundo.
 """
 
 from dataclasses import dataclass
@@ -32,7 +34,8 @@ class ControladorSaidaParede:
     CORRIGIR_YAW_ALINHAMENTO = "EXIT_PAREDE_CORRIGIR_YAW_ALINHAMENTO"
     AVANCAR_ATE_PAREDE_FRENTE = "EXIT_PAREDE_AVANCAR_ATE_FRENTE"
     CORRIGIR_YAW_AVANCO_FRENTE = "EXIT_PAREDE_CORRIGIR_YAW_FRENTE"
-    PAREDE_FRENTE_ATINGIDA = "EXIT_PAREDE_PAREDE_FRENTE_ATINGIDA"
+    PIVO_TRASEIRO_ESTABILIZAR = "EXIT_PAREDE_PIVO_TRASEIRO_ESTABILIZAR"
+    PAREDE_FRENTE_ESTAVEL = "EXIT_PAREDE_PAREDE_FRENTE_ESTAVEL"
     FALHA = "EXIT_PAREDE_FALHA"
 
     _ESTADOS_GIRO = {
@@ -63,11 +66,15 @@ class ControladorSaidaParede:
         self._frente_mm = None
         self._frente_em = None
         self._frente_em_antes_avanco = None
+        self._frente_em_antes_pivo = None
+        self._frente_em_processada_pivo = None
+        self._frente_referencia_pivo_mm = None
+        self._estavel_desde_pivo = None
         self._tentativas_correcao = 0
 
     @property
     def terminal(self):
-        return self.state in (self.PAREDE_FRENTE_ATINGIDA, self.FALHA)
+        return self.state in (self.PAREDE_FRENTE_ESTAVEL, self.FALHA)
 
     @property
     def solicita_zerar_mpu(self):
@@ -82,6 +89,7 @@ class ControladorSaidaParede:
         if self.state in {
             self.AVANCAR_ATE_PAREDE_FRENTE,
             self.CORRIGIR_YAW_AVANCO_FRENTE,
+            self.PIVO_TRASEIRO_ESTABILIZAR,
         }:
             return "FRENTE"
         return "LATERAL"
@@ -137,10 +145,10 @@ class ControladorSaidaParede:
 
     def atualizar(self, now=None):
         agora = time.monotonic() if now is None else float(now)
-        if self.state == self.PAREDE_FRENTE_ATINGIDA:
+        if self.state == self.PAREDE_FRENTE_ESTAVEL:
             return self._parado(
-                self.PAREDE_FRENTE_ATINGIDA,
-                "parede frontal detectada a 118 mm; robo parado",
+                self.PAREDE_FRENTE_ESTAVEL,
+                "ultrassom frontal estavel por 1,0 s; robo parado",
                 terminal=True,
             )
         if self.state == self.FALHA:
@@ -280,7 +288,7 @@ class ControladorSaidaParede:
             if (
                 self._frente_mm <= cfg.SAIDA_PAREDE_DISTANCIA_FRENTE_FINAL_MM
             ):
-                self._entrar(self.PAREDE_FRENTE_ATINGIDA, agora)
+                self._entrar_pivo_traseiro(agora)
                 return self.atualizar(agora)
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_AVANCO_FRENTE_S:
                 return self._falhar(
@@ -318,6 +326,45 @@ class ControladorSaidaParede:
                 "corrigindo yaw antes de retomar o avanco reto",
             )
 
+        if self.state == self.PIVO_TRASEIRO_ESTABILIZAR:
+            if not self._frente_fresca_desde_pivo(agora):
+                if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
+                    return self._falhar(
+                        "ultrassom frontal sem leitura nova durante pivo traseiro",
+                        agora,
+                    )
+                return self._parado(
+                    self.PIVO_TRASEIRO_ESTABILIZAR,
+                    "parede frontal atingida; aguardando leitura nova para o pivo",
+                )
+            if self._frente_mm is None:
+                return self._falhar(
+                    "ultrassom frontal respondeu sem eco durante pivo traseiro",
+                    agora,
+                )
+            self._atualizar_estabilidade_frontal(agora)
+            if self._estavel_desde_pivo is not None and (
+                agora - self._estavel_desde_pivo
+                >= cfg.SAIDA_PAREDE_TEMPO_ESTABILIDADE_FRENTE_S
+            ):
+                self._entrar(self.PAREDE_FRENTE_ESTAVEL, agora)
+                return self.atualizar(agora)
+            if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S:
+                return self._falhar(
+                    "timeout: ultrassom frontal nao estabilizou durante pivo traseiro",
+                    agora,
+                )
+            return MotionCommand(
+                self.PIVO_TRASEIRO_ESTABILIZAR,
+                angle=180,
+                speed=cfg.SAIDA_PAREDE_PWM_PIVO_TRASEIRO / 120.0,
+                detail=(
+                    "pivo para a direita com frente ancorada; "
+                    f"frontal={self._frente_mm} mm"
+                ),
+                pivo_traseiro=True,
+            )
+
         return self._falhar(f"estado de alinhamento desconhecido: {self.state}", agora)
 
     def _entrar_alinhamento(self, agora):
@@ -327,6 +374,29 @@ class ControladorSaidaParede:
     def _entrar_avanco_frente(self, agora):
         self._frente_em_antes_avanco = self._frente_em
         self._entrar(self.AVANCAR_ATE_PAREDE_FRENTE, agora)
+
+    def _entrar_pivo_traseiro(self, agora):
+        # A leitura que encontrou a parede so inicia a fase. A estabilidade
+        # precisa ser provada por leituras novas, feitas ja com o pivo ativo.
+        self._frente_em_antes_pivo = self._frente_em
+        self._frente_em_processada_pivo = None
+        self._frente_referencia_pivo_mm = None
+        self._estavel_desde_pivo = None
+        self._entrar(self.PIVO_TRASEIRO_ESTABILIZAR, agora)
+
+    def _atualizar_estabilidade_frontal(self, agora):
+        if self._frente_em == self._frente_em_processada_pivo:
+            return
+        medida_atual = self._frente_mm
+        if self._frente_referencia_pivo_mm is None:
+            self._frente_referencia_pivo_mm = medida_atual
+            self._estavel_desde_pivo = agora
+        elif abs(medida_atual - self._frente_referencia_pivo_mm) > (
+            cfg.SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_FRENTE_MM
+        ):
+            self._frente_referencia_pivo_mm = medida_atual
+            self._estavel_desde_pivo = agora
+        self._frente_em_processada_pivo = self._frente_em
 
     def _preparar_giro_para(self, alvo, estado, agora):
         if alvo is None or self._sinal_yaw_por_giro_direita is None:
@@ -409,6 +479,14 @@ class ControladorSaidaParede:
                 self._frente_em_antes_avanco is None
                 or self._frente_em > self._frente_em_antes_avanco
             )
+            and agora - self._frente_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
+        )
+
+    def _frente_fresca_desde_pivo(self, agora):
+        return (
+            self._frente_em is not None
+            and self._frente_em_antes_pivo is not None
+            and self._frente_em > self._frente_em_antes_pivo
             and agora - self._frente_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
         )
 
@@ -497,14 +575,18 @@ def executar_alinhamento_parede(arduino, *, intervalo_s=0.005):
             if comando.wheel_speeds is not None:
                 enviado = arduino.rodas(*comando.wheel_speeds)
             else:
-                enviado = steer(comando.angle, comando.speed)
+                enviado = steer(
+                    comando.angle,
+                    comando.speed,
+                    rear_pivot_enabled=comando.pivo_traseiro,
+                )
             if enviado is False:
                 raise RuntimeError("comando de alinhamento nao foi enviado")
             controlador.notificar_comando_escrito(comando.state, time.monotonic())
 
             if comando.terminal:
-                if comando.state == ControladorSaidaParede.PAREDE_FRENTE_ATINGIDA:
-                    return "parede_frente_atingida"
+                if comando.state == ControladorSaidaParede.PAREDE_FRENTE_ESTAVEL:
+                    return "parede_frente_estavel"
                 print(
                     f"[saida] falha: {comando.detail} "
                     f"({controlador.diagnostico_yaw(agora)})")

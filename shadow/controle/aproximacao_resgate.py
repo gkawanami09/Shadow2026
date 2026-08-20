@@ -20,6 +20,9 @@ class MotionCommand:
     pickup_confirmations: int = 0
     target_kind: object = None
     wheel_speeds: object = None
+    # Quando verdadeiro, ``direcao.steer`` desloca o centro de giro para a
+    # frente: a frente fica quase parada e a traseira executa o pivo.
+    pivo_traseiro: bool = False
 
 
 class BallApproachController:

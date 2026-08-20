@@ -38,7 +38,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description=(
             "Testa a saida pos-vermelho: avanco curto, giro de 90 graus, "
-            "alinhamento lateral e parada frontal a 118 mm."))
+            "alinhamento lateral, parede frontal a 118 mm e pivo traseiro."))
     return parser.parse_args(argv)
 
 
@@ -64,8 +64,8 @@ def main(argv=None):
         arduino.travar_sessao()
         print("[saida] iniciando como se o deposito vermelho tivesse terminado")
         resultado = executar_alinhamento_parede(arduino)
-        if resultado == "parede_frente_atingida":
-            print("[saida] parede frontal a 118 mm; robo parado")
+        if resultado == "parede_frente_estavel":
+            print("[saida] ultrassom frontal estavel por 1 s; robo parado")
             return EXIT_OK
         print("[saida] alinhamento interrompido; robo parado")
         return EXIT_FALHA_MANOBRA
