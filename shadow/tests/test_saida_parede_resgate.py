@@ -256,15 +256,39 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
         self.assertEqual(comando.angle, 0)
 
-    def test_abertura_confirmada_para_sem_entrar_no_vao(self):
+    def test_abertura_curta_nao_e_aceita_como_saida(self):
         controlador, instante = self._chegar_a_parede_direita()
 
         for _ in range(cfg.SAIDA_PAREDE_CONFIRMACOES_ABERTURA):
             instante += 0.02
             comando = self._passo(controlador, instante, yaw=90, lateral=300)
+        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
+        self.assertFalse(comando.terminal)
+
+        instante += 0.02
+        comando = self._passo(controlador, instante, yaw=90, lateral=120)
+        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
+        self.assertFalse(comando.terminal)
+
+    def test_abertura_longa_com_frente_livre_para_sem_entrar_no_vao(self):
+        controlador, instante = self._chegar_a_parede_direita()
+
+        for intervalo in (0.02, 0.40, 0.41):
+            instante += intervalo
+            comando = self._passo(controlador, instante, yaw=90, lateral=300)
         self.assertEqual(controlador.state, controlador.ABERTURA_ENCONTRADA)
         self.assertTrue(comando.terminal)
         self.assertEqual(comando.angle, 190)
+
+    def test_abertura_longa_com_parede_a_frente_nao_e_saida(self):
+        controlador, instante = self._chegar_a_parede_direita()
+
+        for intervalo in (0.02, 0.40, 0.41):
+            instante += intervalo
+            comando = self._passo(
+                controlador, instante, yaw=90, frente=180, lateral=300)
+        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
+        self.assertFalse(comando.terminal)
 
 
 if __name__ == "__main__":

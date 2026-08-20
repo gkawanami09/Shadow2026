@@ -107,6 +107,7 @@ class ControladorSaidaParede:
         self._frente_proxima = 0
         self._lateral_aberta = 0
         self._lateral_parede = 0
+        self._abertura_iniciada_em = None
         self._lateral_em_antes_do_giro = None
         # Um vao so existe depois de o sensor ter visto uma parede continua.
         # Isso impede que a zona aberta logo depois do deposito vermelho seja
@@ -188,11 +189,14 @@ class ControladorSaidaParede:
             or self._lateral_mm >= cfg.SAIDA_PAREDE_DISTANCIA_ABERTURA_MM
         )
         if aberta:
+            if self._lateral_aberta == 0:
+                self._abertura_iniciada_em = agora
             self._lateral_aberta += 1
             self._lateral_parede = 0
         else:
             self._lateral_parede += 1
             self._lateral_aberta = 0
+            self._abertura_iniciada_em = None
             if self._lateral_parede >= cfg.SAIDA_PAREDE_CONFIRMACOES_PAREDE:
                 self._parede_lateral_confirmada = True
 
@@ -362,14 +366,11 @@ class ControladorSaidaParede:
             )
 
         if self.state == self.SEGUIR_PAREDE:
-            if (
-                self._parede_lateral_confirmada
-                and self._lateral_aberta >= cfg.SAIDA_PAREDE_CONFIRMACOES_ABERTURA
-            ):
-                self._entrar(self.ABERTURA_ENCONTRADA, agora)
-                return self.atualizar(agora)
             if self._frente_proxima >= cfg.SAIDA_PAREDE_CONFIRMACOES_PAREDE:
                 self._entrar(self.PARAR_PAREDE, agora)
+                return self.atualizar(agora)
+            if self._abertura_confirmada(agora):
+                self._entrar(self.ABERTURA_ENCONTRADA, agora)
                 return self.atualizar(agora)
             if self._erro_heading() > cfg.SAIDA_PAREDE_TOLERANCIA_YAW_GRAUS:
                 self._tentativas_correcao_seguimento += 1
@@ -430,12 +431,6 @@ class ControladorSaidaParede:
 
         if self.state == self.PARAR_PAREDE:
             if (
-                self._parede_lateral_confirmada
-                and self._lateral_aberta >= cfg.SAIDA_PAREDE_CONFIRMACOES_ABERTURA
-            ):
-                self._entrar(self.ABERTURA_ENCONTRADA, agora)
-                return self.atualizar(agora)
-            if (
                 self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_ASSENTAMENTO_S
                 and self._lateral_parede >= cfg.SAIDA_PAREDE_CONFIRMACOES_PAREDE
             ):
@@ -457,6 +452,7 @@ class ControladorSaidaParede:
                 self._heading_parede = self._alvo_yaw
                 self._frente_proxima = 0
                 self._lateral_aberta = 0
+                self._abertura_iniciada_em = None
                 # A leitura lateral durante o giro pertence a parede que
                 # acabou de bloquear a frente. Esperamos um eco novo antes de
                 # decidir se vale aproximar a direita; se estiver aberto, pode
@@ -784,6 +780,25 @@ class ControladorSaidaParede:
                 frente - lateral,
                 frente + lateral,
             ),
+        )
+
+    def _abertura_confirmada(self, agora):
+        """Aceita somente um vao lateral longo, com frente desimpedida."""
+        if not self._parede_lateral_confirmada:
+            return False
+        if self._lateral_aberta < cfg.SAIDA_PAREDE_CONFIRMACOES_ABERTURA:
+            return False
+        if self._abertura_iniciada_em is None:
+            return False
+        if (
+            agora - self._abertura_iniciada_em
+            < cfg.SAIDA_PAREDE_TEMPO_MINIMO_ABERTURA_S
+        ):
+            return False
+        return (
+            self._frente_mm is None
+            or self._frente_mm
+            >= cfg.SAIDA_PAREDE_DISTANCIA_FRENTE_LIVRE_ABERTURA_MM
         )
 
     def _lateral(self, estado, esquerda, detalhe, pwm=None):

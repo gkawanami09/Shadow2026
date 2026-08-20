@@ -812,6 +812,12 @@ SAIDA_PAREDE_DISTANCIA_FRENTE_PARAR_MM = 115
 SAIDA_PAREDE_CONFIRMACOES_PAREDE = 2
 SAIDA_PAREDE_DISTANCIA_ABERTURA_MM = 230
 SAIDA_PAREDE_CONFIRMACOES_ABERTURA = 3
+# O vao lateral precisa continuar aberto enquanto o robo avanca. Isso evita
+# aceitar a folga curta entre um triangulo e a parede como se fosse a saida.
+# A frente tambem deve estar livre, pois uma parede a frente e um canto, nao
+# uma saida lateral segura.
+SAIDA_PAREDE_TEMPO_MINIMO_ABERTURA_S = 0.80
+SAIDA_PAREDE_DISTANCIA_FRENTE_LIVRE_ABERTURA_MM = 200
 # Depois de um giro para fugir da parede frontal, so aproxima o lado direito
 # se houver parede nele. A distancia alvo evita raspar na parede; os 2 s sao
 # apenas o teto para uma parede mais distante, nunca uma ordem cega de andar.
