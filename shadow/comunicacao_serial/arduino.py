@@ -250,9 +250,10 @@ class Arduino:
         self._ultra_value = None
         self._ultra_response_received = False
         self._ultra_lado = lado
-        # Sem argumento preserva o comando frontal legada; o firmware ja
-        # possui a variante ``ULTRASSOM LATERAL`` para o segundo HC-SR04.
-        comando = "ULTRASSOM" if lado == "FRENTE" else "ULTRASSOM LATERAL"
+        # Sempre explicita o lado. O terminal manual validado no robo usa
+        # ``ULTRASSOM FRENTE``; depender da abreviacao legada sem argumento
+        # pode ler outro sensor em um firmware antigo ainda gravado no Uno.
+        comando = f"ULTRASSOM {lado}"
         self._write_line(comando)
         if not self._connected:
             self._ultra_pending = False

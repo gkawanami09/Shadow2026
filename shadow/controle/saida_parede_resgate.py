@@ -284,7 +284,11 @@ class ControladorSaidaParede:
                 return self.atualizar(agora)
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_AVANCO_FRENTE_S:
                 return self._falhar(
-                    "timeout sem parede frontal a 118 mm", agora)
+                    "timeout sem parede frontal a "
+                    f"{cfg.SAIDA_PAREDE_DISTANCIA_FRENTE_FINAL_MM} mm "
+                    f"(ultima leitura={self._frente_mm} mm)",
+                    agora,
+                )
             if not self._mpu_fresco(agora):
                 return self._falhar("MPU sem leitura durante avanco reto", agora)
             if self._erro_heading() > cfg.SAIDA_PAREDE_TOLERANCIA_YAW_GRAUS:

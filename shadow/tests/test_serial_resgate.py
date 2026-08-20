@@ -169,7 +169,7 @@ class RescueSerialLedTests(unittest.TestCase):
     def test_ultrasonic_response_survives_refresh_and_split_line(self):
         arduino = self._connected_arduino()
         self.assertTrue(arduino.iniciar_ultrassom(timeout=0.05))
-        self.assertEqual(arduino._ser.writes, [b"ULTRASSOM\n"])
+        self.assertEqual(arduino._ser.writes, [b"ULTRASSOM FRENTE\n"])
 
         arduino._ser.feed(b"OK ULTRA")
         arduino.refresh()
