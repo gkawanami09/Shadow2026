@@ -66,7 +66,7 @@ class ControladorFalso:
 
 
 class MonitorSaidaParedeTests(unittest.TestCase):
-    def test_alterna_mpu_frente_lateral_sem_deixar_ultrassom_esperar(self):
+    def test_alterna_mpu_e_ultrassom_lateral_sem_consultar_frente(self):
         arduino = ArduinoFalso()
         controlador = ControladorFalso()
         monitor = MonitorSensoresSaida(arduino)
@@ -89,10 +89,10 @@ class MonitorSaidaParedeTests(unittest.TestCase):
 
         self.assertEqual(
             arduino.comandos,
-            ["MPU", "ULTRASSOM FRENTE", "MPU", "ULTRASSOM LATERAL"],
+            ["MPU", "ULTRASSOM LATERAL", "MPU", "ULTRASSOM LATERAL"],
         )
         self.assertEqual([leitura[0] for leitura in controlador.ultrassons], [
-            "FRENTE", "LATERAL",
+            "LATERAL", "LATERAL",
         ])
         self.assertEqual([leitura[0] for leitura in controlador.yaws], [4.0, 5.0])
 

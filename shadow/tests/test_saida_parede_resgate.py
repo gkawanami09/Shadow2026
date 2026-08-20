@@ -1,4 +1,4 @@
-"""Testes da maquina de estados da saida pela parede direita."""
+"""Testes da manobra curta pos-vermelho: girar e alinhar na parede."""
 
 import sys
 from pathlib import Path
@@ -9,12 +9,7 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import config_resgate as cfg  # noqa: E402
-from controle.saida_parede_resgate import (  # noqa: E402
-    ControladorSaidaParede,
-)
-
-
-NAO_PRETA = "nao_preta"
+from controle.saida_parede_resgate import ControladorSaidaParede  # noqa: E402
 
 
 class SaidaParedeResgateTests(unittest.TestCase):
@@ -23,295 +18,125 @@ class SaidaParedeResgateTests(unittest.TestCase):
         controlador,
         instante,
         *,
-        yaw,
-        frente=450,
-        lateral=120,
-        aceitar=True,
+        yaw=0,
+        lateral=200,
+        enviar_yaw=True,
+        enviar_lateral=True,
+        respondeu_lateral=True,
     ):
-        controlador.observar_mpu(yaw, instante)
-        controlador.observar_ultrassom("FRENTE", frente, True, instante)
-        controlador.observar_ultrassom("LATERAL", lateral, True, instante)
+        if enviar_yaw:
+            controlador.observar_mpu(yaw, instante)
+        if enviar_lateral:
+            controlador.observar_ultrassom(
+                "LATERAL", lateral, respondeu_lateral, instante)
         comando = controlador.atualizar(instante)
-        if aceitar and not comando.terminal:
+        if not comando.terminal:
             controlador.notificar_comando_escrito(comando.state, instante)
         return comando
 
-    def _chegar_a_parede_direita(self, yaw_direita=90, lateral_inicial=120):
+    def _chegar_ao_alinhamento(self, yaw_final=90):
         controlador = ControladorSaidaParede(start_time=0.0)
         self.assertTrue(controlador.solicita_zerar_mpu)
         self.assertTrue(controlador.confirmar_mpu_zerado(True, 0.0))
 
-        self._passo(controlador, 0.0, yaw=0, lateral=lateral_inicial)
-        self._passo(
-            controlador,
-            cfg.SAIDA_PAREDE_AVANCO_APOS_VERMELHO_S + 0.01,
-            yaw=0,
-            lateral=lateral_inicial,
+        comando = self._passo(controlador, 0.0, yaw=0)
+        self.assertEqual(controlador.state, controlador.AFASTAR_VERMELHO)
+        self.assertEqual(comando.angle, 0)
+        self.assertEqual(
+            comando.speed,
+            cfg.SAIDA_PAREDE_AVANCO_APOS_VERMELHO_PWM / 120.0,
         )
-        instante_giro = (
-            cfg.SAIDA_PAREDE_AVANCO_APOS_VERMELHO_S
-            + cfg.SAIDA_PAREDE_ASSENTAMENTO_S
-            + 0.02
-        )
-        comando = self._passo(
-            controlador,
-            instante_giro,
-            yaw=0,
-            lateral=lateral_inicial,
-        )
+
+        instante = cfg.SAIDA_PAREDE_AVANCO_APOS_VERMELHO_S + 0.01
+        comando = self._passo(controlador, instante, yaw=0)
+        self.assertEqual(controlador.state, controlador.ASSENTAR_INICIAL)
+        self.assertEqual(comando.speed, 0.0)
+
+        instante += cfg.SAIDA_PAREDE_ASSENTAMENTO_S + 0.01
+        comando = self._passo(controlador, instante, yaw=0)
         self.assertEqual(controlador.state, controlador.GIRO_INICIAL_DIREITA)
         self.assertEqual(comando.angle, 180)
 
-        # Uma pequena mudanca revela o sinal real do gyro no giro fisico a
-        # direita. O teste tambem cobre a montagem mais comum: yaw crescente.
-        sinal = 1 if yaw_direita == 90 else -1
-        comando = self._passo(
-            controlador,
-            instante_giro + 0.03,
-            yaw=6 * sinal,
-            lateral=lateral_inicial,
-        )
+        sinal = 1 if yaw_final == 90 else -1
+        comando = self._passo(controlador, instante + 0.03, yaw=6 * sinal)
         self.assertEqual(comando.angle, 180)
-        comando = self._passo(
-            controlador,
-            instante_giro + 0.40,
-            yaw=yaw_direita,
-            lateral=lateral_inicial,
-        )
-        self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_INICIAL)
-        self.assertEqual(comando.wheel_speeds, (100, -100, -100, 100))
-        instante_alinhado = (
-            instante_giro + 0.40
-            + cfg.SAIDA_PAREDE_TRANSLACAO_INICIAL_DIREITA_S + 0.01
-        )
-        comando = self._passo(
-            controlador,
-            instante_alinhado,
-            yaw=yaw_direita,
-            lateral=lateral_inicial,
-        )
-        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
-        if lateral_inicial < cfg.SAIDA_PAREDE_DISTANCIA_ABERTURA_MM:
-            frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
-            traseira = cfg.SAIDA_PAREDE_PWM_TRASEIRA_ESQUERDA
-            lateral_frente = (
-                -traseira + cfg.SAIDA_PAREDE_PWM_OSCILACAO_FRENTE)
-            self.assertEqual(
-                comando.wheel_speeds,
-                (frente + lateral_frente, frente + traseira,
-                 frente - lateral_frente, frente - traseira),
-            )
-        else:
-            self.assertEqual(comando.angle, 0)
-        self.assertEqual(controlador.heading_parede, float(yaw_direita))
-        return controlador, instante_alinhado
+        comando = self._passo(controlador, instante + 0.40, yaw=yaw_final)
+        self.assertEqual(controlador.state, controlador.ALINHAR_DIREITA)
+        self.assertEqual(comando.speed, 0.0)
+        self.assertEqual(controlador.heading_parede, float(yaw_final))
+        return controlador, instante + 0.40
 
-    def test_giro_inicial_calibra_yaw_invertido_sem_inverter_direita_fisica(self):
-        controlador, _ = self._chegar_a_parede_direita(yaw_direita=270)
-
+    def test_gira_direita_mesmo_com_yaw_invertido(self):
+        controlador, _ = self._chegar_ao_alinhamento(yaw_final=270)
         self.assertEqual(controlador.heading_parede, 270.0)
 
-    def test_translacao_inicial_corrige_yaw_antes_de_continuar(self):
-        controlador = ControladorSaidaParede(start_time=0.0)
-        self.assertTrue(controlador.confirmar_mpu_zerado(True, 0.0))
-        self._passo(controlador, 0.0, yaw=0)
-        instante = cfg.SAIDA_PAREDE_AVANCO_APOS_VERMELHO_S + 0.01
-        self._passo(controlador, instante, yaw=0)
-        instante += cfg.SAIDA_PAREDE_ASSENTAMENTO_S + 0.02
-        self._passo(controlador, instante, yaw=0)
-        self._passo(controlador, instante + 0.03, yaw=6)
-        instante += 0.40
-        self._passo(controlador, instante, yaw=90)
-        self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_INICIAL)
-
-        instante += 0.05
-        comando = self._passo(controlador, instante, yaw=100)
-        self.assertEqual(
-            controlador.state, controlador.CORRIGIR_YAW_TRANSLACAO_INICIAL)
-        self.assertEqual(comando.angle, -180)
-
-        instante += 0.10
-        comando = self._passo(controlador, instante, yaw=90)
-        self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_INICIAL)
-        self.assertEqual(comando.wheel_speeds, (100, -100, -100, 100))
-
-    def test_triangulo_nao_altera_o_percurso_de_teste(self):
-        controlador, instante = self._chegar_a_parede_direita()
-        instante += cfg.SAIDA_PAREDE_COOLDOWN_TRIANGULO_S + 0.01
-        controlador.observar_triangulo(True, instante)
-        comando = self._passo(controlador, instante, yaw=90)
-        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
-        self.assertIsNotNone(comando.wheel_speeds)
-
-    def test_seguimento_ziguezague_mantem_traseira_esquerda_e_alterna_frente(self):
-        controlador, instante = self._chegar_a_parede_direita()
-        comando = self._passo(
-            controlador,
-            instante + 0.02,
-            yaw=90,
-            lateral=180,
-        )
-        frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
-        traseira = cfg.SAIDA_PAREDE_PWM_TRASEIRA_ESQUERDA
-        oscilacao = cfg.SAIDA_PAREDE_PWM_OSCILACAO_FRENTE
-        self.assertEqual(
-            comando.wheel_speeds,
-            (frente - traseira + oscilacao, frente + traseira,
-             frente + traseira - oscilacao, frente - traseira),
-        )
-
-        comando = self._passo(
-            controlador,
-            instante + 0.02 + cfg.SAIDA_PAREDE_OSCILACAO_FRENTE_S,
-            yaw=90,
-            lateral=180,
-        )
-        self.assertEqual(
-            comando.wheel_speeds,
-            (frente - traseira - oscilacao, frente + traseira,
-             frente + traseira + oscilacao, frente - traseira),
-        )
-
-    def test_seguimento_mantem_ziguezague_mesmo_com_parede_proxima(self):
-        controlador, instante = self._chegar_a_parede_direita()
-        comando = self._passo(
-            controlador,
-            instante + 0.02,
-            yaw=90,
-            lateral=60,
-        )
-        frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
-        traseira = cfg.SAIDA_PAREDE_PWM_TRASEIRA_ESQUERDA
-        oscilacao = cfg.SAIDA_PAREDE_PWM_OSCILACAO_FRENTE
-        self.assertEqual(
-            comando.wheel_speeds,
-            (frente - traseira + oscilacao, frente + traseira,
-             frente + traseira - oscilacao, frente - traseira),
-        )
-
-    def test_seguimento_corrige_yaw_antes_de_voltar_ao_avanco_diagonal(self):
-        controlador, instante = self._chegar_a_parede_direita()
-        comando = self._passo(
-            controlador, instante + 0.02, yaw=109, lateral=120)
-        self.assertEqual(
-            controlador.state, controlador.CORRIGIR_YAW_SEGUINDO_PAREDE)
-        self.assertEqual(comando.angle, -180)
-
-        comando = self._passo(
-            controlador, instante + 0.12, yaw=90, lateral=160)
-        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
-        self.assertIsNotNone(comando.wheel_speeds)
-
-    def test_parede_frontal_vira_a_esquerda_e_alinha_so_com_parede_lateral(self):
-        controlador, instante = self._chegar_a_parede_direita()
-        self._passo(controlador, instante + 0.02, yaw=90, frente=100)
-        instante += 0.04
-        comando = self._passo(controlador, instante, yaw=90, frente=100)
-        self.assertEqual(controlador.state, controlador.PARAR_PAREDE)
-        self.assertEqual(comando.angle, 190)
-
-        instante += cfg.SAIDA_PAREDE_ASSENTAMENTO_S + 0.01
-        comando = self._passo(controlador, instante, yaw=90, frente=100)
-        self.assertEqual(controlador.state, controlador.GIRO_PAREDE_ESQUERDA)
-        self.assertEqual(comando.angle, -180)
-
-        instante += 0.10
-        comando = self._passo(
-            controlador, instante, yaw=0, frente=450, lateral=180)
-        self.assertEqual(controlador.state, controlador.CONFERIR_PAREDE_APOS_GIRO)
-        self.assertEqual(comando.angle, 190)
-
-        instante += 0.02
-        comando = self._passo(
-            controlador, instante, yaw=0, frente=450, lateral=180)
-        self.assertEqual(controlador.state, controlador.ALINHAR_DIREITA_APOS_GIRO)
+    def test_alinha_para_direita_e_para_ao_chegar_na_faixa(self):
+        controlador, instante = self._chegar_ao_alinhamento()
+        comando = self._passo(controlador, instante + 0.01, yaw=90, lateral=200)
         self.assertEqual(comando.wheel_speeds, (45, -45, -45, 45))
+        self.assertEqual(controlador.state, controlador.ALINHAR_DIREITA)
 
-        instante += cfg.SAIDA_PAREDE_ALINHAMENTO_DIREITA_MAX_S + 0.01
-        comando = self._passo(
-            controlador, instante, yaw=0, frente=450, lateral=180)
-        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
-        self.assertIsNotNone(comando.wheel_speeds)
-
-    def test_parede_frontal_sem_lateral_nao_faz_giro_a_esquerda(self):
-        controlador, instante = self._chegar_a_parede_direita()
-        self._passo(
-            controlador, instante + 0.02, yaw=90, frente=100, lateral=300)
-        instante += 0.04
-        comando = self._passo(
-            controlador, instante, yaw=90, frente=100, lateral=300)
-        self.assertEqual(controlador.state, controlador.PARAR_PAREDE)
-        self.assertEqual(comando.angle, 190)
-
-        instante += cfg.SAIDA_PAREDE_ASSENTAMENTO_S + 0.01
-        comando = self._passo(
-            controlador, instante, yaw=90, frente=100, lateral=300)
-        self.assertNotEqual(controlador.state, controlador.GIRO_PAREDE_ESQUERDA)
-        self.assertEqual(comando.angle, 190)
-
-    def test_espaco_lateral_apos_giro_nao_translada_para_direita(self):
-        controlador, instante = self._chegar_a_parede_direita()
-        self._passo(controlador, instante + 0.02, yaw=90, frente=100)
-        instante += 0.04
-        self._passo(controlador, instante, yaw=90, frente=100)
-        instante += cfg.SAIDA_PAREDE_ASSENTAMENTO_S + 0.01
-        self._passo(controlador, instante, yaw=90, frente=100)
-
-        instante += 0.10
-        self._passo(
-            controlador, instante, yaw=0, frente=450, lateral=300)
-        instante += 0.02
-        comando = self._passo(
-            controlador, instante, yaw=0, frente=450, lateral=300)
-
-        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
-        self.assertEqual(comando.angle, 0)
+        comando = self._passo(controlador, instante + 0.08, yaw=90, lateral=130)
+        self.assertTrue(comando.terminal)
+        self.assertEqual(controlador.state, controlador.ALINHADO)
+        self.assertEqual(comando.speed, 0.0)
         self.assertIsNone(comando.wheel_speeds)
 
-    def test_espaco_aberto_inicial_nao_e_saida_antes_de_ver_parede(self):
-        controlador, instante = self._chegar_a_parede_direita(
-            lateral_inicial=300)
+    def test_alinha_para_esquerda_se_a_parede_ja_estiver_proxima(self):
+        controlador, instante = self._chegar_ao_alinhamento()
+        comando = self._passo(controlador, instante + 0.01, yaw=90, lateral=90)
+        self.assertEqual(comando.wheel_speeds, (-45, 45, 45, -45))
 
-        for _ in range(cfg.SAIDA_PAREDE_CONFIRMACOES_ABERTURA + 1):
-            instante += 0.02
-            comando = self._passo(controlador, instante, yaw=90, lateral=300)
-
-        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
-        self.assertEqual(comando.angle, 0)
-
-    def test_abertura_curta_nao_e_aceita_como_saida(self):
-        controlador, instante = self._chegar_a_parede_direita()
-
-        for _ in range(cfg.SAIDA_PAREDE_CONFIRMACOES_ABERTURA):
-            instante += 0.02
-            comando = self._passo(controlador, instante, yaw=90, lateral=300)
-        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
-        self.assertFalse(comando.terminal)
-
-        instante += 0.02
-        comando = self._passo(controlador, instante, yaw=90, lateral=120)
-        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
-        self.assertFalse(comando.terminal)
-
-    def test_abertura_longa_com_frente_livre_para_sem_entrar_no_vao(self):
-        controlador, instante = self._chegar_a_parede_direita()
-
-        for intervalo in (0.02, 0.40, 0.41):
-            instante += intervalo
-            comando = self._passo(controlador, instante, yaw=90, lateral=300)
-        self.assertEqual(controlador.state, controlador.ABERTURA_ENCONTRADA)
+        comando = self._passo(controlador, instante + 0.08, yaw=90, lateral=120)
         self.assertTrue(comando.terminal)
-        self.assertEqual(comando.angle, 190)
+        self.assertEqual(controlador.state, controlador.ALINHADO)
 
-    def test_abertura_longa_com_parede_a_frente_nao_e_saida(self):
-        controlador, instante = self._chegar_a_parede_direita()
+    def test_corrige_yaw_antes_de_continuar_a_translacao(self):
+        controlador, instante = self._chegar_ao_alinhamento()
+        comando = self._passo(controlador, instante + 0.01, yaw=100, lateral=200)
+        self.assertEqual(controlador.state, controlador.CORRIGIR_YAW_ALINHAMENTO)
+        self.assertEqual(comando.angle, -180)
 
-        for intervalo in (0.02, 0.40, 0.41):
-            instante += intervalo
-            comando = self._passo(
-                controlador, instante, yaw=90, frente=180, lateral=300)
-        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
-        self.assertFalse(comando.terminal)
+        comando = self._passo(controlador, instante + 0.08, yaw=90, lateral=200)
+        self.assertEqual(controlador.state, controlador.ALINHAR_DIREITA)
+        self.assertEqual(comando.speed, 0.0)
+
+        comando = self._passo(controlador, instante + 0.09, yaw=90, lateral=200)
+        self.assertEqual(comando.wheel_speeds, (45, -45, -45, 45))
+
+    def test_para_em_falha_se_nao_receber_ultrassom_novo_apos_giro(self):
+        controlador, instante = self._chegar_ao_alinhamento()
+        comando = self._passo(
+            controlador,
+            instante + cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S + 0.01,
+            yaw=90,
+            enviar_lateral=False,
+        )
+        self.assertTrue(comando.terminal)
+        self.assertEqual(controlador.state, controlador.FALHA)
+        self.assertIn("ultrassom lateral", comando.detail)
+
+    def test_para_em_falha_se_nao_encontrar_a_distancia_alvo_no_prazo(self):
+        controlador, instante = self._chegar_ao_alinhamento()
+        self._passo(controlador, instante + 0.01, yaw=90, lateral=200)
+        comando = self._passo(
+            controlador,
+            instante + cfg.SAIDA_PAREDE_TIMEOUT_ALINHAMENTO_S + 0.01,
+            yaw=90,
+            lateral=200,
+        )
+        self.assertTrue(comando.terminal)
+        self.assertEqual(controlador.state, controlador.FALHA)
+        self.assertIn("timeout", comando.detail)
+
+    def test_estado_alinhado_permanece_parado(self):
+        controlador, instante = self._chegar_ao_alinhamento()
+        self._passo(controlador, instante + 0.01, yaw=90, lateral=125)
+        comando = self._passo(controlador, instante + 1.0, yaw=90, lateral=300)
+        self.assertTrue(comando.terminal)
+        self.assertEqual(controlador.state, controlador.ALINHADO)
+        self.assertEqual(comando.speed, 0.0)
+        self.assertIsNone(comando.wheel_speeds)
 
 
 if __name__ == "__main__":

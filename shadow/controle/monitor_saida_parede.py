@@ -1,4 +1,4 @@
-"""Agenda MPU e os dois ultrassons sem disputar a serial do resgate."""
+"""Agenda MPU e o ultrassom lateral sem disputar a serial do resgate."""
 
 import time
 
@@ -8,15 +8,15 @@ import config_resgate as cfg
 class MonitorSensoresSaida:
     """Entrega leituras novas ao controlador e mantem uma consulta por vez.
 
-    O monitor alterna MPU, frontal e lateral. A alternancia e importante: uma
-    captura de camera mais lenta nao pode fazer o MPU monopolizar a USB e
-    envelhecer a leitura que confirma parede ou abertura.
+    A manobra curta usa somente yaw e a parede lateral direita. Nao consultar
+    o ultrassom frontal reduz trafego serial e impede que ele seja confundido
+    com uma nova fase de procura de saida.
     """
 
     def __init__(self, arduino):
         self._arduino = arduino
         self._lado_ultrassom_pendente = None
-        self._proximo_lado = "FRENTE"
+        self._proximo_lado = "LATERAL"
         self._proximo_sensor = "MPU"
         self._proxima_leitura_mpu = 0.0
         self._proxima_leitura_ultrassom = 0.0
@@ -88,8 +88,6 @@ class MonitorSensoresSaida:
                     lado=lado,
                 ):
                     self._lado_ultrassom_pendente = lado
-                    self._proximo_lado = (
-                        "LATERAL" if lado == "FRENTE" else "FRENTE")
                     self._proxima_leitura_ultrassom = (
                         instante + cfg.SAIDA_PAREDE_INTERVALO_ULTRASSOM_S)
                     self._proximo_sensor = "MPU"

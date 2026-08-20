@@ -860,11 +860,11 @@ def _confirmar_saida_com_camera_linha(
 
 
 def _executar_saida_parede(arduino, camera_index, debug=False):
-    """Executa o teste de parede por sensores e para na primeira abertura.
+    """Alinha o robo a parede direita e encerra a manobra.
 
-    Nesta etapa de calibracao nao ha visao de triangulos, sonda de linha ou
-    entrada no vao. Manter as duas cameras fechadas elimina concorrencia de
-    processamento e deixa o LED apagado durante toda a rota.
+    Nao ha busca de abertura, visao de triangulos, sonda de linha ou entrada
+    em vao. Manter as duas cameras fechadas elimina concorrencia de
+    processamento e deixa o LED apagado durante toda a manobra.
     """
     from controle.direcao import steer
     from controle.monitor_saida_parede import MonitorSensoresSaida
@@ -881,7 +881,7 @@ def _executar_saida_parede(arduino, camera_index, debug=False):
             raise RuntimeError("nao foi possivel apagar LED da saida por sensores")
         print(
             "[saida-parede] cameras fechadas e LED APAGADO; "
-            "teste de percurso pela parede direita")
+            "girando e alinhando na parede direita")
         while True:
             agora = time.monotonic()
             if (
@@ -928,10 +928,8 @@ def _executar_saida_parede(arduino, camera_index, debug=False):
             controlador.notificar_comando_escrito(comando.state, time.monotonic())
 
             if comando.terminal:
-                if comando.state == ControladorSaidaParede.ABERTURA_ENCONTRADA:
-                    return "abertura_encontrada"
-                if comando.state == ControladorSaidaParede.SUCESSO:
-                    return PRETA
+                if comando.state == ControladorSaidaParede.ALINHADO:
+                    return "alinhado_parede"
                 print(
                     f"[saida-parede] falha: {comando.detail} "
                     f"({controlador.diagnostico_yaw(agora)})")
@@ -2241,22 +2239,13 @@ def main(args=None):
                         inicio_saida = None
                         deteccao_saida = None
                         faltas_saida = 0
-                        if resultado_saida_parede == PRETA:
-                            codigo_saida = EXIT_OK
-                            comando = MotionCommand(
-                                "EXIT_BLACK_CONFIRMED",
-                                detail=(
-                                    "faixa preta e continuacao confirmadas "
-                                    "pela saida por parede"),
-                                terminal=True,
-                            )
-                        elif resultado_saida_parede == "abertura_encontrada":
+                        if resultado_saida_parede == "alinhado_parede":
                             codigo_saida = EXIT_INCOMPLETE
                             comando = MotionCommand(
-                                "EXIT_WALL_OPENING_FOUND",
+                                "EXIT_WALL_ALIGNED",
                                 detail=(
-                                    "abertura lateral confirmada; robo "
-                                    "mantido parado para validacao manual"),
+                                    "giro e alinhamento na parede direita "
+                                    "concluidos; robo parado"),
                                 terminal=True,
                             )
                         else:
@@ -2264,8 +2253,8 @@ def main(args=None):
                             comando = MotionCommand(
                                 "EXIT_WALL_FAILED",
                                 detail=(
-                                    "saida por parede nao confirmou uma "
-                                    "faixa preta segura"),
+                                    "giro ou alinhamento na parede "
+                                    "nao foi concluido com seguranca"),
                                 terminal=True,
                             )
                         comando_atualizado = False
