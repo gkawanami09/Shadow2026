@@ -132,6 +132,53 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
         self.assertEqual(comando.angle, 0)
 
+    def test_seguimento_avanca_e_aproxima_lateral_quando_parede_distante(self):
+        controlador, instante = self._chegar_a_parede_direita()
+        comando = self._passo(
+            controlador,
+            instante + 0.02,
+            yaw=90,
+            lateral=(
+                cfg.SAIDA_PAREDE_DISTANCIA_SEGUIR_ALVO_MM
+                + cfg.SAIDA_PAREDE_TOLERANCIA_SEGUIR_LATERAL_MM + 1),
+        )
+        frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
+        lateral = cfg.SAIDA_PAREDE_PWM_CORRECAO_LATERAL
+        self.assertEqual(
+            comando.wheel_speeds,
+            (frente + lateral, frente - lateral, frente - lateral, frente + lateral),
+        )
+
+    def test_seguimento_avanca_e_afasta_lateral_quando_parede_proxima(self):
+        controlador, instante = self._chegar_a_parede_direita()
+        comando = self._passo(
+            controlador,
+            instante + 0.02,
+            yaw=90,
+            lateral=(
+                cfg.SAIDA_PAREDE_DISTANCIA_SEGUIR_ALVO_MM
+                - cfg.SAIDA_PAREDE_TOLERANCIA_SEGUIR_LATERAL_MM - 1),
+        )
+        frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
+        lateral = cfg.SAIDA_PAREDE_PWM_CORRECAO_LATERAL
+        self.assertEqual(
+            comando.wheel_speeds,
+            (frente - lateral, frente + lateral, frente + lateral, frente - lateral),
+        )
+
+    def test_seguimento_corrige_yaw_antes_de_voltar_ao_avanco_diagonal(self):
+        controlador, instante = self._chegar_a_parede_direita()
+        comando = self._passo(
+            controlador, instante + 0.02, yaw=97, lateral=120)
+        self.assertEqual(
+            controlador.state, controlador.CORRIGIR_YAW_SEGUINDO_PAREDE)
+        self.assertEqual(comando.angle, -180)
+
+        comando = self._passo(
+            controlador, instante + 0.12, yaw=90, lateral=160)
+        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
+        self.assertIsNotNone(comando.wheel_speeds)
+
     def test_parede_frontal_vira_a_esquerda_e_alinha_so_com_parede_lateral(self):
         controlador, instante = self._chegar_a_parede_direita()
         self._passo(controlador, instante + 0.02, yaw=90, frente=100)
@@ -161,7 +208,7 @@ class SaidaParedeResgateTests(unittest.TestCase):
         comando = self._passo(
             controlador, instante, yaw=0, frente=450, lateral=180)
         self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
-        self.assertEqual(comando.angle, 0)
+        self.assertIsNotNone(comando.wheel_speeds)
 
     def test_parede_frontal_sem_lateral_nao_faz_giro_a_esquerda(self):
         controlador, instante = self._chegar_a_parede_direita()

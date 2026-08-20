@@ -31,6 +31,7 @@ class ControladorSaidaParede:
     TRANSLADAR_DIREITA_INICIAL = "EXIT_PAREDE_ALINHAR_INICIAL_DIREITA"
     CORRIGIR_YAW_TRANSLACAO_INICIAL = "EXIT_PAREDE_CORRIGIR_YAW_INICIAL"
     SEGUIR_PAREDE = "EXIT_PAREDE_SEGUIR_DIREITA"
+    CORRIGIR_YAW_SEGUINDO_PAREDE = "EXIT_PAREDE_CORRIGIR_YAW_SEGUINDO"
     PARAR_TRIANGULO = "EXIT_PAREDE_PARAR_TRIANGULO"
     DESVIAR_TRIANGULO = "EXIT_PAREDE_DESVIAR_TRIANGULO"
     PASSAR_TRIANGULO = "EXIT_PAREDE_PASSAR_TRIANGULO"
@@ -74,6 +75,7 @@ class ControladorSaidaParede:
     _ESTADOS_GIRO_MONITORADO = {
         GIRO_INICIAL_DIREITA,
         CORRIGIR_YAW_TRANSLACAO_INICIAL,
+        CORRIGIR_YAW_SEGUINDO_PAREDE,
         DESVIAR_TRIANGULO,
         RETORNAR_TRIANGULO,
         GIRO_PAREDE_ESQUERDA,
@@ -114,6 +116,7 @@ class ControladorSaidaParede:
         self._ultimo_triangulo_em = -float("inf")
         self._tentativas_translacao = 0
         self._tempo_translacao_inicial_restante = 0.0
+        self._tentativas_correcao_seguimento = 0
         self._giros_parede = 0
         self._tempo_recuo_sonda = cfg.SAIDA_PAREDE_RECUO_MINIMO_S
         self._sonda_iniciada = False
@@ -368,7 +371,31 @@ class ControladorSaidaParede:
             if self._frente_proxima >= cfg.SAIDA_PAREDE_CONFIRMACOES_PAREDE:
                 self._entrar(self.PARAR_PAREDE, agora)
                 return self.atualizar(agora)
-            return self._frente(self.SEGUIR_PAREDE, int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120)), "seguindo parede direita")
+            if self._erro_heading() > cfg.SAIDA_PAREDE_TOLERANCIA_YAW_GRAUS:
+                self._tentativas_correcao_seguimento += 1
+                if (
+                    self._tentativas_correcao_seguimento
+                    > cfg.SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO
+                ):
+                    return self._falhar(
+                        "yaw nao voltou ao rumo enquanto seguia a parede")
+                self._preparar_giro_para(
+                    self._heading_parede,
+                    self.CORRIGIR_YAW_SEGUINDO_PAREDE,
+                    agora,
+                )
+                return self.atualizar(agora)
+            self._tentativas_correcao_seguimento = 0
+            return self._avancar_alinhando_parede()
+
+        if self.state == self.CORRIGIR_YAW_SEGUINDO_PAREDE:
+            if self._giro_concluido(agora):
+                self._entrar(self.SEGUIR_PAREDE, agora)
+                return self.atualizar(agora)
+            return self._girar(
+                self.CORRIGIR_YAW_SEGUINDO_PAREDE,
+                "corrigindo yaw para manter a traseira paralela a parede",
+            )
 
         if self.state == self.PARAR_TRIANGULO:
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_ASSENTAMENTO_S:
@@ -702,6 +729,61 @@ class ControladorSaidaParede:
             angle=0,
             speed=float(pwm) / 120.0,
             detail=detalhe,
+        )
+
+    def _avancar_alinhando_parede(self):
+        """Avanca e corrige lateralmente, preservando o heading pelo MPU."""
+        pwm_frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
+        pwm_lateral = int(cfg.SAIDA_PAREDE_PWM_CORRECAO_LATERAL)
+        alvo = int(cfg.SAIDA_PAREDE_DISTANCIA_SEGUIR_ALVO_MM)
+        tolerancia = int(cfg.SAIDA_PAREDE_TOLERANCIA_SEGUIR_LATERAL_MM)
+
+        if not self._parede_lateral_confirmada:
+            return self._frente(
+                self.SEGUIR_PAREDE,
+                pwm_frente,
+                "seguindo reto ate confirmar a primeira parede direita",
+            )
+        if (
+            self._lateral_mm is None
+            or self._lateral_mm >= cfg.SAIDA_PAREDE_DISTANCIA_ABERTURA_MM
+        ):
+            return self._frente(
+                self.SEGUIR_PAREDE,
+                pwm_frente,
+                "possivel abertura direita; seguindo reto ate confirmar",
+            )
+        if self._lateral_mm > alvo + tolerancia:
+            return self._avanco_com_lateral(
+                pwm_frente,
+                pwm_lateral,
+                "parede direita distante; avancando e aproximando a traseira",
+            )
+        if self._lateral_mm < alvo - tolerancia:
+            return self._avanco_com_lateral(
+                pwm_frente,
+                -pwm_lateral,
+                "parede direita proxima; avancando e afastando a traseira",
+            )
+        return self._frente(
+            self.SEGUIR_PAREDE,
+            pwm_frente,
+            "seguindo reto alinhado com a parede direita",
+        )
+
+    def _avanco_com_lateral(self, pwm_frente, pwm_lateral, detalhe):
+        """Soma vetor de frente ao de lateral das rodas omnidirecionais."""
+        frente = int(pwm_frente)
+        lateral = int(pwm_lateral)
+        return MotionCommand(
+            self.SEGUIR_PAREDE,
+            detail=detalhe,
+            wheel_speeds=(
+                frente + lateral,
+                frente - lateral,
+                frente - lateral,
+                frente + lateral,
+            ),
         )
 
     def _lateral(self, estado, esquerda, detalhe, pwm=None):

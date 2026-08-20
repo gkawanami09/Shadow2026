@@ -819,6 +819,13 @@ SAIDA_PAREDE_DISTANCIA_ALINHAMENTO_MM = 125
 SAIDA_PAREDE_ALINHAMENTO_DIREITA_MAX_S = 2.0
 SAIDA_PAREDE_VELOCIDADE_SEGUIR = 0.38
 SAIDA_PAREDE_VELOCIDADE_APROXIMAR = 0.28
+# Durante cada trecho reto, a omnidirecional soma avanco com uma pequena
+# correcao lateral. Assim o lado/traseira direito permanece na referencia da
+# parede sem parar para fazer translacoes separadas. A banda evita trocar de
+# sentido por ruido normal do HC-SR04.
+SAIDA_PAREDE_DISTANCIA_SEGUIR_ALVO_MM = 125
+SAIDA_PAREDE_TOLERANCIA_SEGUIR_LATERAL_MM = 20
+SAIDA_PAREDE_PWM_CORRECAO_LATERAL = 22
 
 # Triangulos verde/vermelho vistos pela camera frontal, sempre com LED
 # apagado. O desvio sai 45 graus da parede direita e retorna ao mesmo heading.
