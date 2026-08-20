@@ -138,6 +138,7 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
 
     def test_vermelho_abre_e_restaura_a_cacamba_no_lado_oposto(self):
         sequenciador = SequenciadorDepositoCinza("red")
+        nomes_etapas = [etapa.nome for etapa in sequenciador._etapas]
         agora = 10.0
         deltas = []
 
@@ -157,6 +158,9 @@ class SequenciadorDepositoCinzaTests(unittest.TestCase):
         self.assertEqual(final.state, "BLACK_DEPOSIT_COMPLETE")
         self.assertTrue(final.terminal)
         self.assertTrue(sequenciador.deposito_fisico_comandado)
+        self.assertNotIn("EXIT_FORWARD", nomes_etapas)
+        self.assertNotIn("EXIT_STOP", nomes_etapas)
+        self.assertEqual(nomes_etapas[-1], "BUCKET_RESTORE")
 
     def test_saida_exige_deposito_vermelho_com_cacamba_comandada(self):
         sequenciador = SequenciadorDepositoCinza("red")

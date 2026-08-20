@@ -297,20 +297,25 @@ class SequenciadorDepositoCinza:
             delta_restauracao,
         ))
         self._indice_restauracao = len(etapas) - 1
-        etapas.extend((
-            _Etapa(
-                "EXIT_FORWARD",
-                "cacamba fechada; avancando reto por 1,5 segundo",
-                0,
-                cfg.SILVER_DEPOSIT_EXIT_FORWARD_SPEED,
-                cfg.SILVER_DEPOSIT_EXIT_FORWARD_S,
-            ),
-            _Etapa(
-                "EXIT_STOP",
-                "avanco final concluido; parando o robo",
-                190,
-                0.0,
-                0.10,
-            ),
-        ))
+        if deposito_verde:
+            # A rota verde ainda usa este afastamento historico antes de
+            # procurar o marcador vermelho. No deposito vermelho, ele faria
+            # o robo atravessar a sala e conflitaria com a nova saida pela
+            # parede, que ja possui seu proprio avanco curto e controlado.
+            etapas.extend((
+                _Etapa(
+                    "EXIT_FORWARD",
+                    "cacamba fechada; avancando reto por 1,5 segundo",
+                    0,
+                    cfg.SILVER_DEPOSIT_EXIT_FORWARD_SPEED,
+                    cfg.SILVER_DEPOSIT_EXIT_FORWARD_S,
+                ),
+                _Etapa(
+                    "EXIT_STOP",
+                    "avanco final concluido; parando o robo",
+                    190,
+                    0.0,
+                    0.10,
+                ),
+            ))
         return tuple(etapas)
