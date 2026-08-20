@@ -252,6 +252,36 @@ class SaidaParedeResgateTests(unittest.TestCase):
             (-45, 45, 45, -45),
         )
 
+    def test_pivo_atualiza_heading_para_nao_girar_antes_da_camera(self):
+        controlador = ControladorSaidaParede(start_time=0.0)
+        controlador._heading_parede = 271.7
+        controlador._sinal_yaw_por_giro_direita = 1.0
+        controlador.observar_mpu(315.6, 0.0)
+        controlador.observar_ultrassom("LATERAL", 110, True, 0.0)
+        controlador._entrar_transladar_direita(0.0)
+        self.assertEqual(controlador.heading_parede, 315.6)
+        controlador.notificar_comando_escrito(controlador.state, 0.0)
+
+        comando = self._passo(
+            controlador,
+            cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.01,
+            yaw=315.6,
+            lateral=110,
+            frente=118,
+        )
+        self.assertEqual(controlador.state, controlador.AFASTAR_ESQUERDA_120)
+        self.assertEqual(comando.speed, 0.0)
+
+        comando = self._passo(
+            controlador,
+            cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.02,
+            yaw=315.6,
+            lateral=119,
+            frente=118,
+        )
+        self.assertEqual(controlador.state, controlador.AFASTAR_ESQUERDA_120)
+        self.assertEqual(comando.wheel_speeds, (-45, 45, 45, -45))
+
     def test_pivo_usa_timeout_de_dois_segundos_e_ainda_translada_direita(self):
         controlador, instante = self._chegar_ao_primeiro_avanco()
         self._passo(controlador, instante + 0.01, yaw=90, lateral=110, frente=118)

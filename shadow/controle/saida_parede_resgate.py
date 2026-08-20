@@ -429,11 +429,11 @@ class ControladorSaidaParede:
                 >= cfg.SAIDA_PAREDE_TEMPO_ESTABILIDADE_LATERAL_S
             ):
                 self._translacao_por_timeout_pivo = False
-                self._entrar(self.TRANSLADAR_DIREITA, agora)
+                self._entrar_transladar_direita(agora)
                 return self.atualizar(agora)
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S:
                 self._translacao_por_timeout_pivo = True
-                self._entrar(self.TRANSLADAR_DIREITA, agora)
+                self._entrar_transladar_direita(agora)
                 return self.atualizar(agora)
             toque_frente_direita_pwm = self._toque_frente_direita_pwm(agora)
             detalhe = (
@@ -492,6 +492,16 @@ class ControladorSaidaParede:
         self._lateral_em_antes_afastamento = self._lateral_em
         self._tentativas_correcao = 0
         self._entrar(self.AFASTAR_ESQUERDA_120, agora)
+
+    def _entrar_transladar_direita(self, agora):
+        # O pivo traseiro muda propositalmente a orientacao do chassi. A
+        # translacao que vem depois deve manter essa orientacao atual, e nao o
+        # yaw guardado antes de encostar na parede frontal. Sem esta troca de
+        # referencia, o afastamento esquerdo tentaria desfazer o pivo e viraria
+        # no lugar em vez de deslizar lateralmente.
+        if self._mpu_fresco(agora):
+            self._heading_parede = self._yaw
+        self._entrar(self.TRANSLADAR_DIREITA, agora)
 
     def _executar_destino_apos_afastamento(self, agora):
         if self._destino_apos_afastamento == self._DESTINO_CAMERA:
