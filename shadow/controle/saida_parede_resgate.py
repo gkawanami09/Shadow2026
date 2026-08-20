@@ -39,6 +39,7 @@ class ControladorSaidaParede:
     PIVO_TRASEIRO_ESTABILIZAR = "EXIT_PAREDE_PIVO_TRASEIRO_ESTABILIZAR"
     TRANSLADAR_DIREITA_FINAL = "EXIT_PAREDE_TRANSLADAR_DIREITA_FINAL"
     VERIFICAR_TRIANGULO_VERDE = "EXIT_PAREDE_VERIFICAR_TRIANGULO_VERDE"
+    AGUARDAR_MPU_TRIANGULO_VERDE = "EXIT_PAREDE_AGUARDAR_MPU_TRIANGULO_VERDE"
     GIRO_TRIANGULO_VERDE = "EXIT_PAREDE_GIRO_TRIANGULO_VERDE"
     SAIDA_CONCLUIDA = "EXIT_PAREDE_SAIDA_CONCLUIDA"
     FALHA = "EXIT_PAREDE_FALHA"
@@ -79,6 +80,7 @@ class ControladorSaidaParede:
         self._translacao_por_timeout_pivo = False
         self._triangulo_verde_confirmado = False
         self._triangulo_verde_tratado = False
+        self._yaw_em_antes_giro_verde = None
         self._tentativas_correcao = 0
 
     @property
@@ -91,7 +93,9 @@ class ControladorSaidaParede:
 
     @property
     def prioriza_mpu(self):
-        return self.state in self._ESTADOS_GIRO
+        return self.state in (
+            self._ESTADOS_GIRO | {self.AGUARDAR_MPU_TRIANGULO_VERDE}
+        )
 
     @property
     def usa_camera_triangulo_verde(self):
@@ -347,31 +351,12 @@ class ControladorSaidaParede:
 
         if self.state == self.VERIFICAR_TRIANGULO_VERDE:
             if self._triangulo_verde_confirmado:
-                if not self._mpu_fresco(agora):
-                    if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
-                        return self._falhar(
-                            "MPU sem leitura nova apos confirmar triangulo verde",
-                            agora,
-                        )
-                    return self._parado(
-                        self.VERIFICAR_TRIANGULO_VERDE,
-                        "triangulo verde confirmado; aguardando yaw para giro de 45 graus",
-                    )
-                if self._sinal_yaw_por_giro_direita is None:
-                    return self._falhar(
-                        "sentido do yaw ausente para girar no triangulo verde",
-                        agora,
-                    )
-                # A rota ja esta com a parede no lado direito: o desvio pelo
-                # triangulo verde e fisicamente para a esquerda, independente
-                # do sinal eletrico que o MPU use para a direita.
-                self._alvo_yaw = self._normalizar(
-                    self._yaw
-                    - cfg.SAIDA_PAREDE_GIRO_TRIANGULO_VERDE_GRAUS
-                    * self._sinal_yaw_por_giro_direita
-                )
                 self._triangulo_verde_tratado = True
-                self._entrar(self.GIRO_TRIANGULO_VERDE, agora)
+                # O frame confirmado pode ser o ultimo antes de fechar a
+                # camera. Nunca usa esse yaw para iniciar o giro: aguarda uma
+                # leitura feita depois do fechamento, com o chassi parado.
+                self._yaw_em_antes_giro_verde = self._yaw_em
+                self._entrar(self.AGUARDAR_MPU_TRIANGULO_VERDE, agora)
                 return self.atualizar(agora)
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S:
                 return self._falhar(
@@ -382,6 +367,35 @@ class ControladorSaidaParede:
                 self.VERIFICAR_TRIANGULO_VERDE,
                 "parado; camera frontal procurando triangulo verde com LED apagado",
             )
+
+        if self.state == self.AGUARDAR_MPU_TRIANGULO_VERDE:
+            if not self._mpu_fresco_depois_giro_verde(agora):
+                if self._tempo_decorrido(agora) >= (
+                    cfg.SAIDA_PAREDE_TIMEOUT_MPU_APOS_CAMERA_S
+                ):
+                    return self._falhar(
+                        "MPU nao respondeu apos fechar a camera do triangulo verde",
+                        agora,
+                    )
+                return self._parado(
+                    self.AGUARDAR_MPU_TRIANGULO_VERDE,
+                    "triangulo verde confirmado; camera fechando e aguardando yaw novo",
+                )
+            if self._sinal_yaw_por_giro_direita is None:
+                return self._falhar(
+                    "sentido do yaw ausente para girar no triangulo verde",
+                    agora,
+                )
+            # A rota ja esta com a parede no lado direito: o desvio pelo
+            # triangulo verde e fisicamente para a esquerda, independente do
+            # sinal eletrico que o MPU use para a direita.
+            self._alvo_yaw = self._normalizar(
+                self._yaw
+                - cfg.SAIDA_PAREDE_GIRO_TRIANGULO_VERDE_GRAUS
+                * self._sinal_yaw_por_giro_direita
+            )
+            self._entrar(self.GIRO_TRIANGULO_VERDE, agora)
+            return self.atualizar(agora)
 
         if self.state == self.GIRO_TRIANGULO_VERDE:
             if self._giro_concluido():
@@ -578,6 +592,13 @@ class ControladorSaidaParede:
             self._yaw is not None
             and self._yaw_em is not None
             and agora - self._yaw_em <= cfg.SAIDA_PAREDE_TIMEOUT_MPU_S
+        )
+
+    def _mpu_fresco_depois_giro_verde(self, agora):
+        return (
+            self._mpu_fresco(agora)
+            and self._yaw_em_antes_giro_verde is not None
+            and self._yaw_em > self._yaw_em_antes_giro_verde
         )
 
     def _lateral_fresca(self, agora):

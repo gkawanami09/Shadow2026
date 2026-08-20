@@ -131,28 +131,9 @@ class SaidaParedeResgateTests(unittest.TestCase):
         comando = self._passo(
             controlador, instante + 0.82, yaw=90, lateral=130, frente=120)
         self.assertFalse(comando.terminal)
+        self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_FINAL)
         comando = self._passo(
             controlador, instante + 1.34, yaw=90, lateral=130, frente=118)
-        self.assertFalse(comando.terminal)
-        self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_FINAL)
-        self.assertEqual(
-            comando.wheel_speeds,
-            (
-                cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
-                -cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
-                -cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
-                cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
-            ),
-        )
-        self.assertIn("0,5 s", comando.detail)
-
-        comando = self._passo(
-            controlador,
-            instante + 1.34 + cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.01,
-            yaw=90,
-            lateral=130,
-            frente=118,
-        )
         self.assertFalse(comando.terminal)
         self.assertEqual(controlador.state, controlador.VERIFICAR_TRIANGULO_VERDE)
         self.assertTrue(controlador.usa_camera_triangulo_verde)
@@ -175,15 +156,15 @@ class SaidaParedeResgateTests(unittest.TestCase):
         )
         self.assertFalse(comando.terminal)
         comando = self._passo(
-            controlador, instante + 1.15, yaw=90, lateral=131, frente=122)
+            controlador, instante + 0.95, yaw=90, lateral=131, frente=122)
         self.assertFalse(comando.terminal)
         comando = self._passo(
-            controlador, instante + 1.61, yaw=90, lateral=131, frente=123)
+            controlador, instante + 1.07, yaw=90, lateral=131, frente=123)
         self.assertFalse(comando.terminal)
         self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_FINAL)
         comando = self._passo(
             controlador,
-            instante + 1.61 + cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.01,
+            instante + 1.07 + cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.01,
             yaw=90,
             lateral=131,
             frente=123,
@@ -204,18 +185,37 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertTrue(controlador.observar_triangulo_verde(True, 0.01))
         comando = self._passo(
             controlador, 0.01, yaw=90, lateral=125, frente=400)
+        self.assertEqual(
+            controlador.state,
+            controlador.AGUARDAR_MPU_TRIANGULO_VERDE,
+        )
+        self.assertTrue(controlador.prioriza_mpu)
+        self.assertEqual(comando.speed, 0.0)
+
+        # Fechar a camera pode levar mais que o timeout normal do MPU. Nesse
+        # intervalo o robo continua parado, sem transformar um yaw antigo em
+        # falha do giro.
+        comando = controlador.atualizar(0.45)
+        self.assertFalse(comando.terminal)
+        self.assertEqual(
+            controlador.state,
+            controlador.AGUARDAR_MPU_TRIANGULO_VERDE,
+        )
+
+        comando = self._passo(
+            controlador, 0.50, yaw=90, lateral=125, frente=400)
         self.assertEqual(controlador.state, controlador.GIRO_TRIANGULO_VERDE)
         self.assertEqual(comando.angle, -180)
         self.assertIn("45 graus para a esquerda", comando.detail)
 
         comando = self._passo(
-            controlador, 0.12, yaw=45, lateral=125, frente=400)
+            controlador, 0.58, yaw=45, lateral=125, frente=400)
         self.assertEqual(controlador.state, controlador.AVANCAR_ATE_PAREDE_FRENTE)
         self.assertEqual(controlador.heading_parede, 45.0)
         self.assertEqual(comando.speed, 0.0)
 
         comando = self._passo(
-            controlador, 0.13, yaw=45, lateral=125, frente=300)
+            controlador, 0.59, yaw=45, lateral=125, frente=300)
         self.assertEqual(comando.angle, 0)
         self.assertEqual(
             comando.speed,

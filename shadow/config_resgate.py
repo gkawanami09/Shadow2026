@@ -836,10 +836,10 @@ SAIDA_PAREDE_PERIODO_TOQUE_FRENTE_DIREITA_S = 0.40
 # A confirmacao de alinhamento e feita pela parede lateral direita; o frontal
 # ja cumpriu seu papel ao limitar a aproximacao antes da curva.
 SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_LATERAL_MM = 5
-SAIDA_PAREDE_TEMPO_ESTABILIDADE_LATERAL_S = 1.0
-# Depois de 3 s com leituras laterais validas, mas oscilantes, a manobra nao
+SAIDA_PAREDE_TEMPO_ESTABILIDADE_LATERAL_S = 0.5
+# Depois de 2 s com leituras laterais validas, mas oscilantes, a manobra nao
 # falha: faz a translacao direita planejada e segue para a verificacao visual.
-SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 3.0
+SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 2.0
 
 # Com a distancia lateral ja estabilizada, sai do contato para a direita.
 # Usa a mesma intensidade da translacao curta inicial, por 0,5 s exatos.
@@ -851,6 +851,10 @@ SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S = 0.50
 # para a esquerda; a mesma sequencia de parede e translacao e entao repetida.
 SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S = 3.0
 SAIDA_PAREDE_GIRO_TRIANGULO_VERDE_GRAUS = 45.0
+# Fechar a camera pode demorar algumas centenas de milissegundos. Depois da
+# confirmacao do verde, o chassi fica parado e espera um yaw NOVO antes de
+# mover; este teto e deliberadamente maior que o timeout normal do MPU.
+SAIDA_PAREDE_TIMEOUT_MPU_APOS_CAMERA_S = 2.5
 
 # Parede frontal e abertura no lado direito. Uma ausencia de eco do sensor
 # lateral so conta quando o Arduino confirmou a resposta; timeout serial para.
