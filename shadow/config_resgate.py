@@ -806,13 +806,20 @@ SAIDA_PAREDE_INTERVALO_ULTRASSOM_S = 0.07
 SAIDA_PAREDE_TIMEOUT_ULTRASSOM_S = 0.12
 SAIDA_PAREDE_TIMEOUT_SENSOR_S = 0.45
 
-# A rota ativa termina aqui: depois do giro inicial, o robo translada ate
-# ficar a 125 mm da parede lateral direita e para. A margem evita oscilar
-# entre os dois sentidos por poucos milimetros de ruido do HC-SR04.
+# Depois do giro inicial, o robo translada ate ficar a 125 mm da parede
+# lateral direita. A margem evita oscilar entre os dois sentidos por poucos
+# milimetros de ruido do HC-SR04; em seguida comeca o avanco frontal.
 SAIDA_PAREDE_DISTANCIA_ALVO_ALINHAMENTO_MM = 125
 SAIDA_PAREDE_TOLERANCIA_ALINHAMENTO_MM = 15
 SAIDA_PAREDE_PWM_TRANSLACAO_ALINHAMENTO = 45
 SAIDA_PAREDE_TIMEOUT_ALINHAMENTO_S = 2.0
+
+# Quando o alinhamento lateral termina, avanca reto ate o HC-SR04 frontal
+# indicar a parede a 118 mm ou menos. O teto de tempo e uma guarda fisica:
+# sem eco ou sem parede o robo para, em vez de atravessar a arena inteira.
+SAIDA_PAREDE_DISTANCIA_FRENTE_FINAL_MM = 118
+SAIDA_PAREDE_AVANCO_ATE_FRENTE_PWM = 45
+SAIDA_PAREDE_TIMEOUT_AVANCO_FRENTE_S = 4.0
 
 # Parede frontal e abertura no lado direito. Uma ausencia de eco do sensor
 # lateral so conta quando o Arduino confirmou a resposta; timeout serial para.

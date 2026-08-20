@@ -109,6 +109,23 @@ class MonitorSaidaParedeTests(unittest.TestCase):
 
         self.assertEqual(arduino.comandos, ["MPU", "MPU"])
 
+    def test_troca_para_ultrassom_frontal_no_avanco_reto(self):
+        arduino = ArduinoFalso()
+        controlador = ControladorFalso()
+        monitor = MonitorSensoresSaida(arduino)
+
+        self.assertTrue(monitor.agendar_proxima(0.00))
+        arduino._mpu_pronto = SimpleNamespace(yaw_graus=4.0)
+        monitor.atualizar_controlador(controlador, 0.01)
+
+        self.assertTrue(
+            monitor.agendar_proxima(0.08, lado_ultrassom="FRENTE"))
+        arduino._ultrassom_pronto = 250
+        monitor.atualizar_controlador(controlador, 0.09)
+
+        self.assertEqual(arduino.comandos, ["MPU", "ULTRASSOM FRENTE"])
+        self.assertEqual(controlador.ultrassons[0][0], "FRENTE")
+
 
 if __name__ == "__main__":
     unittest.main()

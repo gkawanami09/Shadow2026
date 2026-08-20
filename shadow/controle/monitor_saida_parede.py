@@ -1,4 +1,4 @@
-"""Agenda MPU e o ultrassom lateral sem disputar a serial do resgate."""
+"""Agenda MPU e um ultrassom por vez sem disputar a serial do resgate."""
 
 import time
 
@@ -8,15 +8,14 @@ import config_resgate as cfg
 class MonitorSensoresSaida:
     """Entrega leituras novas ao controlador e mantem uma consulta por vez.
 
-    A manobra curta usa somente yaw e a parede lateral direita. Nao consultar
-    o ultrassom frontal reduz trafego serial e impede que ele seja confundido
-    com uma nova fase de procura de saida.
+    Primeiro a manobra usa o ultrassom lateral para alinhar. Depois usa o
+    frontal para parar a 118 mm da parede. Em ambos os casos, o MPU alterna
+    com o unico HC-SR04 necessario naquele estado.
     """
 
     def __init__(self, arduino):
         self._arduino = arduino
         self._lado_ultrassom_pendente = None
-        self._proximo_lado = "LATERAL"
         self._proximo_sensor = "MPU"
         self._proxima_leitura_mpu = 0.0
         self._proxima_leitura_ultrassom = 0.0
@@ -41,7 +40,12 @@ class MonitorSensoresSaida:
             )
             self._lado_ultrassom_pendente = None
 
-    def agendar_proxima(self, agora=None, priorizar_mpu=False):
+    def agendar_proxima(
+        self,
+        agora=None,
+        priorizar_mpu=False,
+        lado_ultrassom="LATERAL",
+    ):
         """Inicia no maximo uma consulta nao bloqueante, se estiver vencida.
 
         Durante um giro, a referencia de yaw tem precedencia. A parede nao
@@ -49,6 +53,9 @@ class MonitorSensoresSaida:
         pode envelhecer o yaw e fazer a manobra abortar mesmo com o MPU bom.
         """
         instante = time.monotonic() if agora is None else float(agora)
+        lado_ultrassom = str(lado_ultrassom).upper()
+        if lado_ultrassom not in ("FRENTE", "LATERAL"):
+            raise ValueError("lado_ultrassom deve ser FRENTE ou LATERAL")
         if self._arduino.consultas_sensores_pendentes:
             return False
 
@@ -82,7 +89,7 @@ class MonitorSensoresSaida:
                 sensor == "ULTRASSOM"
                 and instante >= self._proxima_leitura_ultrassom
             ):
-                lado = self._proximo_lado
+                lado = lado_ultrassom
                 if self._arduino.iniciar_ultrassom(
                     timeout=cfg.SAIDA_PAREDE_TIMEOUT_ULTRASSOM_S,
                     lado=lado,

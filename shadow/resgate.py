@@ -2151,13 +2151,13 @@ def main(args=None):
                         inicio_saida = None
                         deteccao_saida = None
                         faltas_saida = 0
-                        if resultado_saida_parede == "alinhado_parede":
+                        if resultado_saida_parede == "parede_frente_atingida":
                             codigo_saida = EXIT_INCOMPLETE
                             comando = MotionCommand(
-                                "EXIT_WALL_ALIGNED",
+                                "EXIT_WALL_FRONT_REACHED",
                                 detail=(
-                                    "giro e alinhamento na parede direita "
-                                    "concluidos; robo parado"),
+                                    "giro, alinhamento e parede frontal a "
+                                    "118 mm concluidos; robo parado"),
                                 terminal=True,
                             )
                         else:
@@ -2165,7 +2165,7 @@ def main(args=None):
                             comando = MotionCommand(
                                 "EXIT_WALL_FAILED",
                                 detail=(
-                                    "giro ou alinhamento na parede "
+                                    "giro, alinhamento ou avanco ate a parede "
                                     "nao foi concluido com seguranca"),
                                 terminal=True,
                             )

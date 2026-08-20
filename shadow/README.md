@@ -41,9 +41,10 @@ sem busca, deposito, cameras ou segue-linha:
 python3 shadow/saida.py
 ```
 
-Ela faz o avancinho, o giro de 90 graus a direita e o alinhamento pelo
-ultrassom lateral; ao terminar, para e fecha a serial. Nao rode junto com
-`mission.py`, `main.py` ou `resgate.py`.
+Ela faz o avancinho, o giro de 90 graus a direita, o alinhamento pelo
+ultrassom lateral e avanca reto ate o frontal marcar 118 mm; ao terminar,
+para e fecha a serial. Nao rode junto com `mission.py`, `main.py` ou
+`resgate.py`.
 
 Na busca, uma soleira confiável veta alvos fora da arena; filtros independentes
 rejeitam madeira, sombras e triângulos. Depois da coleta, prata é levada ao

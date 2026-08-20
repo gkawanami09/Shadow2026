@@ -3,7 +3,7 @@
 Esta rotina deliberadamente nao procura a saida. Ela so afasta o robo do
 marcador vermelho, gira 90 graus para a direita pelo MPU e usa o ultrassom
 lateral direito para regular a distancia da parede. Ao terminar o
-alinhamento, para o robo para a proxima etapa ser decidida manualmente.
+alinhamento, avanca reto ate encontrar a parede frontal a 118 mm e para.
 """
 
 from dataclasses import dataclass
@@ -22,7 +22,7 @@ class ResultadoSondaLinha:
 
 
 class ControladorSaidaParede:
-    """Executa somente o giro inicial e o alinhamento lateral direito."""
+    """Gira, alinha na parede direita e para diante da parede frontal."""
 
     ZERAR_MPU = "EXIT_PAREDE_ZERAR_MPU"
     AFASTAR_VERMELHO = "EXIT_PAREDE_AFASTAR_VERMELHO"
@@ -30,12 +30,15 @@ class ControladorSaidaParede:
     GIRO_INICIAL_DIREITA = "EXIT_PAREDE_GIRO_INICIAL_DIREITA"
     ALINHAR_DIREITA = "EXIT_PAREDE_ALINHAR_DIREITA"
     CORRIGIR_YAW_ALINHAMENTO = "EXIT_PAREDE_CORRIGIR_YAW_ALINHAMENTO"
-    ALINHADO = "EXIT_PAREDE_ALINHADO"
+    AVANCAR_ATE_PAREDE_FRENTE = "EXIT_PAREDE_AVANCAR_ATE_FRENTE"
+    CORRIGIR_YAW_AVANCO_FRENTE = "EXIT_PAREDE_CORRIGIR_YAW_FRENTE"
+    PAREDE_FRENTE_ATINGIDA = "EXIT_PAREDE_PAREDE_FRENTE_ATINGIDA"
     FALHA = "EXIT_PAREDE_FALHA"
 
     _ESTADOS_GIRO = {
         GIRO_INICIAL_DIREITA,
         CORRIGIR_YAW_ALINHAMENTO,
+        CORRIGIR_YAW_AVANCO_FRENTE,
     }
 
     def __init__(self, start_time=None):
@@ -57,11 +60,14 @@ class ControladorSaidaParede:
         self._lateral_mm = None
         self._lateral_em = None
         self._lateral_em_antes_alinhamento = None
+        self._frente_mm = None
+        self._frente_em = None
+        self._frente_em_antes_avanco = None
         self._tentativas_correcao = 0
 
     @property
     def terminal(self):
-        return self.state in (self.ALINHADO, self.FALHA)
+        return self.state in (self.PAREDE_FRENTE_ATINGIDA, self.FALHA)
 
     @property
     def solicita_zerar_mpu(self):
@@ -70,6 +76,15 @@ class ControladorSaidaParede:
     @property
     def prioriza_mpu(self):
         return self.state in self._ESTADOS_GIRO
+
+    @property
+    def lado_ultrassom_atual(self):
+        if self.state in {
+            self.AVANCAR_ATE_PAREDE_FRENTE,
+            self.CORRIGIR_YAW_AVANCO_FRENTE,
+        }:
+            return "FRENTE"
+        return "LATERAL"
 
     @property
     def heading_parede(self):
@@ -89,12 +104,20 @@ class ControladorSaidaParede:
         self._yaw_em = time.monotonic() if timestamp is None else float(timestamp)
 
     def observar_ultrassom(self, lado, distancia_mm, respondeu, timestamp=None):
-        """Registra somente o HC-SR04 lateral; o frontal nao participa."""
-        if str(lado).upper() != "LATERAL" or not respondeu:
+        """Registra a leitura do HC-SR04 pedida pelo estado atual."""
+        if not respondeu:
             return
-        self._lateral_mm = None if distancia_mm is None else int(distancia_mm)
-        self._lateral_em = (
-            time.monotonic() if timestamp is None else float(timestamp))
+        agora = time.monotonic() if timestamp is None else float(timestamp)
+        lado = str(lado).upper()
+        if lado == "LATERAL":
+            self._lateral_mm = None if distancia_mm is None else int(distancia_mm)
+            self._lateral_em = agora
+            return
+        if lado == "FRENTE":
+            self._frente_mm = None if distancia_mm is None else int(distancia_mm)
+            self._frente_em = agora
+            return
+        raise ValueError("lado deve ser FRENTE ou LATERAL")
 
     def confirmar_mpu_zerado(self, sucesso, now=None):
         if self.state != self.ZERAR_MPU:
@@ -114,10 +137,10 @@ class ControladorSaidaParede:
 
     def atualizar(self, now=None):
         agora = time.monotonic() if now is None else float(now)
-        if self.state == self.ALINHADO:
+        if self.state == self.PAREDE_FRENTE_ATINGIDA:
             return self._parado(
-                self.ALINHADO,
-                "parede direita alinhada; robo parado",
+                self.PAREDE_FRENTE_ATINGIDA,
+                "parede frontal detectada a 118 mm; robo parado",
                 terminal=True,
             )
         if self.state == self.FALHA:
@@ -198,7 +221,7 @@ class ControladorSaidaParede:
             erro_distancia = (
                 self._lateral_mm - cfg.SAIDA_PAREDE_DISTANCIA_ALVO_ALINHAMENTO_MM)
             if abs(erro_distancia) <= cfg.SAIDA_PAREDE_TOLERANCIA_ALINHAMENTO_MM:
-                self._entrar(self.ALINHADO, agora)
+                self._entrar_avanco_frente(agora)
                 return self.atualizar(agora)
             if not self._mpu_fresco(agora):
                 return self._falhar("MPU sem leitura durante alinhamento lateral", agora)
@@ -234,11 +257,64 @@ class ControladorSaidaParede:
                 "corrigindo yaw antes de continuar o alinhamento lateral",
             )
 
+        if self.state == self.AVANCAR_ATE_PAREDE_FRENTE:
+            if not self._frente_fresca(agora):
+                if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
+                    return self._falhar(
+                        "ultrassom frontal sem leitura nova apos alinhamento",
+                        agora,
+                    )
+                return self._parado(
+                    self.AVANCAR_ATE_PAREDE_FRENTE,
+                    "alinhamento concluido; aguardando ultrassom frontal novo",
+                )
+            if (
+                self._frente_mm is not None
+                and self._frente_mm <= cfg.SAIDA_PAREDE_DISTANCIA_FRENTE_FINAL_MM
+            ):
+                self._entrar(self.PAREDE_FRENTE_ATINGIDA, agora)
+                return self.atualizar(agora)
+            if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_AVANCO_FRENTE_S:
+                return self._falhar(
+                    "timeout sem parede frontal a 118 mm", agora)
+            if not self._mpu_fresco(agora):
+                return self._falhar("MPU sem leitura durante avanco reto", agora)
+            if self._erro_heading() > cfg.SAIDA_PAREDE_TOLERANCIA_YAW_GRAUS:
+                self._tentativas_correcao += 1
+                if self._tentativas_correcao > cfg.SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO:
+                    return self._falhar(
+                        "yaw nao voltou ao rumo durante avanco reto", agora)
+                self._preparar_giro_para(
+                    self._heading_parede,
+                    self.CORRIGIR_YAW_AVANCO_FRENTE,
+                    agora,
+                )
+                return self.atualizar(agora)
+            self._tentativas_correcao = 0
+            return self._frente(
+                self.AVANCAR_ATE_PAREDE_FRENTE,
+                cfg.SAIDA_PAREDE_AVANCO_ATE_FRENTE_PWM,
+                "avancando reto ate o ultrassom frontal marcar 118 mm",
+            )
+
+        if self.state == self.CORRIGIR_YAW_AVANCO_FRENTE:
+            if self._giro_concluido():
+                self._entrar_avanco_frente(agora)
+                return self.atualizar(agora)
+            return self._girar(
+                self.CORRIGIR_YAW_AVANCO_FRENTE,
+                "corrigindo yaw antes de retomar o avanco reto",
+            )
+
         return self._falhar(f"estado de alinhamento desconhecido: {self.state}", agora)
 
     def _entrar_alinhamento(self, agora):
         self._lateral_em_antes_alinhamento = self._lateral_em
         self._entrar(self.ALINHAR_DIREITA, agora)
+
+    def _entrar_avanco_frente(self, agora):
+        self._frente_em_antes_avanco = self._frente_em
+        self._entrar(self.AVANCAR_ATE_PAREDE_FRENTE, agora)
 
     def _preparar_giro_para(self, alvo, estado, agora):
         if alvo is None or self._sinal_yaw_por_giro_direita is None:
@@ -312,6 +388,16 @@ class ControladorSaidaParede:
             and self._lateral_em_antes_alinhamento is not None
             and self._lateral_em > self._lateral_em_antes_alinhamento
             and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
+        )
+
+    def _frente_fresca(self, agora):
+        return (
+            self._frente_em is not None
+            and (
+                self._frente_em_antes_avanco is None
+                or self._frente_em > self._frente_em_antes_avanco
+            )
+            and agora - self._frente_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
         )
 
     def _tempo_decorrido(self, agora):
@@ -405,8 +491,8 @@ def executar_alinhamento_parede(arduino, *, intervalo_s=0.005):
             controlador.notificar_comando_escrito(comando.state, time.monotonic())
 
             if comando.terminal:
-                if comando.state == ControladorSaidaParede.ALINHADO:
-                    return "alinhado_parede"
+                if comando.state == ControladorSaidaParede.PAREDE_FRENTE_ATINGIDA:
+                    return "parede_frente_atingida"
                 print(
                     f"[saida] falha: {comando.detail} "
                     f"({controlador.diagnostico_yaw(agora)})")
@@ -415,6 +501,7 @@ def executar_alinhamento_parede(arduino, *, intervalo_s=0.005):
             monitor_sensores.agendar_proxima(
                 time.monotonic(),
                 priorizar_mpu=controlador.prioriza_mpu,
+                lado_ultrassom=controlador.lado_ultrassom_atual,
             )
             arduino.refresh(fail_closed=True)
             time.sleep(intervalo_s)
