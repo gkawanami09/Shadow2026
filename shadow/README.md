@@ -34,6 +34,17 @@ python3 shadow/resgate.py --camera-index 0 --debug
 python3 shadow/resgate.py --camera-index 0 --drive --debug
 ```
 
+Para testar somente a manobra que ocorre logo depois do deposito vermelho,
+sem busca, deposito, cameras ou segue-linha:
+
+```bash
+python3 shadow/saida.py
+```
+
+Ela faz o avancinho, o giro de 90 graus a direita e o alinhamento pelo
+ultrassom lateral; ao terminar, para e fecha a serial. Nao rode junto com
+`mission.py`, `main.py` ou `resgate.py`.
+
 Na busca, uma soleira confiável veta alvos fora da arena; filtros independentes
 rejeitam madeira, sombras e triângulos. Depois da coleta, prata é levada ao
 triângulo verde e preta ao vermelho; o movimento de garra só é liberado depois

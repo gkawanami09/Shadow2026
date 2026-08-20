@@ -340,3 +340,86 @@ class ControladorSaidaParede:
     @staticmethod
     def _normalizar(angulo):
         return float(angulo) % 360.0
+
+
+def executar_alinhamento_parede(arduino, *, intervalo_s=0.005):
+    """Executa a manobra curta diretamente, sem cameras ou resgate completo.
+
+    O chamador deve ter adquirido a trava dos motores e inicializado
+    ``controle.direcao`` com este mesmo Arduino. A funcao nao fecha a serial:
+    isso continua responsabilidade do programa que a chamou.
+    """
+    from controle.direcao import steer
+    from controle.monitor_saida_parede import MonitorSensoresSaida
+
+    controlador = ControladorSaidaParede()
+    monitor_sensores = MonitorSensoresSaida(arduino)
+    epoca_serial = arduino.connection_epoch
+    ultimo_estado = None
+    ultimo_log_yaw = -float("inf")
+
+    try:
+        if arduino.led("APAGADO") is False:
+            raise RuntimeError("nao foi possivel apagar LED da saida")
+        print(
+            "[saida] LED APAGADO; sem cameras; "
+            "girando e alinhando na parede direita")
+        while True:
+            agora = time.monotonic()
+            if (
+                not arduino.connected
+                or arduino.connection_epoch != epoca_serial
+            ):
+                raise RuntimeError("serial mudou durante o alinhamento de saida")
+
+            monitor_sensores.atualizar_controlador(controlador, agora)
+            comando = controlador.atualizar(agora)
+
+            if comando.state != ultimo_estado:
+                print(
+                    f"[saida] {comando.state}: {comando.detail} "
+                    f"({controlador.diagnostico_yaw(agora)})")
+                ultimo_estado = comando.state
+            elif (
+                controlador.prioriza_mpu
+                and agora - ultimo_log_yaw >= 0.40
+            ):
+                print(
+                    f"[saida] giro monitorado: "
+                    f"{controlador.diagnostico_yaw(agora)}")
+                ultimo_log_yaw = agora
+
+            if controlador.solicita_zerar_mpu:
+                steer()
+                monitor_sensores.cancelar()
+                if not controlador.confirmar_mpu_zerado(arduino.zerar_mpu(), agora):
+                    return None
+                continue
+
+            if comando.wheel_speeds is not None:
+                enviado = arduino.rodas(*comando.wheel_speeds)
+            else:
+                enviado = steer(comando.angle, comando.speed)
+            if enviado is False:
+                raise RuntimeError("comando de alinhamento nao foi enviado")
+            controlador.notificar_comando_escrito(comando.state, time.monotonic())
+
+            if comando.terminal:
+                if comando.state == ControladorSaidaParede.ALINHADO:
+                    return "alinhado_parede"
+                print(
+                    f"[saida] falha: {comando.detail} "
+                    f"({controlador.diagnostico_yaw(agora)})")
+                return None
+
+            monitor_sensores.agendar_proxima(
+                time.monotonic(),
+                priorizar_mpu=controlador.prioriza_mpu,
+            )
+            arduino.refresh(fail_closed=True)
+            time.sleep(intervalo_s)
+    finally:
+        try:
+            steer()
+        except (OSError, RuntimeError):
+            pass

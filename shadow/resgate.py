@@ -860,99 +860,11 @@ def _confirmar_saida_com_camera_linha(
 
 
 def _executar_saida_parede(arduino, camera_index, debug=False):
-    """Alinha o robo a parede direita e encerra a manobra.
+    """Compatibilidade: delega a manobra direta pos-vermelho."""
+    del camera_index, debug
+    from controle.saida_parede_resgate import executar_alinhamento_parede
 
-    Nao ha busca de abertura, visao de triangulos, sonda de linha ou entrada
-    em vao. Manter as duas cameras fechadas elimina concorrencia de
-    processamento e deixa o LED apagado durante toda a manobra.
-    """
-    from controle.direcao import steer
-    from controle.monitor_saida_parede import MonitorSensoresSaida
-    from controle.saida_parede_resgate import ControladorSaidaParede
-
-    controlador = ControladorSaidaParede()
-    monitor_sensores = MonitorSensoresSaida(arduino)
-    epoca_serial = arduino.connection_epoch
-    ultimo_estado_saida = None
-    ultimo_yaw_log = -float("inf")
-
-    try:
-        if arduino.led("APAGADO") is False:
-            raise RuntimeError("nao foi possivel apagar LED da saida por sensores")
-        print(
-            "[saida-parede] cameras fechadas e LED APAGADO; "
-            "girando e alinhando na parede direita")
-        while True:
-            agora = time.monotonic()
-            if (
-                not arduino.connected
-                or arduino.connection_epoch != epoca_serial
-            ):
-                raise RuntimeError("serial mudou durante a saida pela parede")
-
-            # O monitor entrega apenas leituras efetivamente respondidas; um
-            # timeout da serial nunca vira uma falsa abertura lateral.
-            monitor_sensores.atualizar_controlador(controlador, agora)
-
-            comando = controlador.atualizar(agora)
-
-            if comando.state != ultimo_estado_saida:
-                print(
-                    f"[saida-parede] {comando.state}: {comando.detail} "
-                    f"({controlador.diagnostico_yaw(agora)})")
-                ultimo_estado_saida = comando.state
-            elif (
-                controlador.prioriza_mpu
-                and agora - ultimo_yaw_log >= 0.40
-            ):
-                print(
-                    f"[saida-parede] giro monitorado: "
-                    f"{controlador.diagnostico_yaw(agora)}")
-                ultimo_yaw_log = agora
-
-            if controlador.solicita_zerar_mpu:
-                # MPU ZERO e manual/sincrono, por isso ocorre somente com o
-                # chassi parado e sem consultas assincronas pendentes.
-                steer()
-                monitor_sensores.cancelar()
-                if not controlador.confirmar_mpu_zerado(arduino.zerar_mpu(), agora):
-                    return None
-                continue
-
-            if comando.wheel_speeds is not None:
-                enviado = arduino.rodas(*comando.wheel_speeds)
-            else:
-                enviado = steer(comando.angle, comando.speed)
-            if enviado is False:
-                raise RuntimeError("comando da saida por parede nao foi enviado")
-            controlador.notificar_comando_escrito(comando.state, time.monotonic())
-
-            if comando.terminal:
-                if comando.state == ControladorSaidaParede.ALINHADO:
-                    return "alinhado_parede"
-                print(
-                    f"[saida-parede] falha: {comando.detail} "
-                    f"({controlador.diagnostico_yaw(agora)})")
-                return RETOMADA_SONDA_FALHOU
-
-            # Uma consulta por vez evita interferencia entre HC-SR04 e faz a
-            # serial continuar responsiva para o watchdog dos motores.
-            monitor_sensores.agendar_proxima(
-                time.monotonic(),
-                priorizar_mpu=controlador.prioriza_mpu,
-            )
-
-            arduino.refresh(fail_closed=True)
-            time.sleep(TICK_S)
-    finally:
-        try:
-            steer()
-        except Exception:
-            pass
-        try:
-            arduino.led("APAGADO")
-        except Exception:
-            pass
+    return executar_alinhamento_parede(arduino, intervalo_s=TICK_S)
 
 
 def parse_args():
