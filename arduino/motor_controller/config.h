@@ -16,17 +16,21 @@
 // LED
 // ======================================================
 
-// LED indicador controlado pela Raspberry Pi.
-#define LED_PIN 12
+// LED indicador controlado pela Raspberry Pi no CH4 do PCA9685.
+#define LED_CANAL_PCA 4
 
 
 // ======================================================
-// SENSOR ULTRASSONICO
+// SENSORES ULTRASSONICOS
 // ======================================================
 
-#define ULTRASSOM_TRIG_PIN 8
+// Frontal.
+#define ULTRASSOM_FRENTE_TRIG_PIN 8
+#define ULTRASSOM_FRENTE_ECHO_PIN 11
 
-#define ULTRASSOM_ECHO_PIN 11
+// Lateral.
+#define ULTRASSOM_LATERAL_TRIG_PIN 12
+#define ULTRASSOM_LATERAL_ECHO_PIN 13
 
 #define ULTRASSOM_TIMEOUT_US 30000UL
 
@@ -78,13 +82,14 @@
 // ======================================================
 // CANAIS DO PCA9685
 //
-// Olhando os 4 conectores utilizados da esquerda
+// Olhando os conectores utilizados da esquerda
 // para a direita:
 //
 // CH0 = Garra esquerda
 // CH1 = Garra direita
 // CH2 = Servo cacamba
 // CH3 = Futaba
+// CH4 = LED
 // ======================================================
 
 #define SERVO_GARRA_ESQUERDA 0
