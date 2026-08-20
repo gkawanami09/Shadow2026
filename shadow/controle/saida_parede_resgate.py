@@ -268,9 +268,17 @@ class ControladorSaidaParede:
                     self.AVANCAR_ATE_PAREDE_FRENTE,
                     "alinhamento concluido; aguardando ultrassom frontal novo",
                 )
+            if self._frente_mm is None:
+                # ``None`` aqui e uma resposta valida ``OK ULTRASSOM -1``:
+                # o HC-SR04 frontal foi consultado, mas nao recebeu eco.
+                # Nao e seguro interpreta-la como pista livre e continuar
+                # reto; o robo fica parado ate o sensor ser corrigido.
+                return self._falhar(
+                    "ultrassom frontal respondeu sem eco; avanco bloqueado",
+                    agora,
+                )
             if (
-                self._frente_mm is not None
-                and self._frente_mm <= cfg.SAIDA_PAREDE_DISTANCIA_FRENTE_FINAL_MM
+                self._frente_mm <= cfg.SAIDA_PAREDE_DISTANCIA_FRENTE_FINAL_MM
             ):
                 self._entrar(self.PAREDE_FRENTE_ATINGIDA, agora)
                 return self.atualizar(agora)

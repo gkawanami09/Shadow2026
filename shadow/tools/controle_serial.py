@@ -27,7 +27,9 @@ Digite exatamente o comando que deseja enviar, por exemplo:
   FUTABA STATUS
   LED ACESO
   LED APAGADO
-  ULTRASSOM
+  ULTRASSOM                  le o sensor frontal (pinos 8/11)
+  ULTRASSOM FRENTE           le o sensor frontal explicitamente
+  ULTRASSOM LATERAL          le o sensor lateral (pinos 12/13)
   PING
   STATUS
   PARAR

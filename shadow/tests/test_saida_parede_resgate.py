@@ -166,6 +166,17 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertEqual(controlador.state, controlador.FALHA)
         self.assertIn("ultrassom frontal", comando.detail)
 
+    def test_para_imediatamente_se_o_frontal_responder_sem_eco(self):
+        controlador, instante = self._chegar_ao_alinhamento()
+        self._passo(
+            controlador, instante + 0.01, yaw=90, lateral=125, frente=400)
+        comando = self._passo(
+            controlador, instante + 0.02, yaw=90, lateral=125, frente=None)
+
+        self.assertTrue(comando.terminal)
+        self.assertEqual(controlador.state, controlador.FALHA)
+        self.assertIn("sem eco", comando.detail)
+
     def test_para_em_falha_se_nao_chegar_na_parede_frontal_no_prazo(self):
         controlador, instante = self._chegar_ao_alinhamento()
         self._passo(
