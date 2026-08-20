@@ -824,8 +824,13 @@ SAIDA_PAREDE_COOLDOWN_TRIANGULO_S = 1.20
 SAIDA_PAREDE_AVANCO_ENTRADA_S = 0.18
 SAIDA_PAREDE_PWM_TRANSLACAO = 45
 SAIDA_PAREDE_TRANSLACAO_ESQUERDA_S = 0.28
-SAIDA_PAREDE_TOLERANCIA_TRANSLACAO_YAW_GRAUS = 3.5
-SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO = 2
+# A translacao omni real oscilou cerca de 4 graus mesmo com as quatro rodas
+# respondendo. Ate 6 graus ainda preserva folga suficiente na abertura de
+# 20--30 cm; acima disso o controlador para a translacao e corrige pelo MPU.
+SAIDA_PAREDE_TOLERANCIA_TRANSLACAO_YAW_GRAUS = 6.0
+# A correcao nao encerra a busca na primeira pequena derrapagem: ela repete
+# alguns pulsos curtos de tanque ate recuperar o heading da parede.
+SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO = 5
 
 # A camera inferior ve somente os centimetros proximos ao chao. O teste usa
 # pulsos curtos, aceita exclusivamente PRETA e devolve ao percurso se a faixa

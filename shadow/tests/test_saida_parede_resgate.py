@@ -165,7 +165,14 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertEqual(controlador.state, controlador.TRANSLADAR_ESQUERDA)
         self.assertEqual(comando.wheel_speeds, (-45, 45, 45, -45))
 
-        instante += cfg.SAIDA_PAREDE_TRANSLACAO_ESQUERDA_S + 0.01
+        # Uma pequena diferenca real entre as quatro rodas nao deve abortar a
+        # abertura: 4 graus ainda e transladacao, nao giro significativo.
+        instante += 0.02
+        comando = self._passo(controlador, instante, yaw=94, lateral=300)
+        self.assertEqual(controlador.state, controlador.TRANSLADAR_ESQUERDA)
+        self.assertEqual(comando.wheel_speeds, (-45, 45, 45, -45))
+
+        instante += cfg.SAIDA_PAREDE_TRANSLACAO_ESQUERDA_S
         comando = self._passo(controlador, instante, yaw=90, lateral=300)
         self.assertEqual(controlador.state, controlador.GIRO_ENTRADA_DIREITA)
         self.assertEqual(comando.angle, 180)
