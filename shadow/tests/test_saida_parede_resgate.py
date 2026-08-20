@@ -76,21 +76,16 @@ class SaidaParedeResgateTests(unittest.TestCase):
         controlador, _ = self._chegar_ao_alinhamento(yaw_final=270)
         self.assertEqual(controlador.heading_parede, 270.0)
 
-    def test_apoia_a_frente_e_translada_so_apos_um_segundo_lateral_estavel(self):
+    def _chegar_ao_avanco_frente(self):
+        """Isola os testes do trecho posterior a verificacao inicial."""
         controlador, instante = self._chegar_ao_alinhamento()
-        comando = self._passo(controlador, instante + 0.01, yaw=90, lateral=200)
-        self.assertEqual(comando.wheel_speeds, (45, -45, -45, 45))
-        self.assertEqual(controlador.state, controlador.ALINHAR_DIREITA)
+        controlador._entrar_avanco_frente(instante)
+        return controlador, instante
 
+    def test_apoia_a_frente_e_translada_so_apos_um_segundo_lateral_estavel(self):
+        controlador, instante = self._chegar_ao_avanco_frente()
         comando = self._passo(
-            controlador, instante + 0.08, yaw=90, lateral=130, frente=400)
-        self.assertFalse(comando.terminal)
-        self.assertEqual(controlador.state, controlador.AVANCAR_ATE_PAREDE_FRENTE)
-        self.assertEqual(comando.speed, 0.0)
-        self.assertIsNone(comando.wheel_speeds)
-
-        comando = self._passo(
-            controlador, instante + 0.09, yaw=90, lateral=130, frente=300)
+            controlador, instante + 0.01, yaw=90, lateral=130, frente=300)
         self.assertEqual(comando.angle, 0)
         self.assertEqual(
             comando.speed,
@@ -98,14 +93,14 @@ class SaidaParedeResgateTests(unittest.TestCase):
         )
 
         comando = self._passo(
-            controlador, instante + 0.16, yaw=90, lateral=130, frente=118)
+            controlador, instante + 0.08, yaw=90, lateral=130, frente=118)
         self.assertFalse(comando.terminal)
         self.assertEqual(controlador.state, controlador.PIVO_TRASEIRO_ESTABILIZAR)
         self.assertEqual(controlador.lado_ultrassom_atual, "LATERAL")
         self.assertEqual(comando.speed, 0.0)
 
         comando = self._passo(
-            controlador, instante + 0.30, yaw=90, lateral=130, frente=116)
+            controlador, instante + 0.22, yaw=90, lateral=130, frente=116)
         self.assertFalse(comando.terminal)
         self.assertEqual(
             comando.angle,
@@ -121,7 +116,7 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertEqual(comando.toque_frente_direita_pwm, 0)
 
         comando = self._passo(
-            controlador, instante + 0.58, yaw=90, lateral=130, frente=116)
+            controlador, instante + 0.50, yaw=90, lateral=130, frente=116)
         self.assertEqual(
             comando.toque_frente_direita_pwm,
             cfg.SAIDA_PAREDE_PWM_TOQUE_FRENTE_DIREITA,
@@ -129,48 +124,91 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertIn("toque na dianteira direita", comando.detail)
 
         comando = self._passo(
-            controlador, instante + 0.82, yaw=90, lateral=130, frente=120)
+            controlador, instante + 0.74, yaw=90, lateral=130, frente=120)
         self.assertFalse(comando.terminal)
         self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_FINAL)
         comando = self._passo(
-            controlador, instante + 1.34, yaw=90, lateral=130, frente=118)
+            controlador, instante + 1.26, yaw=90, lateral=130, frente=118)
         self.assertFalse(comando.terminal)
         self.assertEqual(controlador.state, controlador.VERIFICAR_TRIANGULO_VERDE)
         self.assertTrue(controlador.usa_camera_triangulo_verde)
         self.assertEqual(comando.speed, 0.0)
 
     def test_reinicia_o_segundo_estavel_quando_o_lateral_variar_demais(self):
-        controlador, instante = self._chegar_ao_alinhamento()
+        controlador, instante = self._chegar_ao_avanco_frente()
         self._passo(
-            controlador, instante + 0.01, yaw=90, lateral=125, frente=400)
-        self._passo(
-            controlador, instante + 0.08, yaw=90, lateral=125, frente=118)
+            controlador, instante + 0.01, yaw=90, lateral=125, frente=118)
         comando = self._passo(
-            controlador, instante + 0.20, yaw=90, lateral=125, frente=116)
+            controlador, instante + 0.13, yaw=90, lateral=125, frente=116)
         self.assertFalse(comando.terminal)
         comando = self._passo(
             controlador,
-            instante + 0.55,
+            instante + 0.48,
             yaw=90,
             lateral=125 + cfg.SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_LATERAL_MM + 1,
         )
         self.assertFalse(comando.terminal)
         comando = self._passo(
-            controlador, instante + 0.95, yaw=90, lateral=131, frente=122)
+            controlador, instante + 0.88, yaw=90, lateral=131, frente=122)
         self.assertFalse(comando.terminal)
         comando = self._passo(
-            controlador, instante + 1.07, yaw=90, lateral=131, frente=123)
+            controlador, instante + 1.00, yaw=90, lateral=131, frente=123)
         self.assertFalse(comando.terminal)
         self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_FINAL)
         comando = self._passo(
             controlador,
-            instante + 1.07 + cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.01,
+            instante + 1.00 + cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.01,
             yaw=90,
             lateral=131,
             frente=123,
         )
         self.assertFalse(comando.terminal)
         self.assertEqual(controlador.state, controlador.VERIFICAR_TRIANGULO_VERDE)
+
+    def test_afasta_a_esquerda_ate_120_mm_antes_de_abrir_a_camera(self):
+        controlador, instante = self._chegar_ao_alinhamento()
+
+        # 110 mm ainda esta dentro da tolerancia do alinhamento (125 +/- 15),
+        # mas nao deixa espaco suficiente para a camera procurar o triangulo.
+        comando = self._passo(
+            controlador, instante + 0.01, yaw=90, lateral=110, frente=400)
+        self.assertEqual(controlador.state, controlador.AFASTAR_ESQUERDA_INICIAL)
+        self.assertEqual(comando.speed, 0.0)
+        self.assertFalse(controlador.usa_camera_triangulo_verde)
+
+        comando = self._passo(
+            controlador, instante + 0.02, yaw=90, lateral=115, frente=400)
+        self.assertEqual(comando.wheel_speeds, (-45, 45, 45, -45))
+        self.assertIn("yaw monitorado", comando.detail)
+        self.assertFalse(controlador.usa_camera_triangulo_verde)
+
+        comando = self._passo(
+            controlador, instante + 0.09, yaw=90, lateral=120, frente=400)
+        self.assertEqual(controlador.state, controlador.VERIFICAR_TRIANGULO_VERDE)
+        self.assertTrue(controlador.usa_camera_triangulo_verde)
+        self.assertEqual(comando.speed, 0.0)
+
+    def test_corrige_yaw_antes_de_continuar_afastamento_inicial(self):
+        controlador, instante = self._chegar_ao_alinhamento()
+        self._passo(
+            controlador, instante + 0.01, yaw=90, lateral=110, frente=400)
+
+        comando = self._passo(
+            controlador, instante + 0.02, yaw=100, lateral=115, frente=400)
+        self.assertEqual(
+            controlador.state,
+            controlador.CORRIGIR_YAW_AFASTAMENTO_INICIAL,
+        )
+        self.assertEqual(comando.angle, -180)
+
+        comando = self._passo(
+            controlador, instante + 0.08, yaw=90, lateral=115, frente=400)
+        self.assertEqual(controlador.state, controlador.AFASTAR_ESQUERDA_INICIAL)
+        self.assertEqual(comando.speed, 0.0)
+
+        comando = self._passo(
+            controlador, instante + 0.09, yaw=90, lateral=115, frente=400)
+        self.assertEqual(comando.wheel_speeds, (-45, 45, 45, -45))
 
     def test_verde_confirmado_gira_45_esquerda_e_reinicia_avanco_frontal(self):
         controlador = ControladorSaidaParede(start_time=0.0)
@@ -236,14 +274,12 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertIn("camera frontal", comando.detail)
 
     def test_falha_se_o_lateral_nao_der_leitura_nova_para_o_pivo(self):
-        controlador, instante = self._chegar_ao_alinhamento()
+        controlador, instante = self._chegar_ao_avanco_frente()
         self._passo(
-            controlador, instante + 0.01, yaw=90, lateral=125, frente=400)
-        self._passo(
-            controlador, instante + 0.08, yaw=90, lateral=125, frente=118)
+            controlador, instante + 0.01, yaw=90, lateral=125, frente=118)
         comando = self._passo(
             controlador,
-            instante + 0.08 + cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S + 0.01,
+            instante + 0.01 + cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S + 0.01,
             yaw=90,
             enviar_lateral=False,
         )
@@ -252,16 +288,14 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertIn("pivo traseiro", comando.detail)
 
     def test_translada_se_lateral_oscilar_ate_timeout_do_pivo(self):
-        controlador, instante = self._chegar_ao_alinhamento()
+        controlador, instante = self._chegar_ao_avanco_frente()
         self._passo(
-            controlador, instante + 0.01, yaw=90, lateral=125, frente=400)
+            controlador, instante + 0.01, yaw=90, lateral=125, frente=118)
         self._passo(
-            controlador, instante + 0.08, yaw=90, lateral=125, frente=118)
-        self._passo(
-            controlador, instante + 0.20, yaw=90, lateral=118, frente=118)
+            controlador, instante + 0.13, yaw=90, lateral=118, frente=118)
         comando = self._passo(
             controlador,
-            instante + 0.08 + cfg.SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S + 0.01,
+            instante + 0.01 + cfg.SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S + 0.01,
             yaw=90,
             lateral=140,
             frente=118,
@@ -287,7 +321,8 @@ class SaidaParedeResgateTests(unittest.TestCase):
         comando = self._passo(
             controlador, instante + 0.08, yaw=90, lateral=120, frente=400)
         self.assertFalse(comando.terminal)
-        self.assertEqual(controlador.state, controlador.AVANCAR_ATE_PAREDE_FRENTE)
+        self.assertEqual(controlador.state, controlador.VERIFICAR_TRIANGULO_VERDE)
+        self.assertTrue(controlador.usa_camera_triangulo_verde)
 
     def test_corrige_yaw_antes_de_continuar_a_translacao(self):
         controlador, instante = self._chegar_ao_alinhamento()
@@ -328,9 +363,14 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertIn("timeout", comando.detail)
 
     def test_para_em_falha_se_o_frontal_nao_responder_apos_alinhamento(self):
-        controlador, instante = self._chegar_ao_alinhamento()
+        controlador, instante = self._chegar_ao_avanco_frente()
         self._passo(
-            controlador, instante + 0.01, yaw=90, lateral=125, frente=400)
+            controlador,
+            instante + 0.01,
+            yaw=90,
+            lateral=125,
+            enviar_frente=False,
+        )
         comando = self._passo(
             controlador,
             instante + 0.01 + cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S + 0.01,
@@ -343,25 +383,21 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertIn("ultrassom frontal", comando.detail)
 
     def test_para_imediatamente_se_o_frontal_responder_sem_eco(self):
-        controlador, instante = self._chegar_ao_alinhamento()
-        self._passo(
-            controlador, instante + 0.01, yaw=90, lateral=125, frente=400)
+        controlador, instante = self._chegar_ao_avanco_frente()
         comando = self._passo(
-            controlador, instante + 0.02, yaw=90, lateral=125, frente=None)
+            controlador, instante + 0.01, yaw=90, lateral=125, frente=None)
 
         self.assertTrue(comando.terminal)
         self.assertEqual(controlador.state, controlador.FALHA)
         self.assertIn("sem eco", comando.detail)
 
     def test_para_em_falha_se_nao_chegar_na_parede_frontal_no_prazo(self):
-        controlador, instante = self._chegar_ao_alinhamento()
+        controlador, instante = self._chegar_ao_avanco_frente()
         self._passo(
-            controlador, instante + 0.01, yaw=90, lateral=125, frente=400)
-        self._passo(
-            controlador, instante + 0.02, yaw=90, lateral=125, frente=300)
+            controlador, instante + 0.01, yaw=90, lateral=125, frente=300)
         comando = self._passo(
             controlador,
-            instante + 0.01 + cfg.SAIDA_PAREDE_TIMEOUT_AVANCO_FRENTE_S + 0.01,
+            instante + cfg.SAIDA_PAREDE_TIMEOUT_AVANCO_FRENTE_S + 0.02,
             yaw=90,
             lateral=125,
             frente=300,
@@ -371,11 +407,9 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertIn("timeout", comando.detail)
 
     def test_corrige_yaw_durante_o_avanco_reto(self):
-        controlador, instante = self._chegar_ao_alinhamento()
-        self._passo(
-            controlador, instante + 0.01, yaw=90, lateral=125, frente=400)
+        controlador, instante = self._chegar_ao_avanco_frente()
         comando = self._passo(
-            controlador, instante + 0.02, yaw=100, lateral=125, frente=300)
+            controlador, instante + 0.01, yaw=100, lateral=125, frente=300)
         self.assertEqual(controlador.state, controlador.CORRIGIR_YAW_AVANCO_FRENTE)
         self.assertEqual(comando.angle, -180)
 

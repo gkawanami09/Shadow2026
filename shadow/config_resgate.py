@@ -814,6 +814,14 @@ SAIDA_PAREDE_TOLERANCIA_ALINHAMENTO_MM = 15
 SAIDA_PAREDE_PWM_TRANSLACAO_ALINHAMENTO = 45
 SAIDA_PAREDE_TIMEOUT_ALINHAMENTO_S = 2.0
 
+# Ainda no primeiro canto, depois de se alinhar a parede direita, o robo
+# precisa abrir espaco para a camera frontal enxergar o triangulo. Enquanto a
+# lateral estiver abaixo de 120 mm, ele translada para a esquerda com o yaw
+# monitorado pelo MPU. O teto impede movimento lateral infinito caso uma parede
+# ou sensor defeituoso nunca permita atingir a distancia solicitada.
+SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_CAMERA_MM = 120
+SAIDA_PAREDE_TIMEOUT_AFASTAMENTO_ESQUERDA_INICIAL_S = 2.0
+
 # Quando o alinhamento lateral termina, avanca reto ate o HC-SR04 frontal
 # indicar a parede a 118 mm ou menos. O teto de tempo e uma guarda fisica:
 # sem eco ou sem parede o robo para, em vez de atravessar a arena inteira.
@@ -846,9 +854,10 @@ SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 2.0
 SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA = 100
 SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S = 0.50
 
-# Depois da primeira translacao, a camera frontal procura o triangulo verde
-# com LED apagado. Um verde confirmado leva a uma unica curva fisica de 45°
-# para a esquerda; a mesma sequencia de parede e translacao e entao repetida.
+# Logo depois do afastamento inicial para a esquerda, a camera frontal procura
+# o triangulo verde com LED apagado. Um verde confirmado leva a uma unica curva
+# fisica de 45 graus para a esquerda; a sequencia de parede e translacao e
+# entao executada uma vez.
 SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S = 3.0
 SAIDA_PAREDE_GIRO_TRIANGULO_VERDE_GRAUS = 45.0
 # Fechar a camera pode demorar algumas centenas de milissegundos. Depois da

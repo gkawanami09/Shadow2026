@@ -3,11 +3,14 @@
 Esta rotina deliberadamente nao procura a saida. Ela so afasta o robo do
 marcador vermelho, gira 90 graus para a direita pelo MPU e usa o ultrassom
 lateral direito para regular a distancia da parede. Ao terminar o
-alinhamento, avanca reto ate encontrar a parede frontal a 118 mm. Entao
+alinhamento, afasta lateralmente para a esquerda ate o sensor direito marcar
+ao menos 120 mm e faz a verificacao visual do triangulo verde. Depois disso,
+avanca reto ate encontrar a parede frontal a 118 mm. Entao
 avanca em curva, mantendo a frente como referencia e movimentando mais a
 traseira. Com o ultrassom lateral direito estavel por um segundo, translada a direita
-por meio segundo. A camera frontal procura um triangulo verde; se confirmar,
-gira 45 graus para a esquerda e repete a aproximacao e o alinhamento.
+por meio segundo e encerra a manobra. A camera frontal ja foi fechada antes
+de o robo mover: se confirmou um triangulo verde, ele gira 45 graus para a
+esquerda e entao executa essa aproximacao e o alinhamento.
 """
 
 from dataclasses import dataclass
@@ -34,6 +37,10 @@ class ControladorSaidaParede:
     GIRO_INICIAL_DIREITA = "EXIT_PAREDE_GIRO_INICIAL_DIREITA"
     ALINHAR_DIREITA = "EXIT_PAREDE_ALINHAR_DIREITA"
     CORRIGIR_YAW_ALINHAMENTO = "EXIT_PAREDE_CORRIGIR_YAW_ALINHAMENTO"
+    AFASTAR_ESQUERDA_INICIAL = "EXIT_PAREDE_AFASTAR_ESQUERDA_INICIAL"
+    CORRIGIR_YAW_AFASTAMENTO_INICIAL = (
+        "EXIT_PAREDE_CORRIGIR_YAW_AFASTAMENTO_INICIAL"
+    )
     AVANCAR_ATE_PAREDE_FRENTE = "EXIT_PAREDE_AVANCAR_ATE_FRENTE"
     CORRIGIR_YAW_AVANCO_FRENTE = "EXIT_PAREDE_CORRIGIR_YAW_FRENTE"
     PIVO_TRASEIRO_ESTABILIZAR = "EXIT_PAREDE_PIVO_TRASEIRO_ESTABILIZAR"
@@ -47,6 +54,7 @@ class ControladorSaidaParede:
     _ESTADOS_GIRO = {
         GIRO_INICIAL_DIREITA,
         CORRIGIR_YAW_ALINHAMENTO,
+        CORRIGIR_YAW_AFASTAMENTO_INICIAL,
         CORRIGIR_YAW_AVANCO_FRENTE,
         GIRO_TRIANGULO_VERDE,
     }
@@ -70,6 +78,7 @@ class ControladorSaidaParede:
         self._lateral_mm = None
         self._lateral_em = None
         self._lateral_em_antes_alinhamento = None
+        self._lateral_em_antes_afastamento_inicial = None
         self._frente_mm = None
         self._frente_em = None
         self._frente_em_antes_avanco = None
@@ -252,7 +261,17 @@ class ControladorSaidaParede:
             erro_distancia = (
                 self._lateral_mm - cfg.SAIDA_PAREDE_DISTANCIA_ALVO_ALINHAMENTO_MM)
             if abs(erro_distancia) <= cfg.SAIDA_PAREDE_TOLERANCIA_ALINHAMENTO_MM:
-                self._entrar_avanco_frente(agora)
+                # Antes de abrir a camera, cria espaco entre a parede direita
+                # e o chassi. A propria leitura que concluiu o alinhamento e
+                # suficiente quando ela ja e >= 120 mm; nao ha motivo para
+                # transladar sem necessidade.
+                if (
+                    self._lateral_mm
+                    >= cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_CAMERA_MM
+                ):
+                    self._entrar_verificacao_triangulo_verde(agora)
+                else:
+                    self._entrar_afastamento_esquerda_inicial(agora)
                 return self.atualizar(agora)
             if not self._mpu_fresco(agora):
                 return self._falhar("MPU sem leitura durante alinhamento lateral", agora)
@@ -286,6 +305,82 @@ class ControladorSaidaParede:
             return self._girar(
                 self.CORRIGIR_YAW_ALINHAMENTO,
                 "corrigindo yaw antes de continuar o alinhamento lateral",
+            )
+
+        if self.state == self.AFASTAR_ESQUERDA_INICIAL:
+            # A primeira leitura do alinhamento apenas decide se esse
+            # afastamento e necessario. As proximas leituras sao obrigatorias
+            # para comandar o deslocamento com o valor lateral atual.
+            if not self._lateral_fresca_desde_afastamento_inicial(agora):
+                if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
+                    return self._falhar(
+                        "ultrassom lateral sem leitura nova durante o "
+                        "afastamento inicial para a esquerda",
+                        agora,
+                    )
+                return self._parado(
+                    self.AFASTAR_ESQUERDA_INICIAL,
+                    "alinhamento inicial concluido; aguardando ultrassom "
+                    "lateral novo para afastar a esquerda",
+                )
+            if self._lateral_mm is None:
+                return self._falhar(
+                    "ultrassom lateral respondeu sem eco durante o "
+                    "afastamento inicial para a esquerda",
+                    agora,
+                )
+            if (
+                self._lateral_mm
+                >= cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_CAMERA_MM
+            ):
+                self._entrar_verificacao_triangulo_verde(agora)
+                return self.atualizar(agora)
+            if (
+                self._tempo_decorrido(agora)
+                >= cfg.SAIDA_PAREDE_TIMEOUT_AFASTAMENTO_ESQUERDA_INICIAL_S
+            ):
+                return self._falhar(
+                    "timeout ao afastar a esquerda ate "
+                    f"{cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_CAMERA_MM} mm "
+                    f"da parede direita (ultima leitura={self._lateral_mm} mm)",
+                    agora,
+                )
+            if not self._mpu_fresco(agora):
+                return self._falhar(
+                    "MPU sem leitura durante afastamento inicial para a esquerda",
+                    agora,
+                )
+            if self._erro_heading() > cfg.SAIDA_PAREDE_TOLERANCIA_TRANSLACAO_YAW_GRAUS:
+                self._tentativas_correcao += 1
+                if self._tentativas_correcao > cfg.SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO:
+                    return self._falhar(
+                        "yaw nao voltou ao rumo durante afastamento inicial",
+                        agora,
+                    )
+                self._preparar_giro_para(
+                    self._heading_parede,
+                    self.CORRIGIR_YAW_AFASTAMENTO_INICIAL,
+                    agora,
+                )
+                return self.atualizar(agora)
+            self._tentativas_correcao = 0
+            return self._lateral(
+                self.AFASTAR_ESQUERDA_INICIAL,
+                direita=False,
+                detalhe=(
+                    "lateral abaixo de "
+                    f"{cfg.SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_CAMERA_MM} mm; "
+                    "transladando para a esquerda com yaw monitorado"
+                ),
+            )
+
+        if self.state == self.CORRIGIR_YAW_AFASTAMENTO_INICIAL:
+            if self._giro_concluido():
+                self._entrar_afastamento_esquerda_inicial(agora)
+                return self.atualizar(agora)
+            return self._girar(
+                self.CORRIGIR_YAW_AFASTAMENTO_INICIAL,
+                "corrigindo yaw antes de continuar o afastamento a esquerda",
             )
 
         if self.state == self.AVANCAR_ATE_PAREDE_FRENTE:
@@ -479,6 +574,13 @@ class ControladorSaidaParede:
         self._lateral_em_antes_alinhamento = self._lateral_em
         self._entrar(self.ALINHAR_DIREITA, agora)
 
+    def _entrar_afastamento_esquerda_inicial(self, agora):
+        # O valor que concluiu o alinhamento pode estar abaixo de 120 mm.
+        # Guarda seu timestamp para exigir uma leitura nova antes de mover.
+        self._lateral_em_antes_afastamento_inicial = self._lateral_em
+        self._tentativas_correcao = 0
+        self._entrar(self.AFASTAR_ESQUERDA_INICIAL, agora)
+
     def _entrar_avanco_frente(self, agora):
         self._frente_em_antes_avanco = self._frente_em
         self._entrar(self.AVANCAR_ATE_PAREDE_FRENTE, agora)
@@ -606,6 +708,14 @@ class ControladorSaidaParede:
             self._lateral_em is not None
             and self._lateral_em_antes_alinhamento is not None
             and self._lateral_em > self._lateral_em_antes_alinhamento
+            and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
+        )
+
+    def _lateral_fresca_desde_afastamento_inicial(self, agora):
+        return (
+            self._lateral_em is not None
+            and self._lateral_em_antes_afastamento_inicial is not None
+            and self._lateral_em > self._lateral_em_antes_afastamento_inicial
             and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
         )
 
