@@ -1,5 +1,6 @@
 """Testes da serial e do LED durante o resgate."""
 
+from collections import deque
 import sys
 from pathlib import Path
 import types
@@ -80,7 +81,7 @@ class RescueSerialLedTests(unittest.TestCase):
         arduino._rampa_estado = None
         arduino._rampa_angulo = None
         arduino._manual_pending = False
-        arduino._manual_response = None
+        arduino._manual_responses = deque()
         return arduino
 
     def _connected_arduino(self):
@@ -212,6 +213,18 @@ class RescueSerialLedTests(unittest.TestCase):
         self.assertEqual(leitura.pitch_graus, 1.25)
 
         arduino._ser.reply_on_write = b"OK MPU ZERO\n"
+        self.assertTrue(arduino.zerar_mpu(timeout=0.05))
+
+    def test_mpu_zero_ignora_resposta_antiga_e_espera_confirmacao_exata(self):
+        arduino = self._connected_arduino()
+        # Simula uma leitura antiga chegando depois de MPU ZERO. Antes a
+        # primeira linha ocupava a resposta manual e a confirmacao do zero se
+        # perdia, encerrando a saida pela parede sem nenhum movimento.
+        arduino._ser.reply_on_write = (
+            b"OK MPU PITCH=0.0 ROLL=0.0 YAW=2.0\n"
+            b"OK MPU ZERO\n"
+        )
+
         self.assertTrue(arduino.zerar_mpu(timeout=0.05))
 
     def test_ultrasonic_no_echo_and_late_cancelled_reply(self):

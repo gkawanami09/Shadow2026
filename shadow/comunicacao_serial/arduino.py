@@ -1,5 +1,6 @@
 """Mantém a comunicação USB serial com o Arduino usando o protocolo SPEC 01."""
 
+from collections import deque
 from dataclasses import dataclass
 import time
 
@@ -48,7 +49,7 @@ class Arduino:
         self._rampa_estado = None
         self._rampa_angulo = None
         self._manual_pending = False
-        self._manual_response = None
+        self._manual_responses = deque()
         self._reconexao_automatica = True
 
         if port is not None:
@@ -113,7 +114,7 @@ class Arduino:
         self.cancelar_mpu()
         self.cancelar_rampa()
         self._manual_pending = False
-        self._manual_response = None
+        self._manual_responses.clear()
 
     def _autodetect(self):
         deadline = time.monotonic() + config.SERIAL_HANDSHAKE_TIMEOUT
@@ -333,6 +334,10 @@ class Arduino:
 
     def zerar_mpu(self, timeout=0.5):
         """Zera a referencia relativa de pitch, roll e yaw com o robo parado."""
+        # Uma amostra assincrona do MPU pedida pela fase anterior pode chegar
+        # exatamente depois deste comando. Ela nao e a confirmacao do ZERO e
+        # jamais deve impedir que a resposta ``OK MPU ZERO`` seja recebida.
+        self.cancelar_mpu()
         resposta = self._query("MPU ZERO", "OK MPU ZERO", timeout)
         return resposta is not None
 
@@ -412,11 +417,16 @@ class Arduino:
         """Corta imediatamente o sinal do canal continuo CH3."""
         return self._send_aux_cmd("FUTABA PARAR")
 
-    def comando_serial(self, comando, timeout=0.5):
+    def comando_serial(self, comando, timeout=0.5, resposta_esperada=None):
         """Envia uma linha livre e retorna a primeira resposta do firmware.
 
         Destinado a ferramentas manuais de teste. Nao substitui o ultimo
         comando de movimento usado pelo keepalive da aplicacao principal.
+
+        Quando ``resposta_esperada`` e informado, respostas pendentes de
+        comandos anteriores sao descartadas ate a resposta com esse prefixo
+        chegar. Isso e necessario para comandos de seguranca, como MPU ZERO,
+        que podem disputar o buffer com uma leitura assincrona anterior.
         """
         comando = str(comando).strip()
         if not comando:
@@ -430,19 +440,24 @@ class Arduino:
 
         self._drain()
         self._manual_pending = True
-        self._manual_response = None
+        self._manual_responses.clear()
         self._write_line(comando)
         deadline = time.monotonic() + timeout
         try:
             while self._connected and time.monotonic() < deadline:
                 self._drain()
-                if self._manual_response is not None:
-                    return self._manual_response
+                while self._manual_responses:
+                    resposta = self._manual_responses.popleft()
+                    if (
+                        resposta_esperada is None
+                        or resposta.startswith(resposta_esperada)
+                    ):
+                        return resposta
                 time.sleep(0.002)
             return None
         finally:
             self._manual_pending = False
-            self._manual_response = None
+            self._manual_responses.clear()
 
     def refresh(self, fail_closed=False):
         """Re-send the last command if the keepalive interval elapsed
@@ -519,8 +534,11 @@ class Arduino:
 
     def _query(self, cmd, prefix, timeout):
         """Envia uma consulta e aguarda somente a resposta correspondente."""
-        line = self.comando_serial(cmd, timeout=timeout)
-        return line if line is not None and line.startswith(prefix) else None
+        return self.comando_serial(
+            cmd,
+            timeout=timeout,
+            resposta_esperada=prefix,
+        )
 
     def _write_line(self, cmd):
         if not self._connected:
@@ -626,11 +644,11 @@ class Arduino:
                 self._ultra_ready = True
                 return
             # A ferramenta manual tambem pode enviar ULTRASSOM.
-            if self._manual_pending and self._manual_response is None:
-                self._manual_response = line
+            if self._manual_pending:
+                self._manual_responses.append(line)
             return
-        if self._manual_pending and self._manual_response is None:
-            self._manual_response = line
+        if self._manual_pending:
+            self._manual_responses.append(line)
         if line.startswith("ERRO"):
             print(f"[serial] firmware respondeu: {line}")
 
