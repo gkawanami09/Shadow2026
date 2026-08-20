@@ -36,6 +36,9 @@ class ControladorSaidaParede:
     RETORNAR_TRIANGULO = "EXIT_PAREDE_RETORNAR_TRIANGULO"
     PARAR_PAREDE = "EXIT_PAREDE_PARAR_FRENTE"
     GIRO_PAREDE_ESQUERDA = "EXIT_PAREDE_GIRO_PAREDE_ESQUERDA"
+    CONFERIR_PAREDE_APOS_GIRO = "EXIT_PAREDE_CONFERIR_LATERAL"
+    ALINHAR_DIREITA_APOS_GIRO = "EXIT_PAREDE_ALINHAR_DIREITA"
+    CORRIGIR_YAW_ALINHAMENTO = "EXIT_PAREDE_CORRIGIR_YAW_ALINHAMENTO"
     PARAR_ABERTURA = "EXIT_PAREDE_PARAR_ABERTURA"
     AVANCAR_ENTRADA = "EXIT_PAREDE_AVANCAR_ENTRADA"
     TRANSLADAR_ESQUERDA = "EXIT_PAREDE_TRANSLADAR_ESQUERDA"
@@ -57,6 +60,7 @@ class ControladorSaidaParede:
         PARAR_TRIANGULO,
         PASSAR_TRIANGULO,
         PARAR_PAREDE,
+        ALINHAR_DIREITA_APOS_GIRO,
         PARAR_ABERTURA,
         AVANCAR_ENTRADA,
         TRANSLADAR_ESQUERDA,
@@ -69,6 +73,7 @@ class ControladorSaidaParede:
         DESVIAR_TRIANGULO,
         RETORNAR_TRIANGULO,
         GIRO_PAREDE_ESQUERDA,
+        CORRIGIR_YAW_ALINHAMENTO,
         CORRIGIR_YAW_TRANSLACAO,
         GIRO_ENTRADA_DIREITA,
         GIRO_RETORNO_ESQUERDA,
@@ -96,6 +101,7 @@ class ControladorSaidaParede:
         self._frente_proxima = 0
         self._lateral_aberta = 0
         self._lateral_parede = 0
+        self._lateral_em_antes_do_giro = None
         # Um vao so existe depois de o sensor ter visto uma parede continua.
         # Isso impede que a zona aberta logo depois do deposito vermelho seja
         # tratada como uma saida antes de o robo alcancar a parede direita.
@@ -356,9 +362,81 @@ class ControladorSaidaParede:
                 self._heading_parede = self._alvo_yaw
                 self._frente_proxima = 0
                 self._lateral_aberta = 0
-                self._entrar(self.SEGUIR_PAREDE, agora)
+                # A leitura lateral durante o giro pertence a parede que
+                # acabou de bloquear a frente. Esperamos um eco novo antes de
+                # decidir se vale aproximar a direita; se estiver aberto, pode
+                # ser justamente a saida e nenhuma translacao deve ocorrer.
+                self._lateral_em_antes_do_giro = self._lateral_em
+                self._tentativas_translacao = 0
+                self._entrar(self.CONFERIR_PAREDE_APOS_GIRO, agora)
                 return self.atualizar(agora)
             return self._girar(self.GIRO_PAREDE_ESQUERDA, "girando 90 graus a esquerda e mantendo parede direita")
+
+        if self.state == self.CONFERIR_PAREDE_APOS_GIRO:
+            leitura_nova = (
+                self._lateral_em is not None
+                and (
+                    self._lateral_em_antes_do_giro is None
+                    or self._lateral_em > self._lateral_em_antes_do_giro
+                )
+            )
+            if not leitura_nova:
+                if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
+                    self._entrar(self.SEGUIR_PAREDE, agora)
+                    return self.atualizar(agora)
+                return self._parado(
+                    self.CONFERIR_PAREDE_APOS_GIRO,
+                    "giro concluido; aguardando ultrassom lateral novo",
+                )
+            if (
+                self._lateral_mm is None
+                or self._lateral_mm >= cfg.SAIDA_PAREDE_DISTANCIA_ABERTURA_MM
+            ):
+                self._entrar(self.SEGUIR_PAREDE, agora)
+                return self.atualizar(agora)
+            self._tentativas_translacao = 0
+            self._entrar(self.ALINHAR_DIREITA_APOS_GIRO, agora)
+            return self.atualizar(agora)
+
+        if self.state == self.ALINHAR_DIREITA_APOS_GIRO:
+            if (
+                self._lateral_mm is None
+                or self._lateral_mm >= cfg.SAIDA_PAREDE_DISTANCIA_ABERTURA_MM
+            ):
+                # A parede sumiu durante a aproximacao: nao atravessa a
+                # abertura de lado, volta ao seguimento para testa-la.
+                self._entrar(self.SEGUIR_PAREDE, agora)
+                return self.atualizar(agora)
+            if self._erro_heading() > cfg.SAIDA_PAREDE_TOLERANCIA_TRANSLACAO_YAW_GRAUS:
+                self._tentativas_translacao += 1
+                if self._tentativas_translacao > cfg.SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO:
+                    return self._falhar("yaw saiu da tolerancia ao alinhar pela direita")
+                self._preparar_giro_para(
+                    self._heading_parede,
+                    self.CORRIGIR_YAW_ALINHAMENTO,
+                    agora,
+                )
+                return self.atualizar(agora)
+            if (
+                self._lateral_mm <= cfg.SAIDA_PAREDE_DISTANCIA_ALINHAMENTO_MM
+                or self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_ALINHAMENTO_DIREITA_MAX_S
+            ):
+                self._entrar(self.SEGUIR_PAREDE, agora)
+                return self.atualizar(agora)
+            return self._lateral(
+                self.ALINHAR_DIREITA_APOS_GIRO,
+                esquerda=False,
+                detalhe="parede lateral confirmada; transladando a direita para alinhar",
+            )
+
+        if self.state == self.CORRIGIR_YAW_ALINHAMENTO:
+            if self._giro_concluido(agora):
+                self._entrar(self.ALINHAR_DIREITA_APOS_GIRO, agora)
+                return self.atualizar(agora)
+            return self._girar(
+                self.CORRIGIR_YAW_ALINHAMENTO,
+                "corrigindo yaw antes de continuar alinhamento lateral",
+            )
 
         if self.state == self.PARAR_ABERTURA:
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_ASSENTAMENTO_S:
@@ -444,6 +522,7 @@ class ControladorSaidaParede:
             self.ASSENTAR_INICIAL,
             self.PARAR_TRIANGULO,
             self.PARAR_PAREDE,
+            self.CONFERIR_PAREDE_APOS_GIRO,
             self.PARAR_ABERTURA,
             self.PRONTO_SONDA_LINHA,
             self.AGUARDANDO_SONDA,
@@ -477,6 +556,12 @@ class ControladorSaidaParede:
                     and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
                 )
                 return frente_fresca and lateral_fresca
+            if self.state == self.ALINHAR_DIREITA_APOS_GIRO:
+                lateral_fresca = (
+                    self._lateral_em is not None
+                    and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
+                )
+                return lateral_fresca
             return frente_fresca
         return True
 

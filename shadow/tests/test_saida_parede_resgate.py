@@ -117,7 +117,7 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
         self.assertEqual(comando.angle, 0)
 
-    def test_parede_frontal_vira_a_esquerda_e_mantem_parede_a_direita(self):
+    def test_parede_frontal_vira_a_esquerda_e_alinha_so_com_parede_lateral(self):
         controlador, instante = self._chegar_a_parede_direita()
         self._passo(controlador, instante + 0.02, yaw=90, frente=100)
         instante += 0.04
@@ -131,9 +131,41 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertEqual(comando.angle, -180)
 
         instante += 0.10
-        comando = self._passo(controlador, instante, yaw=0, frente=450)
+        comando = self._passo(
+            controlador, instante, yaw=0, frente=450, lateral=180)
+        self.assertEqual(controlador.state, controlador.CONFERIR_PAREDE_APOS_GIRO)
+        self.assertEqual(comando.angle, 190)
+
+        instante += 0.02
+        comando = self._passo(
+            controlador, instante, yaw=0, frente=450, lateral=180)
+        self.assertEqual(controlador.state, controlador.ALINHAR_DIREITA_APOS_GIRO)
+        self.assertEqual(comando.wheel_speeds, (45, -45, -45, 45))
+
+        instante += cfg.SAIDA_PAREDE_ALINHAMENTO_DIREITA_MAX_S + 0.01
+        comando = self._passo(
+            controlador, instante, yaw=0, frente=450, lateral=180)
         self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
         self.assertEqual(comando.angle, 0)
+
+    def test_espaco_lateral_apos_giro_nao_translada_para_direita(self):
+        controlador, instante = self._chegar_a_parede_direita()
+        self._passo(controlador, instante + 0.02, yaw=90, frente=100)
+        instante += 0.04
+        self._passo(controlador, instante, yaw=90, frente=100)
+        instante += cfg.SAIDA_PAREDE_ASSENTAMENTO_S + 0.01
+        self._passo(controlador, instante, yaw=90, frente=100)
+
+        instante += 0.10
+        self._passo(
+            controlador, instante, yaw=0, frente=450, lateral=300)
+        instante += 0.02
+        comando = self._passo(
+            controlador, instante, yaw=0, frente=450, lateral=300)
+
+        self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
+        self.assertEqual(comando.angle, 0)
+        self.assertIsNone(comando.wheel_speeds)
 
     def test_espaco_aberto_inicial_nao_e_saida_antes_de_ver_parede(self):
         controlador, instante = self._chegar_a_parede_direita(

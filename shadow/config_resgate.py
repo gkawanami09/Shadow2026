@@ -807,6 +807,11 @@ SAIDA_PAREDE_DISTANCIA_FRENTE_PARAR_MM = 115
 SAIDA_PAREDE_CONFIRMACOES_PAREDE = 2
 SAIDA_PAREDE_DISTANCIA_ABERTURA_MM = 230
 SAIDA_PAREDE_CONFIRMACOES_ABERTURA = 3
+# Depois de um giro para fugir da parede frontal, so aproxima o lado direito
+# se houver parede nele. A distancia alvo evita raspar na parede; os 2 s sao
+# apenas o teto para uma parede mais distante, nunca uma ordem cega de andar.
+SAIDA_PAREDE_DISTANCIA_ALINHAMENTO_MM = 125
+SAIDA_PAREDE_ALINHAMENTO_DIREITA_MAX_S = 2.0
 SAIDA_PAREDE_VELOCIDADE_SEGUIR = 0.38
 SAIDA_PAREDE_VELOCIDADE_APROXIMAR = 0.28
 
