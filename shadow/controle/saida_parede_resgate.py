@@ -5,7 +5,8 @@ marcador vermelho, gira 90 graus para a direita pelo MPU e usa o ultrassom
 lateral direito para regular a distancia da parede. Ao terminar o
 alinhamento, avanca reto ate encontrar a parede frontal a 118 mm. Entao
 avanca em curva, mantendo a frente como referencia e movimentando mais a
-traseira, e so para quando o ultrassom frontal estiver estavel por um segundo.
+traseira. Com o ultrassom frontal estavel por um segundo, translada a direita
+por meio segundo e para.
 """
 
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ class ResultadoSondaLinha:
 
 
 class ControladorSaidaParede:
-    """Gira, alinha na parede direita e para diante da parede frontal."""
+    """Gira, alinha, estabiliza a frente e translada a direita ao final."""
 
     ZERAR_MPU = "EXIT_PAREDE_ZERAR_MPU"
     AFASTAR_VERMELHO = "EXIT_PAREDE_AFASTAR_VERMELHO"
@@ -35,7 +36,8 @@ class ControladorSaidaParede:
     AVANCAR_ATE_PAREDE_FRENTE = "EXIT_PAREDE_AVANCAR_ATE_FRENTE"
     CORRIGIR_YAW_AVANCO_FRENTE = "EXIT_PAREDE_CORRIGIR_YAW_FRENTE"
     PIVO_TRASEIRO_ESTABILIZAR = "EXIT_PAREDE_PIVO_TRASEIRO_ESTABILIZAR"
-    PAREDE_FRENTE_ESTAVEL = "EXIT_PAREDE_PAREDE_FRENTE_ESTAVEL"
+    TRANSLADAR_DIREITA_FINAL = "EXIT_PAREDE_TRANSLADAR_DIREITA_FINAL"
+    SAIDA_CONCLUIDA = "EXIT_PAREDE_SAIDA_CONCLUIDA"
     FALHA = "EXIT_PAREDE_FALHA"
 
     _ESTADOS_GIRO = {
@@ -74,7 +76,7 @@ class ControladorSaidaParede:
 
     @property
     def terminal(self):
-        return self.state in (self.PAREDE_FRENTE_ESTAVEL, self.FALHA)
+        return self.state in (self.SAIDA_CONCLUIDA, self.FALHA)
 
     @property
     def solicita_zerar_mpu(self):
@@ -145,10 +147,10 @@ class ControladorSaidaParede:
 
     def atualizar(self, now=None):
         agora = time.monotonic() if now is None else float(now)
-        if self.state == self.PAREDE_FRENTE_ESTAVEL:
+        if self.state == self.SAIDA_CONCLUIDA:
             return self._parado(
-                self.PAREDE_FRENTE_ESTAVEL,
-                "ultrassom frontal estavel por 1,0 s; robo parado",
+                self.SAIDA_CONCLUIDA,
+                "leitura frontal estabilizada e translacao final concluida; robo parado",
                 terminal=True,
             )
         if self.state == self.FALHA:
@@ -347,7 +349,7 @@ class ControladorSaidaParede:
                 agora - self._estavel_desde_pivo
                 >= cfg.SAIDA_PAREDE_TEMPO_ESTABILIDADE_FRENTE_S
             ):
-                self._entrar(self.PAREDE_FRENTE_ESTAVEL, agora)
+                self._entrar(self.TRANSLADAR_DIREITA_FINAL, agora)
                 return self.atualizar(agora)
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S:
                 return self._falhar(
@@ -368,6 +370,19 @@ class ControladorSaidaParede:
                 detail=detalhe,
                 pivo_traseiro=True,
                 toque_frente_direita_pwm=toque_frente_direita_pwm,
+            )
+
+        if self.state == self.TRANSLADAR_DIREITA_FINAL:
+            if self._tempo_decorrido(agora) >= (
+                cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S
+            ):
+                self._entrar(self.SAIDA_CONCLUIDA, agora)
+                return self.atualizar(agora)
+            return self._lateral(
+                self.TRANSLADAR_DIREITA_FINAL,
+                direita=True,
+                pwm=cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
+                detalhe="leitura frontal estavel; transladando para a direita por 0,5 s",
             )
 
         return self._falhar(f"estado de alinhamento desconhecido: {self.state}", agora)
@@ -472,8 +487,10 @@ class ControladorSaidaParede:
         return MotionCommand(estado, detail=detalhe, terminal=terminal)
 
     @staticmethod
-    def _lateral(estado, direita, detalhe):
-        pwm = int(cfg.SAIDA_PAREDE_PWM_TRANSLACAO_ALINHAMENTO)
+    def _lateral(estado, direita, detalhe, pwm=None):
+        if pwm is None:
+            pwm = cfg.SAIDA_PAREDE_PWM_TRANSLACAO_ALINHAMENTO
+        pwm = int(pwm)
         rodas = (pwm, -pwm, -pwm, pwm) if direita else (-pwm, pwm, pwm, -pwm)
         return MotionCommand(estado, detail=detalhe, wheel_speeds=rodas)
 
@@ -606,8 +623,8 @@ def executar_alinhamento_parede(arduino, *, intervalo_s=0.005):
             controlador.notificar_comando_escrito(comando.state, time.monotonic())
 
             if comando.terminal:
-                if comando.state == ControladorSaidaParede.PAREDE_FRENTE_ESTAVEL:
-                    return "parede_frente_estavel"
+                if comando.state == ControladorSaidaParede.SAIDA_CONCLUIDA:
+                    return "saida_concluida"
                 print(
                     f"[saida] falha: {comando.detail} "
                     f"({controlador.diagnostico_yaw(agora)})")

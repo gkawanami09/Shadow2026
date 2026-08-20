@@ -51,7 +51,7 @@ class SaidaDiretaTests(unittest.TestCase):
             patch("saida.steer", return_value=True) as parar,
             patch(
                 "saida.executar_alinhamento_parede",
-                return_value="parede_frente_estavel",
+                return_value="saida_concluida",
             ) as executar,
         ):
             codigo = saida.main([])

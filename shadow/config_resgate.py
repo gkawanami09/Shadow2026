@@ -837,6 +837,11 @@ SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_FRENTE_MM = 5
 SAIDA_PAREDE_TEMPO_ESTABILIDADE_FRENTE_S = 1.0
 SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 3.0
 
+# Com a frente ja estabilizada, sai do contato lateralmente para a direita.
+# Usa a mesma intensidade da translacao curta inicial, por 0,5 s exatos.
+SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA = 100
+SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S = 0.50
+
 # Parede frontal e abertura no lado direito. Uma ausencia de eco do sensor
 # lateral so conta quando o Arduino confirmou a resposta; timeout serial para.
 SAIDA_PAREDE_DISTANCIA_FRENTE_PARAR_MM = 115

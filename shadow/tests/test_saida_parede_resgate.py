@@ -132,8 +132,28 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertFalse(comando.terminal)
         comando = self._passo(
             controlador, instante + 1.34, yaw=90, lateral=130, frente=118)
+        self.assertFalse(comando.terminal)
+        self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_FINAL)
+        self.assertEqual(
+            comando.wheel_speeds,
+            (
+                cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
+                -cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
+                -cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
+                cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
+            ),
+        )
+        self.assertIn("0,5 s", comando.detail)
+
+        comando = self._passo(
+            controlador,
+            instante + 1.34 + cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.01,
+            yaw=90,
+            lateral=130,
+            frente=118,
+        )
         self.assertTrue(comando.terminal)
-        self.assertEqual(controlador.state, controlador.PAREDE_FRENTE_ESTAVEL)
+        self.assertEqual(controlador.state, controlador.SAIDA_CONCLUIDA)
         self.assertEqual(comando.speed, 0.0)
 
     def test_reinicia_o_segundo_estavel_quando_o_frontal_variar_demais(self):
@@ -158,7 +178,17 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertFalse(comando.terminal)
         comando = self._passo(
             controlador, instante + 1.61, yaw=90, lateral=125, frente=123)
+        self.assertFalse(comando.terminal)
+        self.assertEqual(controlador.state, controlador.TRANSLADAR_DIREITA_FINAL)
+        comando = self._passo(
+            controlador,
+            instante + 1.61 + cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.01,
+            yaw=90,
+            lateral=125,
+            frente=123,
+        )
         self.assertTrue(comando.terminal)
+        self.assertEqual(controlador.state, controlador.SAIDA_CONCLUIDA)
 
     def test_falha_se_o_frontal_nao_der_leitura_nova_para_o_pivo(self):
         controlador, instante = self._chegar_ao_alinhamento()
