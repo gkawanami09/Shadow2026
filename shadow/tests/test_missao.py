@@ -2,7 +2,9 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +17,7 @@ from controle.missao import (  # noqa: E402
     HandoffExecutor,
     index_of,
 )
+import mission  # noqa: E402
 
 
 class FakeSystem:
@@ -135,6 +138,51 @@ class HandoffFailureTests(unittest.TestCase):
 
         with self.assertRaises(HandoffError):
             HandoffExecutor(Incompleto(), HANDOFF_TO_RESCUE).run()
+
+
+class MissionRedRestartTests(unittest.TestCase):
+    class SistemaFalso:
+        def __init__(self):
+            self.inicios = 0
+            self.reinicios = []
+            self.esperas_pronto = 0
+            self.esperas_fase = 0
+            self.encerrado = False
+
+        def start_line_phase(self):
+            self.inicios += 1
+
+        def reiniciar_missao_do_percurso(self, motivo):
+            self.reinicios.append(motivo)
+
+        def wait_line_ready(self):
+            self.esperas_pronto += 1
+            return True
+
+        def wait_line_phase(self):
+            self.esperas_fase += 1
+            if self.esperas_fase == 1:
+                return "finished"
+            raise KeyboardInterrupt
+
+        def shutdown(self):
+            self.encerrado = True
+
+    def test_faixa_vermelha_reinicia_o_percurso_sem_encerrar_mission(self):
+        sistema = self.SistemaFalso()
+        args = SimpleNamespace(debug=False, rescue_camera_index=None)
+
+        with (
+            patch.object(mission, "parse_args", return_value=args),
+            patch.object(mission, "MissionSystem", return_value=sistema),
+        ):
+            codigo = mission.main()
+
+        self.assertEqual(codigo, 130)
+        self.assertEqual(sistema.inicios, 1)
+        self.assertEqual(sistema.reinicios, ["faixa vermelha final alcancada"])
+        self.assertEqual(sistema.esperas_pronto, 2)
+        self.assertTrue(sistema.encerrado)
 
 
 if __name__ == "__main__":

@@ -625,15 +625,19 @@ def main():
                 resultado = system.wait_line_phase()
 
                 if resultado == "finished":
-                    print(
-                        "[missao] faixa vermelha final alcancada; "
-                        "prova concluida")
+                    # A faixa vermelha encerra somente a *tentativa* atual.
+                    # O supervisor deve continuar vivo para iniciar o proximo
+                    # percurso, tal como faz depois de um quit do debug.
+                    motivo = "faixa vermelha final alcancada"
+                    print(f"[missao] {motivo}; reiniciando automaticamente")
+                    tentativas += 1
                     estado_atual = mudar_estado(
                         estado_atual,
-                        EstadoMissao.ENCERRADO,
-                        "faixa vermelha final alcancada",
+                        EstadoMissao.RECONECTANDO,
+                        motivo,
                     )
-                    break
+                    iniciar_percurso_ate_pronto(motivo)
+                    continue
 
                 if resultado == "quit":
                     # No modo debug, q/Esc fecha a janela e sinaliza

@@ -46,7 +46,7 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
                 speed_right = -min(speed * right_correction * 1.2, 1)
             else:
                 speed_left = min(speed * left_correction, 1)
-                speed_right = min(speed * right_correction * ((max_turn_angle - angle) / (max_turn_angle - 1)), 1)
+                speed_right = min(speed * right_correction * ((max_turn_angle - angle) / max_turn_angle), 1)
 
         # left
         else:
@@ -55,7 +55,7 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
                 speed_left = -min(speed * left_correction * 1.2, 1)
                 speed_right = min(speed * right_correction * 1.2, 1)
             else:
-                speed_left = min(speed * left_correction * ((max_turn_angle + angle) / (max_turn_angle - 1)), 1)
+                speed_left = min(speed * left_correction * ((max_turn_angle + angle) / max_turn_angle), 1)
                 speed_right = min(speed * right_correction, 1)
 
     else:

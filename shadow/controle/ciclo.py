@@ -71,13 +71,21 @@ def _enter_rescue_zone(arduino):
 
 def _enter_rescue_after_no_black(arduino):
     """Entrega a serial ao resgate apos a ausencia de preto confirmada."""
-    if steer() is False or terminate.value or not arduino.connected:
+    if terminate.value:
+        status.value = 'Entrada do resgate cancelada - encerrando controle'
         return False
-    status.value = 'Linha preta ausente — entrando no resgate'
-    if arduino.led("APAGADO") is False or not arduino.connected:
-        # Sem confirmar o ultimo comando da sessao, nao pode existir handoff:
-        # o supervisor vera este filho terminar e reiniciara o percurso,
-        # aguardando o Arduino em uma nova instancia serial.
+    if steer() is False:
+        status.value = 'Falha ao parar na entrada do resgate - tentando novamente'
+        return False
+    if not arduino.connected:
+        status.value = 'Arduino desconectado na entrada do resgate'
+        return False
+    status.value = 'Linha preta ausente - entrando no resgate'
+    if arduino.led("APAGADO") is False:
+        status.value = 'Falha ao apagar LED na entrada do resgate - tentando novamente'
+        return False
+    if not arduino.connected:
+        status.value = 'Arduino desconectado ao apagar LED da entrada'
         return False
     entry_armed.value = False
     _reset_entry_silver("entrada por ausencia de preto")
@@ -434,7 +442,15 @@ def control_loop():
                     ):
                         if _enter_rescue_after_no_black(arduino):
                             rescue_requested.value = True
-                        break
+                            break
+                        # O handoff ainda nao aconteceu: ``entry_armed``
+                        # continua verdadeiro e o resgate nao pode assumir a
+                        # serial. Mantenha os motores parados e tente de novo
+                        # enquanto a sessao existir, em vez de encerrar o
+                        # filho silenciosamente e reiniciar o segue-linha.
+                        if arduino.connected and not terminate.value:
+                            sleep_steering(.05)
+                        continue
                 else:
                     no_black_since = None
 
