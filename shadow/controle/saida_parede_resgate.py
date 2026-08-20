@@ -728,11 +728,9 @@ class ControladorSaidaParede:
         )
 
     def _avancar_alinhando_parede(self):
-        """Avanca e corrige lateralmente, preservando o heading pelo MPU."""
+        """Avanca com forca lateral direita fixa, preservando o yaw pelo MPU."""
         pwm_frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
-        pwm_lateral = int(cfg.SAIDA_PAREDE_PWM_CORRECAO_LATERAL)
-        alvo = int(cfg.SAIDA_PAREDE_DISTANCIA_SEGUIR_ALVO_MM)
-        tolerancia = int(cfg.SAIDA_PAREDE_TOLERANCIA_SEGUIR_LATERAL_MM)
+        pwm_lateral = int(cfg.SAIDA_PAREDE_PWM_FORCA_DIREITA_SEGUINDO)
 
         if not self._parede_lateral_confirmada:
             return self._frente(
@@ -749,22 +747,10 @@ class ControladorSaidaParede:
                 pwm_frente,
                 "possivel abertura direita; seguindo reto ate confirmar",
             )
-        if self._lateral_mm > alvo + tolerancia:
-            return self._avanco_com_lateral(
-                pwm_frente,
-                pwm_lateral,
-                "parede direita distante; avancando e aproximando a traseira",
-            )
-        if self._lateral_mm < alvo - tolerancia:
-            return self._avanco_com_lateral(
-                pwm_frente,
-                -pwm_lateral,
-                "parede direita proxima; avancando e afastando a traseira",
-            )
-        return self._frente(
-            self.SEGUIR_PAREDE,
+        return self._avanco_com_lateral(
             pwm_frente,
-            "seguindo reto alinhado com a parede direita",
+            pwm_lateral,
+            "avancando com forca forte da traseira/lado direito",
         )
 
     def _avanco_com_lateral(self, pwm_frente, pwm_lateral, detalhe):
