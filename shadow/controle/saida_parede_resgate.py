@@ -642,6 +642,7 @@ def executar_alinhamento_parede(
     debug=False,
     camera_factory=None,
     detector_verde_factory=None,
+    detector_painel_verde_factory=None,
     fonte_assincrona_factory=None,
 ):
     """Executa a manobra pos-vermelho com uma verificacao frontal do verde.
@@ -659,6 +660,9 @@ def executar_alinhamento_parede(
     if detector_verde_factory is None:
         from visao.marcador_resgate import MarkerDetector
         detector_verde_factory = MarkerDetector
+    if detector_painel_verde_factory is None:
+        from visao.marcador_resgate import GreenRectangleDetector
+        detector_painel_verde_factory = GreenRectangleDetector
     if fonte_assincrona_factory is None:
         from visao.resgate_assincrono import LatestFrameSource
         fonte_assincrona_factory = LatestFrameSource
@@ -669,16 +673,58 @@ def executar_alinhamento_parede(
     ultimo_estado = None
     ultimo_log_yaw = -float("inf")
     fonte_verde = None
-    detector_verde = None
+    detector_triangulo_verde = None
+    detector_painel_verde = None
     ultima_sequencia_verde = 0
+    ultimo_frame_verde = None
+    proximo_log_debug_verde = 0.0
 
     def fechar_camera_verde():
-        nonlocal fonte_verde, detector_verde, ultima_sequencia_verde
+        nonlocal fonte_verde, detector_triangulo_verde, detector_painel_verde
+        nonlocal ultima_sequencia_verde, ultimo_frame_verde
         if fonte_verde is not None:
             fonte_verde.close()
         fonte_verde = None
-        detector_verde = None
+        detector_triangulo_verde = None
+        detector_painel_verde = None
         ultima_sequencia_verde = 0
+        ultimo_frame_verde = None
+
+    def salvar_debug_verde(motivo):
+        """Salva o quadro e as duas mascaras para calibrar na Raspberry."""
+        if not debug or ultimo_frame_verde is None:
+            return
+        from pathlib import Path
+
+        import cv2
+
+        pasta = Path("/tmp/shadow-saida-verde")
+        pasta.mkdir(parents=True, exist_ok=True)
+        sufixo = str(int(time.time() * 1000))
+        bruto = pasta / f"{sufixo}-bruto.png"
+        anotado = ultimo_frame_verde.copy()
+        altura, largura = anotado.shape[:2]
+        topo_roi = int(round(altura * cfg.MARKER_ROI_TOP))
+        cv2.line(anotado, (0, topo_roi), (largura - 1, topo_roi),
+                 (0, 255, 255), 1)
+        for candidato in detector_triangulo_verde.last_candidates:
+            x, y, w, h = (int(valor) for valor in candidato.bbox)
+            cv2.rectangle(anotado, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.putText(anotado, motivo, (8, 24), cv2.FONT_HERSHEY_SIMPLEX,
+                    .55, (0, 0, 255), 1, cv2.LINE_AA)
+        cv2.imwrite(str(bruto), ultimo_frame_verde)
+        cv2.imwrite(str(pasta / f"{sufixo}-anotado.png"), anotado)
+        if detector_triangulo_verde.last_mask is not None:
+            cv2.imwrite(
+                str(pasta / f"{sufixo}-mascara-triangulo.png"),
+                detector_triangulo_verde.last_mask)
+        if detector_painel_verde.last_mask is not None:
+            cv2.imwrite(
+                str(pasta / f"{sufixo}-mascara-painel.png"),
+                detector_painel_verde.last_mask)
+        print(
+            "[saida] debug verde salvo em "
+            f"{pasta} ({motivo})")
 
     try:
         if arduino.led("APAGADO") is False:
@@ -702,32 +748,68 @@ def executar_alinhamento_parede(
                             "nao foi possivel manter o LED apagado na camera frontal")
                     fonte_verde = fonte_assincrona_factory(
                         camera_factory(camera_index))
-                    detector_verde = detector_verde_factory("green")
+                    detector_triangulo_verde = detector_verde_factory("green")
+                    detector_painel_verde = detector_painel_verde_factory()
                     print(
                         "[saida] camera frontal ativa com LED APAGADO; "
                         "procurando triangulo verde")
                 quadro = fonte_verde.poll(ultima_sequencia_verde)
                 if quadro is not None:
                     ultima_sequencia_verde = quadro.sequence
-                    deteccao_verde = detector_verde.detect(
+                    ultimo_frame_verde = quadro.frame
+                    deteccao_triangulo = detector_triangulo_verde.detect(
                         quadro.frame,
                         timestamp=quadro.captured_at,
                     )
-                    if deteccao_verde is not None and (
-                        deteccao_verde.confirmed
+                    deteccao_painel = detector_painel_verde.detect(
+                        quadro.frame,
+                        timestamp=quadro.captured_at,
+                    )
+                    deteccao_confirmada = next(
+                        (
+                            deteccao
+                            for deteccao in (
+                                deteccao_triangulo,
+                                deteccao_painel,
+                            )
+                            if deteccao is not None and deteccao.confirmed
+                        ),
+                        None,
+                    )
+                    if deteccao_confirmada is not None and (
+                        deteccao_confirmada.confirmed
                     ) and controlador.observar_triangulo_verde(
                         True,
                         quadro.captured_at,
                     ):
+                        origem = (
+                            "triangulo" if deteccao_confirmada is deteccao_triangulo
+                            else "painel verde-ciano")
                         print(
-                            "[saida] triangulo verde confirmado pela camera "
-                            f"em {deteccao_verde.hits} frame(s)")
-                    elif debug and deteccao_verde is not None:
+                            "[saida] verde confirmado pela camera "
+                            f"({origem}) em {deteccao_confirmada.hits} frame(s)")
+                    elif debug and agora >= proximo_log_debug_verde:
+                        proximo_log_debug_verde = agora + 0.40
+                        mascara_triangulo = detector_triangulo_verde.last_mask
+                        proporcao_triangulo = (
+                            0.0 if mascara_triangulo is None else
+                            int((mascara_triangulo > 0).sum())
+                            / float(max(mascara_triangulo.size, 1))
+                        )
                         print(
-                            "[saida] verde em aquisicao: "
-                            f"hits={deteccao_verde.hits} "
-                            f"confirmado={deteccao_verde.confirmed}")
+                            "[saida] debug verde: "
+                            f"mascara-triangulo={proporcao_triangulo:.2%} "
+                            f"candidatos={len(detector_triangulo_verde.last_candidates)} "
+                            f"rejeicoes={detector_triangulo_verde.last_rejections}; "
+                            f"mascara-painel={detector_painel_verde.last_mask_ratio:.2%} "
+                            f"rejeicoes-painel={detector_painel_verde.last_rejections}")
             comando = controlador.atualizar(agora)
+
+            if (
+                comando.state == ControladorSaidaParede.FALHA
+                and fonte_verde is not None
+            ):
+                salvar_debug_verde(comando.detail)
 
             # A camera frontal e fechada antes do giro/avanco seguinte. Isso
             # deixa so um pipeline de imagem ativo e impede processamento

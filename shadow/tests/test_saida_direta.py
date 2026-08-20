@@ -60,7 +60,11 @@ class SaidaDiretaTests(unittest.TestCase):
         self.assertTrue(trava.adquirida)
         self.assertTrue(trava.liberada)
         iniciar_direcao.assert_called_once_with(arduino)
-        executar.assert_called_once_with(arduino, camera_index=None)
+        executar.assert_called_once_with(
+            arduino,
+            camera_index=None,
+            debug=False,
+        )
         self.assertTrue(arduino.sessao_travada)
         self.assertTrue(arduino.fechado)
         self.assertEqual(arduino.leds, ["APAGADO"])

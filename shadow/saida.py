@@ -44,6 +44,13 @@ def parse_args(argv=None):
         type=int,
         help="indice da camera frontal de resgate (padrao: configurado)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help=(
+            "mostra diagnostico das mascaras do verde e salva os ultimos "
+            "frames em /tmp/shadow-saida-verde se nao confirmar"),
+    )
     return parser.parse_args(argv)
 
 
@@ -71,6 +78,7 @@ def main(argv=None):
         resultado = executar_alinhamento_parede(
             arduino,
             camera_index=args.camera_index,
+            debug=args.debug,
         )
         if resultado == "saida_concluida":
             print(
