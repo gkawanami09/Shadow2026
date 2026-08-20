@@ -821,9 +821,13 @@ SAIDA_PAREDE_PWM_TRANSLACAO_ESQUERDA = 45
 SAIDA_PAREDE_TIMEOUT_AFASTAMENTO_ESQUERDA_S = 2.0
 
 # No avanco com a camera do segue-linha, o mesmo HC-SR04 lateral direito deve
-# continuar vendo a parede. Sem eco ou a partir desta distancia, ha um vao ao
-# lado do robo e a rota para por seguranca.
+# continuar vendo a parede. Sem eco para por seguranca; a partir desta
+# distancia ha um vao lateral e a rota declara a saida encontrada.
 SAIDA_PAREDE_DISTANCIA_LATERAL_MAX_AVANCO_LINHA_MM = 230
+# Uma faixa preta so e aceita quando a parede direita ja nao esta perto. Se o
+# lateral ainda estiver abaixo de 200 mm, a faixa pertence ao percurso junto
+# da parede e o robo a ignora, aproximando ate o frontal marcar 118 mm.
+SAIDA_PAREDE_DISTANCIA_LATERAL_MINIMA_PRETO_MM = 200
 
 # Ao chegar a parede frontal, o robo avanca em arco para a esquerda, com a
 # frente como ponto de apoio e a traseira conduzindo a curva. O angulo fica
@@ -850,13 +854,14 @@ SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 2.0
 SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA = 100
 SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S = 0.50
 
-# Depois da primeira sequencia completa de frente, pivo, direita e esquerda,
-# a camera frontal procura o triangulo verde com LED apagado. Um verde
-# confirmado inicia duas sequencias adicionais identicas; nao ha giro de 45
-# graus nesta rota.
+# Depois de cada sequencia impar de frente, pivo, direita e esquerda, a camera
+# de linha procura preto com LED aceso. Ao chegar a 118 mm ela fecha, apaga o
+# LED e a frontal procura o triangulo verde. Um verde confirmado inicia duas
+# sequencias adicionais identicas; nao ha giro de 45 graus nesta rota.
 SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S = 3.0
-# Se a camera frontal nao confirmar o verde, o robo encerra esta alternativa
-# girando 90 graus fisicos para a esquerda, guiado pelo MPU.
+# Se a camera frontal nao confirmar o verde, o robo gira 90 graus fisicos para
+# a esquerda, translada a direita e se afasta da parede antes de voltar a
+# procurar preto, sempre guiado pelo MPU e pelo ultrassom lateral direito.
 SAIDA_PAREDE_GIRO_SEM_VERDE_ESQUERDA_GRAUS = 90.0
 # Fechar a camera pode demorar algumas centenas de milissegundos. Depois da
 # confirmacao do verde, o chassi fica parado e espera um yaw NOVO antes de

@@ -3,10 +3,10 @@
 Depois do avanco curto e do giro inicial de 90 graus, cada passagem segue a
 mesma ordem: avanco ate 118 mm no ultrassom frontal, pivo traseiro ate o
 lateral estabilizar (ou completar 2 s), translacao para a direita e
-afastamento para a esquerda ate o lateral marcar ao menos 120 mm. A camera
-de segue-linha, com LED aceso, abre depois da primeira passagem: ela guia o
-avanco ate preto ou ate a parede frontal. Neste ultimo caso, a camera frontal
-com LED apagado decide o triangulo verde.
+afastamento para a esquerda ate o lateral marcar ao menos 120 mm. Depois de
+cada par de passagens, a camera de segue-linha, com LED aceso, guia o avanco
+ate preto, um vao lateral ou a parede frontal. Neste ultimo caso, a camera
+frontal com LED apagado decide o triangulo verde.
 """
 
 from dataclasses import dataclass
@@ -25,7 +25,7 @@ class ResultadoSondaLinha:
 
 
 class ControladorSaidaParede:
-    """Executa a rota pos-vermelho em tres passagens de parede."""
+    """Executa a rota pos-vermelho em passagens de parede e varreduras."""
 
     ZERAR_MPU = "EXIT_PAREDE_ZERAR_MPU"
     AFASTAR_VERMELHO = "EXIT_PAREDE_AFASTAR_VERMELHO"
@@ -45,6 +45,9 @@ class ControladorSaidaParede:
     AGUARDAR_MPU_TRIANGULO_VERDE = "EXIT_PAREDE_AGUARDAR_MPU_TRIANGULO_VERDE"
     AGUARDAR_MPU_SEM_VERDE = "EXIT_PAREDE_AGUARDAR_MPU_SEM_VERDE"
     GIRO_SEM_VERDE_ESQUERDA = "EXIT_PAREDE_GIRO_SEM_VERDE_ESQUERDA"
+    TRANSLADAR_DIREITA_SEM_VERDE = (
+        "EXIT_PAREDE_TRANSLADAR_DIREITA_SEM_VERDE"
+    )
     SAIDA_CONCLUIDA = "EXIT_PAREDE_SAIDA_CONCLUIDA"
     FALHA = "EXIT_PAREDE_FALHA"
 
@@ -439,17 +442,29 @@ class ControladorSaidaParede:
                     agora,
                 )
             if self._lateral_mm >= cfg.SAIDA_PAREDE_DISTANCIA_LATERAL_MAX_AVANCO_LINHA_MM:
-                return self._falhar(
-                    "ultrassom lateral indicou espaco aberto durante avanco com camera de linha "
-                    f"({self._lateral_mm} mm)",
-                    agora,
-                )
-            if self._linha_preta_confirmada:
                 self._concluir(
-                    "linha preta confirmada pela camera do segue-linha; robo parado",
+                    "saida encontrada pelo ultrassom lateral direito "
+                    f"({self._lateral_mm} mm); robo parado",
                     agora,
                 )
                 return self.atualizar(agora)
+            preto_ignorado = False
+            if self._linha_preta_confirmada:
+                if (
+                    self._lateral_mm
+                    >= cfg.SAIDA_PAREDE_DISTANCIA_LATERAL_MINIMA_PRETO_MM
+                ):
+                    self._concluir(
+                        "linha preta confirmada com lateral direito livre; "
+                        "robo parado",
+                        agora,
+                    )
+                    return self.atualizar(agora)
+                # Preto com a parede direita ainda perto nao e saida. Limpa
+                # o voto para que a mesma faixa precise ser confirmada de
+                # novo se reaparecer depois do proximo frame da camera.
+                self._linha_preta_confirmada = False
+                preto_ignorado = True
             if self._frente_mm <= cfg.SAIDA_PAREDE_DISTANCIA_FRENTE_FINAL_MM:
                 self._entrar_verificacao_triangulo_verde(agora)
                 return self.atualizar(agora)
@@ -472,10 +487,17 @@ class ControladorSaidaParede:
                 )
                 return self.atualizar(agora)
             self._tentativas_correcao = 0
+            detalhe = (
+                "faixa preta ignorada: lateral direito ainda abaixo de "
+                f"{cfg.SAIDA_PAREDE_DISTANCIA_LATERAL_MINIMA_PRETO_MM} mm; "
+                "aproximando ate 118 mm"
+                if preto_ignorado
+                else "avancando com camera de linha e LED aceso; procurando preto ou 118 mm"
+            )
             return self._frente(
                 self.AVANCAR_CAMERA_LINHA,
                 cfg.SAIDA_PAREDE_AVANCO_ATE_FRENTE_PWM,
-                "avancando com camera de linha e LED aceso; procurando preto ou 118 mm",
+                detalhe,
             )
 
         if self.state == self.CORRIGIR_YAW_AVANCO_LINHA:
@@ -550,9 +572,9 @@ class ControladorSaidaParede:
 
         if self.state == self.GIRO_SEM_VERDE_ESQUERDA:
             if self._giro_concluido():
-                self._concluir(
-                    "triangulo verde ausente; giro de 90 graus para a esquerda concluido; robo parado",
+                self._entrar_transladar_direita(
                     agora,
+                    self.TRANSLADAR_DIREITA_SEM_VERDE,
                 )
                 return self.atualizar(agora)
             return self._girar(
@@ -604,32 +626,44 @@ class ControladorSaidaParede:
                 toque_frente_direita_pwm=toque_frente_direita_pwm,
             )
 
-        if self.state == self.TRANSLADAR_DIREITA:
+        if self.state in {
+            self.TRANSLADAR_DIREITA,
+            self.TRANSLADAR_DIREITA_SEM_VERDE,
+        }:
             if self._tempo_decorrido(agora) >= (
                 cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S
             ):
-                self._passagens_direita_concluidas += 1
-                destinos = {
-                    1: self._DESTINO_CAMERA,
-                    2: self._DESTINO_AVANCO,
-                    3: self._DESTINO_PARAR,
-                }
-                destino = destinos.get(self._passagens_direita_concluidas)
-                if destino is None:
-                    return self._falhar(
-                        "quantidade inesperada de passagens de parede",
+                if self.state == self.TRANSLADAR_DIREITA_SEM_VERDE:
+                    self._entrar_afastamento_esquerda(
                         agora,
+                        self._DESTINO_CAMERA,
                     )
+                    return self.atualizar(agora)
+                self._passagens_direita_concluidas += 1
+                # A camera de linha reaparece depois da primeira passagem e,
+                # se verde for confirmado, depois de cada duas passagens
+                # seguintes. Isso permite continuar procurando a saida em vez
+                # de encerrar automaticamente na terceira passagem.
+                destino = (
+                    self._DESTINO_CAMERA
+                    if self._passagens_direita_concluidas % 2 == 1
+                    else self._DESTINO_AVANCO
+                )
                 self._entrar_afastamento_esquerda(agora, destino)
                 return self.atualizar(agora)
             detalhe = (
                 "lateral oscilou por tempo demais; transladando para a direita "
                 "mesmo sem estabilizar"
                 if self._translacao_por_timeout_pivo else
-                "leitura lateral estavel; transladando para a direita por 0,5 s"
+                (
+                    "triangulo verde ausente; transladando para a direita "
+                    "antes de afastar e retomar a varredura"
+                    if self.state == self.TRANSLADAR_DIREITA_SEM_VERDE else
+                    "leitura lateral estavel; transladando para a direita por 0,5 s"
+                )
             )
             return self._lateral(
-                self.TRANSLADAR_DIREITA,
+                self.state,
                 direita=True,
                 pwm=cfg.SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA,
                 detalhe=detalhe,
@@ -646,7 +680,7 @@ class ControladorSaidaParede:
         self._tentativas_correcao = 0
         self._entrar(self.AFASTAR_ESQUERDA_120, agora)
 
-    def _entrar_transladar_direita(self, agora):
+    def _entrar_transladar_direita(self, agora, estado=None):
         # O pivo traseiro muda propositalmente a orientacao do chassi. A
         # translacao que vem depois deve manter essa orientacao atual, e nao o
         # yaw guardado antes de encostar na parede frontal. Sem esta troca de
@@ -654,7 +688,7 @@ class ControladorSaidaParede:
         # no lugar em vez de deslizar lateralmente.
         if self._mpu_fresco(agora):
             self._heading_parede = self._yaw
-        self._entrar(self.TRANSLADAR_DIREITA, agora)
+        self._entrar(estado or self.TRANSLADAR_DIREITA, agora)
 
     def _executar_destino_apos_afastamento(self, agora):
         if self._destino_apos_afastamento == self._DESTINO_CAMERA:
@@ -662,12 +696,6 @@ class ControladorSaidaParede:
             return
         if self._destino_apos_afastamento == self._DESTINO_AVANCO:
             self._entrar_avanco_frente(agora)
-            return
-        if self._destino_apos_afastamento == self._DESTINO_PARAR:
-            self._concluir(
-                "triangulo verde tratado e tres passagens de parede concluidas; robo parado",
-                agora,
-            )
             return
         self._falhar("destino ausente apos afastamento lateral", agora)
 

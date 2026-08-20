@@ -188,15 +188,41 @@ class SaidaParedeResgateTests(unittest.TestCase):
     def test_linha_preta_confirmada_para_o_robo(self):
         controlador, instante = self._chegar_ao_avanco_com_camera_linha()
         self._passo(
-            controlador, instante + 0.01, yaw=90, lateral=120, frente=300)
+            controlador,
+            instante + 0.01,
+            yaw=90,
+            lateral=cfg.SAIDA_PAREDE_DISTANCIA_LATERAL_MINIMA_PRETO_MM,
+            frente=300,
+        )
         self.assertTrue(controlador.observar_linha_preta(True, instante + 0.02))
         comando = self._passo(
-            controlador, instante + 0.02, yaw=90, lateral=120, frente=300)
+            controlador,
+            instante + 0.02,
+            yaw=90,
+            lateral=cfg.SAIDA_PAREDE_DISTANCIA_LATERAL_MINIMA_PRETO_MM,
+            frente=300,
+        )
         self.assertTrue(comando.terminal)
         self.assertEqual(controlador.state, controlador.SAIDA_CONCLUIDA)
         self.assertIn("linha preta", comando.detail)
 
-    def test_avanco_com_camera_linha_para_se_lateral_abrir_ou_ficar_sem_eco(self):
+    def test_linha_preta_com_parede_direita_perto_e_ignorada_ate_118_mm(self):
+        controlador, instante = self._chegar_ao_avanco_com_camera_linha()
+        self._passo(
+            controlador, instante + 0.01, yaw=90, lateral=199, frente=300)
+        self.assertTrue(controlador.observar_linha_preta(True, instante + 0.02))
+        comando = self._passo(
+            controlador, instante + 0.02, yaw=90, lateral=199, frente=300)
+        self.assertFalse(comando.terminal)
+        self.assertEqual(controlador.state, controlador.AVANCAR_CAMERA_LINHA)
+        self.assertIn("preta ignorada", comando.detail)
+
+        comando = self._passo(
+            controlador, instante + 0.03, yaw=90, lateral=199, frente=118)
+        self.assertFalse(comando.terminal)
+        self.assertEqual(controlador.state, controlador.VERIFICAR_TRIANGULO_VERDE)
+
+    def test_avanco_com_camera_linha_declara_saida_se_lateral_abrir_ou_ficar_sem_eco(self):
         controlador, instante = self._chegar_ao_avanco_com_camera_linha()
         comando = self._passo(
             controlador,
@@ -206,7 +232,8 @@ class SaidaParedeResgateTests(unittest.TestCase):
             frente=300,
         )
         self.assertTrue(comando.terminal)
-        self.assertIn("espaco aberto", comando.detail)
+        self.assertEqual(controlador.state, controlador.SAIDA_CONCLUIDA)
+        self.assertIn("saida encontrada", comando.detail)
 
         controlador, instante = self._chegar_ao_avanco_com_camera_linha()
         comando = self._passo(
@@ -237,7 +264,7 @@ class SaidaParedeResgateTests(unittest.TestCase):
         )
         self.assertEqual(controlador.heading_parede, 90.0)
 
-    def test_verde_executa_mais_duas_passagens_e_para_apos_120_mm(self):
+    def test_verde_executa_mais_duas_passagens_e_retorna_a_camera_linha(self):
         controlador, instante = self._chegar_a_camera_frontal()
 
         controlador.observar_triangulo_verde(True, instante + 0.01)
@@ -253,13 +280,13 @@ class SaidaParedeResgateTests(unittest.TestCase):
         instante, comando = self._executar_passagem_ate_afastamento(
             controlador,
             instante,
-            controlador.SAIDA_CONCLUIDA,
+            controlador.AVANCAR_CAMERA_LINHA,
         )
-        self.assertTrue(comando.terminal)
+        self.assertFalse(comando.terminal)
         self.assertEqual(comando.speed, 0.0)
-        self.assertTrue(controlador.terminal)
+        self.assertTrue(controlador.usa_camera_linha_preta)
 
-    def test_sem_verde_gira_90_graus_para_a_esquerda_e_para(self):
+    def test_sem_verde_gira_90_translada_e_retorna_a_camera_linha(self):
         controlador, instante = self._chegar_a_camera_frontal()
         comando = controlador.atualizar(
             instante + cfg.SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S + 0.01)
@@ -283,9 +310,33 @@ class SaidaParedeResgateTests(unittest.TestCase):
             lateral=120,
             frente=118,
         )
-        self.assertTrue(comando.terminal)
-        self.assertEqual(controlador.state, controlador.SAIDA_CONCLUIDA)
-        self.assertIn("90 graus para a esquerda", comando.detail)
+        self.assertFalse(comando.terminal)
+        self.assertEqual(
+            controlador.state,
+            controlador.TRANSLADAR_DIREITA_SEM_VERDE,
+        )
+        self.assertIn("transladando para a direita", comando.detail)
+
+        instante += cfg.SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S + 0.10
+        comando = self._passo(
+            controlador,
+            instante + cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.01,
+            yaw=0,
+            lateral=110,
+            frente=118,
+        )
+        self.assertEqual(controlador.state, controlador.AFASTAR_ESQUERDA_120)
+        self.assertFalse(comando.terminal)
+
+        comando = self._passo(
+            controlador,
+            instante + cfg.SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S + 0.02,
+            yaw=0,
+            lateral=120,
+            frente=118,
+        )
+        self.assertEqual(controlador.state, controlador.AVANCAR_CAMERA_LINHA)
+        self.assertFalse(comando.terminal)
 
     def test_afastamento_corrige_yaw_antes_de_continuar_a_esquerda(self):
         controlador = ControladorSaidaParede(start_time=0.0)
