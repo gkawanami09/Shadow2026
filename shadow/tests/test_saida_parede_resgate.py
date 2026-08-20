@@ -106,7 +106,12 @@ class SaidaParedeResgateTests(unittest.TestCase):
         comando = self._passo(
             controlador, instante + 0.30, yaw=90, lateral=130, frente=116)
         self.assertFalse(comando.terminal)
-        self.assertEqual(comando.angle, -180)
+        self.assertEqual(
+            comando.angle,
+            cfg.SAIDA_PAREDE_ANGULO_CURVA_TRASEIRA,
+        )
+        self.assertGreater(comando.angle, -110)
+        self.assertLess(comando.angle, 0)
         self.assertTrue(comando.pivo_traseiro)
         self.assertEqual(
             comando.speed,

@@ -821,11 +821,13 @@ SAIDA_PAREDE_DISTANCIA_FRENTE_FINAL_MM = 118
 SAIDA_PAREDE_AVANCO_ATE_FRENTE_PWM = 45
 SAIDA_PAREDE_TIMEOUT_AVANCO_FRENTE_S = 4.0
 
-# Ao chegar a parede frontal, o robo mantem a frente como ponto de apoio e
-# gira somente a traseira para a esquerda. A confirmacao exige leituras
-# consecutivas praticamente iguais durante um segundo; a tolerancia absorve
-# o ruido normal de poucos milimetros do HC-SR04.
+# Ao chegar a parede frontal, o robo avanca em arco para a esquerda, com a
+# frente como ponto de apoio e a traseira conduzindo a curva. O angulo fica
+# abaixo do limite de pivo puro para haver avanco real ao mesmo tempo.
+# A confirmacao exige leituras consecutivas praticamente iguais durante um
+# segundo; a tolerancia absorve o ruido normal de poucos milimetros do HC-SR04.
 SAIDA_PAREDE_PWM_PIVO_TRASEIRO = 45
+SAIDA_PAREDE_ANGULO_CURVA_TRASEIRA = -100
 SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_FRENTE_MM = 5
 SAIDA_PAREDE_TEMPO_ESTABILIDADE_FRENTE_S = 1.0
 SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 3.0

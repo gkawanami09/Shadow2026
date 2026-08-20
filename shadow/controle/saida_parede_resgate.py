@@ -4,8 +4,8 @@ Esta rotina deliberadamente nao procura a saida. Ela so afasta o robo do
 marcador vermelho, gira 90 graus para a direita pelo MPU e usa o ultrassom
 lateral direito para regular a distancia da parede. Ao terminar o
 alinhamento, avanca reto ate encontrar a parede frontal a 118 mm. Entao
-mantem a frente como pivô, movimenta a traseira e so para quando o ultrassom
-frontal estiver estavel por um segundo.
+avanca em curva, mantendo a frente como referencia e movimentando mais a
+traseira, e so para quando o ultrassom frontal estiver estavel por um segundo.
 """
 
 from dataclasses import dataclass
@@ -356,10 +356,10 @@ class ControladorSaidaParede:
                 )
             return MotionCommand(
                 self.PIVO_TRASEIRO_ESTABILIZAR,
-                angle=-180,
+                angle=cfg.SAIDA_PAREDE_ANGULO_CURVA_TRASEIRA,
                 speed=cfg.SAIDA_PAREDE_PWM_PIVO_TRASEIRO / 120.0,
                 detail=(
-                    "pivo para a esquerda com frente ancorada; "
+                    "avancando em curva para a esquerda com frente priorizada; "
                     f"frontal={self._frente_mm} mm"
                 ),
                 pivo_traseiro=True,
