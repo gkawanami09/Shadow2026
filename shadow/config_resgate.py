@@ -825,11 +825,16 @@ SAIDA_PAREDE_DISTANCIA_ALINHAMENTO_MM = 125
 SAIDA_PAREDE_ALINHAMENTO_DIREITA_MAX_S = 2.0
 SAIDA_PAREDE_VELOCIDADE_SEGUIR = 0.38
 SAIDA_PAREDE_VELOCIDADE_APROXIMAR = 0.28
-# Em todo trecho reto apos a primeira parede, a traseira/lado direito recebe
-# uma forca omni fixa para a direita, sem depender da distancia medida. O MPU
-# segura o yaw para a forca produzir deslizamento lateral, nao um giro. Com
-# PWM de frente 46, 70 mantem cada roda dentro do teto seguro de 120.
-SAIDA_PAREDE_PWM_FORCA_DIREITA_SEGUINDO = 70
+# Em todo trecho reto apos a primeira parede, a traseira recebe um vies para
+# a esquerda e a frente oscila para os dois lados. Esse zigue-zague ajuda a
+# soltar o chassi de cantos e triangulos sem entrar numa sequencia especial de
+# camera. Com PWM de frente 46, todos os valores abaixo ficam em -120..120.
+SAIDA_PAREDE_PWM_TRASEIRA_ESQUERDA = 40
+SAIDA_PAREDE_PWM_OSCILACAO_FRENTE = 24
+SAIDA_PAREDE_OSCILACAO_FRENTE_S = 0.16
+# A oscilacao deliberada pode alterar um pouco o yaw. Acima desta faixa o MPU
+# interrompe o pulso e traz o robo de volta ao heading da parede.
+SAIDA_PAREDE_TOLERANCIA_YAW_ZIGUEZAGUE_GRAUS = 18.0
 
 # Triangulos verde/vermelho vistos pela camera frontal, sempre com LED
 # apagado. O desvio sai 45 graus da parede direita e retorna ao mesmo heading.

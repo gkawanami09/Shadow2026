@@ -93,11 +93,13 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
         if lateral_inicial < cfg.SAIDA_PAREDE_DISTANCIA_ABERTURA_MM:
             frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
-            lateral = cfg.SAIDA_PAREDE_PWM_FORCA_DIREITA_SEGUINDO
+            traseira = cfg.SAIDA_PAREDE_PWM_TRASEIRA_ESQUERDA
+            lateral_frente = (
+                -traseira + cfg.SAIDA_PAREDE_PWM_OSCILACAO_FRENTE)
             self.assertEqual(
                 comando.wheel_speeds,
-                (frente + lateral, frente - lateral,
-                 frente - lateral, frente + lateral),
+                (frente + lateral_frente, frente + traseira,
+                 frente - lateral_frente, frente - traseira),
             )
         else:
             self.assertEqual(comando.angle, 0)
@@ -141,7 +143,7 @@ class SaidaParedeResgateTests(unittest.TestCase):
         self.assertEqual(controlador.state, controlador.SEGUIR_PAREDE)
         self.assertIsNotNone(comando.wheel_speeds)
 
-    def test_seguimento_forca_direita_independente_da_distancia_lateral(self):
+    def test_seguimento_ziguezague_mantem_traseira_esquerda_e_alterna_frente(self):
         controlador, instante = self._chegar_a_parede_direita()
         comando = self._passo(
             controlador,
@@ -150,13 +152,27 @@ class SaidaParedeResgateTests(unittest.TestCase):
             lateral=180,
         )
         frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
-        lateral = cfg.SAIDA_PAREDE_PWM_FORCA_DIREITA_SEGUINDO
+        traseira = cfg.SAIDA_PAREDE_PWM_TRASEIRA_ESQUERDA
+        oscilacao = cfg.SAIDA_PAREDE_PWM_OSCILACAO_FRENTE
         self.assertEqual(
             comando.wheel_speeds,
-            (frente + lateral, frente - lateral, frente - lateral, frente + lateral),
+            (frente - traseira + oscilacao, frente + traseira,
+             frente + traseira - oscilacao, frente - traseira),
         )
 
-    def test_seguimento_mantem_forca_direita_mesmo_com_parede_proxima(self):
+        comando = self._passo(
+            controlador,
+            instante + 0.02 + cfg.SAIDA_PAREDE_OSCILACAO_FRENTE_S,
+            yaw=90,
+            lateral=180,
+        )
+        self.assertEqual(
+            comando.wheel_speeds,
+            (frente - traseira - oscilacao, frente + traseira,
+             frente + traseira + oscilacao, frente - traseira),
+        )
+
+    def test_seguimento_mantem_ziguezague_mesmo_com_parede_proxima(self):
         controlador, instante = self._chegar_a_parede_direita()
         comando = self._passo(
             controlador,
@@ -165,16 +181,18 @@ class SaidaParedeResgateTests(unittest.TestCase):
             lateral=60,
         )
         frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
-        lateral = cfg.SAIDA_PAREDE_PWM_FORCA_DIREITA_SEGUINDO
+        traseira = cfg.SAIDA_PAREDE_PWM_TRASEIRA_ESQUERDA
+        oscilacao = cfg.SAIDA_PAREDE_PWM_OSCILACAO_FRENTE
         self.assertEqual(
             comando.wheel_speeds,
-            (frente + lateral, frente - lateral, frente - lateral, frente + lateral),
+            (frente - traseira + oscilacao, frente + traseira,
+             frente + traseira - oscilacao, frente - traseira),
         )
 
     def test_seguimento_corrige_yaw_antes_de_voltar_ao_avanco_diagonal(self):
         controlador, instante = self._chegar_a_parede_direita()
         comando = self._passo(
-            controlador, instante + 0.02, yaw=97, lateral=120)
+            controlador, instante + 0.02, yaw=109, lateral=120)
         self.assertEqual(
             controlador.state, controlador.CORRIGIR_YAW_SEGUINDO_PAREDE)
         self.assertEqual(comando.angle, -180)

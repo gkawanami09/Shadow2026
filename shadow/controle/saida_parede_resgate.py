@@ -118,6 +118,8 @@ class ControladorSaidaParede:
         self._tentativas_translacao = 0
         self._tempo_translacao_inicial_restante = 0.0
         self._tentativas_correcao_seguimento = 0
+        self._frente_ziguezague_direita = True
+        self._proxima_oscillacao_frente_em = None
         self._giros_parede = 0
         self._tempo_recuo_sonda = cfg.SAIDA_PAREDE_RECUO_MINIMO_S
         self._sonda_iniciada = False
@@ -372,7 +374,10 @@ class ControladorSaidaParede:
             if self._abertura_confirmada(agora):
                 self._entrar(self.ABERTURA_ENCONTRADA, agora)
                 return self.atualizar(agora)
-            if self._erro_heading() > cfg.SAIDA_PAREDE_TOLERANCIA_YAW_GRAUS:
+            if (
+                self._erro_heading()
+                > cfg.SAIDA_PAREDE_TOLERANCIA_YAW_ZIGUEZAGUE_GRAUS
+            ):
                 self._tentativas_correcao_seguimento += 1
                 if (
                     self._tentativas_correcao_seguimento
@@ -387,7 +392,7 @@ class ControladorSaidaParede:
                 )
                 return self.atualizar(agora)
             self._tentativas_correcao_seguimento = 0
-            return self._avancar_alinhando_parede()
+            return self._avancar_alinhando_parede(agora)
 
         if self.state == self.CORRIGIR_YAW_SEGUINDO_PAREDE:
             if self._giro_concluido(agora):
@@ -727,10 +732,9 @@ class ControladorSaidaParede:
             detail=detalhe,
         )
 
-    def _avancar_alinhando_parede(self):
-        """Avanca com forca lateral direita fixa, preservando o yaw pelo MPU."""
+    def _avancar_alinhando_parede(self, agora):
+        """Avanca em zigue-zague, com traseira esquerda e frente oscilante."""
         pwm_frente = int(round(cfg.SAIDA_PAREDE_VELOCIDADE_SEGUIR * 120))
-        pwm_lateral = int(cfg.SAIDA_PAREDE_PWM_FORCA_DIREITA_SEGUINDO)
 
         if not self._parede_lateral_confirmada:
             return self._frente(
@@ -747,24 +751,43 @@ class ControladorSaidaParede:
                 pwm_frente,
                 "possivel abertura direita; seguindo reto ate confirmar",
             )
-        return self._avanco_com_lateral(
+        return self._avanco_ziguezague(
             pwm_frente,
-            pwm_lateral,
-            "avancando com forca forte da traseira/lado direito",
+            agora,
         )
 
-    def _avanco_com_lateral(self, pwm_frente, pwm_lateral, detalhe):
-        """Soma vetor de frente ao de lateral das rodas omnidirecionais."""
+    def _avanco_ziguezague(self, pwm_frente, agora):
+        """Mantem a traseira a esquerda e alterna o desvio da frente."""
+        if self._proxima_oscillacao_frente_em is None:
+            self._proxima_oscillacao_frente_em = (
+                agora + cfg.SAIDA_PAREDE_OSCILACAO_FRENTE_S)
+        elif agora >= self._proxima_oscillacao_frente_em:
+            self._frente_ziguezague_direita = (
+                not self._frente_ziguezague_direita)
+            self._proxima_oscillacao_frente_em = (
+                agora + cfg.SAIDA_PAREDE_OSCILACAO_FRENTE_S)
+
         frente = int(pwm_frente)
-        lateral = int(pwm_lateral)
+        traseira_esquerda = int(cfg.SAIDA_PAREDE_PWM_TRASEIRA_ESQUERDA)
+        oscilacao = int(cfg.SAIDA_PAREDE_PWM_OSCILACAO_FRENTE)
+        lateral_frente = (
+            -traseira_esquerda + oscilacao
+            if self._frente_ziguezague_direita
+            else -traseira_esquerda - oscilacao
+        )
+        detalhe = (
+            "zigue-zague: traseira esquerda; frente para direita"
+            if self._frente_ziguezague_direita
+            else "zigue-zague: traseira esquerda; frente para esquerda"
+        )
         return MotionCommand(
             self.SEGUIR_PAREDE,
             detail=detalhe,
             wheel_speeds=(
-                frente + lateral,
-                frente - lateral,
-                frente - lateral,
-                frente + lateral,
+                frente + lateral_frente,
+                frente + traseira_esquerda,
+                frente - lateral_frente,
+                frente - traseira_esquerda,
             ),
         )
 
@@ -807,6 +830,9 @@ class ControladorSaidaParede:
         self.state = estado
         self._inicio_estado = time.monotonic() if now is None else float(now)
         self._comando_aceito = False
+        if estado == self.SEGUIR_PAREDE:
+            self._frente_ziguezague_direita = True
+            self._proxima_oscillacao_frente_em = None
         if estado != self.PRONTO_SONDA_LINHA:
             self._sonda_iniciada = False
 
