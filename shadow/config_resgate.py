@@ -820,6 +820,11 @@ SAIDA_PAREDE_DISTANCIA_MINIMA_ESQUERDA_MM = 120
 SAIDA_PAREDE_PWM_TRANSLACAO_ESQUERDA = 45
 SAIDA_PAREDE_TIMEOUT_AFASTAMENTO_ESQUERDA_S = 2.0
 
+# No avanco com a camera do segue-linha, o mesmo HC-SR04 lateral direito deve
+# continuar vendo a parede. Sem eco ou a partir desta distancia, ha um vao ao
+# lado do robo e a rota para por seguranca.
+SAIDA_PAREDE_DISTANCIA_LATERAL_MAX_AVANCO_LINHA_MM = 230
+
 # Ao chegar a parede frontal, o robo avanca em arco para a esquerda, com a
 # frente como ponto de apoio e a traseira conduzindo a curva. O angulo fica
 # abaixo do limite de pivo puro para haver avanco real ao mesmo tempo.
@@ -850,6 +855,9 @@ SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S = 0.50
 # confirmado inicia duas sequencias adicionais identicas; nao ha giro de 45
 # graus nesta rota.
 SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S = 3.0
+# Se a camera frontal nao confirmar o verde, o robo encerra esta alternativa
+# girando 90 graus fisicos para a esquerda, guiado pelo MPU.
+SAIDA_PAREDE_GIRO_SEM_VERDE_ESQUERDA_GRAUS = 90.0
 # Fechar a camera pode demorar algumas centenas de milissegundos. Depois da
 # confirmacao do verde, o chassi fica parado e espera um yaw NOVO antes de
 # mover; este teto e deliberadamente maior que o timeout normal do MPU.

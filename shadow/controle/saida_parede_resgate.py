@@ -4,9 +4,9 @@ Depois do avanco curto e do giro inicial de 90 graus, cada passagem segue a
 mesma ordem: avanco ate 118 mm no ultrassom frontal, pivo traseiro ate o
 lateral estabilizar (ou completar 2 s), translacao para a direita e
 afastamento para a esquerda ate o lateral marcar ao menos 120 mm. A camera
-frontal, com LED apagado, abre somente depois da primeira passagem. Se ela
-confirmar o triangulo verde, o robo faz mais duas passagens e para apos o
-ultimo afastamento a 120 mm.
+de segue-linha, com LED aceso, abre depois da primeira passagem: ela guia o
+avanco ate preto ou ate a parede frontal. Neste ultimo caso, a camera frontal
+com LED apagado decide o triangulo verde.
 """
 
 from dataclasses import dataclass
@@ -37,10 +37,14 @@ class ControladorSaidaParede:
     )
     AVANCAR_ATE_PAREDE_FRENTE = "EXIT_PAREDE_AVANCAR_ATE_FRENTE"
     CORRIGIR_YAW_AVANCO_FRENTE = "EXIT_PAREDE_CORRIGIR_YAW_FRENTE"
+    AVANCAR_CAMERA_LINHA = "EXIT_PAREDE_AVANCAR_CAMERA_LINHA"
+    CORRIGIR_YAW_AVANCO_LINHA = "EXIT_PAREDE_CORRIGIR_YAW_LINHA"
     PIVO_TRASEIRO_ESTABILIZAR = "EXIT_PAREDE_PIVO_TRASEIRO_ESTABILIZAR"
     TRANSLADAR_DIREITA = "EXIT_PAREDE_TRANSLADAR_DIREITA"
     VERIFICAR_TRIANGULO_VERDE = "EXIT_PAREDE_VERIFICAR_TRIANGULO_VERDE"
     AGUARDAR_MPU_TRIANGULO_VERDE = "EXIT_PAREDE_AGUARDAR_MPU_TRIANGULO_VERDE"
+    AGUARDAR_MPU_SEM_VERDE = "EXIT_PAREDE_AGUARDAR_MPU_SEM_VERDE"
+    GIRO_SEM_VERDE_ESQUERDA = "EXIT_PAREDE_GIRO_SEM_VERDE_ESQUERDA"
     SAIDA_CONCLUIDA = "EXIT_PAREDE_SAIDA_CONCLUIDA"
     FALHA = "EXIT_PAREDE_FALHA"
 
@@ -52,6 +56,8 @@ class ControladorSaidaParede:
         GIRO_INICIAL_DIREITA,
         CORRIGIR_YAW_AFASTAMENTO_ESQUERDA,
         CORRIGIR_YAW_AVANCO_FRENTE,
+        CORRIGIR_YAW_AVANCO_LINHA,
+        GIRO_SEM_VERDE_ESQUERDA,
     }
 
     def __init__(self, start_time=None):
@@ -76,16 +82,20 @@ class ControladorSaidaParede:
         self._frente_mm = None
         self._frente_em = None
         self._frente_em_antes_avanco = None
+        self._lateral_em_antes_avanco_linha = None
         self._lateral_em_antes_pivo = None
         self._lateral_em_processada_pivo = None
         self._lateral_referencia_pivo_mm = None
         self._estavel_desde_pivo = None
         self._translacao_por_timeout_pivo = False
         self._triangulo_verde_confirmado = False
+        self._linha_preta_confirmada = False
         self._yaw_em_antes_retomada_verde = None
+        self._yaw_em_antes_giro_sem_verde = None
         self._tentativas_correcao = 0
         self._passagens_direita_concluidas = 0
         self._destino_apos_afastamento = None
+        self._detalhe_sucesso = ""
 
     @property
     def terminal(self):
@@ -98,7 +108,10 @@ class ControladorSaidaParede:
     @property
     def prioriza_mpu(self):
         return self.state in (
-            self._ESTADOS_GIRO | {self.AGUARDAR_MPU_TRIANGULO_VERDE}
+            self._ESTADOS_GIRO | {
+                self.AGUARDAR_MPU_TRIANGULO_VERDE,
+                self.AGUARDAR_MPU_SEM_VERDE,
+            }
         )
 
     @property
@@ -106,13 +119,28 @@ class ControladorSaidaParede:
         return self.state == self.VERIFICAR_TRIANGULO_VERDE
 
     @property
+    def usa_camera_linha_preta(self):
+        return self.state == self.AVANCAR_CAMERA_LINHA
+
+    @property
     def lado_ultrassom_atual(self):
         if self.state in {
             self.AVANCAR_ATE_PAREDE_FRENTE,
             self.CORRIGIR_YAW_AVANCO_FRENTE,
+            self.AVANCAR_CAMERA_LINHA,
+            self.CORRIGIR_YAW_AVANCO_LINHA,
         }:
             return "FRENTE"
         return "LATERAL"
+
+    @property
+    def lados_ultrassom_atuais(self):
+        if self.state in {
+            self.AVANCAR_CAMERA_LINHA,
+            self.CORRIGIR_YAW_AVANCO_LINHA,
+        }:
+            return ("FRENTE", "LATERAL")
+        return (self.lado_ultrassom_atual,)
 
     @property
     def heading_parede(self):
@@ -154,6 +182,13 @@ class ControladorSaidaParede:
         self._triangulo_verde_confirmado = True
         return True
 
+    def observar_linha_preta(self, confirmado, timestamp=None):
+        """Recebe a confirmacao temporal da camera do segue-linha."""
+        if self.state != self.AVANCAR_CAMERA_LINHA or not confirmado:
+            return False
+        self._linha_preta_confirmada = True
+        return True
+
     def confirmar_mpu_zerado(self, sucesso, now=None):
         if self.state != self.ZERAR_MPU:
             return False
@@ -175,7 +210,7 @@ class ControladorSaidaParede:
         if self.state == self.SAIDA_CONCLUIDA:
             return self._parado(
                 self.SAIDA_CONCLUIDA,
-                "triangulo verde tratado e tres passagens de parede concluidas; robo parado",
+                self._detalhe_sucesso or "rota de saida concluida; robo parado",
                 terminal=True,
             )
         if self.state == self.FALHA:
@@ -373,6 +408,85 @@ class ControladorSaidaParede:
                 "corrigindo yaw antes de retomar o avanco reto",
             )
 
+        if self.state == self.AVANCAR_CAMERA_LINHA:
+            # Esta etapa consulta os dois HC-SR04 alternadamente: o frontal
+            # limita a aproximacao e o lateral direito confirma que o robo
+            # ainda esta ao lado de uma parede, nao entrando num vao.
+            if not self._frente_fresca(agora) or not self._lateral_fresca_apos_avanco_linha(agora):
+                if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S:
+                    faltando = []
+                    if not self._frente_fresca(agora):
+                        faltando.append("frontal")
+                    if not self._lateral_fresca_apos_avanco_linha(agora):
+                        faltando.append("lateral")
+                    return self._falhar(
+                        "ultrassom sem leitura nova durante avanco com camera de linha: "
+                        + ", ".join(faltando),
+                        agora,
+                    )
+                return self._parado(
+                    self.AVANCAR_CAMERA_LINHA,
+                    "camera de linha ativa; aguardando ultrassons frontal e lateral novos",
+                )
+            if self._frente_mm is None:
+                return self._falhar(
+                    "ultrassom frontal respondeu sem eco durante avanco com camera de linha",
+                    agora,
+                )
+            if self._lateral_mm is None:
+                return self._falhar(
+                    "ultrassom lateral respondeu sem eco durante avanco com camera de linha",
+                    agora,
+                )
+            if self._lateral_mm >= cfg.SAIDA_PAREDE_DISTANCIA_LATERAL_MAX_AVANCO_LINHA_MM:
+                return self._falhar(
+                    "ultrassom lateral indicou espaco aberto durante avanco com camera de linha "
+                    f"({self._lateral_mm} mm)",
+                    agora,
+                )
+            if self._linha_preta_confirmada:
+                self._concluir(
+                    "linha preta confirmada pela camera do segue-linha; robo parado",
+                    agora,
+                )
+                return self.atualizar(agora)
+            if self._frente_mm <= cfg.SAIDA_PAREDE_DISTANCIA_FRENTE_FINAL_MM:
+                self._entrar_verificacao_triangulo_verde(agora)
+                return self.atualizar(agora)
+            if not self._mpu_fresco(agora):
+                return self._falhar(
+                    "MPU sem leitura durante avanco com camera de linha",
+                    agora,
+                )
+            if self._erro_heading() > cfg.SAIDA_PAREDE_TOLERANCIA_YAW_GRAUS:
+                self._tentativas_correcao += 1
+                if self._tentativas_correcao > cfg.SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO:
+                    return self._falhar(
+                        "yaw nao voltou ao rumo durante avanco com camera de linha",
+                        agora,
+                    )
+                self._preparar_giro_para(
+                    self._heading_parede,
+                    self.CORRIGIR_YAW_AVANCO_LINHA,
+                    agora,
+                )
+                return self.atualizar(agora)
+            self._tentativas_correcao = 0
+            return self._frente(
+                self.AVANCAR_CAMERA_LINHA,
+                cfg.SAIDA_PAREDE_AVANCO_ATE_FRENTE_PWM,
+                "avancando com camera de linha e LED aceso; procurando preto ou 118 mm",
+            )
+
+        if self.state == self.CORRIGIR_YAW_AVANCO_LINHA:
+            if self._giro_concluido():
+                self._entrar_avanco_camera_linha(agora)
+                return self.atualizar(agora)
+            return self._girar(
+                self.CORRIGIR_YAW_AVANCO_LINHA,
+                "corrigindo yaw antes de retomar o avanco com camera de linha",
+            )
+
         if self.state == self.VERIFICAR_TRIANGULO_VERDE:
             if self._triangulo_verde_confirmado:
                 # O frame confirmado pode ser o ultimo antes de fechar a
@@ -382,10 +496,11 @@ class ControladorSaidaParede:
                 self._entrar(self.AGUARDAR_MPU_TRIANGULO_VERDE, agora)
                 return self.atualizar(agora)
             if self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S:
-                return self._falhar(
-                    "triangulo verde nao foi confirmado pela camera frontal",
-                    agora,
-                )
+                # Fecha a frontal antes de mover. A leitura de yaw que decide
+                # o giro de 90 graus precisa ser posterior ao fechamento.
+                self._yaw_em_antes_giro_sem_verde = self._yaw_em
+                self._entrar(self.AGUARDAR_MPU_SEM_VERDE, agora)
+                return self.atualizar(agora)
             return self._parado(
                 self.VERIFICAR_TRIANGULO_VERDE,
                 "parado; camera frontal procurando triangulo verde com LED apagado",
@@ -406,6 +521,44 @@ class ControladorSaidaParede:
                 )
             self._entrar_avanco_frente(agora)
             return self.atualizar(agora)
+
+        if self.state == self.AGUARDAR_MPU_SEM_VERDE:
+            if not self._mpu_fresco_depois_giro_sem_verde(agora):
+                if self._tempo_decorrido(agora) >= (
+                    cfg.SAIDA_PAREDE_TIMEOUT_MPU_APOS_CAMERA_S
+                ):
+                    return self._falhar(
+                        "MPU nao respondeu apos fechar a camera sem triangulo verde",
+                        agora,
+                    )
+                return self._parado(
+                    self.AGUARDAR_MPU_SEM_VERDE,
+                    "triangulo verde ausente; camera fechando e aguardando yaw novo",
+                )
+            if self._sinal_yaw_por_giro_direita is None:
+                return self._falhar(
+                    "sentido do yaw ausente para girar sem triangulo verde",
+                    agora,
+                )
+            self._alvo_yaw = self._normalizar(
+                self._yaw
+                - cfg.SAIDA_PAREDE_GIRO_SEM_VERDE_ESQUERDA_GRAUS
+                * self._sinal_yaw_por_giro_direita
+            )
+            self._entrar(self.GIRO_SEM_VERDE_ESQUERDA, agora)
+            return self.atualizar(agora)
+
+        if self.state == self.GIRO_SEM_VERDE_ESQUERDA:
+            if self._giro_concluido():
+                self._concluir(
+                    "triangulo verde ausente; giro de 90 graus para a esquerda concluido; robo parado",
+                    agora,
+                )
+                return self.atualizar(agora)
+            return self._girar(
+                self.GIRO_SEM_VERDE_ESQUERDA,
+                "triangulo verde ausente; girando 90 graus para a esquerda",
+            )
 
         if self.state == self.PIVO_TRASEIRO_ESTABILIZAR:
             if not self._lateral_fresca_desde_pivo(agora):
@@ -505,19 +658,29 @@ class ControladorSaidaParede:
 
     def _executar_destino_apos_afastamento(self, agora):
         if self._destino_apos_afastamento == self._DESTINO_CAMERA:
-            self._entrar_verificacao_triangulo_verde(agora)
+            self._entrar_avanco_camera_linha(agora)
             return
         if self._destino_apos_afastamento == self._DESTINO_AVANCO:
             self._entrar_avanco_frente(agora)
             return
         if self._destino_apos_afastamento == self._DESTINO_PARAR:
-            self._entrar(self.SAIDA_CONCLUIDA, agora)
+            self._concluir(
+                "triangulo verde tratado e tres passagens de parede concluidas; robo parado",
+                agora,
+            )
             return
         self._falhar("destino ausente apos afastamento lateral", agora)
 
     def _entrar_avanco_frente(self, agora):
         self._frente_em_antes_avanco = self._frente_em
         self._entrar(self.AVANCAR_ATE_PAREDE_FRENTE, agora)
+
+    def _entrar_avanco_camera_linha(self, agora):
+        self._frente_em_antes_avanco = self._frente_em
+        self._lateral_em_antes_avanco_linha = self._lateral_em
+        self._linha_preta_confirmada = False
+        self._tentativas_correcao = 0
+        self._entrar(self.AVANCAR_CAMERA_LINHA, agora)
 
     def _entrar_pivo_traseiro(self, agora):
         # A leitura que encontrou a parede so inicia a fase. A estabilidade
@@ -532,6 +695,10 @@ class ControladorSaidaParede:
     def _entrar_verificacao_triangulo_verde(self, agora):
         self._triangulo_verde_confirmado = False
         self._entrar(self.VERIFICAR_TRIANGULO_VERDE, agora)
+
+    def _concluir(self, detalhe, agora):
+        self._detalhe_sucesso = str(detalhe)
+        self._entrar(self.SAIDA_CONCLUIDA, agora)
 
     def _atualizar_estabilidade_lateral(self, agora):
         if self._lateral_em == self._lateral_em_processada_pivo:
@@ -637,6 +804,13 @@ class ControladorSaidaParede:
             and self._yaw_em > self._yaw_em_antes_retomada_verde
         )
 
+    def _mpu_fresco_depois_giro_sem_verde(self, agora):
+        return (
+            self._mpu_fresco(agora)
+            and self._yaw_em_antes_giro_sem_verde is not None
+            and self._yaw_em > self._yaw_em_antes_giro_sem_verde
+        )
+
     def _lateral_fresca_desde_afastamento(self, agora):
         return (
             self._lateral_em is not None
@@ -653,6 +827,14 @@ class ControladorSaidaParede:
                 or self._frente_em > self._frente_em_antes_avanco
             )
             and agora - self._frente_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
+        )
+
+    def _lateral_fresca_apos_avanco_linha(self, agora):
+        return (
+            self._lateral_em is not None
+            and self._lateral_em_antes_avanco_linha is not None
+            and self._lateral_em > self._lateral_em_antes_avanco_linha
+            and agora - self._lateral_em <= cfg.SAIDA_PAREDE_TIMEOUT_SENSOR_S
         )
 
     def _lateral_fresca_desde_pivo(self, agora):
@@ -701,6 +883,8 @@ def executar_alinhamento_parede(
     detector_verde_factory=None,
     detector_painel_verde_factory=None,
     fonte_assincrona_factory=None,
+    camera_linha_factory=None,
+    classificador_linha_factory=None,
 ):
     """Executa a manobra pos-vermelho com uma verificacao frontal do verde.
 
@@ -723,6 +907,12 @@ def executar_alinhamento_parede(
     if fonte_assincrona_factory is None:
         from visao.resgate_assincrono import LatestFrameSource
         fonte_assincrona_factory = LatestFrameSource
+    if camera_linha_factory is None:
+        from visao.captura import LineCamera
+        camera_linha_factory = LineCamera
+    if classificador_linha_factory is None:
+        from visao.confirmacao_saida_linha import ClassificadorFaixaSaidaLinha
+        classificador_linha_factory = ClassificadorFaixaSaidaLinha
 
     controlador = ControladorSaidaParede()
     monitor_sensores = MonitorSensoresSaida(arduino)
@@ -730,9 +920,13 @@ def executar_alinhamento_parede(
     ultimo_estado = None
     ultimo_log_yaw = -float("inf")
     fonte_verde = None
+    fonte_linha = None
     detector_triangulo_verde = None
     detector_painel_verde = None
+    classificador_linha = None
     ultima_sequencia_verde = 0
+    ultima_sequencia_linha = 0
+    confirmacoes_linha_preta = 0
     ultimo_frame_verde = None
     proximo_log_debug_verde = 0.0
 
@@ -746,6 +940,18 @@ def executar_alinhamento_parede(
         detector_painel_verde = None
         ultima_sequencia_verde = 0
         ultimo_frame_verde = None
+
+    def fechar_camera_linha():
+        nonlocal fonte_linha, classificador_linha, ultima_sequencia_linha
+        nonlocal confirmacoes_linha_preta
+        if fonte_linha is not None:
+            fonte_linha.close()
+        fonte_linha = None
+        classificador_linha = None
+        ultima_sequencia_linha = 0
+        confirmacoes_linha_preta = 0
+        if arduino.led("APAGADO") is False:
+            raise RuntimeError("nao foi possivel apagar LED apos camera de linha")
 
     def salvar_debug_verde(motivo):
         """Salva o quadro e as duas mascaras para calibrar na Raspberry."""
@@ -787,8 +993,7 @@ def executar_alinhamento_parede(
         if arduino.led("APAGADO") is False:
             raise RuntimeError("nao foi possivel apagar LED da saida")
         print(
-            "[saida] LED APAGADO; camera frontal sera aberta somente "
-            "para procurar o triangulo verde")
+            "[saida] LED APAGADO; cameras serao abertas uma por vez conforme a rota")
         while True:
             agora = time.monotonic()
             if (
@@ -798,7 +1003,52 @@ def executar_alinhamento_parede(
                 raise RuntimeError("serial mudou durante a rota de saida")
 
             monitor_sensores.atualizar_controlador(controlador, agora)
-            if controlador.usa_camera_triangulo_verde:
+            if controlador.usa_camera_linha_preta:
+                if fonte_verde is not None:
+                    raise RuntimeError(
+                        "camera frontal ainda aberta ao iniciar camera de linha")
+                if fonte_linha is None:
+                    if arduino.led("ACESO") is False:
+                        raise RuntimeError(
+                            "nao foi possivel acender LED da camera de linha")
+                    fonte_linha = fonte_assincrona_factory(camera_linha_factory())
+                    classificador_linha = classificador_linha_factory()
+                    print(
+                        "[saida] camera do segue-linha ativa com LED ACESO; "
+                        "procurando faixa preta")
+                quadro_linha = fonte_linha.poll(ultima_sequencia_linha)
+                if quadro_linha is not None:
+                    ultima_sequencia_linha = quadro_linha.sequence
+                    resultado_linha = classificador_linha.classificar(
+                        quadro_linha.frame,
+                        timestamp=quadro_linha.captured_at,
+                    )
+                    from visao.confirmacao_saida_linha import (
+                        PRETA,
+                        faixa_pronta_para_confirmacao,
+                    )
+                    if (
+                        faixa_pronta_para_confirmacao(resultado_linha)
+                        and resultado_linha.classificacao == PRETA
+                    ):
+                        confirmacoes_linha_preta += 1
+                        if (
+                            confirmacoes_linha_preta
+                            >= cfg.SAIDA_PAREDE_CONFIRMACOES_PRETO
+                            and controlador.observar_linha_preta(
+                                True,
+                                quadro_linha.captured_at,
+                            )
+                        ):
+                            print(
+                                "[saida] faixa preta confirmada pela camera "
+                                f"do segue-linha em {confirmacoes_linha_preta} frame(s)")
+                    else:
+                        confirmacoes_linha_preta = 0
+            elif controlador.usa_camera_triangulo_verde:
+                if fonte_linha is not None:
+                    raise RuntimeError(
+                        "camera de linha ainda aberta ao iniciar camera frontal")
                 if fonte_verde is None:
                     if arduino.led("APAGADO") is False:
                         raise RuntimeError(
@@ -868,9 +1118,10 @@ def executar_alinhamento_parede(
             ):
                 salvar_debug_verde(comando.detail)
 
-            # A camera frontal e fechada antes do avanco seguinte. Isso
-            # deixa so um pipeline de imagem ativo e impede processamento
-            # concorrente com a camera de segue-linha em qualquer handoff.
+            # Cada handoff fecha a camera anterior antes de abrir a proxima.
+            # Assim LED/camera de linha nunca coexistem com a frontal.
+            if not controlador.usa_camera_linha_preta and fonte_linha is not None:
+                fechar_camera_linha()
             if not controlador.usa_camera_triangulo_verde and fonte_verde is not None:
                 fechar_camera_verde()
 
@@ -920,12 +1171,17 @@ def executar_alinhamento_parede(
                 time.monotonic(),
                 priorizar_mpu=controlador.prioriza_mpu,
                 lado_ultrassom=controlador.lado_ultrassom_atual,
+                lados_ultrassom=controlador.lados_ultrassom_atuais,
             )
             arduino.refresh(fail_closed=True)
             time.sleep(intervalo_s)
     finally:
         try:
             fechar_camera_verde()
+        except (OSError, RuntimeError):
+            pass
+        try:
+            fechar_camera_linha()
         except (OSError, RuntimeError):
             pass
         try:

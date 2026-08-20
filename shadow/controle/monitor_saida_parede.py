@@ -8,15 +8,16 @@ import config_resgate as cfg
 class MonitorSensoresSaida:
     """Entrega leituras novas ao controlador e mantem uma consulta por vez.
 
-    Primeiro a manobra usa o ultrassom lateral para alinhar. Depois usa o
-    frontal para parar a 118 mm da parede. Em ambos os casos, o MPU alterna
-    com o unico HC-SR04 necessario naquele estado.
+    Conforme a etapa, consulta o frontal, o lateral ou ambos em rodizio. O
+    MPU ocupa os intervalos entre leituras de distancia, sem duas consultas
+    concorrentes na serial.
     """
 
     def __init__(self, arduino):
         self._arduino = arduino
         self._lado_ultrassom_pendente = None
         self._proximo_sensor = "MPU"
+        self._proximo_lado_ultrassom = 0
         self._proxima_leitura_mpu = 0.0
         self._proxima_leitura_ultrassom = 0.0
 
@@ -45,6 +46,7 @@ class MonitorSensoresSaida:
         agora=None,
         priorizar_mpu=False,
         lado_ultrassom="LATERAL",
+        lados_ultrassom=None,
     ):
         """Inicia no maximo uma consulta nao bloqueante, se estiver vencida.
 
@@ -53,9 +55,13 @@ class MonitorSensoresSaida:
         pode envelhecer o yaw e fazer a manobra abortar mesmo com o MPU bom.
         """
         instante = time.monotonic() if agora is None else float(agora)
-        lado_ultrassom = str(lado_ultrassom).upper()
-        if lado_ultrassom not in ("FRENTE", "LATERAL"):
-            raise ValueError("lado_ultrassom deve ser FRENTE ou LATERAL")
+        if lados_ultrassom is None:
+            lados = (str(lado_ultrassom).upper(),)
+        else:
+            lados = tuple(str(lado).upper() for lado in lados_ultrassom)
+        if not lados or any(lado not in ("FRENTE", "LATERAL") for lado in lados):
+            raise ValueError(
+                "lados_ultrassom deve conter somente FRENTE e/ou LATERAL")
         if self._arduino.consultas_sensores_pendentes:
             return False
 
@@ -89,7 +95,7 @@ class MonitorSensoresSaida:
                 sensor == "ULTRASSOM"
                 and instante >= self._proxima_leitura_ultrassom
             ):
-                lado = lado_ultrassom
+                lado = lados[self._proximo_lado_ultrassom % len(lados)]
                 if self._arduino.iniciar_ultrassom(
                     timeout=cfg.SAIDA_PAREDE_TIMEOUT_ULTRASSOM_S,
                     lado=lado,
@@ -98,6 +104,8 @@ class MonitorSensoresSaida:
                     self._proxima_leitura_ultrassom = (
                         instante + cfg.SAIDA_PAREDE_INTERVALO_ULTRASSOM_S)
                     self._proximo_sensor = "MPU"
+                    self._proximo_lado_ultrassom = (
+                        self._proximo_lado_ultrassom + 1) % len(lados)
                     return True
         return False
 

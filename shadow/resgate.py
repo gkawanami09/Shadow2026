@@ -860,7 +860,7 @@ def _confirmar_saida_com_camera_linha(
 
 
 def _executar_saida_parede(arduino, camera_index, debug=False):
-    """Executa a manobra pos-vermelho e a camera frontal do triangulo verde."""
+    """Executa a rota pos-vermelho com cameras de linha e frontal."""
     from controle.saida_parede_resgate import executar_alinhamento_parede
 
     return executar_alinhamento_parede(
@@ -2160,8 +2160,8 @@ def main(args=None):
                             comando = MotionCommand(
                                 "EXIT_WALL_SEQUENCE_DONE",
                                 detail=(
-                                    "giro, tres passagens de parede e "
-                                    "triangulo verde concluidos; robo parado"),
+                                    "rota de saida pela parede concluida; "
+                                    "robo parado"),
                                 terminal=True,
                             )
                         else:
