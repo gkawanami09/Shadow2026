@@ -117,6 +117,15 @@ class SaidaParedeResgateTests(unittest.TestCase):
             comando.speed,
             cfg.SAIDA_PAREDE_PWM_PIVO_TRASEIRO / 120.0,
         )
+        self.assertEqual(comando.toque_frente_direita_pwm, 0)
+
+        comando = self._passo(
+            controlador, instante + 0.58, yaw=90, lateral=130, frente=116)
+        self.assertEqual(
+            comando.toque_frente_direita_pwm,
+            cfg.SAIDA_PAREDE_PWM_TOQUE_FRENTE_DIREITA,
+        )
+        self.assertIn("toque na dianteira direita", comando.detail)
 
         comando = self._passo(
             controlador, instante + 0.82, yaw=90, lateral=130, frente=120)

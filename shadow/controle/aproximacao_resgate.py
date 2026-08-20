@@ -23,6 +23,8 @@ class MotionCommand:
     # Quando verdadeiro, ``direcao.steer`` desloca o centro de giro para a
     # frente: a frente fica quase parada e a traseira executa o pivo.
     pivo_traseiro: bool = False
+    # Pulso adicional e temporario aplicado somente na roda dianteira direita.
+    toque_frente_direita_pwm: int = 0
 
 
 class BallApproachController:

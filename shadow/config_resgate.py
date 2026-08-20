@@ -826,8 +826,13 @@ SAIDA_PAREDE_TIMEOUT_AVANCO_FRENTE_S = 4.0
 # abaixo do limite de pivo puro para haver avanco real ao mesmo tempo.
 # A confirmacao exige leituras consecutivas praticamente iguais durante um
 # segundo; a tolerancia absorve o ruido normal de poucos milimetros do HC-SR04.
-SAIDA_PAREDE_PWM_PIVO_TRASEIRO = 45
+SAIDA_PAREDE_PWM_PIVO_TRASEIRO = 80
 SAIDA_PAREDE_ANGULO_CURVA_TRASEIRA = -100
+# Durante a curva, a dianteira direita recebe um toque curto periodico para
+# ajudar o robo a progredir e nao ficar apenas rodando sobre a frente.
+SAIDA_PAREDE_PWM_TOQUE_FRENTE_DIREITA = 35
+SAIDA_PAREDE_DURACAO_TOQUE_FRENTE_DIREITA_S = 0.10
+SAIDA_PAREDE_PERIODO_TOQUE_FRENTE_DIREITA_S = 0.40
 SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_FRENTE_MM = 5
 SAIDA_PAREDE_TEMPO_ESTABILIDADE_FRENTE_S = 1.0
 SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 3.0

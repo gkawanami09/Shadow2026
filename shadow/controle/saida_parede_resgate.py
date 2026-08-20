@@ -354,15 +354,20 @@ class ControladorSaidaParede:
                     "timeout: ultrassom frontal nao estabilizou durante pivo traseiro",
                     agora,
                 )
+            toque_frente_direita_pwm = self._toque_frente_direita_pwm(agora)
+            detalhe = (
+                "avancando em curva para a esquerda com frente priorizada; "
+                f"frontal={self._frente_mm} mm"
+            )
+            if toque_frente_direita_pwm:
+                detalhe += "; toque na dianteira direita"
             return MotionCommand(
                 self.PIVO_TRASEIRO_ESTABILIZAR,
                 angle=cfg.SAIDA_PAREDE_ANGULO_CURVA_TRASEIRA,
                 speed=cfg.SAIDA_PAREDE_PWM_PIVO_TRASEIRO / 120.0,
-                detail=(
-                    "avancando em curva para a esquerda com frente priorizada; "
-                    f"frontal={self._frente_mm} mm"
-                ),
+                detail=detalhe,
                 pivo_traseiro=True,
+                toque_frente_direita_pwm=toque_frente_direita_pwm,
             )
 
         return self._falhar(f"estado de alinhamento desconhecido: {self.state}", agora)
@@ -397,6 +402,21 @@ class ControladorSaidaParede:
             self._frente_referencia_pivo_mm = medida_atual
             self._estavel_desde_pivo = agora
         self._frente_em_processada_pivo = self._frente_em
+
+    def _toque_frente_direita_pwm(self, agora):
+        if not self._comando_aceito:
+            return 0
+        periodo = max(
+            float(cfg.SAIDA_PAREDE_PERIODO_TOQUE_FRENTE_DIREITA_S),
+            0.01,
+        )
+        duracao = min(
+            max(float(cfg.SAIDA_PAREDE_DURACAO_TOQUE_FRENTE_DIREITA_S), 0.0),
+            periodo,
+        )
+        if duracao <= 0.0 or self._tempo_decorrido(agora) % periodo >= duracao:
+            return 0
+        return int(cfg.SAIDA_PAREDE_PWM_TOQUE_FRENTE_DIREITA)
 
     def _preparar_giro_para(self, alvo, estado, agora):
         if alvo is None or self._sinal_yaw_por_giro_direita is None:
@@ -579,6 +599,7 @@ def executar_alinhamento_parede(arduino, *, intervalo_s=0.005):
                     comando.angle,
                     comando.speed,
                     rear_pivot_enabled=comando.pivo_traseiro,
+                    toque_frente_direita_pwm=comando.toque_frente_direita_pwm,
                 )
             if enviado is False:
                 raise RuntimeError("comando de alinhamento nao foi enviado")

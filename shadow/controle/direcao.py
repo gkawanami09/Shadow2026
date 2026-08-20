@@ -18,7 +18,8 @@ def init_steering(arduino_instance):
     arduino = arduino_instance
 
 
-def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=False):
+def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=False,
+          toque_frente_direita_pwm=0):
     """Transforma ângulo e velocidade no movimento das quatro rodas.
 
     O ângulo 190 para o robô e o ângulo 200 dá ré. Ângulos entre -180 e
@@ -95,6 +96,12 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
         else:          # esquerda: re somente na dianteira esquerda
             front_left = ((1 - assist) * front_left
                           - assist * front_reverse)
+
+        # Na saida do resgate, pequenos impulsos na dianteira direita fazem
+        # o chassi continuar progredindo enquanto a traseira puxa a curva.
+        # O parametro e opt-in e nao altera o segue-linha normal.
+        toque = float(toque_frente_direita_pwm) / MAX_PWM
+        front_right = min(max(front_right + toque, -1.), 1.)
 
         return arduino.rodas(
             round(front_left * MAX_PWM),
