@@ -837,12 +837,20 @@ SAIDA_PAREDE_PERIODO_TOQUE_FRENTE_DIREITA_S = 0.40
 # ja cumpriu seu papel ao limitar a aproximacao antes da curva.
 SAIDA_PAREDE_TOLERANCIA_ESTABILIDADE_LATERAL_MM = 5
 SAIDA_PAREDE_TEMPO_ESTABILIDADE_LATERAL_S = 1.0
+# Depois de 3 s com leituras laterais validas, mas oscilantes, a manobra nao
+# falha: faz a translacao direita planejada e segue para a verificacao visual.
 SAIDA_PAREDE_TIMEOUT_PIVO_TRASEIRO_S = 3.0
 
 # Com a distancia lateral ja estabilizada, sai do contato para a direita.
 # Usa a mesma intensidade da translacao curta inicial, por 0,5 s exatos.
 SAIDA_PAREDE_PWM_TRANSLACAO_FINAL_DIREITA = 100
 SAIDA_PAREDE_TRANSLACAO_FINAL_DIREITA_S = 0.50
+
+# Depois da primeira translacao, a camera frontal procura o triangulo verde
+# com LED apagado. Um verde confirmado leva a uma unica curva fisica de 45°
+# para a esquerda; a mesma sequencia de parede e translacao e entao repetida.
+SAIDA_PAREDE_TIMEOUT_TRIANGULO_VERDE_S = 3.0
+SAIDA_PAREDE_GIRO_TRIANGULO_VERDE_GRAUS = 45.0
 
 # Parede frontal e abertura no lado direito. Uma ausencia de eco do sensor
 # lateral so conta quando o Arduino confirmou a resposta; timeout serial para.

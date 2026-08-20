@@ -38,12 +38,17 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description=(
             "Testa a saida pos-vermelho: avanco curto, giro de 90 graus, "
-            "alinhamento lateral, curva traseira e translacao final direita."))
+            "alinhamento lateral, camera do verde e translacao direita."))
+    parser.add_argument(
+        "--camera-index",
+        type=int,
+        help="indice da camera frontal de resgate (padrao: configurado)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
-    parse_args(argv)
+    args = parse_args(argv)
     trava = MotorOwnerLock("teste-saida")
     try:
         trava.acquire()
@@ -63,9 +68,14 @@ def main(argv=None):
         # uma manobra baseada numa postura antiga do robo.
         arduino.travar_sessao()
         print("[saida] iniciando como se o deposito vermelho tivesse terminado")
-        resultado = executar_alinhamento_parede(arduino)
+        resultado = executar_alinhamento_parede(
+            arduino,
+            camera_index=args.camera_index,
+        )
         if resultado == "saida_concluida":
-            print("[saida] translacao final direita concluida; robo parado")
+            print(
+                "[saida] triangulo verde tratado e translacao final direita "
+                "concluida; robo parado")
             return EXIT_OK
         print("[saida] alinhamento interrompido; robo parado")
         return EXIT_FALHA_MANOBRA

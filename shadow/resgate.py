@@ -860,11 +860,15 @@ def _confirmar_saida_com_camera_linha(
 
 
 def _executar_saida_parede(arduino, camera_index, debug=False):
-    """Compatibilidade: delega a manobra direta pos-vermelho."""
-    del camera_index, debug
+    """Executa a manobra pos-vermelho e a camera frontal do triangulo verde."""
     from controle.saida_parede_resgate import executar_alinhamento_parede
 
-    return executar_alinhamento_parede(arduino, intervalo_s=TICK_S)
+    return executar_alinhamento_parede(
+        arduino,
+        intervalo_s=TICK_S,
+        camera_index=camera_index,
+        debug=debug,
+    )
 
 
 def parse_args():
@@ -2157,8 +2161,8 @@ def main(args=None):
                                 "EXIT_WALL_SEQUENCE_DONE",
                                 detail=(
                                     "giro, alinhamento, parede frontal e "
-                                    "curva traseira e translacao direita "
-                                    "concluidos; robo parado"),
+                                    "triangulo verde, curva traseira e "
+                                    "translacao direita concluidos; robo parado"),
                                 terminal=True,
                             )
                         else:
