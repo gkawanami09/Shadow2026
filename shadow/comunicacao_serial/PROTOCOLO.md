@@ -32,6 +32,10 @@ lado por meio de `controle/direcao.py`.
 | `SERVO <nome> <delta>` | move relativamente a ultima posicao; nomes ativos `GARRA_ESQ`, `GARRA_DIR` ou `CACAMBA`; delta -180..180 | `OK SERVO <nome> DELTA <d> POS <alvo>` |
 | `LED APAGADO\|ACESO` | controla o LED indicador em D12; inicia aceso no boot | `OK LED <modo>` |
 | `ULTRASSOM` | mede o sensor com TRIG D8 e ECHO D11 | `OK ULTRASSOM <mm>`; `-1` = sem eco |
+| `ULTRASSOM FRENTE` | mede explicitamente o HC-SR04 frontal | `OK ULTRASSOM FRENTE <mm>`; `-1` = sem eco |
+| `ULTRASSOM LATERAL` | mede o HC-SR04 apontado para a direita | `OK ULTRASSOM LATERAL <mm>`; `-1` = sem eco |
+| `MPU` | le orientacao relativa atual | `OK MPU PITCH=<p> ROLL=<r> YAW=<y>` |
+| `MPU ZERO` | zera a referencia relativa, somente com o robo parado | `OK MPU ZERO` |
 | `FUTABA <potencia> <tempo_ms>` | aciona CH3 com potencia assinada -100..100 por 1..3000 ms e corta o sinal automaticamente | `OK FUTABA POTENCIA <p> TEMPO_MS <ms>` |
 | `FUTABA STATUS` | informa se esta ativo e a potencia atual | `OK FUTABA <estado> POTENCIA <p>` |
 | `FUTABA PARAR` | corta imediatamente a saida CH3 | `OK FUTABA PARADO` |

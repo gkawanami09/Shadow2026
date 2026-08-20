@@ -69,6 +69,11 @@ class RescueSerialLedTests(unittest.TestCase):
         arduino._ultra_ready = False
         arduino._ultra_value = None
         arduino._ultra_response_received = False
+        arduino._ultra_lado = "FRENTE"
+        arduino._mpu_pending = False
+        arduino._mpu_deadline = 0.0
+        arduino._mpu_ready = False
+        arduino._mpu_value = None
         arduino._rampa_pending = False
         arduino._rampa_deadline = 0.0
         arduino._rampa_ready = False
@@ -184,6 +189,30 @@ class RescueSerialLedTests(unittest.TestCase):
         self.assertFalse(arduino.iniciar_ultrassom(timeout=0.05))
         self.assertEqual(arduino.poll_ultrassom(), (True, 200))
         self.assertTrue(arduino.iniciar_ultrassom(timeout=0.05))
+
+    def test_lateral_ultrasonic_uses_existing_firmware_variant(self):
+        arduino = self._connected_arduino()
+
+        self.assertTrue(
+            arduino.iniciar_ultrassom(timeout=0.05, lado="lateral"))
+
+        self.assertEqual(arduino._ser.writes, [b"ULTRASSOM LATERAL\n"])
+        arduino._ser.feed(b"OK ULTRASSOM LATERAL 187\n")
+        self.assertEqual(arduino.poll_ultrassom(), (True, 187))
+
+    def test_mpu_response_is_non_blocking_and_zero_is_confirmed(self):
+        arduino = self._connected_arduino()
+
+        self.assertTrue(arduino.iniciar_mpu(timeout=0.05))
+        self.assertEqual(arduino._ser.writes, [b"MPU\n"])
+        arduino._ser.feed(b"OK MPU PITCH=1.25 ROLL=-2.5 YAW=91.0\n")
+        concluido, leitura = arduino.poll_mpu()
+        self.assertTrue(concluido)
+        self.assertEqual(leitura.yaw_graus, 91.0)
+        self.assertEqual(leitura.pitch_graus, 1.25)
+
+        arduino._ser.reply_on_write = b"OK MPU ZERO\n"
+        self.assertTrue(arduino.zerar_mpu(timeout=0.05))
 
     def test_ultrasonic_no_echo_and_late_cancelled_reply(self):
         arduino = self._connected_arduino()

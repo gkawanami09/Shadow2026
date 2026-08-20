@@ -859,6 +859,162 @@ def _confirmar_saida_com_camera_linha(
     )
 
 
+def _executar_saida_parede(arduino, camera_index, debug=False):
+    """Executa a nova saida com uma camera por vez e parede a direita.
+
+    A funcao recebe a serial ja pertencente ao resgate. Ela nunca abre a
+    camera inferior enquanto a frontal estiver aberta: fecha a frontal antes
+    da sonda, e so a reabre depois de o controlador desfazer a tentativa.
+    """
+    from controle.direcao import steer
+    from controle.monitor_saida_parede import MonitorSensoresSaida
+    from controle.saida_parede_resgate import ControladorSaidaParede
+    from controle.sonda_linha_saida import (
+        RETOMADA_FALHOU as RETOMADA_SONDA_FALHOU,
+        testar_abertura_com_camera_linha,
+    )
+    from visao.captura_resgate import RescueCamera
+
+    controlador = ControladorSaidaParede()
+    monitor_sensores = MonitorSensoresSaida(arduino)
+    marcadores_saida = MarkerPair()
+    camera_frontal = None
+    epoca_serial = arduino.connection_epoch
+    sucesso = False
+
+    def abrir_camera_frontal():
+        if arduino.led("APAGADO") is False:
+            raise RuntimeError("nao foi possivel apagar LED da camera frontal")
+        return RescueCamera(camera_index)
+
+    def fechar_camera_frontal():
+        nonlocal camera_frontal
+        if camera_frontal is None:
+            return
+        try:
+            camera_frontal.close()
+        finally:
+            camera_frontal = None
+
+    try:
+        camera_frontal = abrir_camera_frontal()
+        print(
+            "[saida-parede] frontal ativa com LED APAGADO; "
+            "seguindo parede direita")
+        while True:
+            agora = time.monotonic()
+            if (
+                not arduino.connected
+                or arduino.connection_epoch != epoca_serial
+            ):
+                raise RuntimeError("serial mudou durante a saida pela parede")
+
+            # O monitor entrega apenas leituras efetivamente respondidas; um
+            # timeout da serial nunca vira uma falsa abertura lateral.
+            monitor_sensores.atualizar_controlador(controlador, agora)
+
+            # A frontal e a unica camera ativa nesta parte. Ela enxerga os
+            # triangulos; a faixa do chao nunca e decidida por esta camera.
+            if camera_frontal is not None:
+                frame = camera_frontal.get_frame()
+                deteccoes_marcador = marcadores_saida.update(frame, agora)
+                triangulo_confirmado = any(
+                    deteccao is not None and deteccao.confirmed
+                    for deteccao in deteccoes_marcador.values()
+                )
+                controlador.observar_triangulo(triangulo_confirmado, agora)
+                if debug:
+                    anotado = overlay_resgate.anotar(
+                        frame,
+                        marcadores=deteccoes_marcador,
+                        estado=controlador.state,
+                        detalhe="saida por parede; LED apagado",
+                        motores_ativos=True,
+                    )
+                    cv2.imshow(JANELA, anotado)
+                    if (cv2.waitKey(1) & 0xFF) in (ord("q"), 27):
+                        return None
+
+            comando = controlador.atualizar(agora)
+
+            if controlador.solicita_zerar_mpu:
+                # MPU ZERO e manual/sincrono, por isso ocorre somente com o
+                # chassi parado e sem consultas assincronas pendentes.
+                steer()
+                monitor_sensores.cancelar()
+                if not controlador.confirmar_mpu_zerado(arduino.zerar_mpu(), agora):
+                    return RETOMADA_SONDA_FALHOU
+                continue
+
+            if controlador.solicita_sonda_linha:
+                # A troca e estritamente sequencial: sem frontal, LED aceso,
+                # camera inferior; a funcao fecha a inferior antes de voltar.
+                steer()
+                fechar_camera_frontal()
+                monitor_sensores.cancelar()
+                if not controlador.iniciar_sonda_linha():
+                    raise RuntimeError("sonda de linha recusada pelo controlador")
+                resultado_sonda = testar_abertura_com_camera_linha(
+                    arduino,
+                    steer,
+                    debug=debug,
+                )
+                if resultado_sonda.resultado == RETOMADA_SONDA_FALHOU:
+                    return RETOMADA_SONDA_FALHOU
+                controlador.registrar_resultado_sonda(
+                    resultado_sonda.resultado,
+                    resultado_sonda.avanco_s,
+                    time.monotonic(),
+                )
+                continue
+
+            if controlador.solicita_camera_frontal:
+                steer()
+                try:
+                    camera_frontal = abrir_camera_frontal()
+                except Exception:
+                    controlador.confirmar_camera_frontal_aberta(False, agora)
+                else:
+                    controlador.confirmar_camera_frontal_aberta(True, agora)
+                    print(
+                        "[saida-parede] frontal reaberta com LED APAGADO; "
+                        "retomando a parede apos abertura sem preto")
+                continue
+
+            if comando.wheel_speeds is not None:
+                enviado = arduino.rodas(*comando.wheel_speeds)
+            else:
+                enviado = steer(comando.angle, comando.speed)
+            if enviado is False:
+                raise RuntimeError("comando da saida por parede nao foi enviado")
+            controlador.notificar_comando_escrito(comando.state, time.monotonic())
+
+            if comando.terminal:
+                if comando.state == ControladorSaidaParede.SUCESSO:
+                    sucesso = True
+                    return PRETA
+                print(f"[saida-parede] falha: {comando.detail}")
+                return RETOMADA_SONDA_FALHOU
+
+            # Uma consulta por vez evita interferencia entre HC-SR04 e faz a
+            # serial continuar responsiva para o watchdog dos motores.
+            monitor_sensores.agendar_proxima(time.monotonic())
+
+            arduino.refresh(fail_closed=True)
+            time.sleep(TICK_S)
+    finally:
+        try:
+            steer()
+        except Exception:
+            pass
+        fechar_camera_frontal()
+        if not sucesso:
+            try:
+                arduino.led("APAGADO")
+            except Exception:
+                pass
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
@@ -2112,28 +2268,79 @@ def main(args=None):
                             timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
                         trabalhador = None
                     portao.reset()
-                    inicio_saida = agora
-                    controlador_saida = ExitPhaseController(
-                        start_time=inicio_saida)
-                    portao_saida, modelo_saida = novo_portao_saida(
-                        modelo_saida)
-                    trabalhador_saida = (
-                        LatestFrameExitDetector(portao_saida.detector)
-                        if modelo_saida is not None else None
-                    )
-                    sequencia_resultado_saida = 0
-                    deteccao_saida = None
-                    faltas_saida = 0
-                    epoca_saida = arduino.connection_epoch
-                    forma = (
-                        frame_atual.shape if frame_atual is not None
-                        else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
-                              cfg.RESCUE_CAMERA_MAX_WIDTH, 3)
-                    )
-                    comando = controlador_saida.update(
-                        None, forma, mapper=None, now=agora)
-                    ultimo_controle_ocioso = agora
-                    comando_atualizado = False
+                    if cfg.SAIDA_PAREDE_ATIVADA:
+                        # A nova rota possui seu proprio ciclo de cameras.
+                        # Encerrar a frontal assincrona antes de entrar nela
+                        # impede duas Picameras abertas em paralelo.
+                        if trabalhador_saida is not None:
+                            trabalhador_saida.close(
+                                timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
+                            trabalhador_saida = None
+                        if captura is not None:
+                            fechou = captura.close(
+                                timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)
+                            if not fechou:
+                                raise RuntimeError(
+                                    "camera frontal nao fechou antes da "
+                                    "saida pela parede")
+                            captura = None
+                            fonte = None
+                        print(
+                            "[resgate] deposito vermelho concluido; "
+                            "iniciando saida pela parede direita")
+                        resultado_saida_parede = _executar_saida_parede(
+                            arduino,
+                            args.camera_index,
+                            debug=args.debug,
+                        )
+                        controlador_saida = None
+                        portao_saida = None
+                        epoca_saida = None
+                        inicio_saida = None
+                        deteccao_saida = None
+                        faltas_saida = 0
+                        if resultado_saida_parede == PRETA:
+                            codigo_saida = EXIT_OK
+                            comando = MotionCommand(
+                                "EXIT_BLACK_CONFIRMED",
+                                detail=(
+                                    "faixa preta e continuacao confirmadas "
+                                    "pela saida por parede"),
+                                terminal=True,
+                            )
+                        else:
+                            codigo_saida = EXIT_INCOMPLETE
+                            comando = MotionCommand(
+                                "EXIT_WALL_FAILED",
+                                detail=(
+                                    "saida por parede nao confirmou uma "
+                                    "faixa preta segura"),
+                                terminal=True,
+                            )
+                        comando_atualizado = False
+                    else:
+                        inicio_saida = agora
+                        controlador_saida = ExitPhaseController(
+                            start_time=inicio_saida)
+                        portao_saida, modelo_saida = novo_portao_saida(
+                            modelo_saida)
+                        trabalhador_saida = (
+                            LatestFrameExitDetector(portao_saida.detector)
+                            if modelo_saida is not None else None
+                        )
+                        sequencia_resultado_saida = 0
+                        deteccao_saida = None
+                        faltas_saida = 0
+                        epoca_saida = arduino.connection_epoch
+                        forma = (
+                            frame_atual.shape if frame_atual is not None
+                            else (cfg.RESCUE_CAMERA_MAX_HEIGHT,
+                                  cfg.RESCUE_CAMERA_MAX_WIDTH, 3)
+                        )
+                        comando = controlador_saida.update(
+                            None, forma, mapper=None, now=agora)
+                        ultimo_controle_ocioso = agora
+                        comando_atualizado = False
 
             if (
                 args.drive

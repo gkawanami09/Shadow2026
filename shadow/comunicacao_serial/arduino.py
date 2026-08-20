@@ -1,11 +1,25 @@
 """Mantém a comunicação USB serial com o Arduino usando o protocolo SPEC 01."""
 
+from dataclasses import dataclass
 import time
 
 import serial
 from serial.tools import list_ports
 
 import config
+
+
+@dataclass(frozen=True)
+class LeituraMpu:
+    """Amostra de orientacao devolvida pelo comando ``MPU`` do Uno.
+
+    O yaw e relativo: o MPU6050 nao possui magnetometro. O controle de
+    saida o usa somente depois de ``MPU ZERO`` e em manobras curtas.
+    """
+
+    pitch_graus: float
+    roll_graus: float
+    yaw_graus: float
 
 
 class Arduino:
@@ -23,6 +37,11 @@ class Arduino:
         self._ultra_ready = False
         self._ultra_value = None
         self._ultra_response_received = False
+        self._ultra_lado = "FRENTE"
+        self._mpu_pending = False
+        self._mpu_deadline = 0.0
+        self._mpu_ready = False
+        self._mpu_value = None
         self._rampa_pending = False
         self._rampa_deadline = 0.0
         self._rampa_ready = False
@@ -91,6 +110,7 @@ class Arduino:
         self._connection_epoch += 1
         self._rx_buffer.clear()
         self.cancelar_ultrassom()
+        self.cancelar_mpu()
         self.cancelar_rampa()
         self._manual_pending = False
         self._manual_response = None
@@ -132,6 +152,11 @@ class Arduino:
         responder, sem confundir isso com um ambiente realmente sem eco.
         """
         return bool(self._ultra_response_received)
+
+    @property
+    def consultas_sensores_pendentes(self):
+        """Indica se ha consulta de ultrassom ou MPU aguardando resposta."""
+        return bool(self._ultra_pending or self._mpu_pending)
 
     def lado(self, esq, dir_):
         """LADO <esq> <dir> — signed wheel speeds, left pair / right pair."""
@@ -193,9 +218,9 @@ class Arduino:
         self._desired_led_mode = modo
         return self._send_aux_cmd(f"LED {modo}")
 
-    def distancia_ultrassom(self, timeout=0.2):
+    def distancia_ultrassom(self, timeout=0.2, lado="FRENTE"):
         """Solicita uma leitura e retorna a distancia em mm, ou None sem eco."""
-        if not self.iniciar_ultrassom(timeout=timeout):
+        if not self.iniciar_ultrassom(timeout=timeout, lado=lado):
             return None
         while True:
             concluido, distancia_mm = self.poll_ultrassom()
@@ -203,11 +228,14 @@ class Arduino:
                 return distancia_mm
             time.sleep(0.002)
 
-    def iniciar_ultrassom(self, timeout=0.2):
+    def iniciar_ultrassom(self, timeout=0.2, lado="FRENTE"):
         """Inicia uma leitura sem esperar a resposta do firmware."""
         timeout = float(timeout)
         if timeout <= 0:
             raise ValueError("timeout do ultrassom deve ser positivo")
+        lado = str(lado).upper()
+        if lado not in ("FRENTE", "LATERAL"):
+            raise ValueError("lado do ultrassom deve ser FRENTE ou LATERAL")
         self._drain()
         if (
             not self._connected
@@ -220,7 +248,11 @@ class Arduino:
         self._ultra_deadline = time.monotonic() + timeout
         self._ultra_value = None
         self._ultra_response_received = False
-        self._write_line("ULTRASSOM")
+        self._ultra_lado = lado
+        # Sem argumento preserva o comando frontal legada; o firmware ja
+        # possui a variante ``ULTRASSOM LATERAL`` para o segundo HC-SR04.
+        comando = "ULTRASSOM" if lado == "FRENTE" else "ULTRASSOM LATERAL"
+        self._write_line(comando)
         if not self._connected:
             self._ultra_pending = False
             return False
@@ -252,6 +284,57 @@ class Arduino:
         self._ultra_value = None
         self._ultra_response_received = False
         self._ultra_deadline = 0.0
+        self._ultra_lado = "FRENTE"
+
+    def iniciar_mpu(self, timeout=0.12):
+        """Pede uma amostra do MPU sem bloquear o ciclo de motores."""
+        timeout = float(timeout)
+        if timeout <= 0:
+            raise ValueError("timeout do MPU deve ser positivo")
+        self._drain()
+        if (
+            not self._connected
+            or self._mpu_pending
+            or self._mpu_ready
+        ):
+            return False
+        self._mpu_pending = True
+        self._mpu_deadline = time.monotonic() + timeout
+        self._mpu_value = None
+        self._write_line("MPU")
+        if not self._connected:
+            self._mpu_pending = False
+            return False
+        return True
+
+    def poll_mpu(self):
+        """Retorna ``(concluido, LeituraMpu | None)`` sem bloquear."""
+        self._drain()
+        now = time.monotonic()
+        if self._mpu_pending and (
+            not self._connected or now >= self._mpu_deadline
+        ):
+            self._mpu_pending = False
+            self._mpu_ready = True
+            self._mpu_value = None
+        if not self._mpu_ready:
+            return False, None
+        leitura = self._mpu_value
+        self._mpu_ready = False
+        self._mpu_value = None
+        return True, leitura
+
+    def cancelar_mpu(self):
+        """Descarta uma leitura pendente do MPU."""
+        self._mpu_pending = False
+        self._mpu_ready = False
+        self._mpu_value = None
+        self._mpu_deadline = 0.0
+
+    def zerar_mpu(self, timeout=0.5):
+        """Zera a referencia relativa de pitch, roll e yaw com o robo parado."""
+        resposta = self._query("MPU ZERO", "OK MPU ZERO", timeout)
+        return resposta is not None
 
     def iniciar_rampa(self, timeout=None):
         """Solicita o estado de rampa sem bloquear o segue-linha.
@@ -491,6 +574,24 @@ class Arduino:
                     pass
 
     def _route_line(self, line):
+        if line.startswith("OK MPU "):
+            if self._mpu_pending:
+                campos = dict(
+                    campo.split("=", 1)
+                    for campo in line.split()[2:]
+                    if "=" in campo
+                )
+                try:
+                    self._mpu_value = LeituraMpu(
+                        pitch_graus=float(campos["PITCH"]),
+                        roll_graus=float(campos["ROLL"]),
+                        yaw_graus=float(campos["YAW"]),
+                    )
+                except (KeyError, ValueError):
+                    self._mpu_value = None
+                self._mpu_pending = False
+                self._mpu_ready = True
+                return
         if line.startswith("OK RAMPA "):
             if self._rampa_pending:
                 campos = dict(

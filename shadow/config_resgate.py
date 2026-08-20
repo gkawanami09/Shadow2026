@@ -768,6 +768,80 @@ EXIT_POST_CONTINUATION_MIN_FORWARD_PROGRESS_RATIO = 0.10
 # componente predominantemente longitudinal. Isso impede que o resto de uma
 # soleira diagonal, ja parcialmente fora do quadro, vire a "terceira linha".
 EXIT_POST_FALLBACK_MAX_LATERAL_PER_FORWARD = 0.85
+
+# ---------------------------------------------------------------------------
+# Saida por parede (depois do deposito vermelho)
+# ---------------------------------------------------------------------------
+# A rota usa somente sensores e marcadores vistos durante a rodada: nao ha
+# mapa nem posicao fixa da arena. A parede e mantida no lado DIREITO, que e o
+# lado fisico do segundo HC-SR04 no Shadow.
+SAIDA_PAREDE_ATIVADA = True
+SAIDA_PAREDE_LADO = "DIREITA"
+
+# A posicao final do deposito vermelho ja aponta para o marcador. Este e
+# apenas o pequeno afastamento que libera o giro inicial de tanque; calibrar
+# na arena sem aumentar ate encostar em uma parede.
+SAIDA_PAREDE_AVANCO_APOS_VERMELHO_PWM = 55
+SAIDA_PAREDE_AVANCO_APOS_VERMELHO_S = 0.35
+SAIDA_PAREDE_ASSENTAMENTO_S = 0.12
+
+# Yaw relativo do MPU6050. O comando MPU ZERO e enviado com o chassi parado
+# antes do primeiro giro; nao tratar esse valor como uma bussola absoluta.
+SAIDA_PAREDE_TOLERANCIA_YAW_GRAUS = 5.0
+# No inicio do primeiro giro a rotina mede este deslocamento minimo para
+# descobrir se o yaw cresce ou decresce quando o tanque gira fisicamente para
+# a direita. Assim a logica continua correta mesmo se o MPU foi montado
+# invertido no chassi.
+SAIDA_PAREDE_VARIACAO_MINIMA_YAW_GRAUS = 4.0
+SAIDA_PAREDE_TIMEOUT_GIRO_S = 2.40
+SAIDA_PAREDE_PWM_GIRO = 55
+SAIDA_PAREDE_TIMEOUT_MPU_S = 0.35
+SAIDA_PAREDE_INTERVALO_MPU_S = 0.05
+SAIDA_PAREDE_INTERVALO_ULTRASSOM_S = 0.07
+SAIDA_PAREDE_TIMEOUT_ULTRASSOM_S = 0.12
+SAIDA_PAREDE_TIMEOUT_SENSOR_S = 0.45
+
+# Parede frontal e abertura no lado direito. Uma ausencia de eco do sensor
+# lateral so conta quando o Arduino confirmou a resposta; timeout serial para.
+SAIDA_PAREDE_DISTANCIA_FRENTE_PARAR_MM = 115
+SAIDA_PAREDE_CONFIRMACOES_PAREDE = 2
+SAIDA_PAREDE_DISTANCIA_ABERTURA_MM = 230
+SAIDA_PAREDE_CONFIRMACOES_ABERTURA = 3
+SAIDA_PAREDE_VELOCIDADE_SEGUIR = 0.38
+SAIDA_PAREDE_VELOCIDADE_APROXIMAR = 0.28
+
+# Triangulos verde/vermelho vistos pela camera frontal, sempre com LED
+# apagado. O desvio sai 45 graus da parede direita e retorna ao mesmo heading.
+SAIDA_PAREDE_GIRO_TRIANGULO_GRAUS = 45.0
+SAIDA_PAREDE_AVANCO_MIN_TRIANGULO_S = 0.25
+SAIDA_PAREDE_AVANCO_MAX_TRIANGULO_S = 1.30
+SAIDA_PAREDE_COOLDOWN_TRIANGULO_S = 1.20
+
+# Entrada na abertura direita. Primeiro o robÃ´ avanca ate a posicao de
+# tentativa, translada para a esquerda (para girar sem raspar na quina) e so
+# depois gira 90 graus para a direita. Os tempos sao conservadores e devem ser
+# ajustados com o robÃ´ real; cada movimento tem guarda de yaw e timeout.
+SAIDA_PAREDE_AVANCO_ENTRADA_S = 0.18
+SAIDA_PAREDE_PWM_TRANSLACAO = 45
+SAIDA_PAREDE_TRANSLACAO_ESQUERDA_S = 0.28
+SAIDA_PAREDE_TOLERANCIA_TRANSLACAO_YAW_GRAUS = 3.5
+SAIDA_PAREDE_MAX_TENTATIVAS_TRANSLACAO = 2
+
+# A camera inferior ve somente os centimetros proximos ao chao. O teste usa
+# pulsos curtos, aceita exclusivamente PRETA e devolve ao percurso se a faixa
+# for clara, prata ou ausente ate o limite. O timeout nao e uma distancia: ele
+# e o teto seguro que precisa ser calibrado na velocidade indicada.
+SAIDA_PAREDE_PWM_SONDA_LINHA = 38
+SAIDA_PAREDE_TIMEOUT_SONDA_LINHA_S = 1.00
+SAIDA_PAREDE_PULSO_SONDA_LINHA_S = 0.08
+SAIDA_PAREDE_CONFIRMACOES_PRETO = 2
+
+# Depois de rejeitar a abertura, desfaz o avanco medido pela sonda, gira de
+# volta a esquerda e translada a direita. A abertura atual fica ignorada ate o
+# ultrassom voltar a enxergar parede, evitando testar o mesmo vao em loop.
+SAIDA_PAREDE_RECUO_MINIMO_S = 0.10
+SAIDA_PAREDE_TIMEOUT_RETORNO_PAREDE_S = 2.50
+SAIDA_PAREDE_MAX_GIROS_PAREDE = 8
 EXIT_POST_FALLBACK_EDGE_MARGIN_RATIO = 0.015
 
 # Mapeamento final dos DOIS triangulos, so para diagnostico e para provar que
