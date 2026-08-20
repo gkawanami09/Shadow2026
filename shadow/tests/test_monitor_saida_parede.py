@@ -96,6 +96,19 @@ class MonitorSaidaParedeTests(unittest.TestCase):
         ])
         self.assertEqual([leitura[0] for leitura in controlador.yaws], [4.0, 5.0])
 
+    def test_giro_prioriza_mpu_sem_intercalar_ultrassom(self):
+        arduino = ArduinoFalso()
+        controlador = ControladorFalso()
+        monitor = MonitorSensoresSaida(arduino)
+
+        self.assertTrue(monitor.agendar_proxima(0.00, priorizar_mpu=True))
+        arduino._mpu_pronto = SimpleNamespace(yaw_graus=4.0)
+        monitor.atualizar_controlador(controlador, 0.01)
+
+        self.assertTrue(monitor.agendar_proxima(0.06, priorizar_mpu=True))
+
+        self.assertEqual(arduino.comandos, ["MPU", "MPU"])
+
 
 if __name__ == "__main__":
     unittest.main()

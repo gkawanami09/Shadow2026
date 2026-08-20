@@ -41,10 +41,27 @@ class MonitorSensoresSaida:
             )
             self._lado_ultrassom_pendente = None
 
-    def agendar_proxima(self, agora=None):
-        """Inicia no maximo uma consulta nao bloqueante, se estiver vencida."""
+    def agendar_proxima(self, agora=None, priorizar_mpu=False):
+        """Inicia no maximo uma consulta nao bloqueante, se estiver vencida.
+
+        Durante um giro, a referencia de yaw tem precedencia. A parede nao
+        muda enquanto o robô gira parado; alternar com o HC-SR04 nesse instante
+        pode envelhecer o yaw e fazer a manobra abortar mesmo com o MPU bom.
+        """
         instante = time.monotonic() if agora is None else float(agora)
         if self._arduino.consultas_sensores_pendentes:
+            return False
+
+        if priorizar_mpu:
+            if instante < self._proxima_leitura_mpu:
+                return False
+            if self._arduino.iniciar_mpu(
+                timeout=cfg.SAIDA_PAREDE_TIMEOUT_MPU_S,
+            ):
+                self._proxima_leitura_mpu = (
+                    instante + cfg.SAIDA_PAREDE_INTERVALO_MPU_S)
+                self._proximo_sensor = "ULTRASSOM"
+                return True
             return False
 
         ordem = (

@@ -64,6 +64,15 @@ class ControladorSaidaParede:
         TRANSLADAR_DIREITA,
         IGNORAR_ABERTURA,
     }
+    _ESTADOS_GIRO_MONITORADO = {
+        GIRO_INICIAL_DIREITA,
+        DESVIAR_TRIANGULO,
+        RETORNAR_TRIANGULO,
+        GIRO_PAREDE_ESQUERDA,
+        CORRIGIR_YAW_TRANSLACAO,
+        GIRO_ENTRADA_DIREITA,
+        GIRO_RETORNO_ESQUERDA,
+    }
 
     def __init__(self, start_time=None):
         agora = time.monotonic() if start_time is None else float(start_time)
@@ -115,8 +124,21 @@ class ControladorSaidaParede:
         return self.state == self.ABRIR_CAMERA_FRONTAL
 
     @property
+    def prioriza_mpu(self):
+        """Durante um giro, yaw e mais urgente que medir as paredes."""
+        return self.state in self._ESTADOS_GIRO_MONITORADO
+
+    @property
     def heading_parede(self):
         return self._heading_parede
+
+    def diagnostico_yaw(self, now=None):
+        """Texto curto para tornar falhas de giro verificaveis no log."""
+        agora = time.monotonic() if now is None else float(now)
+        yaw = "-" if self._yaw is None else f"{self._yaw:.1f}"
+        alvo = "-" if self._alvo_yaw is None else f"{self._alvo_yaw:.1f}"
+        idade = "-" if self._yaw_em is None else f"{agora - self._yaw_em:.2f}s"
+        return f"yaw={yaw} alvo={alvo} idade={idade}"
 
     def observar_mpu(self, yaw_graus, timestamp=None):
         if yaw_graus is None:
@@ -217,15 +239,7 @@ class ControladorSaidaParede:
             return MotionCommand(self.FALHA, detail=self._detalhe_falha, terminal=True)
 
         if (
-            self.state in {
-                self.GIRO_INICIAL_DIREITA,
-                self.DESVIAR_TRIANGULO,
-                self.RETORNAR_TRIANGULO,
-                self.GIRO_PAREDE_ESQUERDA,
-                self.CORRIGIR_YAW_TRANSLACAO,
-                self.GIRO_ENTRADA_DIREITA,
-                self.GIRO_RETORNO_ESQUERDA,
-            }
+            self.state in self._ESTADOS_GIRO_MONITORADO
             and self._tempo_decorrido(agora) >= cfg.SAIDA_PAREDE_TIMEOUT_GIRO_S
         ):
             return self._falhar("timeout no giro monitorado por yaw")

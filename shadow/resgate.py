@@ -881,6 +881,8 @@ def _executar_saida_parede(arduino, camera_index, debug=False):
     camera_frontal = None
     epoca_serial = arduino.connection_epoch
     sucesso = False
+    ultimo_estado_saida = None
+    ultimo_yaw_log = -float("inf")
 
     def abrir_camera_frontal():
         if arduino.led("APAGADO") is False:
@@ -936,6 +938,20 @@ def _executar_saida_parede(arduino, camera_index, debug=False):
                         return None
 
             comando = controlador.atualizar(agora)
+
+            if comando.state != ultimo_estado_saida:
+                print(
+                    f"[saida-parede] {comando.state}: {comando.detail} "
+                    f"({controlador.diagnostico_yaw(agora)})")
+                ultimo_estado_saida = comando.state
+            elif (
+                controlador.prioriza_mpu
+                and agora - ultimo_yaw_log >= 0.40
+            ):
+                print(
+                    f"[saida-parede] giro monitorado: "
+                    f"{controlador.diagnostico_yaw(agora)}")
+                ultimo_yaw_log = agora
 
             if controlador.solicita_zerar_mpu:
                 # MPU ZERO e manual/sincrono, por isso ocorre somente com o
@@ -993,12 +1009,17 @@ def _executar_saida_parede(arduino, camera_index, debug=False):
                 if comando.state == ControladorSaidaParede.SUCESSO:
                     sucesso = True
                     return PRETA
-                print(f"[saida-parede] falha: {comando.detail}")
+                print(
+                    f"[saida-parede] falha: {comando.detail} "
+                    f"({controlador.diagnostico_yaw(agora)})")
                 return RETOMADA_SONDA_FALHOU
 
             # Uma consulta por vez evita interferencia entre HC-SR04 e faz a
             # serial continuar responsiva para o watchdog dos motores.
-            monitor_sensores.agendar_proxima(time.monotonic())
+            monitor_sensores.agendar_proxima(
+                time.monotonic(),
+                priorizar_mpu=controlador.prioriza_mpu,
+            )
 
             arduino.refresh(fail_closed=True)
             time.sleep(TICK_S)
