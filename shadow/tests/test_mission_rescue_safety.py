@@ -16,7 +16,6 @@ from mission import (  # noqa: E402
     RESCUE_EXIT_ARDUINO_DESCONECTADO,
     RESCUE_EXIT_OK,
     RESCUE_RETURN_COMPLETED,
-    RESCUE_RETURN_RESTART_AFTER_ARDUINO,
     RESCUE_RETURN_STOPPED,
     mudar_estado,
     rescue_return_action,
@@ -39,14 +38,26 @@ class RescueReturnSafetyTests(unittest.TestCase):
             RESCUE_RETURN_COMPLETED,
         )
 
-    def test_so_desconexao_do_arduino_autoriza_reinicio_do_percurso(self):
+    def test_desconexao_do_arduino_bloqueia_reinicio_do_percurso(self):
         self.assertEqual(
             rescue_return_action(RESCUE_EXIT_ARDUINO_DESCONECTADO),
-            RESCUE_RETURN_RESTART_AFTER_ARDUINO,
+            RESCUE_RETURN_STOPPED,
         )
         self.assertEqual(rescue_return_action(3), RESCUE_RETURN_STOPPED)
         self.assertEqual(rescue_return_action(4), RESCUE_RETURN_STOPPED)
         self.assertEqual(rescue_return_action(99), RESCUE_RETURN_STOPPED)
+
+    def test_ciclo_fisico_sustentado_do_arduino_libera_nova_tentativa(self):
+        sistema = MissionSystem(None, None, SimpleNamespace())
+        portas = iter((set(), {"/dev/ttyACM0"}, set(), {"/dev/ttyACM0"}))
+
+        with (
+            patch.object(
+                sistema, "_portas_arduino_presentes", side_effect=portas),
+            patch("mission.time.sleep"),
+            patch("mission.time.monotonic", side_effect=(0.0, 1.0, 2.0, 6.0)),
+        ):
+            sistema.aguardar_ciclo_do_arduino("teste")
 
     def test_falha_serial_tardia_do_resgate_reinicia_o_percurso(self):
         args = type("Args", (), {"gerenciado_pela_missao": True})()

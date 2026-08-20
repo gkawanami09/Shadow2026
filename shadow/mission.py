@@ -64,7 +64,6 @@ CHILD_JOIN_TIMEOUT_S = 6.0
 RESCUE_EXIT_OK = 0
 RESCUE_EXIT_ARDUINO_DESCONECTADO = 5
 RESCUE_RETURN_COMPLETED = "completed"
-RESCUE_RETURN_RESTART_AFTER_ARDUINO = "restart_after_arduino"
 RESCUE_RETURN_STOPPED = "stopped"
 
 
@@ -129,11 +128,15 @@ def mudar_estado(estado_atual, novo_estado, motivo=""):
 
 
 def rescue_return_action(returncode):
-    """Define a unica situacao em que uma falha pode rearmar o percurso."""
+    """Define quando e seguro devolver o robô ao percurso.
+
+    Uma desconexão USB durante o resgate não informa se o Arduino reiniciou,
+    se os motores ainda receberam parte do último comando ou onde o robô
+    terminou fisicamente. Por isso, somente o término normal da saída preta
+    confirmada pode liberar o segue-linha.
+    """
     if int(returncode) == RESCUE_EXIT_OK:
         return RESCUE_RETURN_COMPLETED
-    if int(returncode) == RESCUE_EXIT_ARDUINO_DESCONECTADO:
-        return RESCUE_RETURN_RESTART_AFTER_ARDUINO
     return RESCUE_RETURN_STOPPED
 
 
@@ -488,33 +491,40 @@ class MissionSystem:
         }
 
     def aguardar_ciclo_do_arduino(self, motivo):
-        """Não rearma o percurso até a placa ter sumido e reaparecido.
+        """Rearma o percurso somente após um desligamento físico sustentado.
 
-        Depois que o resgate começou, um retorno inesperado não autoriza
-        devolver os motores ao segue-linha: a posição, as vítimas na garra e
-        a etapa física já não podem ser presumidas. O operador sinaliza que
-        reposicionou o robô fazendo o ciclo físico do Arduino.
+        Uma reconexão USB breve pode ser cabo, ruído ou reset por queda de
+        tensão. Ela não autoriza devolver os motores ao segue-linha. Para
+        sinalizar que corrigiu e reposicionou o robô, o operador desliga a
+        alimentação do Arduino pelo intervalo mínimo configurado e o religa.
         """
-        viu_desconectado = not self._portas_arduino_presentes()
         print(
             "[missao] resgate interrompido; segue-linha bloqueado. "
-            f"{motivo}. Desligue e religue o Arduino para reiniciar.")
+            f"{motivo}. Desligue o Arduino por pelo menos "
+            f"{config.MISSION_ARDUINO_DESLIGAMENTO_MINIMO_S:.0f} s e "
+            "religue-o para reiniciar.")
+        desligado_desde = None
         while True:
             time.sleep(config.MISSION_RECOVERY_DELAY_S)
+            agora = time.monotonic()
             portas = self._portas_arduino_presentes()
             if not portas:
-                viu_desconectado = True
-            elif viu_desconectado:
-                print("[missao] Arduino reconectado; reiniciando pelo percurso")
-                return
-
-    def aguardar_arduino_reconectado(self):
-        """Espera a reconexão depois que o próprio resgate detectou a queda."""
-        print(
-            "[missao] Arduino desconectado no resgate; aguardando "
-            "reconexao para reiniciar pelo percurso")
-        while not self._portas_arduino_presentes():
-            time.sleep(config.MISSION_RECOVERY_DELAY_S)
+                if desligado_desde is None:
+                    desligado_desde = agora
+                    print("[missao] Arduino desligado; aguardando religacao")
+                continue
+            if desligado_desde is None:
+                continue
+            duracao_desligado = agora - desligado_desde
+            if duracao_desligado < config.MISSION_ARDUINO_DESLIGAMENTO_MINIMO_S:
+                print(
+                    "[missao] reconexao curta do Arduino "
+                    f"({duracao_desligado:.1f} s); segue-linha continua "
+                    "bloqueado. Faca um desligamento completo.")
+                desligado_desde = None
+                continue
+            print("[missao] Arduino religado; reiniciando pelo percurso")
+            return
 
     # -- encerramento ----------------------------------------------------
     def shutdown(self):
@@ -675,25 +685,15 @@ def main():
 
                 returncode = system.wait_rescue()
                 rescue_action = rescue_return_action(returncode)
-                if rescue_action == RESCUE_RETURN_RESTART_AFTER_ARDUINO:
-                    system.aguardar_arduino_reconectado()
-                    motivo = "Arduino reconectado depois de cair no resgate"
-                    estado_atual = mudar_estado(
-                        estado_atual,
-                        EstadoMissao.RECONECTANDO,
-                        motivo,
-                    )
-                    tentativas += 1
-                    iniciar_percurso_ate_pronto(motivo)
-                    continue
                 if rescue_action == RESCUE_RETURN_STOPPED:
-                    # Um erro comum permanece em RESGATE. Somente o ciclo
-                    # físico do Arduino autoriza limpar a tentativa.
+                    # Reconexões breves não rearmam a missão. A retomada só
+                    # ocorre após o operador desligar a placa pelo intervalo
+                    # mínimo, reposicionar o robô e religá-la.
                     system.aguardar_ciclo_do_arduino(
                         f"resgate terminou com codigo {returncode}")
                     motivo = (
                         f"resgate terminou com codigo {returncode}; "
-                        "Arduino foi reiniciado")
+                        "Arduino foi desligado e religado")
                     estado_atual = mudar_estado(
                         estado_atual,
                         EstadoMissao.RECONECTANDO,
