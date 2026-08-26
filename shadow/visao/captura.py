@@ -38,6 +38,32 @@ def escolher_fps_captura(modos_sensor):
     return min(float(CAPTURE_FPS), maior_fps)
 
 
+def obter_recorte_maximo(camera_controls):
+    """Retorna o maior ScalerCrop anunciado pelo driver, se disponível."""
+    try:
+        recorte_bruto = camera_controls["ScalerCrop"][1]
+        recorte = tuple(recorte_bruto)
+    except (AttributeError, KeyError, TypeError, IndexError):
+        try:
+            recorte = (
+                recorte_bruto.x,
+                recorte_bruto.y,
+                recorte_bruto.width,
+                recorte_bruto.height,
+            )
+        except (AttributeError, UnboundLocalError):
+            return None
+
+    if (
+        len(recorte) != 4
+        or not all(isinstance(valor, int) for valor in recorte)
+        or recorte[2] <= 0
+        or recorte[3] <= 0
+    ):
+        return None
+    return recorte
+
+
 class LineCamera:
     def __init__(self):
         from picamera2 import Picamera2  # import local: so existe no Pi
@@ -78,15 +104,51 @@ class LineCamera:
             self.picam2 = Picamera2(camera_num=LINE_CAMERA_INDEX)
             self._configurar_e_iniciar(float(CAPTURE_FPS_FALLBACK))
 
-        if LENS_POSITION is not None:
-            try:
-                from libcamera import controls
-                self.picam2.set_controls({"AfMode": controls.AfModeEnum.Manual,
-                                          "LensPosition": LENS_POSITION})
-            except Exception as err:
-                print(f"[camera] LensPosition ignorado (módulo sem AF?): {err}")
+        self._abrir_campo_de_visao()
+        self._configurar_foco()
 
         time.sleep(0.1)
+
+    def _abrir_campo_de_visao(self):
+        """Pede ao libcamera o sensor inteiro, sem zoom/crop digital."""
+        recorte = obter_recorte_maximo(
+            getattr(self.picam2, "camera_controls", None)
+        )
+        if recorte is None or not hasattr(self.picam2, "set_controls"):
+            # A proporção 16:9 da configuração já evita recorte lateral em
+            # drivers antigos que não expõem ScalerCrop.
+            return
+
+        try:
+            self.picam2.set_controls({"ScalerCrop": recorte})
+            print(f"[camera] campo de visão máximo: ScalerCrop={recorte}")
+        except Exception as err:
+            print(f"[camera] ScalerCrop máximo ignorado pelo driver: {err}")
+
+    def _configurar_foco(self):
+        """Mantém objetos próximos focados sem restringir o alcance da lente."""
+        if not hasattr(self.picam2, "set_controls"):
+            return
+
+        try:
+            from libcamera import controls
+
+            if LENS_POSITION is None:
+                foco = {"AfMode": controls.AfModeEnum.Continuous}
+                # A faixa completa inclui o foco próximo e evita travá-lo só
+                # no intervalo normal. Há versões antigas sem AfRange.
+                if hasattr(controls, "AfRangeEnum"):
+                    foco["AfRange"] = controls.AfRangeEnum.Full
+                self.picam2.set_controls(foco)
+                print("[camera] autofocus contínuo ativado (faixa completa)")
+            else:
+                self.picam2.set_controls({
+                    "AfMode": controls.AfModeEnum.Manual,
+                    "LensPosition": LENS_POSITION,
+                })
+                print(f"[camera] foco manual: LensPosition={LENS_POSITION}")
+        except Exception as err:
+            print(f"[camera] controle de foco ignorado (módulo sem AF?): {err}")
 
     def _configurar_e_iniciar(self, fps):
         self.capture_fps = float(fps)

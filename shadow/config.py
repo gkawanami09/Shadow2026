@@ -67,22 +67,26 @@ OBSTACLE_LEFT_PREFERENCE_CONFIRM_TIME_S = .12
 OBSTACLE_RETRY_COOLDOWN_S = 1.0
 
 # ----------------------------------------------------------------------------
-# Câmera: captura 640×480 e processamento em 448×252
+# Câmera: captura e processamento em 16:9, sem cortar as laterais
 # ----------------------------------------------------------------------------
 # Mapeamento físico atual do Pi 5: índice 0 = resgate; índice 1 = segue-linha
 # no flat 2. Nunca deixar Picamera2 escolher a câmera padrão neste processo.
 LINE_CAMERA_INDEX = 1
 CAPTURE_WIDTH = 640
-CAPTURE_HEIGHT = 480
-# A OV5647 possui modo VGA mais rápido. A captura escolhe até este alvo usando
-# apenas modos realmente anunciados pelo driver e volta para 40 FPS quando não
-# consegue confirmar um modo mais rápido. A captura rápida continua ativa
-# mesmo quando o PWM do segue-linha fica fixo.
+# A Camera Module 3 Wide possui sensor 16:9. Pedir 4:3 (640×480) fazia o
+# libcamera cortar as laterais; 640×360 preserva o maior campo de visão que a
+# lente e o sensor conseguem entregar. A resolução final já é 16:9 também.
+CAPTURE_HEIGHT = 360
+# O FPS é limitado pelos modos que o driver realmente anuncia. A captura rápida
+# continua ativa mesmo quando o PWM do segue-linha fica fixo.
 CAPTURE_FPS = 60
 CAPTURE_FPS_FALLBACK = 40
 camera_x = 448                            # resolucao do algoritmo
 camera_y = 252
-LENS_POSITION = None                      # None = foco fixo; ajuste se o modulo tiver AF
+# None ativa o autofocus contínuo (faixa completa) em módulos AF, como a
+# Camera Module 3 Wide. Um valor numérico fixa o foco manualmente, útil só
+# depois de uma calibração específica.
+LENS_POSITION = None
 DEBUG_SHM_NAME = "shadow_shm_cam"
 DEBUG_SHM_SIZE = camera_x * camera_y * 3  # 338688 B
 

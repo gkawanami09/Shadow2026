@@ -94,7 +94,7 @@ têm a mesma cor, e é a geometria que as separa.
 | `T_SWEEP_RIGHT` (0.35 s) | config.py | Varredura do gap curta/longa demais para ~45° |
 | `max_turn_angle` (110) | config.py | Oscilação na reta → suba um pouco (ex.: 120); curvas moles → desça |
 | `left/right_correction` (1/1) | config.py | Robô puxa para um lado em linha reta |
-| `LENS_POSITION` (None) | config.py | Imagem desfocada a 8 cm em módulo com AF → tente 6-8 |
+| `LENS_POSITION` (`None`) | config.py | `None` usa autofocus contínuo na faixa completa da Camera Module 3 Wide; use valor numérico somente para travar um foco manual já calibrado |
 
 ## 4. Frações geométricas (raramente precisam mudar)
 

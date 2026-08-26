@@ -12,10 +12,27 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config
 import config_resgate
-from visao.captura import LineCamera, escolher_fps_captura
+from visao.captura import (LineCamera, escolher_fps_captura,
+                           obter_recorte_maximo)
 
 
 class LineCameraSelectionTests(unittest.TestCase):
+    def test_captura_e_processamento_preservam_aspecto_16_por_9(self):
+        self.assertEqual(config.CAPTURE_WIDTH * 9, config.CAPTURE_HEIGHT * 16)
+        self.assertEqual(config.camera_x * 9, config.camera_y * 16)
+
+    def test_recorte_maximo_aceita_apenas_retangulo_valido(self):
+        self.assertEqual(
+            obter_recorte_maximo({"ScalerCrop": ((0, 0, 1, 1),
+                                                  (0, 0, 4608, 2592))}),
+            (0, 0, 4608, 2592),
+        )
+        self.assertIsNone(obter_recorte_maximo({}))
+        self.assertIsNone(
+            obter_recorte_maximo({"ScalerCrop": ((0, 0, 1, 1),
+                                                  (0, 0, 0, 2592))})
+        )
+
     def test_fps_nunca_ultrapassa_modo_vga_anunciado(self):
         casos = (
             ([{"size": (640, 480), "fps": 90}], 60.),
