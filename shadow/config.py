@@ -159,7 +159,9 @@ BOTTOM_CENTER_MIN_Y = .82
 # próprio centro sem acionar o antigo pivô de traseira.
 LINE_TANK_FULL_ANGLE = 120
 LINE_TANK_SPEED_REDUCTION = .40
-LINE_TANK_TURN_GAIN = .90
+# Acima de ~70 graus de erro, o lado interno já começa a recuar. Isso evita
+# esperar a linha chegar à borda da imagem para começar a girar no tanque.
+LINE_TANK_TURN_GAIN = 1.35
 
 # Perfil usado apenas em rotinas explícitas de resgate que pedem
 # ``rear_pivot_enabled``. O segue-linha normal usa ``LADO`` e arcos

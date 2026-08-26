@@ -54,6 +54,14 @@ class SteeringTests(unittest.TestCase):
         self.assertGreater(esquerda, LINE_FOLLOW_PWM)
         self.assertLess(direita, 0)
 
+    def test_linha_fugindo_para_esquerda_recuar_todo_o_lado_esquerdo(self):
+        direcao.steer(-75, LINE_FOLLOW_SPEED, center_pivot=False)
+
+        comando, esquerda, direita = self.arduino.chamadas[-1]
+        self.assertEqual(comando, "lado")
+        self.assertLess(esquerda, 0)
+        self.assertGreater(direita, 0)
+
     def test_pivo_central_so_acontece_quando_pedido(self):
         direcao.steer(-180, LINE_FOLLOW_SPEED, center_pivot=True)
 
