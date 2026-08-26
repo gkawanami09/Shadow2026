@@ -13,6 +13,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config
 import config_resgate
 from visao.captura import (LineCamera, escolher_fps_captura,
+                           escolher_modo_sensor_campo_aberto,
                            obter_recorte_maximo)
 
 
@@ -27,6 +28,27 @@ class LineCameraSelectionTests(unittest.TestCase):
                                                   (0, 0, 4608, 2592))}),
             (0, 0, 4608, 2592),
         )
+
+    def test_modo_sem_crop_prefere_sensor_inteiro_ao_modo_rapido_recortado(self):
+        modos = (
+            {
+                "size": (1536, 864), "bit_depth": 10, "fps": 120.13,
+                "crop_limits": (768, 432, 3072, 1728),
+            },
+            {
+                "size": (2304, 1296), "bit_depth": 10, "fps": 56.03,
+                "crop_limits": (0, 0, 4608, 2592),
+            },
+            {
+                "size": (4608, 2592), "bit_depth": 10, "fps": 14.35,
+                "crop_limits": (0, 0, 4608, 2592),
+            },
+        )
+        self.assertEqual(
+            escolher_modo_sensor_campo_aberto(modos, 50),
+            {"output_size": (2304, 1296), "bit_depth": 10},
+        )
+        self.assertIsNone(escolher_modo_sensor_campo_aberto(modos, 60))
         self.assertIsNone(obter_recorte_maximo({}))
         self.assertIsNone(
             obter_recorte_maximo({"ScalerCrop": ((0, 0, 1, 1),
@@ -35,8 +57,8 @@ class LineCameraSelectionTests(unittest.TestCase):
 
     def test_fps_nunca_ultrapassa_modo_vga_anunciado(self):
         casos = (
-            ([{"size": (640, 480), "fps": 90}], 60.),
-            ([{"size": (640, 480), "fps": 55}], 55.),
+            ([{"size": (640, 480), "fps": 90}], 50.),
+            ([{"size": (640, 480), "fps": 55}], 50.),
             ([{"size": (640, 480), "fps": 40}], 40.),
             ([{"size": (640, 480), "fps": 30}], 30.),
             ([
@@ -63,7 +85,7 @@ class LineCameraSelectionTests(unittest.TestCase):
                     float(config.CAPTURE_FPS_FALLBACK),
                 )
 
-    def test_modo_vga_rapido_configura_sessenta_fps(self):
+    def test_modo_vga_rapido_configura_cinquenta_fps(self):
         configuracoes = []
 
         class FakePicamera2:
@@ -93,10 +115,10 @@ class LineCameraSelectionTests(unittest.TestCase):
         ):
             camera = LineCamera()
 
-        self.assertEqual(camera.capture_fps, 60.)
+        self.assertEqual(camera.capture_fps, 50.)
         self.assertEqual(
             configuracoes[0]["controls"]["FrameDurationLimits"],
-            (16667, 16667),
+            (20000, 20000),
         )
         self.assertFalse(configuracoes[0]["queue"])
 
@@ -125,7 +147,7 @@ class LineCameraSelectionTests(unittest.TestCase):
             def start(self):
                 duracao = configuracoes[-1]["controls"][
                     "FrameDurationLimits"][0]
-                if duracao == 16667:
+                if duracao == 20000:
                     raise RuntimeError("modo recusado")
 
             def stop(self):
@@ -180,13 +202,13 @@ class LineCameraSelectionTests(unittest.TestCase):
         ):
             camera = LineCamera()
 
-        self.assertEqual(camera.capture_fps, 60.)
+        self.assertEqual(camera.capture_fps, 50.)
         self.assertEqual(
             configuracoes[0]["controls"]["FrameDurationLimits"],
-            (16667, 16667),
+            (20000, 20000),
         )
 
-    def test_pwm_fixo_mantem_captura_em_sessenta_fps(self):
+    def test_pwm_fixo_mantem_captura_em_cinquenta_fps(self):
         configuracoes = []
 
         class FakePicamera2:
@@ -216,10 +238,10 @@ class LineCameraSelectionTests(unittest.TestCase):
         ):
             camera = LineCamera()
 
-        self.assertEqual(camera.capture_fps, 60.)
+        self.assertEqual(camera.capture_fps, 50.)
         self.assertEqual(
             configuracoes[0]["controls"]["FrameDurationLimits"],
-            (16667, 16667),
+            (20000, 20000),
         )
 
     def test_line_and_rescue_use_different_fixed_indices(self):

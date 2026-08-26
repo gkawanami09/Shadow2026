@@ -38,6 +38,49 @@ def escolher_fps_captura(modos_sensor):
     return min(float(CAPTURE_FPS), maior_fps)
 
 
+def escolher_modo_sensor_campo_aberto(modos_sensor, fps_alvo):
+    """Escolhe um modo que mantenha o sensor inteiro dentro do FPS pedido.
+
+    A IMX708 da Camera Module 3 Wide anuncia 1536×864 a 120 FPS, mas esse
+    modo já chega recortado ao ISP. O modo 2304×1296 usa o sensor completo
+    com binning. Fixar esse modo impede que o seletor automático priorize FPS
+    e elimine as laterais antes de ``ScalerCrop`` poder atuar.
+    """
+    candidatos = []
+    for modo in modos_sensor or ():
+        try:
+            largura, altura = modo["size"]
+            bit_depth = int(modo["bit_depth"])
+            fps = float(modo["fps"])
+            x, y, largura_crop, altura_crop = modo["crop_limits"]
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        if (
+            largura < CAPTURE_WIDTH
+            or altura < CAPTURE_HEIGHT
+            or not math.isfinite(fps)
+            or fps < fps_alvo
+            or x != 0
+            or y != 0
+            or largura_crop <= 0
+            or altura_crop <= 0
+        ):
+            continue
+        candidatos.append((fps, largura * altura, (largura, altura), bit_depth))
+
+    if not candidatos:
+        return None
+
+    # Entre os modos sem crop que suportam o FPS, preferimos o mais rápido;
+    # em empate, o de menor resolução reduz custo no ISP sem reduzir o FoV.
+    _, _, tamanho, bit_depth = max(
+        candidatos,
+        key=lambda candidato: (candidato[0], -candidato[1]),
+    )
+    return {"output_size": tamanho, "bit_depth": bit_depth}
+
+
 def obter_recorte_maximo(camera_controls):
     """Retorna o maior ScalerCrop anunciado pelo driver, se disponível."""
     try:
@@ -86,6 +129,16 @@ class LineCamera:
         except (AttributeError, RuntimeError, TypeError):
             modos_sensor = ()
         fps_escolhido = escolher_fps_captura(modos_sensor)
+        self._sensor_config = escolher_modo_sensor_campo_aberto(
+            modos_sensor,
+            fps_escolhido,
+        )
+        if self._sensor_config is not None:
+            print(
+                "[camera] modo sem crop selecionado: "
+                f"{self._sensor_config['output_size']} "
+                f"({fps_escolhido:.1f} FPS solicitados)"
+            )
         try:
             self._configurar_e_iniciar(fps_escolhido)
         except Exception as erro_fps:
@@ -102,7 +155,12 @@ class LineCamera:
             self.close()
             time.sleep(.05)
             self.picam2 = Picamera2(camera_num=LINE_CAMERA_INDEX)
-            self._configurar_e_iniciar(float(CAPTURE_FPS_FALLBACK))
+            fps_fallback = float(CAPTURE_FPS_FALLBACK)
+            self._sensor_config = escolher_modo_sensor_campo_aberto(
+                modos_sensor,
+                fps_fallback,
+            )
+            self._configurar_e_iniciar(fps_fallback)
 
         self._abrir_campo_de_visao()
         self._configurar_foco()
@@ -158,14 +216,23 @@ class LineCamera:
             f"{self.capture_fps:.1f} FPS "
             f"({frame_us} us por frame)"
         )
+        opcoes = {
+            "main": {
+                "size": (CAPTURE_WIDTH, CAPTURE_HEIGHT),
+                "format": "RGB888",
+            },
+            "controls": {"FrameDurationLimits": (frame_us, frame_us)},
+            "buffer_count": 4,
+        }
+        if self._sensor_config is not None:
+            # Disponível no Picamera2 do Raspberry Pi OS Bookworm. Informar o
+            # modo exato evita que a escolha automática caia no 1536×864
+            # recortado só por ele ser mais rápido.
+            opcoes["sensor"] = self._sensor_config
+
         try:
             video_config = self.picam2.create_video_configuration(
-                main={
-                    "size": (CAPTURE_WIDTH, CAPTURE_HEIGHT),
-                    "format": "RGB888",
-                },
-                controls={"FrameDurationLimits": (frame_us, frame_us)},
-                buffer_count=4,
+                **opcoes,
                 # O frame devolvido precisa ser posterior ao pedido. Isso
                 # remove até um período de atraso escondido da fila interna.
                 queue=False,
@@ -174,24 +241,12 @@ class LineCamera:
             try:
                 # Versões intermediárias podem aceitar o controle de FPS, mas
                 # ainda não conhecer o argumento ``queue``.
-                video_config = self.picam2.create_video_configuration(
-                    main={
-                        "size": (CAPTURE_WIDTH, CAPTURE_HEIGHT),
-                        "format": "RGB888",
-                    },
-                    controls={
-                        "FrameDurationLimits": (frame_us, frame_us),
-                    },
-                    buffer_count=4,
-                )
+                video_config = self.picam2.create_video_configuration(**opcoes)
             except TypeError:
-                # Compatibilidade final com Picamera2 antigo. Sem controle
-                # explícito, o FPS medido impede a aceleração se ele ficar lento.
+                # Picamera2 antigo não aceita ``sensor``. Continua funcional,
+                # mas não há como garantir o modo do sensor por essa API.
                 video_config = self.picam2.create_video_configuration(
-                    main={
-                        "size": (CAPTURE_WIDTH, CAPTURE_HEIGHT),
-                        "format": "RGB888",
-                    },
+                    main=opcoes["main"],
                 )
 
         self.picam2.configure(video_config)

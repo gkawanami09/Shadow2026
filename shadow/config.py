@@ -77,9 +77,10 @@ CAPTURE_WIDTH = 640
 # libcamera cortar as laterais; 640×360 preserva o maior campo de visão que a
 # lente e o sensor conseguem entregar. A resolução final já é 16:9 também.
 CAPTURE_HEIGHT = 360
-# O FPS é limitado pelos modos que o driver realmente anuncia. A captura rápida
-# continua ativa mesmo quando o PWM do segue-linha fica fixo.
-CAPTURE_FPS = 60
+# Na IMX708, 60 FPS pode selecionar o modo 1536×864, que recorta o sensor
+# antes do ScalerCrop. 50 FPS cabe no modo 2304×1296 sem crop e preserva todo
+# o campo óptico da Camera Module 3 Wide.
+CAPTURE_FPS = 50
 CAPTURE_FPS_FALLBACK = 40
 camera_x = 448                            # resolucao do algoritmo
 camera_y = 252
