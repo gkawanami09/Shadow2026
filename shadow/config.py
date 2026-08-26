@@ -103,7 +103,7 @@ right_correction = 1
 # ----------------------------------------------------------------------------
 # Velocidades
 # ----------------------------------------------------------------------------
-LINE_FOLLOW_PWM = 80
+LINE_FOLLOW_PWM = 75
 LINE_FOLLOW_SPEED = LINE_FOLLOW_PWM / MAX_PWM
 # Uma câmera Wide vê a linha sair pela lateral muito antes da curva terminar,
 # mas manter uma curva antiga por 0,7 s levava o robô para fora da pista.
@@ -113,7 +113,9 @@ LINE_LOSS_STEER_HOLD = .22
 # interrompe os comandos de movimento nem o watchdog. A correcao proporcional
 # do segue-linha recebe a propria velocidade abaixo; assim, ela escala junto
 # com o PWM em subida e descida.
-RAMPA_HABILITADA = True
+# O MPU6050 não está instalado/uso neste robô por enquanto. Mantém o
+# segue-linha na velocidade fixa e não envia consultas ``RAMPA`` pela serial.
+RAMPA_HABILITADA = False
 RAMPA_CONSULTA_INTERVALO_S = .10
 RAMPA_RESPOSTA_TIMEOUT_S = .20
 RAMPA_SUBIDA_PWM = 120
@@ -121,7 +123,7 @@ RAMPA_DESCIDA_PWM = 50
 RAMPA_SUBIDA_SPEED = RAMPA_SUBIDA_PWM / MAX_PWM
 RAMPA_DESCIDA_SPEED = RAMPA_DESCIDA_PWM / MAX_PWM
 
-# O segue-linha usa PWM 80 diretamente. O controlador adaptativo permanece no
+# O segue-linha usa PWM 75 diretamente. O controlador adaptativo permanece no
 # projeto para uma calibração futura, mas não participa dos comandos atuais.
 RETA_RAPIDA_HABILITADA = False
 VELOCIDADE_RETA_RAPIDA = LINE_FOLLOW_SPEED

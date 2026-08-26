@@ -59,7 +59,10 @@ class VelocidadeAdaptativaTests(unittest.TestCase):
     def setUp(self):
         # O robô usa PWM 80 fixo. Para continuar testando o controlador
         # opcional isoladamente, simulamos aqui um teto maior que a base.
-        self.teto_teste = .75
+        self.teto_teste = (
+            config.LINE_FOLLOW_SPEED
+            + 10 * config.PASSO_VELOCIDADE_RETA_RAPIDA
+        )
         patcher = mock.patch(
             "controle.velocidade_adaptativa.VELOCIDADE_RETA_RAPIDA",
             self.teto_teste,
@@ -67,11 +70,11 @@ class VelocidadeAdaptativaTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_configuracao_principal_usa_pwm_80_sem_modo_adaptativo(self):
-        self.assertEqual(config.LINE_FOLLOW_PWM, 80)
+    def test_configuracao_principal_usa_pwm_75_sem_modo_adaptativo(self):
+        self.assertEqual(config.LINE_FOLLOW_PWM, 75)
         self.assertAlmostEqual(
             config.LINE_FOLLOW_SPEED * config.MAX_PWM,
-            80.,
+            75.,
         )
         self.assertFalse(config.RETA_RAPIDA_HABILITADA)
 
