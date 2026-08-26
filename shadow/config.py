@@ -94,7 +94,9 @@ DEBUG_SHM_SIZE = camera_x * camera_y * 3  # 338688 B
 # ----------------------------------------------------------------------------
 # Controle proporcional da direção
 # ----------------------------------------------------------------------------
-max_turn_angle = 110                      # acima disso: pivot no lugar
+# Legado do resgate: o segue-linha não usa mais este limiar abrupto para
+# trocar uma curva por pivô. As manobras deliberadas ainda o usam.
+max_turn_angle = 110
 left_correction = 1                       # trim por lado
 right_correction = 1
 
@@ -103,7 +105,9 @@ right_correction = 1
 # ----------------------------------------------------------------------------
 LINE_FOLLOW_PWM = 80
 LINE_FOLLOW_SPEED = LINE_FOLLOW_PWM / MAX_PWM
-LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair brevemente da imagem
+# Uma câmera Wide vê a linha sair pela lateral muito antes da curva terminar,
+# mas manter uma curva antiga por 0,7 s levava o robô para fora da pista.
+LINE_LOSS_STEER_HOLD = .22
 
 # Rampa lida pelo MPU6050 do Arduino. A consulta e assincrona, portanto nao
 # interrompe os comandos de movimento nem o watchdog. A correcao proporcional
@@ -142,16 +146,22 @@ LINE_CROP_INITIAL = .6
 LINE_CROP_NORMAL = .6
 LINE_CROP_GREEN = .45                     # durante curva verde
 
-# Mantem a linha sob o centro inferior da camera frontal. O ponto proximo tem
-# prioridade, mas parte do POI original preserva antecipacao de curvas.
+# A Wide tem distorção maior no rodapé. O ponto próximo estabiliza o robô,
+# mas o ponto à frente deve pesar mais para o eixo central do chassi prever a
+# curva em vez de corrigir tardiamente em cima da linha.
 BOTTOM_CENTER_CONTROL = True
-BOTTOM_CENTER_WEIGHT = .7
-BOTTOM_CENTER_MIN_Y = .75
+BOTTOM_CENTER_WEIGHT = .35
+BOTTOM_CENTER_MIN_Y = .82
 
-# Em correcoes fortes, aproxima o centro de giro da frente do robo: as rodas
-# dianteiras perdem velocidade e a traseira descreve o arco. A transicao e
-# proporcional ao mesmo angulo produzido pelo controle da bolinha inferior;
-# nao existe deteccao ou sequencia temporizada especifica para curvas de 90°.
+# Curva contínua do segue-linha. Em ``LINE_CURVE_FULL_ANGLE`` a roda interna
+# chega a zero, sem inverter de repente; a velocidade total cai para o fator
+# mínimo, preservando aderência nas curvas fechadas.
+LINE_CURVE_FULL_ANGLE = 125
+LINE_CURVE_MIN_SPEED_RATIO = .55
+
+# Perfil usado apenas em rotinas explícitas de resgate que pedem
+# ``rear_pivot_enabled``. O segue-linha normal usa ``LADO`` e arcos
+# diferenciais contínuos, pois a Camera Module 3 Wide está no eixo do chassi.
 FRONT_ANCHORED_STEERING = True
 FRONT_ANCHOR_START_ANGLE = 65
 FRONT_ANCHOR_FULL_ANGLE = 120

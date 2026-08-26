@@ -5,6 +5,7 @@ import time
 from config import (FRONT_ANCHORED_STEERING, FRONT_ANCHOR_FULL_ANGLE,
                     FRONT_ANCHOR_MAX_BLEND, FRONT_ANCHOR_REAR_SCALE,
                     FRONT_ANCHOR_START_ANGLE,
+                    LINE_CURVE_FULL_ANGLE, LINE_CURVE_MIN_SPEED_RATIO,
                     MAX_PWM, PIVOT_FRONT_REVERSE_MIN_PWM,
                     PIVOT_FRONT_REVERSE_SCALE, left_correction, max_turn_angle,
                     right_correction)
@@ -19,7 +20,7 @@ def init_steering(arduino_instance):
 
 
 def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=False,
-          toque_frente_direita_pwm=0):
+          toque_frente_direita_pwm=0, center_pivot=None):
     """Transforma ângulo e velocidade no movimento das quatro rodas.
 
     O ângulo 190 para o robô e o ângulo 200 dá ré. Ângulos entre -180 e
@@ -38,26 +39,37 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
 
     # forward
     elif -180 <= angle <= 180:
+        if center_pivot is None:
+            # Mantem a semantica antiga para manobras especiais que ainda
+            # chamam ``steer(180)`` sem declarar o modo.
+            center_pivot = abs(angle) > max_turn_angle
 
-        # right
-        if angle >= 0:
-            if angle > max_turn_angle:
-                # pivot: roda interna (direita) inverte o sentido
-                speed_left = min(speed * left_correction * 1.2, 1)
-                speed_right = -min(speed * right_correction * 1.2, 1)
+        if center_pivot:
+            # Giro no centro: reservado para verde, retorno e buscas.
+            outer = min(speed * 1.2, 1.)
+            if angle >= 0:
+                speed_left = outer * left_correction
+                speed_right = -outer * right_correction
             else:
-                speed_left = min(speed * left_correction, 1)
-                speed_right = min(speed * right_correction * ((max_turn_angle - angle) / max_turn_angle), 1)
-
-        # left
+                speed_left = -outer * left_correction
+                speed_right = outer * right_correction
         else:
-            if angle < -max_turn_angle:
-                # pivot: roda interna (esquerda) inverte o sentido
-                speed_left = -min(speed * left_correction * 1.2, 1)
-                speed_right = min(speed * right_correction * 1.2, 1)
+            # O segue-linha com a camera Wide alinhada ao chassi faz apenas
+            # arcos diferenciais: os dois motores de cada lado permanecem
+            # iguais e a roda interna nunca muda abruptamente para rÃ©.
+            turn = min(abs(float(angle)) / LINE_CURVE_FULL_ANGLE, 1.)
+            curve_speed = min(
+                speed * (1 - (1 - LINE_CURVE_MIN_SPEED_RATIO) * turn),
+                1.,
+            )
+            outer = curve_speed
+            inner = curve_speed * (1 - turn)
+            if angle >= 0:
+                speed_left = min(outer * left_correction, 1.)
+                speed_right = min(inner * right_correction, 1.)
             else:
-                speed_left = min(speed * left_correction * ((max_turn_angle + angle) / max_turn_angle), 1)
-                speed_right = min(speed * right_correction, 1)
+                speed_left = min(inner * left_correction, 1.)
+                speed_right = min(outer * right_correction, 1.)
 
     else:
         # angulo fora do vocabulario: para por seguranca
