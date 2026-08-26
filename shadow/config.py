@@ -153,11 +153,13 @@ BOTTOM_CENTER_CONTROL = True
 BOTTOM_CENTER_WEIGHT = .35
 BOTTOM_CENTER_MIN_Y = .82
 
-# Curva contínua do segue-linha. Em ``LINE_CURVE_FULL_ANGLE`` a roda interna
-# chega a zero, sem inverter de repente; a velocidade total cai para o fator
-# mínimo, preservando aderência nas curvas fechadas.
-LINE_CURVE_FULL_ANGLE = 125
-LINE_CURVE_MIN_SPEED_RATIO = .55
+# Mistura diferencial de tanque do segue-linha: o erro da câmera cria uma
+# diferença contínua entre os lados esquerdo e direito.
+# Em erro grande, o lado interno pode entrar em ré para o robô girar no
+# próprio centro sem acionar o antigo pivô de traseira.
+LINE_TANK_FULL_ANGLE = 120
+LINE_TANK_SPEED_REDUCTION = .40
+LINE_TANK_TURN_GAIN = .90
 
 # Perfil usado apenas em rotinas explícitas de resgate que pedem
 # ``rear_pivot_enabled``. O segue-linha normal usa ``LADO`` e arcos

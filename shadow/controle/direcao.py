@@ -5,7 +5,8 @@ import time
 from config import (FRONT_ANCHORED_STEERING, FRONT_ANCHOR_FULL_ANGLE,
                     FRONT_ANCHOR_MAX_BLEND, FRONT_ANCHOR_REAR_SCALE,
                     FRONT_ANCHOR_START_ANGLE,
-                    LINE_CURVE_FULL_ANGLE, LINE_CURVE_MIN_SPEED_RATIO,
+                    LINE_TANK_FULL_ANGLE, LINE_TANK_SPEED_REDUCTION,
+                    LINE_TANK_TURN_GAIN,
                     MAX_PWM, PIVOT_FRONT_REVERSE_MIN_PWM,
                     PIVOT_FRONT_REVERSE_SCALE, left_correction, max_turn_angle,
                     right_correction)
@@ -54,22 +55,14 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
                 speed_left = -outer * left_correction
                 speed_right = outer * right_correction
         else:
-            # O segue-linha com a camera Wide alinhada ao chassi faz apenas
-            # arcos diferenciais: os dois motores de cada lado permanecem
             # iguais e a roda interna nunca muda abruptamente para rÃ©.
-            turn = min(abs(float(angle)) / LINE_CURVE_FULL_ANGLE, 1.)
-            curve_speed = min(
-                speed * (1 - (1 - LINE_CURVE_MIN_SPEED_RATIO) * turn),
-                1.,
-            )
-            outer = curve_speed
-            inner = curve_speed * (1 - turn)
-            if angle >= 0:
-                speed_left = min(outer * left_correction, 1.)
-                speed_right = min(inner * right_correction, 1.)
-            else:
-                speed_left = min(inner * left_correction, 1.)
-                speed_right = min(outer * right_correction, 1.)
+            # Tank steering contínuo: cada lado recebe sua própria velocidade.
+            # Erro grande admite ré no lado interno para corrigir a tempo.
+            turn = max(-1., min(float(angle) / LINE_TANK_FULL_ANGLE, 1.))
+            linear = speed * (1 - LINE_TANK_SPEED_REDUCTION * abs(turn))
+            rotation = speed * LINE_TANK_TURN_GAIN * turn
+            speed_left = max(-1., min((linear + rotation) * left_correction, 1.))
+            speed_right = max(-1., min((linear - rotation) * right_correction, 1.))
 
     else:
         # angulo fora do vocabulario: para por seguranca

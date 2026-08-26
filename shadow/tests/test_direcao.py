@@ -46,14 +46,13 @@ class SteeringTests(unittest.TestCase):
             [("lado", LINE_FOLLOW_PWM, LINE_FOLLOW_PWM)],
         )
 
-    def test_curva_normal_eh_arco_continuo_sem_re_na_roda_interna(self):
+    def test_curva_normal_faz_correcao_de_tanque_com_re_no_lado_interno(self):
         direcao.steer(180, LINE_FOLLOW_SPEED, center_pivot=False)
 
         comando, esquerda, direita = self.arduino.chamadas[-1]
         self.assertEqual(comando, "lado")
-        self.assertGreater(esquerda, 0)
-        self.assertEqual(direita, 0)
-        self.assertLess(esquerda, LINE_FOLLOW_PWM)
+        self.assertGreater(esquerda, LINE_FOLLOW_PWM)
+        self.assertLess(direita, 0)
 
     def test_pivo_central_so_acontece_quando_pedido(self):
         direcao.steer(-180, LINE_FOLLOW_SPEED, center_pivot=True)
