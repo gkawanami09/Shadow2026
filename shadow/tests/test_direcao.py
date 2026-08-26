@@ -51,7 +51,7 @@ class SteeringTests(unittest.TestCase):
 
         comando, esquerda, direita = self.arduino.chamadas[-1]
         self.assertEqual(comando, "lado")
-        self.assertGreater(esquerda, LINE_FOLLOW_PWM)
+        self.assertEqual(esquerda, LINE_FOLLOW_PWM)
         self.assertLess(direita, 0)
 
     def test_linha_fugindo_para_esquerda_recuar_todo_o_lado_esquerdo(self):
@@ -61,6 +61,27 @@ class SteeringTests(unittest.TestCase):
         self.assertEqual(comando, "lado")
         self.assertLess(esquerda, 0)
         self.assertGreater(direita, 0)
+
+    def test_curva_fechada_pode_usar_pivo_traseiro_parcial(self):
+        direcao.steer(
+            90,
+            LINE_FOLLOW_SPEED,
+            center_pivot=False,
+            rear_pivot_enabled=True,
+            rear_pivot_start_angle=78,
+            rear_pivot_full_angle=112,
+            rear_pivot_max_blend=.58,
+            rear_pivot_rear_scale=1.10,
+        )
+
+        (comando, frente_esquerda, tras_esquerda,
+         frente_direita, tras_direita) = self.arduino.chamadas[-1]
+        self.assertEqual(comando, "rodas")
+        self.assertGreater(frente_esquerda, 0)
+        self.assertLess(frente_esquerda, LINE_FOLLOW_PWM)
+        self.assertGreater(tras_esquerda, frente_esquerda)
+        self.assertLess(frente_direita, 0)
+        self.assertLess(tras_direita, frente_direita)
 
     def test_pivo_central_so_acontece_quando_pedido(self):
         direcao.steer(-180, LINE_FOLLOW_SPEED, center_pivot=True)

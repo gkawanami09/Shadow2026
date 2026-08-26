@@ -683,7 +683,24 @@ def control_loop():
                     and now >= green_approach_until
                     and -180 <= angle <= 180
                 )
-                steer(angle, command_speed, center_pivot=center_pivot)
+                rear_pivot = (
+                    config.LINE_REAR_PIVOT_ENABLED
+                    and not center_pivot
+                    and green_direction is None
+                    and line_detected.value
+                    and -180 <= angle <= 180
+                    and abs(angle) > config.LINE_REAR_PIVOT_START_ANGLE
+                )
+                steer(
+                    angle,
+                    command_speed,
+                    center_pivot=center_pivot,
+                    rear_pivot_enabled=rear_pivot,
+                    rear_pivot_start_angle=config.LINE_REAR_PIVOT_START_ANGLE,
+                    rear_pivot_full_angle=config.LINE_REAR_PIVOT_FULL_ANGLE,
+                    rear_pivot_max_blend=config.LINE_REAR_PIVOT_MAX_BLEND,
+                    rear_pivot_rear_scale=config.LINE_REAR_PIVOT_REAR_SCALE,
+                )
 
                 time_last_angles = add_time_value(time_last_angles, line_angle.value)
             elif line_status.value == "stop":

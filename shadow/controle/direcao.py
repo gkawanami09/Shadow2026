@@ -21,7 +21,9 @@ def init_steering(arduino_instance):
 
 
 def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=False,
-          toque_frente_direita_pwm=0, center_pivot=None):
+          toque_frente_direita_pwm=0, center_pivot=None,
+          rear_pivot_start_angle=None, rear_pivot_full_angle=None,
+          rear_pivot_max_blend=None, rear_pivot_rear_scale=None):
     """Transforma ângulo e velocidade no movimento das quatro rodas.
 
     O ângulo 190 para o robô e o ângulo 200 dá ré. Ângulos entre -180 e
@@ -61,8 +63,15 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
             turn = max(-1., min(float(angle) / LINE_TANK_FULL_ANGLE, 1.))
             linear = speed * (1 - LINE_TANK_SPEED_REDUCTION * abs(turn))
             rotation = speed * LINE_TANK_TURN_GAIN * turn
-            speed_left = max(-1., min((linear + rotation) * left_correction, 1.))
-            speed_right = max(-1., min((linear - rotation) * right_correction, 1.))
+            # O lado externo não acelera acima da velocidade pedida. Em uma
+            # curva de 90 graus, ganhar PWM era justamente o que fazia o robô
+            # atravessar a linha antes de conseguir fazer a correção.
+            speed_left = max(
+                -1., min((linear + rotation) * left_correction,
+                           min(speed * left_correction, 1.)))
+            speed_right = max(
+                -1., min((linear - rotation) * right_correction,
+                           min(speed * right_correction, 1.)))
 
     else:
         # angulo fora do vocabulario: para por seguranca
@@ -72,12 +81,20 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
     # frente do chassi. No limite, as rodas dianteiras ficam quase paradas e
     # somente a traseira gira em sentidos opostos. Isso faz a traseira buscar
     # o alinhamento apontado pela bolinha inferior sem um caso especial de 90°.
+    anchor_start = (FRONT_ANCHOR_START_ANGLE if rear_pivot_start_angle is None
+                    else rear_pivot_start_angle)
+    anchor_full = (FRONT_ANCHOR_FULL_ANGLE if rear_pivot_full_angle is None
+                   else rear_pivot_full_angle)
+    anchor_blend = (FRONT_ANCHOR_MAX_BLEND if rear_pivot_max_blend is None
+                    else rear_pivot_max_blend)
+    anchor_rear_scale = (FRONT_ANCHOR_REAR_SCALE
+                         if rear_pivot_rear_scale is None
+                         else rear_pivot_rear_scale)
     if FRONT_ANCHORED_STEERING and rear_pivot_enabled and -180 <= angle <= 180 and \
-            abs(angle) > FRONT_ANCHOR_START_ANGLE:
-        span = max(FRONT_ANCHOR_FULL_ANGLE - FRONT_ANCHOR_START_ANGLE, 1)
-        blend = min((abs(angle) - FRONT_ANCHOR_START_ANGLE) / span,
-                    FRONT_ANCHOR_MAX_BLEND)
-        rear_speed = min(speed * FRONT_ANCHOR_REAR_SCALE, 1.)
+            abs(angle) > anchor_start:
+        span = max(anchor_full - anchor_start, 1)
+        blend = min((abs(angle) - anchor_start) / span, anchor_blend)
+        rear_speed = min(speed * anchor_rear_scale, 1.)
 
         if angle > 0:  # direita: traseira esquerda avanca, direita recua
             anchor_te, anchor_td = rear_speed, -rear_speed

@@ -165,6 +165,16 @@ LINE_TANK_SPEED_REDUCTION = .40
 # esperar a linha chegar à borda da imagem para começar a girar no tanque.
 LINE_TANK_TURN_GAIN = 1.35
 
+# Curva fechada da linha: transfere parte do giro para a traseira, levando o
+# centro de rotação para perto da frente do chassi. É propositalmente parcial:
+# a frente continua se movendo e a câmera não fica girando parada sobre a
+# mesma imagem.
+LINE_REAR_PIVOT_ENABLED = True
+LINE_REAR_PIVOT_START_ANGLE = 78
+LINE_REAR_PIVOT_FULL_ANGLE = 112
+LINE_REAR_PIVOT_MAX_BLEND = .58
+LINE_REAR_PIVOT_REAR_SCALE = 1.10
+
 # Perfil usado apenas em rotinas explícitas de resgate que pedem
 # ``rear_pivot_enabled``. O segue-linha normal usa ``LADO`` e arcos
 # diferenciais contínuos, pois a Camera Module 3 Wide está no eixo do chassi.
