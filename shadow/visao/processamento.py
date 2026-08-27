@@ -34,11 +34,10 @@ from visao import verde as green_module
 from visao.captura import LineCamera
 from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
-from visao.linha import (calculate_angle, contorno_atravessa_laterais,
-                         determine_correct_line)
+from visao.linha import calculate_angle, determine_correct_line
 from visao.trajetoria import extrair_ponto_futuro
 from visao.verde import ConfirmadorVerde, check_green, latch_turn_direction
-from visao.faixa_verde import altura_faixa_transversal
+from visao.faixa_verde import altura_faixa_transversal, tem_ramo_lateral
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
 
 # Cores carregadas do config.ini (fallback: valores do config.py)
@@ -312,13 +311,19 @@ def vision_loop(debug=False):
                     alvo_verde in (-1, 1)
                     or turn_direction in ("left", "right", "turn_around")
                 )
+                limite_lateral = config.GREEN_BRANCH_TRANSVERSE_MIN_RUN_PX
+                possui_extensao_lateral = any(
+                    np.min(contorno[:, 0, 0])
+                    < camera_x / 2 - limite_lateral
+                    or np.max(contorno[:, 0, 0])
+                    > camera_x / 2 + limite_lateral
+                    for contorno in contours_blk
+                )
                 intersecao_sem_verde = bool(
                     not verde_autorizado
                     and linha_a_frente_frame
-                    and any(
-                        contorno_atravessa_laterais(contorno)
-                        for contorno in contours_blk
-                    )
+                    and possui_extensao_lateral
+                    and tem_ramo_lateral(black_image)
                 )
                 if intersecao_sem_verde:
                     direcao_marcada = "straight"

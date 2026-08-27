@@ -11,7 +11,8 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
-from visao.faixa_verde import altura_faixa_transversal  # noqa: E402
+from visao.faixa_verde import (altura_faixa_transversal,
+                               tem_ramo_lateral)  # noqa: E402
 
 
 class FaixaVerdeTests(unittest.TestCase):
@@ -45,6 +46,19 @@ class FaixaVerdeTests(unittest.TestCase):
 
         self.assertEqual(altura_faixa_transversal(
             mascara, "left"), -1.)
+
+    def test_t_com_ramo_apenas_a_direita_e_intersecao(self):
+        mascara = self.mascara()
+        mascara[120:133, config.camera_x // 2 - 8:400] = 255
+        self.assertTrue(tem_ramo_lateral(mascara))
+
+    def test_linha_vertical_nao_e_intersecao_lateral(self):
+        self.assertFalse(tem_ramo_lateral(self.mascara()))
+
+    def test_risco_desligado_do_eixo_nao_e_intersecao(self):
+        mascara = self.mascara()
+        mascara[120:133, 330:440] = 255
+        self.assertFalse(tem_ramo_lateral(mascara))
 
 
 if __name__ == "__main__":

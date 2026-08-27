@@ -249,9 +249,9 @@ def calculate_angle(
         index = 1 if turn_direction == "left" else 2
         final_poi = poi[index] if is_crop else poi_no_crop[index]
 
-    elif preferir_reto and atravessa_os_dois_lados:
-        # Intersecao sem marcador confirmado: a barra transversal nao pode
-        # sequestrar o POI. O topo pertence ao ramo que continua em frente.
+    elif preferir_reto:
+        # Intersecao sem marcador confirmado: um ramo transversal de apenas
+        # um lado tambem nao pode sequestrar o POI. O topo e a continuacao.
         final_poi = poi_no_crop[0]
 
     else:

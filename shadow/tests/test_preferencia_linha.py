@@ -172,6 +172,32 @@ class PreferenciaLinhaTests(unittest.TestCase):
         self.assertAlmostEqual(ponto[0], 224, delta=1)
         self.assertAlmostEqual(angulo, 0, delta=1)
 
+    def test_t_de_um_so_lado_sem_verde_preserva_topo_reto(self):
+        contorno = np.array(
+            [
+                [[205, 0]], [[243, 0]], [[243, 110]],
+                [[447, 110]], [[447, 145]], [[243, 145]],
+                [[243, 251]], [[205, 251]],
+            ],
+            dtype=np.int32,
+        )
+        recorte = contorno[
+            contorno[:, 0, 1] > 151
+        ].reshape(-1, 1, 2)
+
+        angulo, ponto, _ = calculate_angle(
+            contorno,
+            recorte,
+            average_line_angle=30,
+            turn_direction="straight",
+            last_bottom_point=224,
+            average_line_point=224,
+            preferir_reto=True,
+        )
+
+        self.assertAlmostEqual(ponto[0], 224, delta=5)
+        self.assertAlmostEqual(angulo, 0, delta=5)
+
 
 if __name__ == "__main__":
     unittest.main()
