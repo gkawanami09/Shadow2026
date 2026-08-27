@@ -257,7 +257,12 @@ GREEN_ROI_MEAN = 125                      # "lado e preto" se media > 125
 GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)
-GREEN_APPROACH_TIME = .7                  # s — avanca reto antes do giro verde
+# A aproximacao nao e mais um avanco cego. A visao trava o ramo marcado e o
+# segue-linha continua alinhando a base ate o alvo lateral chegar nesta regiao.
+# O tempo existe apenas como limite de seguranca caso a geometria congele.
+GREEN_APPROACH_TIME = .25                 # s — limite maximo da aproximacao
+GREEN_APPROACH_BRANCH_SIDE_MIN_PX = 70    # alvo precisa estar no lado marcado
+GREEN_APPROACH_BRANCH_MIN_Y_RATIO = .45   # e proximo da base antes do tanque
 GREEN_APPROACH_SPEED = .5                 # base PWM 60, preserva a manobra
 GREEN_TURN_BLIND_TIME = .30                # s — giro sem aceitar leitura da camera
 GREEN_TURN_SIDE_MIN_ERROR_PX = 55          # linha alvo deve primeiro entrar pelo lado marcado

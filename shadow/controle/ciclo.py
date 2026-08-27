@@ -21,6 +21,7 @@ from controle.parada_obstaculo import (
     desviar_obstaculo,
 )
 from controle.parada_vermelho import stop_for_red
+from controle.manobra_verde import ramo_pronto_para_giro
 from controle.velocidade import get_speed
 from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
 from controle.direcao import (init_steering, mix_line_pwm, sleep_steering,
@@ -535,7 +536,25 @@ def control_loop():
                     green_armed = False
 
                 resultado_visao = ler_resultado_visao_rapida()
-                if green_direction is None:
+                aproximando_ramo_verde = (
+                    green_direction is not None
+                    and green_turn_started is None
+                    and green_reverse_until is None
+                )
+                if aproximando_ramo_verde and (
+                    ramo_pronto_para_giro(
+                        green_direction,
+                        ponto_alvo_x=resultado_visao.ponto_alvo_x,
+                        ponto_alvo_y=resultado_visao.ponto_alvo_y,
+                    )
+                    or now >= green_approach_until
+                ):
+                    green_turn_started = now
+                    green_turn_deadline = now + GREEN_TURN_TIMEOUT
+                    green_target_seen = False
+                    aproximando_ramo_verde = False
+
+                if green_direction is None or aproximando_ramo_verde:
                     saida_linha = controlador_linha.atualizar(
                         sequencia=resultado_visao.sequencia,
                         publicado_em=resultado_visao.publicado_em,
@@ -626,12 +645,20 @@ def control_loop():
                         green_target_seen = False
                         green_turn_target.value = 0
                         angle = line_angle.value if line_detected.value else 190
-                elif green_direction is not None and now < green_approach_until:
-                    # A direcao ja foi memorizada: atravessa o marcador reto
-                    # antes de iniciar qualquer rotacao.
-                    angle = 0
+                elif green_direction is not None and green_turn_started is None:
+                    # A visao ja escolheu somente o ramo marcado. Enquanto ele
+                    # se aproxima da base, o controlador normal continua
+                    # fechando o erro inferior em vez de avancar cego.
                     command_speed = GREEN_APPROACH_SPEED
-                    status.value = f'Verde {green_direction} — avancando antes do giro'
+                    if saida_linha is not None and saida_linha.comando_valido:
+                        usar_controle_linha = True
+                        correcao_linha = saida_linha.correcao
+                        angle = saida_linha.angulo_equivalente
+                    else:
+                        angle = 190
+                    status.value = (
+                        f'Verde {green_direction} — ramo travado, '
+                        'alinhando aproximacao')
                 elif green_direction is not None:
                     if green_turn_started is None:
                         green_turn_started = now
