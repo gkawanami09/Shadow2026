@@ -90,9 +90,9 @@ camera_y = 252
 LENS_POSITION = None
 # Com os LEDs inferiores, a iluminacao e controlada. Trava AE/AWB depois do
 # aquecimento para a faixa preta grande nao fazer a camera clarear o piso.
-LINE_CAMERA_LOCK_AUTO_CONTROLS = True
+LINE_CAMERA_LOCK_AUTO_CONTROLS = False
 LINE_CAMERA_WARMUP_S = .45
-LINE_CAMERA_EXPOSURE_VALUE = -.35
+LINE_CAMERA_EXPOSURE_VALUE = 0.
 DEBUG_SHM_NAME = "shadow_shm_cam"
 DEBUG_SHM_SIZE = camera_x * camera_y * 3  # 338688 B
 

@@ -226,6 +226,7 @@ class LineCamera:
 
         time.sleep(float(LINE_CAMERA_WARMUP_S))
         if not LINE_CAMERA_LOCK_AUTO_CONTROLS:
+            print("[camera] exposicao e balanco de branco automaticos ativos")
             return
         if not hasattr(self.picam2, "capture_metadata"):
             print("[camera] metadata indisponivel; AE/AWB permanecem automaticos")
