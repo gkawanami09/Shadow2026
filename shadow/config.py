@@ -72,36 +72,30 @@ OBSTACLE_RETRY_COOLDOWN_S = 1.0
 # Mapeamento físico atual do Pi 5: índice 0 = resgate; índice 1 = segue-linha
 # no flat 2. Nunca deixar Picamera2 escolher a câmera padrão neste processo.
 LINE_CAMERA_INDEX = 1
+# A Camera Module 3 Wide usa um sensor 16:9. Capturar em 640×360 preserva o
+# campo de visão lateral; 640×480 recortaria as bordas da imagem.
 CAPTURE_WIDTH = 640
-# A Camera Module 3 Wide possui sensor 16:9. Pedir 4:3 (640×480) fazia o
-# libcamera cortar as laterais; 640×360 preserva o maior campo de visão que a
-# lente e o sensor conseguem entregar. A resolução final já é 16:9 também.
 CAPTURE_HEIGHT = 360
-# Na IMX708, 60 FPS pode selecionar o modo 1536×864, que recorta o sensor
-# antes do ScalerCrop. 50 FPS cabe no modo 2304×1296 sem crop e preserva todo
-# o campo óptico da Camera Module 3 Wide.
+# 50 FPS evita o modo recortado 1536×864 e permite usar 2304×1296, mantendo o
+# FOV Wide completo. Se o driver não sustentar esse modo, tenta 40 FPS.
 CAPTURE_FPS = 50
 CAPTURE_FPS_FALLBACK = 40
-camera_x = 448                            # resolucao do algoritmo
+camera_x = 448                            # resolução do algoritmo
 camera_y = 252
-# None ativa o autofocus contínuo (faixa completa) em módulos AF, como a
-# Camera Module 3 Wide. Um valor numérico fixa o foco manualmente, útil só
-# depois de uma calibração específica.
+# None ativa o foco automático contínuo implementado em captura.py.
 LENS_POSITION = None
-# Com os LEDs inferiores, a iluminacao e controlada. Trava AE/AWB depois do
-# aquecimento para a faixa preta grande nao fazer a camera clarear o piso.
+# Mantém exposição e balanço de branco automáticos. Fixar estes controles sem
+# calibração específica pode estourar toda a pista para branco.
 LINE_CAMERA_LOCK_AUTO_CONTROLS = False
 LINE_CAMERA_WARMUP_S = .45
-LINE_CAMERA_EXPOSURE_VALUE = 0.
+LINE_CAMERA_EXPOSURE_VALUE = 0.0
 DEBUG_SHM_NAME = "shadow_shm_cam"
 DEBUG_SHM_SIZE = camera_x * camera_y * 3  # 338688 B
 
 # ----------------------------------------------------------------------------
 # Controle proporcional da direção
 # ----------------------------------------------------------------------------
-# Legado do resgate: o segue-linha não usa mais este limiar abrupto para
-# trocar uma curva por pivô. As manobras deliberadas ainda o usam.
-max_turn_angle = 110
+max_turn_angle = 110                      # acima disso: pivot no lugar
 left_correction = 1                       # trim por lado
 right_correction = 1
 
@@ -110,17 +104,13 @@ right_correction = 1
 # ----------------------------------------------------------------------------
 LINE_FOLLOW_PWM = 80
 LINE_FOLLOW_SPEED = LINE_FOLLOW_PWM / MAX_PWM
-# Uma câmera Wide vê a linha sair pela lateral muito antes da curva terminar,
-# mas manter uma curva antiga por 0,7 s levava o robô para fora da pista.
-LINE_LOSS_STEER_HOLD = .22
+LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair brevemente da imagem
 
 # Rampa lida pelo MPU6050 do Arduino. A consulta e assincrona, portanto nao
 # interrompe os comandos de movimento nem o watchdog. A correcao proporcional
 # do segue-linha recebe a propria velocidade abaixo; assim, ela escala junto
 # com o PWM em subida e descida.
-# O MPU6050 não está instalado/uso neste robô por enquanto. Mantém o
-# segue-linha na velocidade fixa e não envia consultas ``RAMPA`` pela serial.
-RAMPA_HABILITADA = False
+RAMPA_HABILITADA = True
 RAMPA_CONSULTA_INTERVALO_S = .10
 RAMPA_RESPOSTA_TIMEOUT_S = .20
 RAMPA_SUBIDA_PWM = 120
@@ -153,77 +143,16 @@ LINE_CROP_INITIAL = .6
 LINE_CROP_NORMAL = .6
 LINE_CROP_GREEN = .45                     # durante curva verde
 
-# A Wide tem distorção maior no rodapé. O ponto próximo estabiliza o robô,
-# mas o ponto à frente deve pesar mais para o eixo central do chassi prever a
-# curva em vez de corrigir tardiamente em cima da linha.
+# Mantem a linha sob o centro inferior da camera frontal. O ponto proximo tem
+# prioridade, mas parte do POI original preserva antecipacao de curvas.
 BOTTOM_CENTER_CONTROL = True
-BOTTOM_CENTER_WEIGHT = .70
+BOTTOM_CENTER_WEIGHT = .7
 BOTTOM_CENTER_MIN_Y = .75
 
-# Seguidor visual V2. Ele usa somente camera e motores: MPU/encoder nao fazem
-# parte do caminho critico. Quando a geometria multiponto nao e confiavel, o
-# ciclo volta ao seguidor angular acima sem interromper o movimento.
-LINE_FOLLOWER_V2_ENABLED = True
-LINE_V2_MIN_CONFIDENCE = .52
-LINE_V2_MAX_RESULT_AGE_S = .12
-LINE_V2_FILTER_TAU_S = .10
-LINE_V2_WHEEL_MAX_PWM = LINE_FOLLOW_PWM
-LINE_V2_MIN_FORWARD_RATIO = .38
-LINE_V2_CURVE_SPEED_REDUCTION = .58
-LINE_V2_LATERAL_KP_PWM = 10.
-LINE_V2_LATERAL_MAX_PWM = 4.
-LINE_V2_HEADING_KP_PWM = 42.
-LINE_V2_LATERAL_YAW_KP_PWM = 24.
-LINE_V2_HEADING_D_PWM = 6.
-LINE_V2_HEADING_D_FILTER = .25
-LINE_V2_CURVATURE_FF_PWM = 5.
-LINE_V2_ROTATION_MAX_PWM = 48.
-LINE_V2_ERROR_DEADBAND = .025
-LINE_V2_MAX_PWM_STEP = 14.
-
-# Corredor central com histerese. Ao sair cerca de 18 px do centro, o robo
-# reduz o avanco e prioriza trazer a faixa de volta. So libera a antecipacao
-# normal quando o erro cai para aproximadamente 8 px, evitando alternancia.
-# A translacao omni e pequena: o alinhamento do corpo vem principalmente do
-# yaw visual, imitando a trajetoria do robo de rodas com tracao lateral.
-LINE_V2_CENTER_ENTER_ERROR = .08
-LINE_V2_CENTER_EXIT_ERROR = .035
-LINE_V2_RECENTER_FORWARD_RATIO = .45
-LINE_V2_RECENTER_LATERAL_KP_PWM = 16.
-LINE_V2_RECENTER_LATERAL_MAX_PWM = 8.
-LINE_V2_RECENTER_LATERAL_YAW_KP_PWM = 34.
-LINE_V2_RECENTER_CURVATURE_SCALE = 0.
-
-# Geometria fisica atual (metros). O termo de rotacao de uma base omni em X
-# usa metade do entre-eixos mais metade da bitola: 0,070 + 0,0675 = 0,1375 m.
-LINE_WHEELBASE_M = .140
-LINE_TRACK_WIDTH_M = .135
-LINE_WHEEL_DIAMETER_M = .050
-LINE_OMNI_ROTATION_ARM_M = (LINE_WHEELBASE_M + LINE_TRACK_WIDTH_M) / 2.
-
-# Mistura diferencial de tanque do segue-linha: o erro da câmera cria uma
-# diferença contínua entre os lados esquerdo e direito.
-# Em erro grande, o lado interno pode entrar em ré para o robô girar no
-# próprio centro sem acionar o antigo pivô de traseira.
-LINE_TANK_FULL_ANGLE = 120
-LINE_TANK_SPEED_REDUCTION = .40
-# Acima de ~70 graus de erro, o lado interno já começa a recuar. Isso evita
-# esperar a linha chegar à borda da imagem para começar a girar no tanque.
-LINE_TANK_TURN_GAIN = 1.35
-
-# Curva fechada da linha: transfere parte do giro para a traseira, levando o
-# centro de rotação para perto da frente do chassi. É propositalmente parcial:
-# a frente continua se movendo e a câmera não fica girando parada sobre a
-# mesma imagem.
-LINE_REAR_PIVOT_ENABLED = True
-LINE_REAR_PIVOT_START_ANGLE = 78
-LINE_REAR_PIVOT_FULL_ANGLE = 112
-LINE_REAR_PIVOT_MAX_BLEND = .58
-LINE_REAR_PIVOT_REAR_SCALE = 1.10
-
-# Perfil usado apenas em rotinas explícitas de resgate que pedem
-# ``rear_pivot_enabled``. O segue-linha normal usa ``LADO`` e arcos
-# diferenciais contínuos, pois a Camera Module 3 Wide está no eixo do chassi.
+# Em correcoes fortes, aproxima o centro de giro da frente do robo: as rodas
+# dianteiras perdem velocidade e a traseira descreve o arco. A transicao e
+# proporcional ao mesmo angulo produzido pelo controle da bolinha inferior;
+# nao existe deteccao ou sequencia temporizada especifica para curvas de 90°.
 FRONT_ANCHORED_STEERING = True
 FRONT_ANCHOR_START_ANGLE = 65
 FRONT_ANCHOR_FULL_ANGLE = 120
@@ -257,15 +186,15 @@ GREEN_ROI_MEAN = 125                      # "lado e preto" se media > 125
 GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)
-GREEN_APPROACH_TIME = .22                 # s — posiciona o eixo dianteiro no vertice
-GREEN_APPROACH_SPEED = .4                 # base PWM 48 durante aproximacao curta
-GREEN_TURN_BLIND_TIME = .18                # s — ignora somente o ramo antigo
+GREEN_APPROACH_TIME = .7                  # s — avanca reto antes do giro verde
+GREEN_APPROACH_SPEED = .5                 # base PWM 60, preserva a manobra
+GREEN_TURN_BLIND_TIME = .30                # s — giro sem aceitar leitura da camera
 GREEN_TURN_SIDE_MIN_ERROR_PX = 55          # linha alvo deve primeiro entrar pelo lado marcado
 GREEN_TURN_CENTER_TOLERANCE_PX = 35        # px — ponto inferior aceito no centro da camera
 GREEN_TURN_TIMEOUT = 2.0                   # s — para com seguranca se nao reencontrar o ramo
-GREEN_TURN_SPEED = .58                    # PWM 70 nas rodas traseiras do pivo
-GREEN_REVERSE_TIME = .12
-GREEN_REVERSE_SPEED = .35                 # PWM 42, apenas para liberar a faixa
+GREEN_TURN_SPEED = .5                     # base PWM 60, preserva o giro
+GREEN_REVERSE_TIME = .5
+GREEN_REVERSE_SPEED = .4                  # PWM 48
 # Quando um verde confirmado indica uma curva, desloca o historico usado
 # para escolher entre ramos concorrentes. Isso faz o ramo indicado vencer a
 # correcao da linha que o robo vinha seguindo no mesmo frame.
@@ -330,8 +259,7 @@ T_180_SEARCH_SPEED = .4                   # procura devagar para nao atravessar 
 T_180_SEARCH_TIMEOUT = 1.5                # s — complemento visual maximo
 T_180_EXIT_BOTTOM_PX = 30                 # px — tolerancia ao redor da bolinha inferior central
 T_180_CONFIRM_TIME = .10                  # s — evita parar por um frame isolado
-TURN_AROUND_PREROLL = .10                 # camera ja esta sobre o marcador duplo
-TURN_AROUND_PREROLL_SPEED = .4            # PWM 48; evita atravessar o vertice
+TURN_AROUND_PREROLL = .55                 # avanca sobre o marcador
 TURN_AROUND_REVERSE = .15                 # metade da ré após re-aquisitar a linha
 TURN_AROUND_REVERSE_EXTRA = .20           # metade do extra se line_size < 5500
 TURN_AROUND_SMALL_LINE = 5500

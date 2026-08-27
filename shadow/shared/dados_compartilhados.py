@@ -89,57 +89,9 @@ class ResultadoVisaoRapida(NamedTuple):
     candidato_vermelho: bool
 
 
-class ResultadoTrajetoriaLinha(NamedTuple):
-    """Geometria multiponto coerente de um unico frame da camera."""
-
-    sequencia: int
-    publicado_em: float
-    valida: bool
-    lateral: float
-    orientacao: float
-    curvatura: float
-    confianca: float
-    largura_normalizada: float
-    amostras: int
-
-
 # Um único bloqueio publica todos os campos. O controle nunca usa uma mistura
 # do ângulo de um frame com o ponto inferior do frame seguinte.
 _resultado_visao_rapida = Array("d", 11, lock=True)
-_resultado_trajetoria_linha = Array("d", 9, lock=True)
-
-
-def publicar_resultado_trajetoria_linha(
-    *, publicado_em, valida, lateral, orientacao, curvatura,
-    confianca, largura_normalizada, amostras,
-):
-    with _resultado_trajetoria_linha.get_lock():
-        dados = _resultado_trajetoria_linha.get_obj()
-        dados[0] += 1
-        dados[1] = float(publicado_em)
-        dados[2] = bool(valida)
-        dados[3] = float(lateral)
-        dados[4] = float(orientacao)
-        dados[5] = float(curvatura)
-        dados[6] = float(confianca)
-        dados[7] = float(largura_normalizada)
-        dados[8] = int(amostras)
-
-
-def ler_resultado_trajetoria_linha():
-    with _resultado_trajetoria_linha.get_lock():
-        dados = tuple(_resultado_trajetoria_linha.get_obj())
-    return ResultadoTrajetoriaLinha(
-        sequencia=int(dados[0]),
-        publicado_em=dados[1],
-        valida=bool(dados[2]),
-        lateral=dados[3],
-        orientacao=dados[4],
-        curvatura=dados[5],
-        confianca=dados[6],
-        largura_normalizada=dados[7],
-        amostras=int(dados[8]),
-    )
 
 
 def publicar_resultado_visao_rapida(

@@ -20,14 +20,6 @@ class ArduinoFalso:
         self.chamadas.append(("lado", esquerda, direita))
         return True
 
-    def rodas(self, frente_esquerda, tras_esquerda,
-              frente_direita, tras_direita):
-        self.chamadas.append((
-            "rodas", frente_esquerda, tras_esquerda,
-            frente_direita, tras_direita,
-        ))
-        return True
-
     def parar(self):
         self.chamadas.append(("parar",))
         return True
@@ -44,67 +36,6 @@ class SteeringTests(unittest.TestCase):
         self.assertEqual(
             self.arduino.chamadas,
             [("lado", LINE_FOLLOW_PWM, LINE_FOLLOW_PWM)],
-        )
-
-    def test_curva_normal_faz_correcao_de_tanque_com_re_no_lado_interno(self):
-        direcao.steer(180, LINE_FOLLOW_SPEED, center_pivot=False)
-
-        comando, esquerda, direita = self.arduino.chamadas[-1]
-        self.assertEqual(comando, "lado")
-        self.assertEqual(esquerda, LINE_FOLLOW_PWM)
-        self.assertLess(direita, 0)
-
-    def test_linha_fugindo_para_esquerda_recuar_todo_o_lado_esquerdo(self):
-        direcao.steer(-75, LINE_FOLLOW_SPEED, center_pivot=False)
-
-        comando, esquerda, direita = self.arduino.chamadas[-1]
-        self.assertEqual(comando, "lado")
-        self.assertLess(esquerda, 0)
-        self.assertGreater(direita, 0)
-
-    def test_curva_fechada_pode_usar_pivo_traseiro_parcial(self):
-        direcao.steer(
-            90,
-            LINE_FOLLOW_SPEED,
-            center_pivot=False,
-            rear_pivot_enabled=True,
-            rear_pivot_start_angle=78,
-            rear_pivot_full_angle=112,
-            rear_pivot_max_blend=.58,
-            rear_pivot_rear_scale=1.10,
-        )
-
-        (comando, frente_esquerda, tras_esquerda,
-         frente_direita, tras_direita) = self.arduino.chamadas[-1]
-        self.assertEqual(comando, "rodas")
-        self.assertGreater(frente_esquerda, 0)
-        self.assertLess(frente_esquerda, LINE_FOLLOW_PWM)
-        self.assertGreater(tras_esquerda, frente_esquerda)
-        self.assertLess(frente_direita, 0)
-        self.assertLess(tras_direita, frente_direita)
-
-    def test_pivo_central_so_acontece_quando_pedido(self):
-        direcao.steer(-180, LINE_FOLLOW_SPEED, center_pivot=True)
-
-        self.assertEqual(self.arduino.chamadas[-1][0], "lado")
-        _, esquerda, direita = self.arduino.chamadas[-1]
-        self.assertLess(esquerda, 0)
-        self.assertGreater(direita, 0)
-
-    def test_pivo_dianteiro_direita_para_as_rodas_da_frente(self):
-        direcao.pivot_front(180, .58)
-
-        self.assertEqual(
-            self.arduino.chamadas[-1],
-            ("rodas", 0, 70, 0, -70),
-        )
-
-    def test_pivo_dianteiro_esquerda_espelha_a_traseira(self):
-        direcao.pivot_front(-180, .58)
-
-        self.assertEqual(
-            self.arduino.chamadas[-1],
-            ("rodas", 0, -70, 0, 70),
         )
 
 
