@@ -211,7 +211,10 @@ LINE_CORNER_EXIT_FRAMES = 3
 LINE_CORNER_RETURN_CANCEL_FRAMES = 2
 LINE_CORNER_TIMEOUT_S = 1.6
 LINE_CORNER_LOST_HOLD_S = .65
-LINE_TRACK_LOST_HOLD_S = .25
+# Ao desaparecer em uma reta (piso branco/gap), continue estritamente reto por
+# esta janela antes da parada de seguranca. Curvas confirmadas usam a memoria
+# separada acima para nao escapar de um canto de 90 graus.
+LINE_TRACK_LOST_HOLD_S = .75
 
 # Mantidos somente para o angulo legado consumido por decisoes de alto nivel
 # (verde, entrada e ferramentas antigas). Os motores do segue-linha normal nao

@@ -304,13 +304,14 @@ class SeguidorLinhaTests(unittest.TestCase):
         self.assertEqual(saidas[2].estado, TRACK)
         self.assertEqual(saidas[2].correcao, 0.)
 
-    def test_perda_em_reta_para_apos_janela_curta(self):
+    def test_perda_em_reta_avanca_reto_por_075s_e_depois_para(self):
         self.quadro(inferior=(250., 251.), alvo=(260., 20.))
-        curta = self.quadro(detectada=False, dt=.10)
-        longa = self.quadro(detectada=False, dt=.20)
+        curta = self.quadro(detectada=False, dt=.70)
+        longa = self.quadro(detectada=False, dt=.06)
 
         self.assertTrue(curta.comando_valido)
         self.assertEqual(curta.estado, LOST)
+        self.assertEqual(curta.correcao, 0.)
         self.assertFalse(longa.comando_valido)
         self.assertEqual(longa.correcao, 0.)
 

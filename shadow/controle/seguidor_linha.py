@@ -112,7 +112,14 @@ class ControladorSegueLinha:
             if em_canto else config.LINE_TRACK_LOST_HOLD_S
         )
         comando_valido = desde_vista <= limite
-        correcao = self._ultima_correcao if comando_valido else 0.
+        # Branco em uma reta deve produzir um avanco previsivel, sem prolongar
+        # a ultima correcao lateral. Em um canto confirmado, preserve o giro
+        # porque zerar a correcao faria o robo escapar antes da nova reta.
+        correcao = (
+            self._ultima_correcao
+            if comando_valido and em_canto
+            else 0.
+        )
         if comando_valido and em_canto:
             correcao = self._canto_sinal * max(
                 abs(correcao), config.LINE_CORNER_MIN_CORRECTION)

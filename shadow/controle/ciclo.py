@@ -879,7 +879,7 @@ def control_loop():
                             f'Curva fechada {lado} — alinhando nova reta')
                     elif saida_linha.estado == LOST:
                         status.value = (
-                            'Linha fora da imagem — mantendo ultimo giro')
+                            'Linha fora da imagem — avanco temporario')
                 else:
                     angle = 190
                     status.value = (
