@@ -5,7 +5,8 @@ import time
 from config import (T_180, T_180_BLIND_EXTRA, T_180_CONFIRM_TIME, T_180_EXIT_BOTTOM_PX,
                     T_180_SEARCH_SPEED,
                     T_180_SEARCH_TIMEOUT, T_180_SPEED, T_180_TEST_STOP,
-                    TURN_AROUND_PREROLL, TURN_AROUND_REVERSE,
+                    TURN_AROUND_PREROLL, TURN_AROUND_PREROLL_SPEED,
+                    TURN_AROUND_REVERSE,
                     TURN_AROUND_REVERSE_EXTRA, TURN_AROUND_SMALL_LINE,
                     camera_x)
 from controle.direcao import sleep_steering, steer
@@ -16,7 +17,7 @@ from shared.dados_compartilhados import (last_bottom_point, line_detected, line_
 def turn_around(_last_turn_dir):
     """Executa o retorno de 180° sempre pelo lado direito."""
     # avanca por cima do marcador duplo
-    steer(0, .7)
+    steer(0, TURN_AROUND_PREROLL_SPEED)
     sleep_steering(TURN_AROUND_PREROLL)
 
     # Pivô temporizado, pois o robô não possui giroscópio.

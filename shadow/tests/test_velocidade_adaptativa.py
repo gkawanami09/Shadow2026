@@ -78,14 +78,14 @@ class VelocidadeAdaptativaTests(unittest.TestCase):
         )
         self.assertFalse(config.RETA_RAPIDA_HABILITADA)
 
-    def test_verde_mantem_as_velocidades_ja_calibradas(self):
+    def test_verde_usa_aproximacao_lenta_e_pivo_traseiro_rapido(self):
         self.assertEqual(
             round(config.GREEN_APPROACH_SPEED * config.MAX_PWM),
-            60,
+            48,
         )
         self.assertEqual(
             round(config.GREEN_TURN_SPEED * config.MAX_PWM),
-            60,
+            70,
         )
 
     def test_seis_frames_a_sessenta_fps_liberam_primeiro_passo(self):

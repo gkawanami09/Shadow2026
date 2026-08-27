@@ -16,6 +16,10 @@ class ControladorSeguidorOmni:
         self._ultimo_t = None
         self._filtrado = np.zeros(3, dtype=np.float64)
         self._rodas_anteriores = None
+        self._ultima_sequencia = None
+        self._ultima_orientacao = None
+        self._ultimo_frame_t = None
+        self._derivada_orientacao = 0.
         self._recentrando = False
         self.modo = "fallback"
 
@@ -71,6 +75,26 @@ class ControladorSeguidorOmni:
         orientacao = self._zona_morta(float(orientacao))
         curvatura = self._zona_morta(float(curvatura))
 
+        sequencia = getattr(resultado, "sequencia", None)
+        frame_novo = sequencia is None or sequencia != self._ultima_sequencia
+        if frame_novo:
+            frame_t = float(resultado.publicado_em)
+            if self._ultimo_frame_t is not None and self._ultima_orientacao is not None:
+                dt_frame = max(frame_t - self._ultimo_frame_t, 1e-3)
+                derivada_bruta = np.clip(
+                    (orientacao - self._ultima_orientacao) / dt_frame,
+                    -3.,
+                    3.,
+                )
+                alpha_d = config.LINE_V2_HEADING_D_FILTER
+                self._derivada_orientacao = (
+                    alpha_d * derivada_bruta
+                    + (1. - alpha_d) * self._derivada_orientacao
+                )
+            self._ultima_orientacao = orientacao
+            self._ultimo_frame_t = frame_t
+            self._ultima_sequencia = sequencia
+
         # O ponto inferior representa a faixa exatamente no eixo da camera.
         # Histerese impede que ruido perto da borda do corredor ligue/desligue
         # o modo a cada frame.
@@ -123,6 +147,7 @@ class ControladorSeguidorOmni:
         rotacao_pwm = float(np.clip(
             config.LINE_V2_HEADING_KP_PWM * orientacao
             + ganho_yaw_lateral * lateral
+            + config.LINE_V2_HEADING_D_PWM * self._derivada_orientacao
             + config.LINE_V2_CURVATURE_FF_PWM * curvatura * escala_curvatura,
             -config.LINE_V2_ROTATION_MAX_PWM,
             config.LINE_V2_ROTATION_MAX_PWM,

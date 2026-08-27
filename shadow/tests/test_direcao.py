@@ -91,6 +91,22 @@ class SteeringTests(unittest.TestCase):
         self.assertLess(esquerda, 0)
         self.assertGreater(direita, 0)
 
+    def test_pivo_dianteiro_direita_para_as_rodas_da_frente(self):
+        direcao.pivot_front(180, .58)
+
+        self.assertEqual(
+            self.arduino.chamadas[-1],
+            ("rodas", 0, 70, 0, -70),
+        )
+
+    def test_pivo_dianteiro_esquerda_espelha_a_traseira(self):
+        direcao.pivot_front(-180, .58)
+
+        self.assertEqual(
+            self.arduino.chamadas[-1],
+            ("rodas", 0, -70, 0, 70),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

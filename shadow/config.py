@@ -166,29 +166,33 @@ BOTTOM_CENTER_MIN_Y = .75
 LINE_FOLLOWER_V2_ENABLED = True
 LINE_V2_MIN_CONFIDENCE = .52
 LINE_V2_MAX_RESULT_AGE_S = .12
-LINE_V2_FILTER_TAU_S = .07
+LINE_V2_FILTER_TAU_S = .10
 LINE_V2_WHEEL_MAX_PWM = LINE_FOLLOW_PWM
 LINE_V2_MIN_FORWARD_RATIO = .38
 LINE_V2_CURVE_SPEED_REDUCTION = .58
-LINE_V2_LATERAL_KP_PWM = 28.
-LINE_V2_LATERAL_MAX_PWM = 20.
-LINE_V2_HEADING_KP_PWM = 50.
+LINE_V2_LATERAL_KP_PWM = 10.
+LINE_V2_LATERAL_MAX_PWM = 4.
+LINE_V2_HEADING_KP_PWM = 42.
 LINE_V2_LATERAL_YAW_KP_PWM = 24.
-LINE_V2_CURVATURE_FF_PWM = 18.
-LINE_V2_ROTATION_MAX_PWM = 58.
+LINE_V2_HEADING_D_PWM = 6.
+LINE_V2_HEADING_D_FILTER = .25
+LINE_V2_CURVATURE_FF_PWM = 5.
+LINE_V2_ROTATION_MAX_PWM = 48.
 LINE_V2_ERROR_DEADBAND = .025
 LINE_V2_MAX_PWM_STEP = 14.
 
-# Corredor central com histerese. Ao sair cerca de 22 px do centro, o robo
+# Corredor central com histerese. Ao sair cerca de 18 px do centro, o robo
 # reduz o avanco e prioriza trazer a faixa de volta. So libera a antecipacao
-# normal quando o erro cai para aproximadamente 10 px, evitando alternancia.
-LINE_V2_CENTER_ENTER_ERROR = .10
-LINE_V2_CENTER_EXIT_ERROR = .045
-LINE_V2_RECENTER_FORWARD_RATIO = .55
-LINE_V2_RECENTER_LATERAL_KP_PWM = 48.
-LINE_V2_RECENTER_LATERAL_MAX_PWM = 32.
-LINE_V2_RECENTER_LATERAL_YAW_KP_PWM = 42.
-LINE_V2_RECENTER_CURVATURE_SCALE = .25
+# normal quando o erro cai para aproximadamente 8 px, evitando alternancia.
+# A translacao omni e pequena: o alinhamento do corpo vem principalmente do
+# yaw visual, imitando a trajetoria do robo de rodas com tracao lateral.
+LINE_V2_CENTER_ENTER_ERROR = .08
+LINE_V2_CENTER_EXIT_ERROR = .035
+LINE_V2_RECENTER_FORWARD_RATIO = .45
+LINE_V2_RECENTER_LATERAL_KP_PWM = 16.
+LINE_V2_RECENTER_LATERAL_MAX_PWM = 8.
+LINE_V2_RECENTER_LATERAL_YAW_KP_PWM = 34.
+LINE_V2_RECENTER_CURVATURE_SCALE = 0.
 
 # Geometria fisica atual (metros). O termo de rotacao de uma base omni em X
 # usa metade do entre-eixos mais metade da bitola: 0,070 + 0,0675 = 0,1375 m.
@@ -253,15 +257,15 @@ GREEN_ROI_MEAN = 125                      # "lado e preto" se media > 125
 GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)
-GREEN_APPROACH_TIME = .7                  # s — avanca reto antes do giro verde
-GREEN_APPROACH_SPEED = .5                 # base PWM 60, preserva a manobra
-GREEN_TURN_BLIND_TIME = .30                # s — giro sem aceitar leitura da camera
+GREEN_APPROACH_TIME = .22                 # s — posiciona o eixo dianteiro no vertice
+GREEN_APPROACH_SPEED = .4                 # base PWM 48 durante aproximacao curta
+GREEN_TURN_BLIND_TIME = .18                # s — ignora somente o ramo antigo
 GREEN_TURN_SIDE_MIN_ERROR_PX = 55          # linha alvo deve primeiro entrar pelo lado marcado
 GREEN_TURN_CENTER_TOLERANCE_PX = 35        # px — ponto inferior aceito no centro da camera
 GREEN_TURN_TIMEOUT = 2.0                   # s — para com seguranca se nao reencontrar o ramo
-GREEN_TURN_SPEED = .5                     # base PWM 60, preserva o giro
-GREEN_REVERSE_TIME = .5
-GREEN_REVERSE_SPEED = .4                  # PWM 48
+GREEN_TURN_SPEED = .58                    # PWM 70 nas rodas traseiras do pivo
+GREEN_REVERSE_TIME = .12
+GREEN_REVERSE_SPEED = .35                 # PWM 42, apenas para liberar a faixa
 # Quando um verde confirmado indica uma curva, desloca o historico usado
 # para escolher entre ramos concorrentes. Isso faz o ramo indicado vencer a
 # correcao da linha que o robo vinha seguindo no mesmo frame.
@@ -326,7 +330,8 @@ T_180_SEARCH_SPEED = .4                   # procura devagar para nao atravessar 
 T_180_SEARCH_TIMEOUT = 1.5                # s — complemento visual maximo
 T_180_EXIT_BOTTOM_PX = 30                 # px — tolerancia ao redor da bolinha inferior central
 T_180_CONFIRM_TIME = .10                  # s — evita parar por um frame isolado
-TURN_AROUND_PREROLL = .55                 # avanca sobre o marcador
+TURN_AROUND_PREROLL = .10                 # camera ja esta sobre o marcador duplo
+TURN_AROUND_PREROLL_SPEED = .4            # PWM 48; evita atravessar o vertice
 TURN_AROUND_REVERSE = .15                 # metade da ré após re-aquisitar a linha
 TURN_AROUND_REVERSE_EXTRA = .20           # metade do extra se line_size < 5500
 TURN_AROUND_SMALL_LINE = 5500

@@ -40,6 +40,19 @@ def drive_omni(forward_pwm, lateral_pwm, rotation_pwm, wheel_limit_pwm):
     return arduino.rodas(*(int(round(valor)) for valor in rodas))
 
 
+def pivot_front(angle, speed):
+    """Gira ao redor do centro do eixo dianteiro usando a traseira.
+
+    A camera de linha esta nesse eixo. Mantendo FE/FD paradas, o vertice da
+    curva permanece sob a camera enquanto TE/TD orientam o chassi.
+    """
+    pwm = int(round(min(max(float(speed), 0.), 1.) * MAX_PWM))
+    if not -180 <= float(angle) <= 180 or angle == 0:
+        return arduino.parar()
+    sinal = 1 if angle > 0 else -1
+    return arduino.rodas(0, sinal * pwm, 0, -sinal * pwm)
+
+
 def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=False,
           toque_frente_direita_pwm=0, center_pivot=None,
           rear_pivot_start_angle=None, rear_pivot_full_angle=None,

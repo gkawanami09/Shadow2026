@@ -23,7 +23,7 @@ from controle.parada_obstaculo import (
 from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
 from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
-from controle.direcao import init_steering, sleep_steering, steer
+from controle.direcao import init_steering, pivot_front, sleep_steering, steer
 from controle.seguidor_omni import ControladorSeguidorOmni
 from controle.retorno import turn_around
 from comunicacao_serial.arduino import Arduino
@@ -703,7 +703,10 @@ def control_loop():
                     and -180 <= angle <= 180
                 )
                 comando_v2_enviado = False
-                if usar_v2:
+                if center_pivot:
+                    pivot_front(angle, command_speed)
+                    comando_v2_enviado = True
+                elif usar_v2:
                     comando_v2_enviado = seguidor_omni.atualizar(
                         ler_resultado_trajetoria_linha(),
                         command_speed,
