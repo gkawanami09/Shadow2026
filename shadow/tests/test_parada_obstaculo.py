@@ -64,7 +64,7 @@ class RelogioFalso:
         self.tempo += duracao
 
 
-def criar_monitor(confirmacoes=2):
+def criar_monitor(confirmacoes=2, distancia_minima_mm=20):
     return MonitorObstaculo(
         distancia_parada_mm=50,
         intervalo_s=.06,
@@ -72,7 +72,7 @@ def criar_monitor(confirmacoes=2):
         confirmacoes=confirmacoes,
         tamanho_historico=3,
         janela_s=.20,
-        distancia_minima_mm=1,
+        distancia_minima_mm=distancia_minima_mm,
         distancia_maxima_mm=4000,
     )
 
@@ -163,14 +163,34 @@ class MonitorObstaculoTests(unittest.TestCase):
         self.assertFalse(monitor.atualizar(arduino, agora=0.06))
         self.assertFalse(monitor.atualizar(arduino, agora=0.12))
 
-    def test_duas_de_tres_toleram_um_eco_ruidoso(self):
+    def test_leitura_distante_entre_ecos_proximos_reinicia_confirmacao(self):
         arduino = ArduinoFalso(
             ((True, 45), (True, 180), (True, 42)))
         monitor = criar_monitor()
 
         self.assertFalse(monitor.atualizar(arduino, agora=0.00))
         self.assertFalse(monitor.atualizar(arduino, agora=0.06))
-        self.assertTrue(monitor.atualizar(arduino, agora=0.12))
+        self.assertFalse(monitor.atualizar(arduino, agora=0.12))
+
+    def test_eco_proximo_demais_e_descartado_como_ruido(self):
+        arduino = ArduinoFalso(((True, 3), (True, 8), (True, 35)))
+        monitor = criar_monitor()
+
+        self.assertFalse(monitor.atualizar(arduino, agora=0.00))
+        self.assertFalse(monitor.atualizar(arduino, agora=0.06))
+        self.assertFalse(monitor.atualizar(arduino, agora=0.12))
+        self.assertEqual(monitor.leituras_invalidas_consecutivas, 0)
+        self.assertEqual(monitor.ultima_distancia_valida_mm, 35)
+        self.assertFalse(monitor.parada_confirmada)
+
+    def test_sem_eco_entre_duas_leituras_proximas_reinicia_confirmacao(self):
+        arduino = ArduinoFalso(
+            ((True, 40), (True, None), (True, 42)))
+        monitor = criar_monitor()
+
+        self.assertFalse(monitor.atualizar(arduino, agora=0.00))
+        self.assertFalse(monitor.atualizar(arduino, agora=0.06))
+        self.assertFalse(monitor.atualizar(arduino, agora=0.12))
 
     def test_leitura_antiga_nao_confirma_obstaculo_novo(self):
         arduino = ArduinoFalso(((True, 40), (True, 45)))

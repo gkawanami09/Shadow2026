@@ -31,8 +31,9 @@ MAX_PWM = 120                             # teto absoluto; firmware tambem trava
 # ----------------------------------------------------------------------------
 # Parada de segurança por obstáculo
 # ----------------------------------------------------------------------------
-# O ultrassônico devolve milímetros. A parada exige duas leituras próximas
-# dentro de uma janela curta: um eco isolado não consegue parar o robô.
+# O ultrassônico devolve milímetros. A parada exige duas leituras próximas E
+# consecutivas dentro de uma janela curta: eco distante, ausência de eco ou
+# medida inválida reinicia a confirmação.
 OBSTACLE_STOP_ENABLED = True
 OBSTACLE_STOP_DISTANCE_MM = 50             # 5 cm, inclusive
 # Uma leitura isolada nesta faixa NÃO inicia o desvio; ela apenas bloqueia uma
@@ -43,7 +44,10 @@ OBSTACLE_READ_TIMEOUT_S = .08              # firmware espera eco por até 30 ms
 OBSTACLE_CONFIRM_READINGS = 2
 OBSTACLE_HISTORY_SIZE = 3
 OBSTACLE_CONFIRM_WINDOW_S = .20
-OBSTACLE_MIN_VALID_MM = 1
+# O HC-SR04 não mede de forma confiável dentro dos primeiros 2 cm. Pulsos
+# menores normalmente são ruído elétrico/reflexo do próprio chassi e jamais
+# podem iniciar uma manobra de obstáculo.
+OBSTACLE_MIN_VALID_MM = 20
 OBSTACLE_MAX_VALID_MM = 4000
 OBSTACLE_LATERAL_PWM = 60                  # translação com rodas omnidirecionais
 OBSTACLE_LATERAL_TIME_S = 1.8              # s: desvio lateral de ida

@@ -56,6 +56,7 @@ class MonitorObstaculo:
             distancia_bloqueio_rapido_mm)
 
         self._leituras = deque(maxlen=int(tamanho_historico))
+        self._proximas_consecutivas = deque(maxlen=self.confirmacoes)
         self._proxima_solicitacao = 0.0
         self.parada_confirmada = False
         self.distancia_confirmada_mm = None
@@ -108,6 +109,7 @@ class MonitorObstaculo:
         # None significa ausência de eco. Não confirma obstáculo nem é usado
         # como uma falsa leitura de distância livre.
         if distancia_mm is None:
+            self._proximas_consecutivas.clear()
             return False
 
         distancia_mm = int(distancia_mm)
@@ -116,6 +118,7 @@ class MonitorObstaculo:
             <= distancia_mm
             <= self.distancia_maxima_mm
         ):
+            self._proximas_consecutivas.clear()
             return False
 
         self.ultima_distancia_valida_mm = distancia_mm
@@ -125,25 +128,35 @@ class MonitorObstaculo:
         self._leituras.append((agora, distancia_mm, proxima))
         self._descartar_antigas(agora)
 
-        leituras_proximas = [
-            distancia
-            for _, distancia, esta_proxima in self._leituras
-            if esta_proxima
-        ]
-        if len(leituras_proximas) >= self.confirmacoes:
+        if not proxima:
+            # Uma medida livre entre dois ecos baixos prova que eles não eram
+            # uma aproximação contínua. O filtro antigo aceitava 45, 180, 42.
+            self._proximas_consecutivas.clear()
+            return True
+
+        self._proximas_consecutivas.append((agora, distancia_mm))
+        if len(self._proximas_consecutivas) >= self.confirmacoes:
             self.parada_confirmada = True
             self.distancia_confirmada_mm = int(round(
-                statistics.median(leituras_proximas)))
+                statistics.median(
+                    distancia
+                    for _, distancia in self._proximas_consecutivas)))
         return True
 
     def _descartar_antigas(self, agora):
         limite = agora - self.janela_s
         while self._leituras and self._leituras[0][0] < limite:
             self._leituras.popleft()
+        while (
+            self._proximas_consecutivas
+            and self._proximas_consecutivas[0][0] < limite
+        ):
+            self._proximas_consecutivas.popleft()
 
     def reiniciar(self):
         """Libera o monitor para detectar outro obstáculo futuramente."""
         self._leituras.clear()
+        self._proximas_consecutivas.clear()
         self._proxima_solicitacao = 0.0
         self.parada_confirmada = False
         self.distancia_confirmada_mm = None
