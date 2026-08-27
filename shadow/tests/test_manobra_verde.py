@@ -9,10 +9,29 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
-from controle.manobra_verde import ramo_pronto_para_giro  # noqa: E402
+from controle.manobra_verde import (  # noqa: E402
+    correcao_aproximacao,
+    ramo_pronto_para_giro,
+)
 
 
 class ManobraVerdeTests(unittest.TestCase):
+    def test_aproximacao_reta_nao_antecipa_ramo_travado(self):
+        self.assertEqual(correcao_aproximacao(config.camera_x / 2), 0.)
+
+    def test_aproximacao_corrige_apenas_deslocamento_da_base(self):
+        direita = correcao_aproximacao(config.camera_x * .75)
+        esquerda = correcao_aproximacao(config.camera_x * .25)
+
+        self.assertGreater(direita, 0.)
+        self.assertAlmostEqual(direita, -esquerda)
+
+    def test_aproximacao_limita_correcao_para_continuar_avancando(self):
+        self.assertEqual(
+            correcao_aproximacao(config.camera_x),
+            config.GREEN_APPROACH_MAX_CORRECTION,
+        )
+
     def test_ramo_distante_ainda_nao_inicia_tanque(self):
         self.assertFalse(ramo_pronto_para_giro(
             "right",
@@ -24,14 +43,14 @@ class ManobraVerdeTests(unittest.TestCase):
         self.assertTrue(ramo_pronto_para_giro(
             "right",
             ponto_alvo_x=config.camera_x - 1,
-            ponto_alvo_y=config.camera_y * .60,
+            ponto_alvo_y=config.camera_y * .70,
         ))
 
     def test_ramo_esquerdo_proximo_inicia_tanque(self):
         self.assertTrue(ramo_pronto_para_giro(
             "left",
             ponto_alvo_x=1,
-            ponto_alvo_y=config.camera_y * .60,
+            ponto_alvo_y=config.camera_y * .70,
         ))
 
     def test_alvo_do_lado_oposto_nao_desfaz_direcao_travada(self):

@@ -5,6 +5,22 @@ import math
 import config
 
 
+def correcao_aproximacao(ponto_inferior_x, *, largura=config.camera_x):
+    """Centraliza somente a faixa de entrada, sem antecipar o ramo lateral."""
+    x = float(ponto_inferior_x)
+    if not math.isfinite(x):
+        return 0.
+
+    meio = float(largura) / 2.
+    erro = max(min((x - meio) / meio, 1.), -1.)
+    correcao = config.LINE_LATERAL_GAIN * erro
+    limite = config.GREEN_APPROACH_MAX_CORRECTION
+    correcao = max(min(correcao, limite), -limite)
+    if abs(correcao) < config.LINE_CORRECTION_DEADBAND:
+        return 0.
+    return correcao
+
+
 def ramo_pronto_para_giro(
     direcao,
     *,

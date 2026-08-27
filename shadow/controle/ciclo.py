@@ -21,7 +21,8 @@ from controle.parada_obstaculo import (
     desviar_obstaculo,
 )
 from controle.parada_vermelho import stop_for_red
-from controle.manobra_verde import ramo_pronto_para_giro
+from controle.manobra_verde import (correcao_aproximacao,
+                                    ramo_pronto_para_giro)
 from controle.velocidade import get_speed
 from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
 from controle.direcao import (init_steering, mix_line_pwm, sleep_steering,
@@ -554,7 +555,7 @@ def control_loop():
                     green_target_seen = False
                     aproximando_ramo_verde = False
 
-                if green_direction is None or aproximando_ramo_verde:
+                if green_direction is None:
                     saida_linha = controlador_linha.atualizar(
                         sequencia=resultado_visao.sequencia,
                         publicado_em=resultado_visao.publicado_em,
@@ -646,19 +647,26 @@ def control_loop():
                         green_turn_target.value = 0
                         angle = line_angle.value if line_detected.value else 190
                 elif green_direction is not None and green_turn_started is None:
-                    # A visao ja escolheu somente o ramo marcado. Enquanto ele
-                    # se aproxima da base, o controlador normal continua
-                    # fechando o erro inferior em vez de avancar cego.
+                    # O ramo continua travado na visao, mas ainda nao comanda
+                    # o rumo. Ate ele chegar perto da base, somente o ponto
+                    # inferior centraliza a faixa de entrada; isso evita
+                    # antecipar o tanque e ficar aquem da intersecao.
                     command_speed = GREEN_APPROACH_SPEED
-                    if saida_linha is not None and saida_linha.comando_valido:
+                    aproximacao_valida = (
+                        resultado_visao.linha_detectada
+                        and now - resultado_visao.publicado_em
+                        <= config.LINE_MAX_FRAME_AGE_S
+                    )
+                    if aproximacao_valida:
                         usar_controle_linha = True
-                        correcao_linha = saida_linha.correcao
-                        angle = saida_linha.angulo_equivalente
+                        correcao_linha = correcao_aproximacao(
+                            resultado_visao.ponto_inferior_x)
+                        angle = round(correcao_linha * 180.)
                     else:
                         angle = 190
                     status.value = (
                         f'Verde {green_direction} — ramo travado, '
-                        'alinhando aproximacao')
+                        'centralizando entrada')
                 elif green_direction is not None:
                     if green_turn_started is None:
                         green_turn_started = now
