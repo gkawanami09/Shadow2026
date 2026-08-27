@@ -304,7 +304,8 @@ def vision_loop(debug=False):
                 alvo_verde = green_turn_target.value
                 direcao_marcada = (
                     "left" if alvo_verde < 0 else
-                    "right" if alvo_verde > 0 else turn_dir.value
+                    "right" if alvo_verde == 1 else
+                    "straight" if alvo_verde == 2 else turn_dir.value
                 )
                 direcao_geometria = (
                     "straight" if preferir_esquerda else direcao_marcada

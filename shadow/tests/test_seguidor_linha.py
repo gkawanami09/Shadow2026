@@ -132,6 +132,25 @@ class SeguidorLinhaTests(unittest.TestCase):
         self.assertEqual(saida.estado, TRACK)
         self.assertLess(saida.correcao, 0.)
 
+    def test_ramo_marcado_sem_lookahead_nao_e_puxado_para_o_ramo_reto(self):
+        # A geometria lateral pede direita. Um ponto futuro generico no lado
+        # oposto venceria essa decisao; por isso o ciclo o desliga no verde.
+        com_futuro = self.quadro(
+            a_frente=True,
+            inferior=(224., 251.),
+            alvo=(400., 126.),
+            futuro=(100., 20.),
+        )
+        self.controlador.reset()
+        sem_futuro = self.quadro(
+            a_frente=True,
+            inferior=(224., 251.),
+            alvo=(400., 126.),
+        )
+
+        self.assertLess(com_futuro.correcao, 0.)
+        self.assertGreater(sem_futuro.correcao, 0.)
+
     def test_ponto_futuro_deslocado_produz_correcao_proporcional(self):
         saida = self.quadro(futuro=(336., 20.))
         angulo = angulo_para_ponto_futuro(336., 20.)

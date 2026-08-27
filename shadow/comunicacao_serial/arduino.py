@@ -14,8 +14,9 @@ import config
 class LeituraMpu:
     """Amostra de orientacao devolvida pelo comando ``MPU`` do Uno.
 
-    O yaw e relativo: o MPU6050 nao possui magnetometro. O controle de
-    saida o usa somente depois de ``MPU ZERO`` e em manobras curtas.
+    O yaw e relativo: o MPU6050 nao possui magnetometro. Controles longos
+    devem usar ``MPU ZERO``; manobras curtas podem usar a diferenca entre a
+    amostra inicial e a atual, sem depender do zero acumulado.
     """
 
     pitch_graus: float

@@ -11,6 +11,8 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config  # noqa: E402
 from controle.manobra_verde import (  # noqa: E402
     correcao_aproximacao,
+    progresso_giro_mpu,
+    ramo_chegou_ao_centro,
     ramo_pronto_para_giro,
 )
 
@@ -41,13 +43,13 @@ class ManobraVerdeTests(unittest.TestCase):
     def test_ramo_direito_proximo_inicia_tanque(self):
         self.assertTrue(ramo_pronto_para_giro(
             "right",
-            faixa_transversal_y=config.camera_y * .70,
+            faixa_transversal_y=config.camera_y * .90,
         ))
 
     def test_ramo_esquerdo_proximo_inicia_tanque(self):
         self.assertTrue(ramo_pronto_para_giro(
             "left",
-            faixa_transversal_y=config.camera_y * .70,
+            faixa_transversal_y=config.camera_y * .90,
         ))
 
     def test_faixa_ausente_nao_inicia_tanque(self):
@@ -55,6 +57,22 @@ class ManobraVerdeTests(unittest.TestCase):
             "right",
             faixa_transversal_y=-1,
         ))
+
+    def test_ramo_dentro_da_tolerancia_conclui_giro(self):
+        self.assertTrue(ramo_chegou_ao_centro(20, 80, 1))
+
+    def test_ramo_que_salta_sobre_centro_tambem_conclui(self):
+        self.assertTrue(ramo_chegou_ao_centro(-60, 70, 1))
+
+    def test_ramo_ainda_no_mesmo_lado_continua_girando(self):
+        self.assertFalse(ramo_chegou_ao_centro(60, 80, 1))
+
+    def test_mpu_mede_giro_independente_do_sentido(self):
+        self.assertEqual(progresso_giro_mpu(12., 102.), 90.)
+        self.assertEqual(progresso_giro_mpu(12., -78.), 90.)
+
+    def test_mpu_ausente_nao_inventa_progresso(self):
+        self.assertIsNone(progresso_giro_mpu(None, 90.))
 
 
 if __name__ == "__main__":

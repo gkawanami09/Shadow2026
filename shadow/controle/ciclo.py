@@ -22,6 +22,8 @@ from controle.parada_obstaculo import (
 )
 from controle.parada_vermelho import stop_for_red
 from controle.manobra_verde import (correcao_aproximacao,
+                                    progresso_giro_mpu,
+                                    ramo_chegou_ao_centro,
                                     ramo_pronto_para_giro)
 from controle.velocidade import get_speed
 from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
@@ -176,6 +178,11 @@ def control_loop():
     green_turn_deadline = 0.
     green_target_seen = False
     green_transversal_frames = 0
+    green_last_signed_error = None
+    green_mpu_last_yaw = None
+    green_mpu_turn_origin = None
+    green_mpu_next_query = 0.
+    green_release_until = 0.
     green_armed = True
     green_rearm_after = 0.
     monitor_obstaculo = MonitorObstaculo()
@@ -396,6 +403,10 @@ def control_loop():
             # Estado normal do segue-linha.
             if line_status.value == "line_detected":
                 now = time.monotonic()
+
+                if (green_turn_target.value == 2
+                        and now >= green_release_until):
+                    green_turn_target.value = 0
                 if line_detected.value:
                     # Nunca inicie o teste apenas porque a camera acabou de
                     # ligar sem a linha no campo. Primeiro a linha precisa ter
@@ -495,6 +506,7 @@ def control_loop():
                     green_turn_deadline = 0.
                     green_target_seen = False
                     green_transversal_frames = 0
+                    green_last_signed_error = None
                     green_turn_target.value = 0
                     green_armed = False
                     green_rearm_after = (
@@ -534,11 +546,35 @@ def control_loop():
                     green_reverse_until = None
                     green_turn_deadline = 0.
                     green_target_seen = False
+                    green_transversal_frames = 0
+                    green_last_signed_error = None
+                    green_mpu_last_yaw = None
+                    green_mpu_turn_origin = None
+                    green_mpu_next_query = now
+                    if hasattr(arduino, "cancelar_mpu"):
+                        arduino.cancelar_mpu()
                     green_turn_target.value = (
                         -1 if direcao_visual == "left" else 1)
                     green_armed = False
 
                 resultado_visao = ler_resultado_visao_rapida()
+
+                # Mantem uma amostra recente durante a aproximacao. Quando o
+                # tanque comeca ela vira a origem do giro, sem bloquear o
+                # controle com um comando ``MPU ZERO``.
+                if (green_direction is not None
+                        and green_reverse_until is None
+                        and config.GREEN_MPU_ENABLED
+                        and hasattr(arduino, "iniciar_mpu")
+                        and hasattr(arduino, "poll_mpu")):
+                    mpu_concluido, leitura_mpu = arduino.poll_mpu()
+                    if mpu_concluido and leitura_mpu is not None:
+                        green_mpu_last_yaw = leitura_mpu.yaw_graus
+                    if now >= green_mpu_next_query:
+                        arduino.iniciar_mpu(
+                            timeout=config.GREEN_MPU_RESPONSE_TIMEOUT_S)
+                        green_mpu_next_query = (
+                            now + config.GREEN_MPU_QUERY_INTERVAL_S)
                 aproximando_ramo_verde = (
                     green_direction is not None
                     and green_turn_started is None
@@ -564,9 +600,10 @@ def control_loop():
                     green_turn_started = now
                     green_turn_deadline = now + GREEN_TURN_TIMEOUT
                     green_target_seen = False
+                    green_mpu_turn_origin = green_mpu_last_yaw
                     aproximando_ramo_verde = False
 
-                if green_direction is None:
+                if green_direction is None or green_turn_started is not None:
                     saida_linha = controlador_linha.atualizar(
                         sequencia=resultado_visao.sequencia,
                         publicado_em=resultado_visao.publicado_em,
@@ -578,8 +615,12 @@ def control_loop():
                         ponto_alvo_y=resultado_visao.ponto_alvo_y,
                         ponto_futuro_x=resultado_visao.ponto_futuro_x,
                         ponto_futuro_y=resultado_visao.ponto_futuro_y,
+                        # No verde o ponto lateral travado e a autoridade. O
+                        # lookahead generico pode escolher o ramo reto de uma
+                        # intersecao conectada e contrariar o marcador.
                         ponto_futuro_valido=(
-                            resultado_visao.ponto_futuro_valido),
+                            resultado_visao.ponto_futuro_valido
+                            and green_direction is None),
                         agora=now,
                     )
                 else:
@@ -689,18 +730,69 @@ def control_loop():
                         green_turn_started = now
                         green_turn_deadline = now + GREEN_TURN_TIMEOUT
                         green_target_seen = False
-                    angle = -180 if green_direction == "left" else 180
+                        green_mpu_turn_origin = green_mpu_last_yaw
                     command_speed = GREEN_TURN_SPEED
 
+                    # O ramo marcado passa pelo mesmo controlador continuo do
+                    # segue-linha. Curvas moderadas ficam diferenciais e o
+                    # tanque aparece somente quando a geometria realmente
+                    # pede uma correcao extrema.
+                    controle_ramo_valido = (
+                        saida_linha is not None
+                        and saida_linha.comando_valido
+                    )
+                    if controle_ramo_valido:
+                        usar_controle_linha = True
+                        correcao_linha = saida_linha.correcao
+                        angle = saida_linha.angulo_equivalente
+                    else:
+                        # Conserva o sentido travado numa perda momentanea. O
+                        # timeout e o MPU impedem giro indefinido.
+                        angle = -180 if green_direction == "left" else 180
+
                     elapsed_turn = now - green_turn_started
-                    erro_inferior = last_bottom_point.value - camera_x / 2
+                    giro_mpu = progresso_giro_mpu(
+                        green_mpu_turn_origin, green_mpu_last_yaw)
+                    if (giro_mpu is not None
+                            and giro_mpu >= config.GREEN_MPU_SLOWDOWN_DEG):
+                        command_speed = min(
+                            command_speed, config.GREEN_MPU_SLOW_SPEED)
+                    linha_ramo_recente = (
+                        resultado_visao.linha_detectada
+                        and now - resultado_visao.publicado_em
+                        <= config.LINE_MAX_FRAME_AGE_S
+                    )
+                    erro_inferior = (
+                        resultado_visao.ponto_inferior_x - camera_x / 2)
                     lado_esperado = -1 if green_direction == "left" else 1
 
-                    if elapsed_turn < GREEN_TURN_BLIND_TIME:
-                        # A linha que ainda estava sob o robo nao pode encerrar
-                        # a manobra: por este intervalo o giro e cego.
+                    if (giro_mpu is not None
+                            and giro_mpu >= config.GREEN_MPU_HARD_LIMIT_DEG):
+                        # Se a camera perder a faixa por um frame, o chassi
+                        # ainda nao pode atravessar completamente os 90 graus.
+                        green_direction = None
+                        green_turn_started = None
+                        green_reverse_until = None
+                        green_turn_deadline = 0.
+                        green_target_seen = False
+                        green_turn_target.value = 2
+                        green_release_until = (
+                            now + config.GREEN_RELEASE_MEMORY_S)
+                        green_armed = False
+                        green_rearm_after = (
+                            now + TURN_AROUND_GREEN_COOLDOWN)
+                        controlador_linha.reset()
+                        usar_controle_linha = False
+                        angle = 190
                         status.value = (
-                            f'Verde {green_direction} — giro cego '
+                            'Verde limitado pelo MPU '
+                            f'({giro_mpu:.0f} graus) — parada de seguranca')
+                    elif elapsed_turn < GREEN_TURN_BLIND_TIME:
+                        # A linha de entrada ainda pode estar sob o robo. O
+                        # controle visual ja atua, mas nao pode encerrar a
+                        # manobra durante esta janela curta.
+                        status.value = (
+                            f'Verde {green_direction} — encaixando ramo '
                             f'({GREEN_TURN_BLIND_TIME:.1f} s)')
                     elif now >= green_turn_deadline:
                         # Sem esta trava um falso contorno poderia deixar o
@@ -711,9 +803,13 @@ def control_loop():
                         green_reverse_until = None
                         green_turn_deadline = 0.
                         green_target_seen = False
-                        green_turn_target.value = 0
+                        green_turn_target.value = 2
+                        green_release_until = (
+                            now + config.GREEN_RELEASE_MEMORY_S)
                         green_armed = False
                         green_rearm_after = now + TURN_AROUND_GREEN_COOLDOWN
+                        controlador_linha.reset()
+                        usar_controle_linha = False
                         angle = 190
                         status.value = (
                             'Verde — ramo marcado nao foi encontrado; '
@@ -722,10 +818,21 @@ def control_loop():
                         # Aceita a linha apenas depois de ela aparecer no lado
                         # que o marcador escolheu. Isso evita capturar o ramo
                         # anterior que ainda cruza o campo da camera.
-                        if (line_detected.value
-                                and lado_esperado * erro_inferior
-                                >= GREEN_TURN_SIDE_MIN_ERROR_PX):
+                        ramo_armado_pela_camera = (
+                            linha_ramo_recente
+                            and lado_esperado * erro_inferior
+                            >= GREEN_TURN_SIDE_MIN_ERROR_PX
+                        )
+                        ramo_armado_pelo_mpu = (
+                            giro_mpu is not None
+                            and giro_mpu
+                            >= config.GREEN_MPU_TARGET_ARM_DEG
+                        )
+                        if (ramo_armado_pela_camera
+                                or ramo_armado_pelo_mpu):
                             green_target_seen = True
+                            green_last_signed_error = (
+                                lado_esperado * erro_inferior)
                             status.value = (
                                 f'Verde {green_direction} — ramo apareceu '
                                 'no lado marcado')
@@ -733,13 +840,31 @@ def control_loop():
                             status.value = (
                                 f'Verde {green_direction} — procurando '
                                 'ramo no lado marcado')
-                    elif (line_detected.value
-                            and abs(erro_inferior)
-                            <= GREEN_TURN_CENTER_TOLERANCE_PX):
-                        green_reverse_until = now + GREEN_REVERSE_TIME
-                        angle = 200
-                        command_speed = GREEN_REVERSE_SPEED
-                        status.value = 'Verde concluido — dando re curta'
+                    elif linha_ramo_recente:
+                        if ramo_chegou_ao_centro(
+                            erro_inferior,
+                            green_last_signed_error,
+                            lado_esperado,
+                        ):
+                            green_direction = None
+                            green_turn_started = None
+                            green_reverse_until = None
+                            green_turn_deadline = 0.
+                            green_target_seen = False
+                            green_turn_target.value = 2
+                            green_release_until = (
+                                now + config.GREEN_RELEASE_MEMORY_S)
+                            controlador_linha.reset()
+                            usar_controle_linha = False
+                            angle = 190
+                            status.value = (
+                                'Verde concluido — ramo alinhado no centro')
+                        else:
+                            green_last_signed_error = (
+                                lado_esperado * erro_inferior)
+                            status.value = (
+                                f'Verde {green_direction} — trazendo ramo '
+                                'para o centro')
                     else:
                         status.value = (
                             f'Verde {green_direction} — trazendo ramo '
@@ -771,7 +896,7 @@ def control_loop():
                         # Aproximacao verde usa o mesmo mixer dos motores, mas
                         # deliberadamente nao possui uma SaidaSegueLinha: ela
                         # centraliza apenas o ponto inferior e ignora o rumo
-                        # futuro do ramo ate iniciar o tanque.
+                        # futuro do ramo ate liberar o controle continuo.
                         steering_state.value = STEERING_SPECIAL
                         steering_lateral_error.value = max(min(
                             (

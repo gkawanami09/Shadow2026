@@ -120,9 +120,9 @@ LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair breve
 # interrompe os comandos de movimento nem o watchdog. A correcao proporcional
 # do segue-linha recebe a propria velocidade abaixo; assim, ela escala junto
 # com o PWM em subida e descida.
-# O MPU não está instalado neste chassi. Desligar a consulta evita I2C e USB
-# a cada 100 ms; reative quando o módulo voltar a ser conectado.
-RAMPA_HABILITADA = False
+# O MPU esta ativo; a troca automatica de PWM em rampas fica isolada enquanto
+# o segue-linha e calibrado. O yaw da manobra verde independe desta opcao.
+RAMPA_HABILITADA = False  # MPU ativo; ajuste automatico de rampa ainda isolado
 RAMPA_CONSULTA_INTERVALO_S = .10
 RAMPA_RESPOSTA_TIMEOUT_S = .20
 RAMPA_SUBIDA_PWM = 120
@@ -151,8 +151,8 @@ PASSO_VELOCIDADE_RETA_RAPIDA = .01
 # ----------------------------------------------------------------------------
 MIN_LINE_SIZE_DEFAULT = 3000              # area minima do contorno
 BLACK_AVG_SIDE_MASK = 21                  # mascara lateral se imagem limpa
-LINE_CROP_INITIAL = .6
-LINE_CROP_NORMAL = .6
+LINE_CROP_INITIAL = .52
+LINE_CROP_NORMAL = .52
 LINE_CROP_GREEN = .45                     # durante curva verde
 
 # O controle visual separa dois erros que antes eram misturados em um unico
@@ -257,11 +257,12 @@ GREEN_ROI_MEAN = 125                      # "lado e preto" se media > 125
 GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)
+GREEN_RELEASE_MEMORY_S = .55              # neutraliza o voto residual ao sair
 # A aproximacao nao e mais um avanco cego. A visao trava o ramo marcado e o
 # segue-linha continua alinhando a base ate o alvo lateral chegar nesta regiao.
 # O tempo existe apenas como limite de seguranca caso a geometria congele.
 GREEN_APPROACH_TIME = .65                 # s — depois disso para, nunca gira
-GREEN_APPROACH_BRANCH_MIN_Y_RATIO = .50   # transversal no meio antes do tanque
+GREEN_APPROACH_BRANCH_MIN_Y_RATIO = .82   # camera no eixo frontal: gira bem abaixo
 GREEN_APPROACH_MAX_CORRECTION = .32       # centraliza entrada sem antecipar giro
 GREEN_APPROACH_SPEED = .5                 # base PWM 60, preserva a manobra
 GREEN_BRANCH_TRANSVERSE_MIN_RUN_PX = 90   # preto horizontal continuo
@@ -272,7 +273,14 @@ GREEN_TURN_SIDE_MIN_ERROR_PX = 55          # linha alvo deve primeiro entrar pel
 GREEN_TURN_CENTER_TOLERANCE_PX = 35        # px — ponto inferior aceito no centro da camera
 GREEN_TURN_TIMEOUT = 2.0                   # s — para com seguranca se nao reencontrar o ramo
 GREEN_TURN_SPEED = .5                     # base PWM 60, preserva o giro
-GREEN_REVERSE_TIME = .5
+GREEN_MPU_ENABLED = True                  # camera guia; MPU limita excesso de giro
+GREEN_MPU_QUERY_INTERVAL_S = .04
+GREEN_MPU_RESPONSE_TIMEOUT_S = .12
+GREEN_MPU_SLOWDOWN_DEG = 70.
+GREEN_MPU_SLOW_SPEED = .32
+GREEN_MPU_TARGET_ARM_DEG = 40.           # evita confundir a linha de entrada
+GREEN_MPU_HARD_LIMIT_DEG = 94.
+GREEN_REVERSE_TIME = 0.                    # controlador continuo nao recua ao alinhar
 GREEN_REVERSE_SPEED = .4                  # PWM 48
 # Quando um verde confirmado indica uma curva, desloca o historico usado
 # para escolher entre ramos concorrentes. Isso faz o ramo indicado vencer a
