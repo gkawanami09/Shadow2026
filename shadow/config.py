@@ -205,6 +205,10 @@ LINE_CORNER_EXIT_HEADING_DEG = 18.
 LINE_CORNER_EXIT_LATERAL = .18
 LINE_CORNER_EXIT_TARGET = .28
 LINE_CORNER_EXIT_FRAMES = 3
+# Se a visao distante passa a pedir o sentido oposto, dois quadros coerentes
+# cancelam a trava antes do timeout. Um quadro isolado ainda e tratado como
+# ruido, preservando a firmeza dos cantos reais de 90 graus.
+LINE_CORNER_RETURN_CANCEL_FRAMES = 2
 LINE_CORNER_TIMEOUT_S = 1.6
 LINE_CORNER_LOST_HOLD_S = .65
 LINE_TRACK_LOST_HOLD_S = .25

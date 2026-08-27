@@ -85,6 +85,7 @@ class ControladorSegueLinha:
         self._canto_candidato_sinal = 0
         self._canto_candidato_frames = 0
         self._canto_alinhado_frames = 0
+        self._canto_retorno_frames = 0
         self._canto_iniciado_em = None
         self._ultima_saida = SaidaSegueLinha(0., TRACK, 0., 0., False)
 
@@ -135,6 +136,7 @@ class ControladorSegueLinha:
         correcao,
         agora,
         permitir_novo_canto=True,
+        cancelar_canto=False,
     ):
         sinal = self._sinal(
             angulo_linha if abs(angulo_linha) >= 5. else correcao)
@@ -167,6 +169,21 @@ class ControladorSegueLinha:
                 self._canto_alinhado_frames = 0
 
         if self._canto_sinal == 0:
+            self.estado = TRACK
+            return correcao
+
+        # Um zig-zag pode parecer um canto real nos primeiros quadros. Quando
+        # o ponto distante revela de forma persistente que a faixa voltou, a
+        # memoria antiga nao pode continuar impondo o giro oposto ao alvo.
+        self._canto_retorno_frames = (
+            self._canto_retorno_frames + 1
+            if cancelar_canto else 0
+        )
+        if (
+            self._canto_retorno_frames
+            >= config.LINE_CORNER_RETURN_CANCEL_FRAMES
+        ):
+            self._limpar_canto()
             self.estado = TRACK
             return correcao
 
@@ -209,6 +226,7 @@ class ControladorSegueLinha:
         self._canto_candidato_sinal = 0
         self._canto_candidato_frames = 0
         self._canto_alinhado_frames = 0
+        self._canto_retorno_frames = 0
         self._canto_iniciado_em = None
 
     def atualizar(
@@ -319,6 +337,17 @@ class ControladorSegueLinha:
                 <= abs(angulo_linha) * config.LINE_FUTURE_RETURN_RATIO
             )
         )
+        futuro_contradiz_canto = (
+            futuro_valido
+            and self._canto_sinal != 0
+            and float(ponto_futuro_y)
+            <= config.camera_y * config.LINE_FUTURE_RETURN_MAX_Y_RATIO
+            and (
+                self._canto_sinal * angulo_futuro_bruto < 0.
+                or abs(angulo_futuro_bruto)
+                <= config.LINE_CORNER_EXIT_HEADING_DEG
+            )
+        )
         correcao = self._atualizar_canto(
             angulo_linha=angulo_linha,
             erro_lateral=erro_lateral,
@@ -327,6 +356,8 @@ class ControladorSegueLinha:
             correcao=correcao,
             agora=agora,
             permitir_novo_canto=not retorno_visivel,
+            cancelar_canto=(
+                retorno_visivel or futuro_contradiz_canto),
         )
         correcao = max(min(correcao, 1.), -1.)
         self._ultima_correcao = correcao

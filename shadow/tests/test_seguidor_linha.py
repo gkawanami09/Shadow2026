@@ -193,6 +193,40 @@ class SeguidorLinhaTests(unittest.TestCase):
         self.assertGreaterEqual(
             perdida.correcao, config.LINE_CORNER_MIN_CORRECTION)
 
+    def test_ponto_futuro_oposto_cancela_canto_ja_armado(self):
+        self.quadro(
+            a_frente=False, alvo=(447., 126.), futuro=(380., 80.))
+        armado = self.quadro(
+            a_frente=False, alvo=(447., 126.), futuro=(380., 80.))
+
+        retorno_1 = self.quadro(
+            a_frente=False, alvo=(1., 126.), futuro=(70., 20.))
+        retorno_2 = self.quadro(
+            a_frente=False, alvo=(1., 126.), futuro=(70., 20.))
+
+        self.assertEqual(armado.estado, CORNER)
+        self.assertEqual(retorno_1.estado, CORNER)
+        self.assertGreaterEqual(
+            retorno_1.correcao, config.LINE_CORNER_MIN_CORRECTION)
+        self.assertEqual(retorno_2.estado, TRACK)
+        self.assertLess(retorno_2.correcao, 0.)
+
+    def test_um_quadro_futuro_oposto_nao_desarma_90_real(self):
+        self.quadro(
+            a_frente=False, alvo=(447., 126.), futuro=(380., 80.))
+        self.quadro(
+            a_frente=False, alvo=(447., 126.), futuro=(380., 80.))
+
+        ruido = self.quadro(
+            a_frente=False, alvo=(447., 126.), futuro=(70., 20.))
+        recuperado = self.quadro(
+            a_frente=False, alvo=(447., 126.), futuro=(380., 80.))
+
+        self.assertEqual(ruido.estado, CORNER)
+        self.assertEqual(recuperado.estado, CORNER)
+        self.assertGreaterEqual(
+            recuperado.correcao, config.LINE_CORNER_MIN_CORRECTION)
+
     def test_canto_sai_so_depois_de_tres_frames_alinhados(self):
         self.quadro(a_frente=False, alvo=(447., 126.))
         self.quadro(a_frente=False, alvo=(447., 126.))
