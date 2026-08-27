@@ -1,10 +1,13 @@
 """Detecta e confirma os marcadores verdes do percurso."""
 
+from collections import deque
+
 import cv2
 import numpy as np
 
 from config import (GREEN_BLACK_MAX_GAP_RATIO, GREEN_BLACK_MIN_RUN_RATIO,
                     GREEN_BLACK_ROI_SCALE, GREEN_CONFIRM_FRAMES,
+                    GREEN_CONFIRM_WINDOW_FRAMES,
                     GREEN_MARKER_MAX_ASPECT, GREEN_MARKER_MEMORY,
                     GREEN_MARKER_MIN_ASPECT, GREEN_MARKER_MIN_RECT_FILL,
                     GREEN_MIN_AREA, GREEN_TURN_AROUND_CONFIRM_FRAMES,
@@ -15,29 +18,43 @@ from shared.dados_compartilhados import (add_time_value, get_time_average,
 
 
 class ConfirmadorVerde:
-    """So libera a mesma geometria em quadros consecutivos."""
+    """Libera uma maioria coerente dentro de uma janela curta de quadros."""
 
     def __init__(self, frames=GREEN_CONFIRM_FRAMES,
-                 frames_180=GREEN_TURN_AROUND_CONFIRM_FRAMES):
+                 frames_180=GREEN_TURN_AROUND_CONFIRM_FRAMES,
+                 window=GREEN_CONFIRM_WINDOW_FRAMES):
         self.frames = max(1, int(frames))
         self.frames_180 = max(1, int(frames_180))
-        self._direcao = "straight"
-        self._contagem = 0
+        self.window = max(self.frames, int(window))
+        self._historico = deque(maxlen=self.window)
+        self._contagem_180 = 0
 
     def atualizar(self, direcao):
+        if direcao == "turn_around":
+            # Dois marcadores validos no mesmo quadro tem prioridade sobre
+            # qualquer voto parcial de 90 graus.
+            self._historico.clear()
+            self._contagem_180 += 1
+            return (
+                "turn_around"
+                if self._contagem_180 >= self.frames_180
+                else "straight"
+            )
+
+        self._contagem_180 = 0
+        direcao = direcao if direcao in ("left", "right") else "straight"
+        self._historico.append(direcao)
         if direcao == "straight":
-            self._direcao = "straight"
-            self._contagem = 0
             return "straight"
-        if direcao != self._direcao:
-            self._direcao = direcao
-            self._contagem = 1
-        else:
-            self._contagem += 1
-        confirmacoes = (
-            self.frames_180 if direcao == "turn_around" else self.frames
+
+        oposta = "right" if direcao == "left" else "left"
+        votos = self._historico.count(direcao)
+        votos_opostos = self._historico.count(oposta)
+        return (
+            direcao
+            if votos >= self.frames and votos > votos_opostos
+            else "straight"
         )
-        return direcao if self._contagem >= confirmacoes else "straight"
 
 
 def _marcador_plausivel(contour):

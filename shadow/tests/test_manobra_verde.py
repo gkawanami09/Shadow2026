@@ -10,6 +10,8 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
 from controle.manobra_verde import (  # noqa: E402
+    alinhamento_verde_pode_concluir,
+    deve_iniciar_giro_verde,
     correcao_aproximacao,
     progresso_giro_mpu,
     ramo_chegou_ao_centro,
@@ -61,11 +63,35 @@ class ManobraVerdeTests(unittest.TestCase):
     def test_ramo_dentro_da_tolerancia_conclui_giro(self):
         self.assertTrue(ramo_chegou_ao_centro(20, 80, 1))
 
+    def test_aproximacao_expirada_com_linha_valida_inicia_giro(self):
+        self.assertTrue(deve_iniciar_giro_verde(
+            0, agora=2., limite_aproximacao=1., linha_recente=True))
+
+    def test_aproximacao_expirada_sem_linha_nao_gira_as_cegas(self):
+        self.assertFalse(deve_iniciar_giro_verde(
+            0, agora=2., limite_aproximacao=1., linha_recente=False))
+
+    def test_transversal_confirmada_libera_antes_do_timeout(self):
+        self.assertTrue(deve_iniciar_giro_verde(
+            config.GREEN_BRANCH_CONFIRM_FRAMES,
+            agora=.5,
+            limite_aproximacao=1.,
+            linha_recente=True,
+        ))
+
     def test_ramo_que_salta_sobre_centro_tambem_conclui(self):
         self.assertTrue(ramo_chegou_ao_centro(-60, 70, 1))
 
     def test_ramo_ainda_no_mesmo_lado_continua_girando(self):
         self.assertFalse(ramo_chegou_ao_centro(60, 80, 1))
+
+    def test_mpu_nao_deixa_concluir_verde_com_apenas_40_graus(self):
+        self.assertFalse(alinhamento_verde_pode_concluir(
+            0, 60, 1, config.GREEN_MPU_TARGET_ARM_DEG))
+
+    def test_mpu_e_centro_persistente_podem_concluir_verde(self):
+        self.assertTrue(alinhamento_verde_pode_concluir(
+            0, 60, 1, config.GREEN_MPU_COMPLETION_MIN_DEG))
 
     def test_mpu_mede_giro_independente_do_sentido(self):
         self.assertEqual(progresso_giro_mpu(12., 102.), 90.)

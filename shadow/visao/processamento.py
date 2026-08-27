@@ -37,7 +37,8 @@ from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_valu
 from visao.linha import calculate_angle, determine_correct_line
 from visao.trajetoria import extrair_ponto_futuro
 from visao.verde import ConfirmadorVerde, check_green, latch_turn_direction
-from visao.faixa_verde import altura_faixa_transversal, tem_ramo_lateral
+from visao.faixa_verde import (altura_faixa_transversal,
+                               tem_continuacao_reta)
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
 
 # Cores carregadas do config.ini (fallback: valores do config.py)
@@ -321,9 +322,8 @@ def vision_loop(debug=False):
                 )
                 intersecao_sem_verde = bool(
                     not verde_autorizado
-                    and linha_a_frente_frame
                     and possui_extensao_lateral
-                    and tem_ramo_lateral(black_image)
+                    and tem_continuacao_reta(black_image)
                 )
                 if intersecao_sem_verde:
                     direcao_marcada = "straight"

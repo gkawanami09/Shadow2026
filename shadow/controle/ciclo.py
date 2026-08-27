@@ -22,8 +22,9 @@ from controle.parada_obstaculo import (
 )
 from controle.parada_vermelho import stop_for_red
 from controle.manobra_verde import (correcao_aproximacao,
+                                    alinhamento_verde_pode_concluir,
+                                    deve_iniciar_giro_verde,
                                     progresso_giro_mpu,
-                                    ramo_chegou_ao_centro,
                                     ramo_pronto_para_giro)
 from controle.velocidade import get_speed
 from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
@@ -592,14 +593,24 @@ def control_loop():
                     green_transversal_frames + 1
                     if transversal_pronta else 0
                 )
+                linha_verde_recente = (
+                    resultado_visao.linha_detectada
+                    and now - resultado_visao.publicado_em
+                    <= config.LINE_MAX_FRAME_AGE_S
+                )
                 if (
                     aproximando_ramo_verde
-                    and green_transversal_frames
-                    >= config.GREEN_BRANCH_CONFIRM_FRAMES
+                    and deve_iniciar_giro_verde(
+                        green_transversal_frames,
+                        agora=now,
+                        limite_aproximacao=green_approach_until,
+                        linha_recente=linha_verde_recente,
+                    )
                 ):
                     green_turn_started = now
                     green_turn_deadline = now + GREEN_TURN_TIMEOUT
                     green_target_seen = False
+                    green_transversal_frames = 0
                     green_mpu_turn_origin = green_mpu_last_yaw
                     aproximando_ramo_verde = False
 
@@ -708,7 +719,6 @@ def control_loop():
                         resultado_visao.linha_detectada
                         and now - resultado_visao.publicado_em
                         <= config.LINE_MAX_FRAME_AGE_S
-                        and now < green_approach_until
                     )
                     if aproximacao_valida:
                         usar_controle_linha = True
@@ -721,8 +731,8 @@ def control_loop():
                         f'Verde {green_direction} — ramo travado, '
                         + (
                             'centralizando entrada'
-                            if now < green_approach_until
-                            else 'PARADO aguardando transversal no meio'
+                            if aproximacao_valida
+                            else 'PARADO aguardando linha valida'
                         )
                     )
                 elif green_direction is not None:
@@ -831,6 +841,7 @@ def control_loop():
                         if (ramo_armado_pela_camera
                                 or ramo_armado_pelo_mpu):
                             green_target_seen = True
+                            green_transversal_frames = 0
                             green_last_signed_error = (
                                 lado_esperado * erro_inferior)
                             status.value = (
@@ -841,11 +852,18 @@ def control_loop():
                                 f'Verde {green_direction} — procurando '
                                 'ramo no lado marcado')
                     elif linha_ramo_recente:
-                        if ramo_chegou_ao_centro(
+                        alinhamento_pronto = alinhamento_verde_pode_concluir(
                             erro_inferior,
                             green_last_signed_error,
                             lado_esperado,
-                        ):
+                            giro_mpu,
+                        )
+                        green_transversal_frames = (
+                            green_transversal_frames + 1
+                            if alinhamento_pronto else 0
+                        )
+                        if (green_transversal_frames
+                                >= config.GREEN_TURN_CENTER_CONFIRM_FRAMES):
                             green_direction = None
                             green_turn_started = None
                             green_reverse_until = None
@@ -864,8 +882,11 @@ def control_loop():
                                 lado_esperado * erro_inferior)
                             status.value = (
                                 f'Verde {green_direction} — trazendo ramo '
-                                'para o centro')
+                                'para o centro '
+                                f'({green_transversal_frames}/'
+                                f'{config.GREEN_TURN_CENTER_CONFIRM_FRAMES})')
                     else:
+                        green_transversal_frames = 0
                         status.value = (
                             f'Verde {green_direction} — trazendo ramo '
                             'para o centro')

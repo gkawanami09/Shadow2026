@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 import unittest
 
+import cv2
 import numpy as np
 
 
@@ -12,6 +13,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
 from visao.faixa_verde import (altura_faixa_transversal,
+                               tem_continuacao_reta,
                                tem_ramo_lateral)  # noqa: E402
 
 
@@ -59,6 +61,49 @@ class FaixaVerdeTests(unittest.TestCase):
         mascara = self.mascara()
         mascara[120:133, 330:440] = 255
         self.assertFalse(tem_ramo_lateral(mascara))
+
+    def test_t_com_preto_acima_da_barra_tem_continuacao_reta(self):
+        mascara = self.mascara()
+        mascara[0:133, config.camera_x // 2 - 8:
+                config.camera_x // 2 + 9] = 255
+        mascara[120:133, config.camera_x // 2 - 8:400] = 255
+        self.assertTrue(tem_continuacao_reta(mascara))
+
+    def test_canto_sem_preto_acima_da_barra_nao_vira_intersecao_reta(self):
+        mascara = np.zeros(
+            (config.camera_y, config.camera_x), dtype=np.uint8)
+        mascara[120:, config.camera_x // 2 - 8:
+                config.camera_x // 2 + 9] = 255
+        mascara[120:133, config.camera_x // 2 - 8:400] = 255
+        self.assertTrue(tem_ramo_lateral(mascara))
+        self.assertFalse(tem_continuacao_reta(mascara))
+
+    def test_cruz_inclinado_ainda_preserva_continuacao_reta(self):
+        mascara = np.zeros(
+            (config.camera_y, config.camera_x), dtype=np.uint8)
+        cv2.rectangle(
+            mascara,
+            (config.camera_x // 2 - 12, 0),
+            (config.camera_x // 2 + 12, config.camera_y - 1),
+            255,
+            -1,
+        )
+        cv2.rectangle(
+            mascara,
+            (40, 110),
+            (config.camera_x - 40, 135),
+            255,
+            -1,
+        )
+        matriz = cv2.getRotationMatrix2D(
+            (config.camera_x / 2, config.camera_y / 2), 18, 1.)
+        inclinada = cv2.warpAffine(
+            mascara,
+            matriz,
+            (config.camera_x, config.camera_y),
+            flags=cv2.INTER_NEAREST,
+        )
+        self.assertTrue(tem_continuacao_reta(inclinada))
 
 
 if __name__ == "__main__":

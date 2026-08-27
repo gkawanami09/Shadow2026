@@ -45,6 +45,28 @@ def ramo_pronto_para_giro(
     return y >= float(altura) * config.GREEN_APPROACH_BRANCH_MIN_Y_RATIO
 
 
+def deve_iniciar_giro_verde(
+    quadros_transversais,
+    *,
+    agora,
+    limite_aproximacao,
+    linha_recente,
+):
+    """Libera pela geometria ou por um fallback temporal com visao valida.
+
+    O fallback elimina o estado impossivel em que o robo para um pouco antes
+    da transversal e, por estar parado, nunca consegue trazê-la mais para
+    baixo. Ele jamais gira apenas pelo relogio: a linha do mesmo instante ainda
+    precisa estar detectada e recente.
+    """
+    if int(quadros_transversais) >= config.GREEN_BRANCH_CONFIRM_FRAMES:
+        return True
+    return bool(
+        linha_recente
+        and float(agora) >= float(limite_aproximacao)
+    )
+
+
 def ramo_chegou_ao_centro(
     erro_inferior,
     erro_assinado_anterior,
@@ -61,6 +83,31 @@ def ramo_chegou_ao_centro(
 
     erro_assinado = float(lado_esperado) * erro
     return float(erro_assinado_anterior) > 0. and erro_assinado <= 0.
+
+
+def alinhamento_verde_pode_concluir(
+    erro_inferior,
+    erro_assinado_anterior,
+    lado_esperado,
+    progresso_mpu,
+):
+    """Exige giro material antes de aceitar a linha central como saida.
+
+    Sem essa trava, a linha de entrada ainda central podia encerrar a manobra
+    logo depois de o MPU apenas armar a procura do ramo. Sem leitura do MPU, a
+    camera continua suficiente: nesse caso o ramo obrigatoriamente ja apareceu
+    no lado marcado antes de chegar aqui.
+    """
+    if progresso_mpu is not None:
+        progresso = float(progresso_mpu)
+        if (not math.isfinite(progresso)
+                or progresso < config.GREEN_MPU_COMPLETION_MIN_DEG):
+            return False
+    return ramo_chegou_ao_centro(
+        erro_inferior,
+        erro_assinado_anterior,
+        lado_esperado,
+    )
 
 
 def progresso_giro_mpu(yaw_inicial, yaw_atual):

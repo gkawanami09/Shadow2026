@@ -47,6 +47,60 @@ def tem_ramo_lateral(mascara_preta):
         toca_eixo & (alcanca_esquerda | alcanca_direita)))
 
 
+def tem_continuacao_reta(mascara_preta):
+    """Distingue cruz/T com saida reta de um canto de 90 graus.
+
+    A largura horizontal so prova que existe uma intersecao. Para mandar o
+    robo reto, tambem exigimos preto persistente no corredor central *acima*
+    dessa barra. Assim, a linha de entrada abaixo de um L nao se passa por uma
+    continuacao futura.
+    """
+    mascara = np.asarray(mascara_preta)
+    if mascara.ndim != 2 or mascara.size == 0:
+        return False
+    binaria = (mascara > 0).astype(np.uint8)
+    quantidade, rotulos = cv2.connectedComponents(binaria, connectivity=8)
+    if quantidade <= 1:
+        return False
+
+    altura, largura = mascara.shape
+    meio = largura // 2
+    corredor = max(
+        int(config.GREEN_BRANCH_CENTER_TOLERANCE_PX),
+        int(round(largura * config.GREEN_STRAIGHT_CORRIDOR_RATIO)),
+    )
+    centro_inicio = max(meio - corredor, 0)
+    centro_fim = min(meio + corredor + 1, largura)
+    topo_fim = max(1, int(round(
+        altura * config.GREEN_STRAIGHT_TOP_Y_RATIO)))
+    base_inicio = min(altura - 1, int(round(
+        altura * config.GREEN_STRAIGHT_BOTTOM_Y_RATIO)))
+    limite_lateral = int(config.GREEN_BRANCH_TRANSVERSE_MIN_RUN_PX)
+    esquerda_fim = max(meio - limite_lateral, 1)
+    direita_inicio = min(meio + limite_lateral, largura - 1)
+    minimo_pixels = max(8, limite_lateral)
+
+    rotulos_da_base = np.unique(
+        rotulos[base_inicio:, centro_inicio:centro_fim])
+    for rotulo in rotulos_da_base:
+        if rotulo == 0:
+            continue
+        componente = rotulos == rotulo
+        chega_ao_futuro = (
+            np.count_nonzero(
+                componente[:topo_fim, centro_inicio:centro_fim])
+            >= minimo_pixels
+        )
+        possui_ramo_lateral = (
+            np.count_nonzero(componente[:, :esquerda_fim])
+            + np.count_nonzero(componente[:, direita_inicio:])
+            >= minimo_pixels
+        )
+        if chega_ao_futuro and possui_ramo_lateral:
+            return True
+    return False
+
+
 def altura_faixa_transversal(mascara_preta, direcao):
     """Retorna o centro Y da faixa horizontal ligada ao eixo, ou ``-1``.
 

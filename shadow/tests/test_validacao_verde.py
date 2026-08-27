@@ -152,12 +152,12 @@ class ValidacaoVerdeTests(unittest.TestCase):
         self.assertEqual(confirmador.atualizar("left"), "straight")
         self.assertEqual(confirmador.atualizar("left"), "left")
 
-    def test_quadro_invalido_zerar_confirmacao(self):
+    def test_um_quadro_invalido_nao_apaga_verde_coerente(self):
         confirmador = ConfirmadorVerde(frames=3)
         confirmador.atualizar("right")
         confirmador.atualizar("right")
         self.assertEqual(confirmador.atualizar("straight"), "straight")
-        self.assertEqual(confirmador.atualizar("right"), "straight")
+        self.assertEqual(confirmador.atualizar("right"), "right")
 
     def test_votos_de_lados_opostos_nao_autorizam_curva(self):
         confirmador = ConfirmadorVerde(frames=3)
