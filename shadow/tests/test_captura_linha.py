@@ -21,6 +21,10 @@ class LineCameraSelectionTests(unittest.TestCase):
     def test_captura_e_processamento_preservam_aspecto_16_por_9(self):
         self.assertEqual(config.CAPTURE_WIDTH * 9, config.CAPTURE_HEIGHT * 16)
         self.assertEqual(config.camera_x * 9, config.camera_y * 16)
+        self.assertEqual(
+            (config.CAPTURE_WIDTH, config.CAPTURE_HEIGHT),
+            (config.camera_x, config.camera_y),
+        )
 
     def test_recorte_maximo_aceita_apenas_retangulo_valido(self):
         self.assertEqual(
@@ -57,8 +61,8 @@ class LineCameraSelectionTests(unittest.TestCase):
 
     def test_fps_nunca_ultrapassa_modo_vga_anunciado(self):
         casos = (
-            ([{"size": (640, 480), "fps": 90}], 50.),
-            ([{"size": (640, 480), "fps": 55}], 50.),
+            ([{"size": (640, 480), "fps": 90}], 40.),
+            ([{"size": (640, 480), "fps": 55}], 40.),
             ([{"size": (640, 480), "fps": 40}], 40.),
             ([{"size": (640, 480), "fps": 30}], 30.),
             ([
@@ -85,7 +89,7 @@ class LineCameraSelectionTests(unittest.TestCase):
                     float(config.CAPTURE_FPS_FALLBACK),
                 )
 
-    def test_modo_vga_rapido_configura_cinquenta_fps(self):
+    def test_modo_full_fov_configura_quarenta_fps(self):
         configuracoes = []
 
         class FakePicamera2:
@@ -115,10 +119,10 @@ class LineCameraSelectionTests(unittest.TestCase):
         ):
             camera = LineCamera()
 
-        self.assertEqual(camera.capture_fps, 50.)
+        self.assertEqual(camera.capture_fps, 40.)
         self.assertEqual(
             configuracoes[0]["controls"]["FrameDurationLimits"],
-            (20000, 20000),
+            (25000, 25000),
         )
         self.assertFalse(configuracoes[0]["queue"])
 
@@ -159,6 +163,8 @@ class LineCameraSelectionTests(unittest.TestCase):
         fake_module = SimpleNamespace(Picamera2=FakePicamera2)
         with (
             mock.patch.dict(sys.modules, {"picamera2": fake_module}),
+            mock.patch("visao.captura.CAPTURE_FPS", 50),
+            mock.patch("visao.captura.CAPTURE_FPS_FALLBACK", 40),
             mock.patch("visao.captura.time.sleep"),
         ):
             camera = LineCamera()
@@ -202,13 +208,13 @@ class LineCameraSelectionTests(unittest.TestCase):
         ):
             camera = LineCamera()
 
-        self.assertEqual(camera.capture_fps, 50.)
+        self.assertEqual(camera.capture_fps, 40.)
         self.assertEqual(
             configuracoes[0]["controls"]["FrameDurationLimits"],
-            (20000, 20000),
+            (25000, 25000),
         )
 
-    def test_pwm_fixo_mantem_captura_em_cinquenta_fps(self):
+    def test_pwm_fixo_mantem_captura_em_quarenta_fps(self):
         configuracoes = []
 
         class FakePicamera2:
@@ -238,11 +244,84 @@ class LineCameraSelectionTests(unittest.TestCase):
         ):
             camera = LineCamera()
 
-        self.assertEqual(camera.capture_fps, 50.)
+        self.assertEqual(camera.capture_fps, 40.)
         self.assertEqual(
             configuracoes[0]["controls"]["FrameDurationLimits"],
-            (20000, 20000),
+            (25000, 25000),
         )
+
+    def test_autofocus_roda_uma_vez_e_depois_fica_manual(self):
+        controles_aplicados = []
+        ciclos_af = []
+
+        class FakePicamera2:
+            sensor_modes = [{"size": (640, 480), "fps": 90}]
+            camera_controls = {}
+
+            @staticmethod
+            def global_camera_info():
+                return [{"Model": "rescue"}, {"Model": "line"}]
+
+            def __init__(self, camera_num):
+                self.camera_num = camera_num
+
+            def create_video_configuration(self, **kwargs):
+                return kwargs
+
+            def configure(self, _configuration):
+                pass
+
+            def start(self):
+                pass
+
+            def set_controls(self, values):
+                controles_aplicados.append(values)
+
+            def autofocus_cycle(self):
+                ciclos_af.append(True)
+                return True
+
+            def capture_metadata(self):
+                return {"LensPosition": 12.5}
+
+        af_mode = SimpleNamespace(Continuous="continuous", Manual="manual")
+        controls = SimpleNamespace(
+            AfModeEnum=af_mode,
+            AfRangeEnum=SimpleNamespace(Full="full"),
+        )
+        with (
+            mock.patch.dict(sys.modules, {
+                "picamera2": SimpleNamespace(Picamera2=FakePicamera2),
+                "libcamera": SimpleNamespace(controls=controls),
+            }),
+            mock.patch("visao.captura.time.sleep"),
+        ):
+            LineCamera()
+
+        self.assertEqual(ciclos_af, [True])
+        self.assertIn({"AfRange": "full"}, controles_aplicados)
+        self.assertIn(
+            {"AfMode": "manual", "LensPosition": 12.5},
+            controles_aplicados,
+        )
+        self.assertNotIn({"AfMode": "continuous"}, controles_aplicados)
+
+    def test_frame_no_tamanho_do_algoritmo_nao_e_redimensionado(self):
+        class FrameFalso:
+            ndim = 3
+            shape = (config.camera_y, config.camera_x, 3)
+
+        frame = FrameFalso()
+        camera = LineCamera.__new__(LineCamera)
+        camera.picam2 = SimpleNamespace(
+            capture_array=lambda _stream: frame,
+        )
+
+        with mock.patch("visao.captura.cv2.resize") as resize:
+            devolvido = camera.get_frame()
+
+        self.assertIs(devolvido, frame)
+        resize.assert_not_called()
 
     def test_line_and_rescue_use_different_fixed_indices(self):
         self.assertEqual(config.LINE_CAMERA_INDEX, 1)

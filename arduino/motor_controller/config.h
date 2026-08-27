@@ -187,6 +187,10 @@
 
 #define DIRECAO_TD 1
 
+// Tempo em short brake antes de aplicar polaridade oposta. O alvo de PWM não
+// muda; este intervalo curto reduz a velocidade antes da corrente de reversão.
+#define TEMPO_MORTO_REVERSAO_US 2000UL
+
 
 // ======================================================
 // MOTOR FRENTE ESQUERDA

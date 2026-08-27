@@ -82,7 +82,8 @@ def main():
                                dtype=np.uint8, buffer=shm.buf)
             while all(p.is_alive() for p in children):
                 cv2.imshow("Shadow2026 - camera de linha", frame.copy())
-                if cv2.waitKey(30) & 0xFF == ord("q"):
+                espera_ms = max(1, round(1000 / config.DEBUG_DISPLAY_FPS))
+                if cv2.waitKey(espera_ms) & 0xFF == ord("q"):
                     break
                 if status.value != last_status:
                     print(f"[status] {status.value}")

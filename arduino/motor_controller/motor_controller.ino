@@ -511,6 +511,20 @@ long medir_distancia_mm(
 // ======================================================
 // MOTORES
 // ======================================================
+int velocidade_anterior_fe = 0;
+int velocidade_anterior_te = 0;
+int velocidade_anterior_fd = 0;
+int velocidade_anterior_td = 0;
+
+bool inverte_sentido(
+  int velocidade_anterior,
+  int velocidade_nova
+) {
+  return
+    (velocidade_anterior > 0 && velocidade_nova < 0) ||
+    (velocidade_anterior < 0 && velocidade_nova > 0);
+}
+
 int limitar_velocidade(
   int velocidade
 ) {
@@ -535,6 +549,11 @@ void parar_motor(
   int pino_in2,
   int pino_pwm
 ) {
+  // O PWM deve cair antes da mudança dos pinos da ponte H.
+  analogWrite(
+    pino_pwm,
+    0
+  );
   digitalWrite(
     pino_in1,
     LOW
@@ -542,10 +561,6 @@ void parar_motor(
   digitalWrite(
     pino_in2,
     LOW
-  );
-  analogWrite(
-    pino_pwm,
-    0
   );
 }
 void controlar_motor(
@@ -560,6 +575,12 @@ void controlar_motor(
       velocidade *
       multiplicador_direcao
     );
+  // Retira o PWM antes de tocar nos pinos de direção. Sem isso, o valor
+  // anterior continuava ativo durante os digitalWrite de uma reversão.
+  analogWrite(
+    pino_pwm,
+    0
+  );
   if (
     velocidade > 0
   ) {
@@ -619,7 +640,79 @@ void parar_todos_motores() {
     TD_IN2,
     TD_PWM
   );
+  velocidade_anterior_fe = 0;
+  velocidade_anterior_te = 0;
+  velocidade_anterior_fd = 0;
+  velocidade_anterior_td = 0;
 }
+
+void preparar_reversoes(
+  int nova_fe,
+  int nova_te,
+  int nova_fd,
+  int nova_td
+) {
+  bool houve_reversao = false;
+  if (inverte_sentido(velocidade_anterior_fe, nova_fe)) {
+    parar_motor(FE_IN1, FE_IN2, FE_PWM);
+    houve_reversao = true;
+  }
+  if (inverte_sentido(velocidade_anterior_te, nova_te)) {
+    parar_motor(TE_IN1, TE_IN2, TE_PWM);
+    houve_reversao = true;
+  }
+  if (inverte_sentido(velocidade_anterior_fd, nova_fd)) {
+    parar_motor(FD_IN1, FD_IN2, FD_PWM);
+    houve_reversao = true;
+  }
+  if (inverte_sentido(velocidade_anterior_td, nova_td)) {
+    parar_motor(TD_IN1, TD_IN2, TD_PWM);
+    houve_reversao = true;
+  }
+  if (houve_reversao) {
+    // Todas as rodas que inverterão esperam juntas: o comando inteiro ganha
+    // somente 2 ms, em vez de somar um atraso para cada motor.
+    delayMicroseconds(TEMPO_MORTO_REVERSAO_US);
+  }
+}
+
+void registrar_velocidades(
+  int nova_fe,
+  int nova_te,
+  int nova_fd,
+  int nova_td
+) {
+  velocidade_anterior_fe = nova_fe;
+  velocidade_anterior_te = nova_te;
+  velocidade_anterior_fd = nova_fd;
+  velocidade_anterior_td = nova_td;
+}
+
+void controlar_motor_com_reversao(
+  int pino_in1,
+  int pino_in2,
+  int pino_pwm,
+  int velocidade,
+  int multiplicador_direcao,
+  int* velocidade_anterior
+) {
+  int velocidade_nova = limitar_velocidade(
+    velocidade * multiplicador_direcao
+  );
+  if (inverte_sentido(*velocidade_anterior, velocidade_nova)) {
+    parar_motor(pino_in1, pino_in2, pino_pwm);
+    delayMicroseconds(TEMPO_MORTO_REVERSAO_US);
+  }
+  controlar_motor(
+    pino_in1,
+    pino_in2,
+    pino_pwm,
+    velocidade,
+    multiplicador_direcao
+  );
+  *velocidade_anterior = velocidade_nova;
+}
+
 bool controlar_motor_por_nome(
   const char* nome_motor,
   int velocidade
@@ -630,12 +723,13 @@ bool controlar_motor_por_nome(
       "FE"
     ) == 0
   ) {
-    controlar_motor(
+    controlar_motor_com_reversao(
       FE_IN1,
       FE_IN2,
       FE_PWM,
       velocidade,
-      DIRECAO_FE
+      DIRECAO_FE,
+      &velocidade_anterior_fe
     );
   } else if (
     strcmp(
@@ -643,12 +737,13 @@ bool controlar_motor_por_nome(
       "TE"
     ) == 0
   ) {
-    controlar_motor(
+    controlar_motor_com_reversao(
       TE_IN1,
       TE_IN2,
       TE_PWM,
       velocidade,
-      DIRECAO_TE
+      DIRECAO_TE,
+      &velocidade_anterior_te
     );
   } else if (
     strcmp(
@@ -656,12 +751,13 @@ bool controlar_motor_por_nome(
       "FD"
     ) == 0
   ) {
-    controlar_motor(
+    controlar_motor_com_reversao(
       FD_IN1,
       FD_IN2,
       FD_PWM,
       velocidade,
-      DIRECAO_FD
+      DIRECAO_FD,
+      &velocidade_anterior_fd
     );
   } else if (
     strcmp(
@@ -669,12 +765,13 @@ bool controlar_motor_por_nome(
       "TD"
     ) == 0
   ) {
-    controlar_motor(
+    controlar_motor_com_reversao(
       TD_IN1,
       TD_IN2,
       TD_PWM,
       velocidade,
-      DIRECAO_TD
+      DIRECAO_TD,
+      &velocidade_anterior_td
     );
   } else {
     return false;
@@ -685,6 +782,12 @@ void controlar_lados(
   int velocidade_esquerda,
   int velocidade_direita
 ) {
+  int nova_fe = limitar_velocidade(velocidade_esquerda * DIRECAO_FE);
+  int nova_te = limitar_velocidade(velocidade_esquerda * DIRECAO_TE);
+  int nova_fd = limitar_velocidade(velocidade_direita * DIRECAO_FD);
+  int nova_td = limitar_velocidade(velocidade_direita * DIRECAO_TD);
+  preparar_reversoes(nova_fe, nova_te, nova_fd, nova_td);
+
   controlar_motor(
     FE_IN1,
     FE_IN2,
@@ -713,6 +816,7 @@ void controlar_lados(
     velocidade_direita,
     DIRECAO_TD
   );
+  registrar_velocidades(nova_fe, nova_te, nova_fd, nova_td);
 }
 void controlar_rodas(
   int vel_fe,
@@ -720,6 +824,12 @@ void controlar_rodas(
   int vel_fd,
   int vel_td
 ) {
+  int nova_fe = limitar_velocidade(vel_fe * DIRECAO_FE);
+  int nova_te = limitar_velocidade(vel_te * DIRECAO_TE);
+  int nova_fd = limitar_velocidade(vel_fd * DIRECAO_FD);
+  int nova_td = limitar_velocidade(vel_td * DIRECAO_TD);
+  preparar_reversoes(nova_fe, nova_te, nova_fd, nova_td);
+
   controlar_motor(
     FE_IN1,
     FE_IN2,
@@ -748,6 +858,7 @@ void controlar_rodas(
     vel_td,
     DIRECAO_TD
   );
+  registrar_velocidades(nova_fe, nova_te, nova_fd, nova_td);
 }
 // ======================================================
 // MPU6050 - CALIBRAR GIROSCOPIO

@@ -76,17 +76,20 @@ OBSTACLE_RETRY_COOLDOWN_S = 1.0
 # Mapeamento físico atual do Pi 5: índice 0 = resgate; índice 1 = segue-linha
 # no flat 2. Nunca deixar Picamera2 escolher a câmera padrão neste processo.
 LINE_CAMERA_INDEX = 1
-# A Camera Module 3 Wide usa um sensor 16:9. Capturar em 640×360 preserva o
-# campo de visão lateral; 640×480 recortaria as bordas da imagem.
-CAPTURE_WIDTH = 640
-CAPTURE_HEIGHT = 360
-# 50 FPS evita o modo recortado 1536×864 e permite usar 2304×1296, mantendo o
-# FOV Wide completo. Se o driver não sustentar esse modo, tenta 40 FPS.
-CAPTURE_FPS = 50
+# A Camera Module 3 Wide usa um sensor 16:9. A saída já é pedida no tamanho
+# exato consumido pelo algoritmo: isso preserva o mesmo campo de visão e os
+# mesmos pontos de controle, mas elimina um resize OpenCV e uma cópia de
+# 640×360 em todos os frames.
+CAPTURE_WIDTH = 448
+CAPTURE_HEIGHT = 252
+# 40 FPS ainda usa o modo full-FoV 2304×1296 da IMX708, deixando margem para
+# a Pi, a câmera e o conversor de alimentação sem alterar o PWM 80.
+CAPTURE_FPS = 40
 CAPTURE_FPS_FALLBACK = 40
 camera_x = 448                            # resolução do algoritmo
 camera_y = 252
-# None ativa o foco automático contínuo implementado em captura.py.
+# None executa um único autofocus na partida e trava a posição encontrada.
+# Um número continua permitindo a calibração manual em dioptrias.
 LENS_POSITION = None
 # Mantém exposição e balanço de branco automáticos. Fixar estes controles sem
 # calibração específica pode estourar toda a pista para branco.
@@ -95,6 +98,9 @@ LINE_CAMERA_WARMUP_S = .45
 LINE_CAMERA_EXPOSURE_VALUE = 0.0
 DEBUG_SHM_NAME = "shadow_shm_cam"
 DEBUG_SHM_SIZE = camera_x * camera_y * 3  # 338688 B
+# A janela é apenas telemetria; a visão continua a 40 FPS. Atualizá-la menos
+# vezes reduz CPU/GPU durante testes sem tocar no controle do robô.
+DEBUG_DISPLAY_FPS = 15
 
 # ----------------------------------------------------------------------------
 # Controle proporcional da direção
@@ -114,7 +120,9 @@ LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair breve
 # interrompe os comandos de movimento nem o watchdog. A correcao proporcional
 # do segue-linha recebe a propria velocidade abaixo; assim, ela escala junto
 # com o PWM em subida e descida.
-RAMPA_HABILITADA = True
+# O MPU não está instalado neste chassi. Desligar a consulta evita I2C e USB
+# a cada 100 ms; reative quando o módulo voltar a ser conectado.
+RAMPA_HABILITADA = False
 RAMPA_CONSULTA_INTERVALO_S = .10
 RAMPA_RESPOSTA_TIMEOUT_S = .20
 RAMPA_SUBIDA_PWM = 120
@@ -308,7 +316,8 @@ ENTRY_TURN_AROUND_REARM_S = 1.0
 # Loops
 # ----------------------------------------------------------------------------
 CONTROL_MAX_ITERATIONS = 60               # teto do loop de controle
-VISION_MAX_FRAMES = 90                    # teto de processamento
+VISION_MAX_FRAMES = 45                    # folga para não descartar captura de 40 FPS
+VISION_OPENCV_THREADS = 1                 # evita picos curtos em todos os núcleos
 VISION_READY_TIMEOUT = 15                 # s que o controle espera a visao no boot
 
 # ----------------------------------------------------------------------------

@@ -165,8 +165,9 @@ class LineCamera:
             self._configurar_e_iniciar(fps_fallback)
 
         self._abrir_campo_de_visao()
-        self._configurar_foco()
+        # AE/AWB precisam enxergar alguns frames antes do único ciclo de AF.
         self._estabilizar_imagem()
+        self._configurar_foco()
 
     def _abrir_campo_de_visao(self):
         """Pede ao libcamera o sensor inteiro, sem zoom/crop digital."""
@@ -185,7 +186,12 @@ class LineCamera:
             print(f"[camera] ScalerCrop máximo ignorado pelo driver: {err}")
 
     def _configurar_foco(self):
-        """Mantém objetos próximos focados sem restringir o alcance da lente."""
+        """Foca uma vez na partida e depois mantém a lente imóvel.
+
+        O foco contínuo caçava a pista a poucos centímetros da Camera Module
+        3 Wide. Um ciclo automático conserva a adaptação a cada módulo, mas
+        travar a posição encontrada remove os movimentos durante a prova.
+        """
         if not hasattr(self.picam2, "set_controls"):
             return
 
@@ -193,13 +199,55 @@ class LineCamera:
             from libcamera import controls
 
             if LENS_POSITION is None:
-                foco = {"AfMode": controls.AfModeEnum.Continuous}
-                # A faixa completa inclui o foco próximo e evita travá-lo só
-                # no intervalo normal. Há versões antigas sem AfRange.
+                foco = {}
+                # A faixa completa inclui o foco próximo. Há versões
+                # antigas do libcamera sem AfRange.
                 if hasattr(controls, "AfRangeEnum"):
                     foco["AfRange"] = controls.AfRangeEnum.Full
-                self.picam2.set_controls(foco)
-                print("[camera] autofocus contínuo ativado (faixa completa)")
+                if foco:
+                    self.picam2.set_controls(foco)
+
+                autofocus = getattr(self.picam2, "autofocus_cycle", None)
+                metadata = getattr(self.picam2, "capture_metadata", None)
+                if autofocus is None or metadata is None:
+                    # Compatibilidade com Picamera2 antigo: nesse caso não é
+                    # seguro inventar uma posição de lente.
+                    self.picam2.set_controls({
+                        "AfMode": controls.AfModeEnum.Continuous,
+                    })
+                    print("[camera] Picamera2 antigo; autofocus contínuo mantido")
+                    return
+
+                try:
+                    sucesso = bool(autofocus())
+                    posicao_bruta = metadata().get("LensPosition")
+                    posicao = float(posicao_bruta)
+                except Exception as err:
+                    # Mesmo sem metadata, sair do AF impede a lente de caçar
+                    # foco durante o percurso. O driver conserva sua posição.
+                    self.picam2.set_controls({
+                        "AfMode": controls.AfModeEnum.Manual,
+                    })
+                    print(
+                        "[camera] autofocus de partida incompleto "
+                        f"({err}); foco atual mantido em modo manual"
+                    )
+                    return
+                if not math.isfinite(posicao):
+                    self.picam2.set_controls({
+                        "AfMode": controls.AfModeEnum.Manual,
+                    })
+                    print("[camera] LensPosition inválida; foco atual mantido")
+                    return
+                self.picam2.set_controls({
+                    "AfMode": controls.AfModeEnum.Manual,
+                    "LensPosition": posicao,
+                })
+                resultado = "confirmado" if sucesso else "melhor tentativa"
+                print(
+                    "[camera] autofocus de partida "
+                    f"{resultado}; foco travado em LensPosition={posicao:.3f}"
+                )
             else:
                 self.picam2.set_controls({
                     "AfMode": controls.AfModeEnum.Manual,
@@ -316,6 +364,9 @@ class LineCamera:
         raw = self.picam2.capture_array("main")
         if raw.ndim == 3 and raw.shape[2] == 4:
             raw = cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
+        if raw.shape[1] == camera_x and raw.shape[0] == camera_y:
+            return raw
+        # Compatibilidade com drivers antigos que ignoram o tamanho solicitado.
         return cv2.resize(raw, (camera_x, camera_y))
 
     def close(self):

@@ -101,6 +101,10 @@ def _has_black_ahead(mask):
 
 
 def vision_loop(debug=False):
+    # As operações trabalham em apenas 448×252. Paralelizá-las faz a Pi 5
+    # acordar vários núcleos por poucos milissegundos sem mudar o resultado;
+    # uma thread deixa o consumo mais uniforme e ainda cabe folgado em 25 ms.
+    cv2.setNumThreads(max(1, int(config.VISION_OPENCV_THREADS)))
     line_module.init_tracker()
     print("[visão] preparando cálculos rápidos...")
     line_module.aquecer_numba()
