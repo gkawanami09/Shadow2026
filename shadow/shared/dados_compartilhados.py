@@ -57,7 +57,6 @@ STEERING_TRACK = 0
 STEERING_CORNER = 1
 STEERING_LOST = 2
 STEERING_SPECIAL = 3
-STEERING_ZIGZAG = 4
 steering_state = Value("b", STEERING_TRACK)
 steering_correction = Value("d", 0.)
 steering_lateral_error = Value("d", 0.)
@@ -103,12 +102,14 @@ class ResultadoVisaoRapida(NamedTuple):
     area_linha: float
     candidato_verde: bool
     candidato_vermelho: bool
-    zigzag_detectado: bool
+    ponto_futuro_x: float
+    ponto_futuro_y: float
+    ponto_futuro_valido: bool
 
 
 # Um único bloqueio publica todos os campos. O controle nunca usa uma mistura
 # do ângulo de um frame com o ponto inferior do frame seguinte.
-_resultado_visao_rapida = Array("d", 14, lock=True)
+_resultado_visao_rapida = Array("d", 16, lock=True)
 
 
 def publicar_resultado_visao_rapida(
@@ -125,7 +126,9 @@ def publicar_resultado_visao_rapida(
     area_linha,
     candidato_verde,
     candidato_vermelho,
-    zigzag_detectado,
+    ponto_futuro_x,
+    ponto_futuro_y,
+    ponto_futuro_valido,
 ):
     with _resultado_visao_rapida.get_lock():
         dados = _resultado_visao_rapida.get_obj()
@@ -142,7 +145,9 @@ def publicar_resultado_visao_rapida(
         dados[10] = float(area_linha)
         dados[11] = bool(candidato_verde)
         dados[12] = bool(candidato_vermelho)
-        dados[13] = bool(zigzag_detectado)
+        dados[13] = float(ponto_futuro_x)
+        dados[14] = float(ponto_futuro_y)
+        dados[15] = bool(ponto_futuro_valido)
 
 
 def ler_resultado_visao_rapida():
@@ -162,7 +167,9 @@ def ler_resultado_visao_rapida():
         area_linha=dados[10],
         candidato_verde=bool(dados[11]),
         candidato_vermelho=bool(dados[12]),
-        zigzag_detectado=bool(dados[13]),
+        ponto_futuro_x=dados[13],
+        ponto_futuro_y=dados[14],
+        ponto_futuro_valido=bool(dados[15]),
     )
 
 

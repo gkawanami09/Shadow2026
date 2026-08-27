@@ -26,8 +26,7 @@ from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
 from controle.direcao import (init_steering, mix_line_pwm, sleep_steering,
                               steer, steer_line)
 from controle.retorno import turn_around
-from controle.seguidor_linha import (CORNER, LOST, ZIGZAG,
-                                     ControladorSegueLinha)
+from controle.seguidor_linha import CORNER, LOST, ControladorSegueLinha
 from comunicacao_serial.arduino import Arduino
 from shared.dados_compartilhados import (ENTRY_SILVER_BLACK_FOLLOW,
                                ENTRY_SILVER_IDLE, ENTRY_SILVER_VALIDATING,
@@ -48,7 +47,6 @@ from shared.dados_compartilhados import (ENTRY_SILVER_BLACK_FOLLOW,
                                rescue_requested, status, terminate,
                                STEERING_CORNER, STEERING_LOST,
                                STEERING_SPECIAL, STEERING_TRACK,
-                               STEERING_ZIGZAG,
                                steering_correction, steering_heading,
                                steering_lateral_error, steering_left_pwm,
                                steering_right_pwm, steering_state,
@@ -543,7 +541,10 @@ def control_loop():
                         ponto_inferior_y=resultado_visao.ponto_inferior_y,
                         ponto_alvo_x=resultado_visao.ponto_alvo_x,
                         ponto_alvo_y=resultado_visao.ponto_alvo_y,
-                        zigzag_detectado=resultado_visao.zigzag_detectado,
+                        ponto_futuro_x=resultado_visao.ponto_futuro_x,
+                        ponto_futuro_y=resultado_visao.ponto_futuro_y,
+                        ponto_futuro_valido=(
+                            resultado_visao.ponto_futuro_valido),
                         agora=now,
                     )
                 else:
@@ -695,9 +696,6 @@ def control_loop():
                         lado = 'direita' if correcao_linha > 0 else 'esquerda'
                         status.value = (
                             f'Curva fechada {lado} — alinhando nova reta')
-                    elif saida_linha.estado == ZIGZAG:
-                        status.value = (
-                            'Zigue-zague confirmado - atravessando reto')
                     elif saida_linha.estado == LOST:
                         status.value = (
                             'Linha fora da imagem — mantendo ultimo giro')
@@ -715,8 +713,6 @@ def control_loop():
                     steering_state.value = (
                         STEERING_CORNER if saida_linha.estado == CORNER
                         else STEERING_LOST if saida_linha.estado == LOST
-                        else STEERING_ZIGZAG
-                        if saida_linha.estado == ZIGZAG
                         else STEERING_TRACK
                     )
                     steering_correction.value = correcao_linha

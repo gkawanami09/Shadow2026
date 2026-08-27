@@ -35,9 +35,9 @@ from visao.captura import LineCamera
 from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.linha import calculate_angle, determine_correct_line
+from visao.trajetoria import extrair_ponto_futuro
 from visao.verde import check_green, latch_turn_direction
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
-from visao.zigzag import detectar_zigzag
 
 # Cores carregadas do config.ini (fallback: valores do config.py)
 black_min = np.array(config.BLACK_MIN_DEFAULT)
@@ -170,10 +170,12 @@ def vision_loop(debug=False):
             ponto_inferior_y_frame = 0.
             ponto_alvo_x_frame = camera_x / 2
             ponto_alvo_y_frame = 0.
+            ponto_futuro_x_frame = camera_x / 2
+            ponto_futuro_y_frame = camera_y
+            ponto_futuro_valido_frame = False
             area_linha_frame = 0.
             candidato_verde_frame = False
             candidato_vermelho_frame = False
-            zigzag_detectado_frame = False
             hsv_image = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2HSV)
             green_image = cv2.inRange(hsv_image, green_min, green_max)
             red_image = cv2.bitwise_or(
@@ -310,14 +312,6 @@ def vision_loop(debug=False):
                 )
                 area_linha_frame = float(cv2.contourArea(blackline))
                 line_size.value = area_linha_frame
-                zigzag_detectado_frame = (
-                    line_status.value == "line_detected"
-                    and not candidato_verde_frame
-                    and not candidato_vermelho_frame
-                    and not preferir_esquerda
-                    and direcao_marcada == "straight"
-                    and detectar_zigzag(blackline)
-                )
 
                 # Calcula a geometria do gap.
                 if line_status.value == "gap_detected":
@@ -341,6 +335,15 @@ def vision_loop(debug=False):
                 line_angle_y.value = int(poi[1])
                 ponto_alvo_x_frame = float(poi[0])
                 ponto_alvo_y_frame = float(poi[1])
+
+                ponto_futuro = extrair_ponto_futuro(
+                    blackline,
+                    mascara_linha=black_image,
+                    origem_x=bottom_point[0],
+                )
+                ponto_futuro_x_frame = ponto_futuro.x
+                ponto_futuro_y_frame = ponto_futuro.y
+                ponto_futuro_valido_frame = ponto_futuro.valido
 
 
 
@@ -368,6 +371,22 @@ def vision_loop(debug=False):
                     cv2.circle(cv2_img, (int(last_average_line_point), 0), 5, (0, 255, 255), 1, cv2.LINE_AA)
                     cv2.circle(cv2_img, (int(poi[0]), int(poi[1])), 5, (0, 0, 255), 1, cv2.LINE_AA)
                     cv2.circle(cv2_img, (int(bottom_point[0]), int(bottom_point[1])), 5, (255, 255, 0), 1, cv2.LINE_AA)
+                    if ponto_futuro.valido:
+                        alvo_futuro = (
+                            int(round(ponto_futuro.x)),
+                            int(round(ponto_futuro.y)),
+                        )
+                        cv2.line(
+                            cv2_img,
+                            (camera_x // 2, camera_y - 1),
+                            alvo_futuro,
+                            (0, 165, 255),
+                            1,
+                            cv2.LINE_AA,
+                        )
+                        cv2.circle(
+                            cv2_img, alvo_futuro, 6,
+                            (0, 165, 255), 2, cv2.LINE_AA)
                     cv2.circle(cv2_img, (camera_x // 2, camera_y - 4),
                                5, (255, 0, 0), -1, cv2.LINE_AA)
 
@@ -420,7 +439,9 @@ def vision_loop(debug=False):
                 area_linha=area_linha_frame,
                 candidato_verde=candidato_verde_frame,
                 candidato_vermelho=candidato_vermelho_frame,
-                zigzag_detectado=zigzag_detectado_frame,
+                ponto_futuro_x=ponto_futuro_x_frame,
+                ponto_futuro_y=ponto_futuro_y_frame,
+                ponto_futuro_valido=ponto_futuro_valido_frame,
             )
 
             if not vision_ready.value:
@@ -475,8 +496,7 @@ def vision_loop(debug=False):
                         1,
                         cv2.LINE_AA,
                     )
-                nomes_controle = (
-                    "TRACK", "CORNER", "LOST", "SPECIAL", "ZIGZAG")
+                nomes_controle = ("TRACK", "CORNER", "LOST", "SPECIAL")
                 indice_controle = int(steering_state.value)
                 nome_controle = (
                     nomes_controle[indice_controle]

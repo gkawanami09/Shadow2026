@@ -1,5 +1,6 @@
 """Testes deterministicos do controlador geometrico do segue-linha."""
 
+import math
 import sys
 from pathlib import Path
 import unittest
@@ -13,8 +14,8 @@ from controle.seguidor_linha import (  # noqa: E402
     CORNER,
     LOST,
     TRACK,
-    ZIGZAG,
     ControladorSegueLinha,
+    angulo_para_ponto_futuro,
     erros_da_geometria,
 )
 
@@ -32,7 +33,7 @@ class SeguidorLinhaTests(unittest.TestCase):
         a_frente=True,
         inferior=(224., 251.),
         alvo=(224., 20.),
-        zigzag=False,
+        futuro=None,
         dt=.02,
     ):
         self.sequencia += 1
@@ -46,7 +47,9 @@ class SeguidorLinhaTests(unittest.TestCase):
             ponto_inferior_y=inferior[1],
             ponto_alvo_x=alvo[0],
             ponto_alvo_y=alvo[1],
-            zigzag_detectado=zigzag,
+            ponto_futuro_x=None if futuro is None else futuro[0],
+            ponto_futuro_y=None if futuro is None else futuro[1],
+            ponto_futuro_valido=futuro is not None,
             agora=self.agora,
         )
 
@@ -78,6 +81,61 @@ class SeguidorLinhaTests(unittest.TestCase):
 
         self.assertAlmostEqual(erro_d, -erro_e)
         self.assertAlmostEqual(angulo_d, -angulo_e)
+
+    def test_rumo_futuro_parte_do_centro_fisico_do_robo(self):
+        direita = angulo_para_ponto_futuro(336, 20)
+        esquerda = angulo_para_ponto_futuro(112, 20)
+
+        self.assertGreater(direita, 0.)
+        self.assertAlmostEqual(direita, -esquerda)
+
+    def test_ponto_futuro_central_ignora_desvios_intermediarios(self):
+        saidas = [
+            self.quadro(
+                a_frente=True,
+                inferior=(300., 251.),
+                alvo=(420., 126.),
+                futuro=(224., 10.),
+            )
+            for _ in range(3)
+        ]
+
+        self.assertTrue(all(saida.estado == TRACK for saida in saidas))
+        self.assertTrue(all(saida.correcao == 0. for saida in saidas))
+
+    def test_controle_segue_o_futuro_mesmo_se_o_local_aponta_ao_contrario(self):
+        saida = self.quadro(
+            a_frente=True,
+            inferior=(300., 251.),
+            alvo=(400., 126.),
+            futuro=(100., 20.),
+        )
+
+        self.assertEqual(saida.estado, TRACK)
+        self.assertLess(saida.correcao, 0.)
+
+    def test_ponto_futuro_deslocado_produz_correcao_proporcional(self):
+        saida = self.quadro(futuro=(336., 20.))
+        angulo = angulo_para_ponto_futuro(336., 20.)
+        esperado = config.LINE_FUTURE_GAIN * math.sin(math.radians(angulo))
+
+        self.assertEqual(saida.estado, TRACK)
+        self.assertAlmostEqual(saida.correcao, esperado)
+
+    def test_90_real_continua_armando_canto(self):
+        primeiro = self.quadro(
+            a_frente=False,
+            alvo=(447., 126.),
+            futuro=(360., 120.),
+        )
+        segundo = self.quadro(
+            a_frente=False,
+            alvo=(447., 126.),
+            futuro=(360., 120.),
+        )
+
+        self.assertEqual(primeiro.estado, TRACK)
+        self.assertEqual(segundo.estado, CORNER)
 
     def test_canto_so_arma_apos_dois_frames_e_faz_pivo(self):
         primeiro = self.quadro(
@@ -158,47 +216,6 @@ class SeguidorLinhaTests(unittest.TestCase):
 
         self.assertEqual(saida.estado, TRACK)
         self.assertEqual(congelada.estado, LOST)
-
-    def test_zigzag_confirma_em_dois_frames_e_manda_reto(self):
-        primeiro = self.quadro(
-            a_frente=False, alvo=(447., 126.), zigzag=True)
-        segundo = self.quadro(
-            a_frente=False, alvo=(447., 126.), zigzag=True)
-
-        self.assertEqual(primeiro.estado, TRACK)
-        self.assertNotEqual(primeiro.estado, CORNER)
-        self.assertEqual(segundo.estado, ZIGZAG)
-        self.assertEqual(segundo.correcao, 0.)
-
-    def test_zigzag_conserva_reto_durante_memoria_curta(self):
-        self.quadro(alvo=(340., 100.), zigzag=True)
-        self.quadro(alvo=(340., 100.), zigzag=True)
-        memoria = self.quadro(alvo=(224., 20.), zigzag=False, dt=.10)
-
-        self.assertEqual(memoria.estado, ZIGZAG)
-        self.assertEqual(memoria.correcao, 0.)
-
-    def test_canto_forte_interrompe_memoria_do_zigzag(self):
-        self.quadro(alvo=(340., 100.), zigzag=True)
-        self.quadro(alvo=(340., 100.), zigzag=True)
-        primeiro = self.quadro(
-            a_frente=False, alvo=(447., 126.), zigzag=False)
-        segundo = self.quadro(
-            a_frente=False, alvo=(447., 126.), zigzag=False)
-
-        self.assertNotEqual(primeiro.estado, ZIGZAG)
-        self.assertEqual(segundo.estado, CORNER)
-
-    def test_saida_do_zigzag_nao_produz_pico_derivativo(self):
-        self.quadro(alvo=(340., 100.), zigzag=True)
-        self.quadro(alvo=(340., 100.), zigzag=True)
-        saida = self.quadro(
-            inferior=(244., 251.), alvo=(244., 20.),
-            zigzag=False, dt=config.ZIGZAG_HOLD_S + .01)
-
-        esperado = config.LINE_LATERAL_GAIN * (20. / (config.camera_x / 2.))
-        self.assertEqual(saida.estado, TRACK)
-        self.assertAlmostEqual(saida.correcao, esperado)
 
 
 if __name__ == "__main__":

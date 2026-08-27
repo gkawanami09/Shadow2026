@@ -168,6 +168,23 @@ LINE_DERIVATIVE_LIMIT = .25
 LINE_CORRECTION_DEADBAND = .025
 LINE_MAX_FRAME_AGE_S = .15
 
+# Pure pursuit visual. O ponto local continua protegendo cantos e perdas, mas
+# o movimento normal mira do centro do robo para um ponto distante do contorno
+# completo. Se a linha desvia e volta dentro da imagem, o alvo futuro prevalece
+# sobre os desvios intermediarios.
+LINE_PATH_SAMPLE_BANDS = 20
+LINE_PATH_MIN_VERTICAL_SPAN_RATIO = .28
+LINE_PATH_MIN_SAMPLES = 7
+LINE_PATH_MAX_BAND_GAP = 2
+LINE_PATH_MAX_LATERAL_JUMP_PX = camera_x * .30
+LINE_FUTURE_FRACTION = 1.0
+LINE_FUTURE_SMOOTH_RADIUS = 1
+LINE_FUTURE_GAIN = 1.05
+LINE_FUTURE_FILTER = .45
+# Quando existe preto material a frente e o rumo local se desfaz antes do
+# ponto futuro, essa diagonal nao pode armar a memoria de um canto de 90.
+LINE_FUTURE_RETURN_RATIO = .65
+
 # Curvas fechadas sao confirmadas em dois frames e ficam travadas para o mesmo
 # lado ate que a nova reta esteja vertical e centralizada. Assim um canto nao
 # volta a ser interpretado como reta no meio do giro.
@@ -184,25 +201,6 @@ LINE_CORNER_EXIT_FRAMES = 3
 LINE_CORNER_TIMEOUT_S = 1.6
 LINE_CORNER_LOST_HOLD_S = .65
 LINE_TRACK_LOST_HOLD_S = .25
-
-# Zigue-zague OBR: a camera wide enxerga varios segmentos no mesmo frame.
-# Em vez de perseguir cada diagonal, a visao confirma que o centro da faixa
-# alterna de lado pelo menos tres vezes e termina perto do eixo por onde
-# entrou. O controle entao atravessa o desenho reto no mesmo PWM 80.
-ZIGZAG_ENABLED = True
-ZIGZAG_SAMPLE_BANDS = 18
-ZIGZAG_MIN_VERTICAL_SPAN_RATIO = .42
-ZIGZAG_MIN_BAND_COVERAGE = .72
-ZIGZAG_DIRECTION_NOISE_PX = 5.
-ZIGZAG_MIN_RUN_PX = camera_x * .075
-ZIGZAG_MIN_RUNS = 3
-ZIGZAG_MIN_TOTAL_SPAN_PX = camera_x * .16
-ZIGZAG_MAX_NET_OFFSET_PX = camera_x * .16
-# Uma faixa horizontal muito larga denuncia degrau/L, nao diagonal alternada.
-ZIGZAG_MAX_BAND_WIDTH_PX = camera_x * .34
-ZIGZAG_CONFIRM_FRAMES = 2
-ZIGZAG_HOLD_S = .25
-ZIGZAG_CORNER_RELEASE_HEADING_DEG = 48.
 
 # Mantidos somente para o angulo legado consumido por decisoes de alto nivel
 # (verde, entrada e ferramentas antigas). Os motores do segue-linha normal nao
