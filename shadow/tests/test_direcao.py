@@ -38,6 +38,32 @@ class SteeringTests(unittest.TestCase):
             [("lado", LINE_FOLLOW_PWM, LINE_FOLLOW_PWM)],
         )
 
+    def test_mixer_continuo_cruza_o_zero_sem_salto(self):
+        self.assertEqual(
+            direcao.mix_line_pwm(.25, LINE_FOLLOW_SPEED),
+            (80, 40),
+        )
+        self.assertEqual(
+            direcao.mix_line_pwm(.50, LINE_FOLLOW_SPEED),
+            (80, 0),
+        )
+        self.assertEqual(
+            direcao.mix_line_pwm(.75, LINE_FOLLOW_SPEED),
+            (80, -40),
+        )
+
+    def test_mixer_e_simetrico_para_esquerda_e_direita(self):
+        direita = direcao.mix_line_pwm(.75, LINE_FOLLOW_SPEED)
+        esquerda = direcao.mix_line_pwm(-.75, LINE_FOLLOW_SPEED)
+
+        self.assertEqual(direita, tuple(reversed(esquerda)))
+        self.assertEqual(direita, (80, -40))
+
+    def test_pivo_total_usa_os_dois_pares_sem_separar_eixos(self):
+        direcao.steer_line(1., LINE_FOLLOW_SPEED)
+
+        self.assertEqual(self.arduino.chamadas, [("lado", 80, -80)])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,34 @@ def init_steering(arduino_instance):
     arduino = arduino_instance
 
 
+def mix_line_pwm(correction, speed):
+    """Mistura continua do segue-linha, sem separar frente e traseira.
+
+    ``correction`` usa -1..1. Em zero os dois lados avancam; em modulo 0.5 a
+    roda interna para; em modulo 1 ela chega ao pivo tanque. O lado externo
+    permanece no PWM base, evitando o salto que existia acima de 110 graus.
+    """
+    correction = max(min(float(correction), 1.), -1.)
+    speed = max(min(float(speed), 1.), 0.)
+    outer = speed
+    inner = speed * (1. - 2. * abs(correction))
+
+    if correction >= 0:
+        speed_left, speed_right = outer, inner
+    else:
+        speed_left, speed_right = inner, outer
+
+    speed_left = max(min(speed_left * left_correction, 1.), -1.)
+    speed_right = max(min(speed_right * right_correction, 1.), -1.)
+    return round(speed_left * MAX_PWM), round(speed_right * MAX_PWM)
+
+
+def steer_line(correction, speed):
+    """Envia o controle normal por pares: FE=TE e FD=TD."""
+    speed_left, speed_right = mix_line_pwm(correction, speed)
+    return arduino.lado(speed_left, speed_right)
+
+
 def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=False,
           toque_frente_direita_pwm=0):
     """Transforma ângulo e velocidade no movimento das quatro rodas.

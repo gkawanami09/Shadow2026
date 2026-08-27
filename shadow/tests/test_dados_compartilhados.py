@@ -56,6 +56,8 @@ class ResultadoVisaoRapidaTests(unittest.TestCase):
             angulo=-4,
             ponto_inferior_x=220,
             ponto_inferior_y=250,
+            ponto_alvo_x=180,
+            ponto_alvo_y=40,
             area_linha=8123,
             candidato_verde=False,
             candidato_vermelho=True,
@@ -70,6 +72,8 @@ class ResultadoVisaoRapidaTests(unittest.TestCase):
         self.assertEqual(resultado.angulo, -4)
         self.assertEqual(resultado.ponto_inferior_x, 220)
         self.assertEqual(resultado.ponto_inferior_y, 250)
+        self.assertEqual(resultado.ponto_alvo_x, 180)
+        self.assertEqual(resultado.ponto_alvo_y, 40)
         self.assertEqual(resultado.area_linha, 8123)
         self.assertFalse(resultado.candidato_verde)
         self.assertTrue(resultado.candidato_vermelho)

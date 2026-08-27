@@ -11,17 +11,10 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GREEN_REVERSE_SPEED, GREEN_REVERSE_TIME,
                     GREEN_TURN_BLIND_TIME, GREEN_TURN_CENTER_TOLERANCE_PX,
                     GREEN_TURN_SIDE_MIN_ERROR_PX, GREEN_TURN_SPEED,
-                    GREEN_TURN_TIMEOUT, LINE_FOLLOW_SPEED,
-                    LINE_LOSS_STEER_HOLD, MIN_LINE_SIZE_DEFAULT,
-                    PIVOT_BOTTOM_MIN_ERROR_PX,
-                    PIVOT_RECOVERY_ASSIST_RAMP,
-                    PIVOT_RECOVERY_ASSIST_START, PIVOT_RECOVERY_EXIT_ANGLE,
-                    PIVOT_RECOVERY_SPEED, PIVOT_RECOVERY_TIMEOUT,
-                    PIVOT_PROGRESS_PX, PIVOT_STALL_MIN_ANGLE,
-                    PIVOT_STALL_RAMP_TIME, PIVOT_STALL_TIME,
-                    TURN_AROUND_GREEN_COOLDOWN, VISION_READY_TIMEOUT,
-                    FRONT_ANCHOR_FULL_ANGLE,
-                    FRONT_ANCHOR_START_ANGLE, camera_x, camera_y)
+                     GREEN_TURN_TIMEOUT, LINE_FOLLOW_SPEED,
+                     MIN_LINE_SIZE_DEFAULT,
+                     TURN_AROUND_GREEN_COOLDOWN, VISION_READY_TIMEOUT,
+                     camera_x, camera_y)
 from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
@@ -30,11 +23,12 @@ from controle.parada_obstaculo import (
 from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
 from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
-from controle.direcao import init_steering, sleep_steering, steer
+from controle.direcao import (init_steering, mix_line_pwm, sleep_steering,
+                              steer, steer_line)
 from controle.retorno import turn_around
+from controle.seguidor_linha import CORNER, LOST, ControladorSegueLinha
 from comunicacao_serial.arduino import Arduino
-from shared.dados_compartilhados import (add_time_value, empty_time_arr,
-                               ENTRY_SILVER_BLACK_FOLLOW,
+from shared.dados_compartilhados import (ENTRY_SILVER_BLACK_FOLLOW,
                                ENTRY_SILVER_IDLE, ENTRY_SILVER_VALIDATING,
                                entry_armed, entry_silver_confirmed,
                                entry_silver_detected, entry_silver_reason,
@@ -51,6 +45,11 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                preferencia_linha_esquerda,
                                red_candidate, red_detected, red_finished,
                                rescue_requested, status, terminate,
+                               STEERING_CORNER, STEERING_LOST,
+                               STEERING_SPECIAL, STEERING_TRACK,
+                               steering_correction, steering_heading,
+                               steering_lateral_error, steering_left_pwm,
+                               steering_right_pwm, steering_state,
                                timer, turn_dir,
                                vision_ready)
 
@@ -123,8 +122,6 @@ def control_loop():
 
     last_turn_dir = "l"
 
-    time_last_angles = empty_time_arr()
-
     # espera a visao publicar o primeiro frame processado
     wait_start = time.perf_counter()
     while not vision_ready.value and not terminate.value:
@@ -165,14 +162,7 @@ def control_loop():
     black_line_seen = False
     no_black_since = None
     gap_retry_after = 0.0
-    pivot_sign = 0
-    pivot_best_error = camera_x
-    pivot_last_progress = time.monotonic()
-    pivot_last_direction = 0
-    pivot_line_lost_since = None
-    last_follow_angle = 0
-    last_line_seen = time.monotonic()
-    last_rear_pivot_enabled = True
+    controlador_linha = ControladorSegueLinha()
     green_direction = None
     green_approach_until = 0.
     green_turn_started = None
@@ -362,14 +352,7 @@ def control_loop():
                 )
                 line_status.value = "line_detected"
                 line_missing_since = None
-                pivot_sign = 0
-                pivot_best_error = camera_x
-                pivot_last_progress = time.monotonic()
-                pivot_last_direction = 0
-                pivot_line_lost_since = None
-                last_follow_angle = line_angle.value
-                last_line_seen = time.monotonic()
-                last_rear_pivot_enabled = True
+                controlador_linha.reset()
                 green_direction = None
                 green_turn_started = None
                 green_reverse_until = None
@@ -495,6 +478,7 @@ def control_loop():
                             "prata desarmada durante giro de 180")
 
                     last_turn_dir = turn_around(last_turn_dir)
+                    controlador_linha.reset()
                     # O filtro visual pode degradar "dois verdes" para apenas
                     # left/right por alguns frames. Nao iniciar uma segunda
                     # manobra com essa leitura residual.
@@ -546,30 +530,24 @@ def control_loop():
                         -1 if direcao_visual == "left" else 1)
                     green_armed = False
 
-                if green_direction is not None:
-                    # Recuperacao de linha do pivo nunca pode vazar para a
-                    # manobra deliberada do marcador verde.
-                    pivot_last_direction = 0
-                    pivot_line_lost_since = None
-
-                if line_detected.value:
-                    last_line_seen = now
-                    last_follow_angle = line_angle.value
-                    last_rear_pivot_enabled = (
-                        preferencia_linha_esquerda.value
-                        or direcao_visual == "straight"
+                resultado_visao = ler_resultado_visao_rapida()
+                if green_direction is None:
+                    saida_linha = controlador_linha.atualizar(
+                        sequencia=resultado_visao.sequencia,
+                        publicado_em=resultado_visao.publicado_em,
+                        linha_detectada=resultado_visao.linha_detectada,
+                        linha_a_frente=resultado_visao.linha_a_frente,
+                        ponto_inferior_x=resultado_visao.ponto_inferior_x,
+                        ponto_inferior_y=resultado_visao.ponto_inferior_y,
+                        ponto_alvo_x=resultado_visao.ponto_alvo_x,
+                        ponto_alvo_y=resultado_visao.ponto_alvo_y,
+                        agora=now,
                     )
-
-                    if (last_rear_pivot_enabled
-                            and abs(line_angle.value) > FRONT_ANCHOR_START_ANGLE):
-                        pivot_last_direction = 1 if line_angle.value > 0 else -1
-                        pivot_line_lost_since = None
-                    elif abs(line_angle.value) <= PIVOT_RECOVERY_EXIT_ANGLE:
-                        pivot_last_direction = 0
-                        pivot_line_lost_since = None
-                elif not last_rear_pivot_enabled:
-                    pivot_last_direction = 0
-                    pivot_line_lost_since = None
+                else:
+                    # Verde possui uma manobra deliberada independente; sua
+                    # geometria nao pode armar a memoria de um canto preto.
+                    controlador_linha.suspender()
+                    saida_linha = None
 
                 velocidade_base = get_speed(line_angle.value)
                 command_speed = velocidade_base
@@ -623,12 +601,14 @@ def control_loop():
                                 f"{round(LINE_FOLLOW_SPEED * config.MAX_PWM)}"
                             )
 
+                usar_controle_linha = False
+                correcao_linha = 0.
+
                 if (green_direction is not None
                         and green_reverse_until is not None):
                     if now < green_reverse_until:
                         angle = 200
                         command_speed = GREEN_REVERSE_SPEED
-                        last_rear_pivot_enabled = False
                         status.value = 'Verde concluido — dando re curta'
                     else:
                         green_direction = None
@@ -638,13 +618,11 @@ def control_loop():
                         green_target_seen = False
                         green_turn_target.value = 0
                         angle = line_angle.value if line_detected.value else 190
-                        last_rear_pivot_enabled = True
                 elif green_direction is not None and now < green_approach_until:
                     # A direcao ja foi memorizada: atravessa o marcador reto
                     # antes de iniciar qualquer rotacao.
                     angle = 0
                     command_speed = GREEN_APPROACH_SPEED
-                    last_rear_pivot_enabled = False
                     status.value = f'Verde {green_direction} — avancando antes do giro'
                 elif green_direction is not None:
                     if green_turn_started is None:
@@ -653,7 +631,6 @@ def control_loop():
                         green_target_seen = False
                     angle = -180 if green_direction == "left" else 180
                     command_speed = GREEN_TURN_SPEED
-                    last_rear_pivot_enabled = False
 
                     elapsed_turn = now - green_turn_started
                     erro_inferior = last_bottom_point.value - camera_x / 2
@@ -702,97 +679,55 @@ def control_loop():
                         green_reverse_until = now + GREEN_REVERSE_TIME
                         angle = 200
                         command_speed = GREEN_REVERSE_SPEED
-                        last_rear_pivot_enabled = False
                         status.value = 'Verde concluido — dando re curta'
                     else:
                         status.value = (
                             f'Verde {green_direction} — trazendo ramo '
                             'para o centro')
-                elif line_detected.value:
-                    angle = last_follow_angle
-                elif pivot_last_direction != 0:
-                    if pivot_line_lost_since is None:
-                        pivot_line_lost_since = now
-                    recovery_time = now - pivot_line_lost_since
-                    if recovery_time <= PIVOT_RECOVERY_TIMEOUT:
-                        # Mantem o lado conhecido e um erro suficientemente
-                        # alto para conservar o pivo traseiro durante a busca.
-                        angle = pivot_last_direction * max(
-                            abs(last_follow_angle), FRONT_ANCHOR_FULL_ANGLE)
-                        command_speed = PIVOT_RECOVERY_SPEED
-                        last_rear_pivot_enabled = True
-                    else:
-                        angle = 190
-                        pivot_last_direction = 0
-                        pivot_line_lost_since = None
-                        status.value = 'Linha nao reencontrada — parada de seguranca'
-                elif now - last_line_seen <= LINE_LOSS_STEER_HOLD:
-                    # A linha saiu da imagem durante a curva: termina o giro
-                    # atual em vez de substituir o comando por frente (0°).
-                    angle = last_follow_angle
+                elif saida_linha is not None and saida_linha.comando_valido:
+                    usar_controle_linha = True
+                    correcao_linha = saida_linha.correcao
+                    angle = saida_linha.angulo_equivalente
+                    if saida_linha.estado == CORNER:
+                        lado = 'direita' if correcao_linha > 0 else 'esquerda'
+                        status.value = (
+                            f'Curva fechada {lado} — alinhando nova reta')
+                    elif saida_linha.estado == LOST:
+                        status.value = (
+                            'Linha fora da imagem — mantendo ultimo giro')
                 else:
-                    # Sem gap e sem linha por tempo demais, parar e mais seguro
-                    # do que continuar reto para fora da pista.
                     angle = 190
-
-                # O angulo pode mudar mesmo quando a linha apenas gira ao
-                # redor da camera. O erro que importa e a distancia horizontal
-                # do ponto inferior ate a bolinha central.
-                error = abs(last_bottom_point.value - camera_x / 2)
-                sign = 1 if angle > 0 else -1 if angle < 0 else 0
-                front_reverse_assist = 0.
-                # Marcadores verdes possuem uma direcao deliberada e precisam
-                # do giro tanque original. O pivo traseiro fica reservado ao
-                # alinhamento comum da linha, quando nao ha decisao verde.
-                rear_pivot_enabled = last_rear_pivot_enabled and angle != 190
-
-                if (not line_detected.value and rear_pivot_enabled
-                        and pivot_line_lost_since is not None):
-                    recovery_time = now - pivot_line_lost_since
-                    front_reverse_assist = min(
-                        PIVOT_RECOVERY_ASSIST_START
-                        + recovery_time / PIVOT_RECOVERY_ASSIST_RAMP,
-                        1.)
-                    side = 'direita' if angle > 0 else 'esquerda'
                     status.value = (
-                        f'Procurando linha — re dianteira {side} '
-                        f'{round(front_reverse_assist * 100)}%')
-
-                elif (rear_pivot_enabled and line_detected.value
-                        and abs(angle) >= PIVOT_STALL_MIN_ANGLE
-                        and error >= PIVOT_BOTTOM_MIN_ERROR_PX):
-                    if sign != pivot_sign:
-                        pivot_sign = sign
-                        pivot_best_error = error
-                        pivot_last_progress = now
-                    elif error <= pivot_best_error - PIVOT_PROGRESS_PX:
-                        pivot_best_error = error
-                        pivot_last_progress = now
-                    else:
-                        stalled_for = now - pivot_last_progress
-                        if stalled_for > PIVOT_STALL_TIME:
-                            front_reverse_assist = min(
-                                (stalled_for - PIVOT_STALL_TIME)
-                                / PIVOT_STALL_RAMP_TIME,
-                                1.)
-                            side = 'direita' if angle > 0 else 'esquerda'
-                            status.value = (
-                                f'Ajudando pivo — re dianteira {side} '
-                                f'{round(front_reverse_assist * 100)}%')
-                else:
-                    pivot_sign = 0
-                    pivot_best_error = camera_x
-                    pivot_last_progress = now
+                        'Linha nao reencontrada — parada de seguranca')
 
                 # A candidata prata já foi tratada no início do ciclo: durante
                 # a observação o robô fica parado; quando aparece preto além da
                 # faixa este mesmo segue-linha continua em velocidade normal.
-                steer(angle, command_speed,
-                      front_reverse_assist=front_reverse_assist,
-                      rear_pivot_enabled=rear_pivot_enabled)
+                if usar_controle_linha:
+                    pwm_esquerda, pwm_direita = mix_line_pwm(
+                        correcao_linha, command_speed)
+                    steering_state.value = (
+                        STEERING_CORNER if saida_linha.estado == CORNER
+                        else STEERING_LOST if saida_linha.estado == LOST
+                        else STEERING_TRACK
+                    )
+                    steering_correction.value = correcao_linha
+                    steering_lateral_error.value = saida_linha.erro_lateral
+                    steering_heading.value = saida_linha.angulo_linha
+                    steering_left_pwm.value = pwm_esquerda
+                    steering_right_pwm.value = pwm_direita
+                    steer_line(correcao_linha, command_speed)
+                else:
+                    steering_state.value = STEERING_SPECIAL
+                    steering_correction.value = 0.
+                    steering_lateral_error.value = 0.
+                    steering_heading.value = 0.
+                    steering_left_pwm.value = 0
+                    steering_right_pwm.value = 0
+                    steer(angle, command_speed)
 
-                time_last_angles = add_time_value(time_last_angles, line_angle.value)
             elif line_status.value == "stop":
+                controlador_linha.suspender()
                 stop_for_red()
                 if mission_mode.value and not entry_armed.value:
                     # A sala de resgate já ficou para trás: esta é a faixa
@@ -805,6 +740,7 @@ def control_loop():
                 continue
 
             elif line_status.value == "gap_detected":
+                controlador_linha.suspender()
                 verified_gap = orientate_gap()
 
                 if verified_gap:
@@ -821,6 +757,7 @@ def control_loop():
                 continue
 
             elif line_status.value == "gap_avoid":
+                controlador_linha.suspender()
                 status.value = 'Cruzando o gap'
 
                 if line_detected.value:

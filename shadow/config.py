@@ -143,8 +143,39 @@ LINE_CROP_INITIAL = .6
 LINE_CROP_NORMAL = .6
 LINE_CROP_GREEN = .45                     # durante curva verde
 
-# Mantem a linha sob o centro inferior da camera frontal. O ponto proximo tem
-# prioridade, mas parte do POI original preserva antecipacao de curvas.
+# O controle visual separa dois erros que antes eram misturados em um unico
+# angulo: posicao da linha sob a camera e direcao da linha a frente. O primeiro
+# mantem o robo centrado; o segundo antecipa curvas e cantos de 90 graus.
+LINE_LATERAL_GAIN = .55
+LINE_HEADING_GAIN = 1.0
+# O termo derivativo produz uma correcao curta quando o erro muda rapidamente,
+# sem acumular integral (que causaria sobrepassagem nas rodas omni).
+LINE_DERIVATIVE_GAIN = .025
+LINE_DERIVATIVE_FILTER = .35
+LINE_DERIVATIVE_LIMIT = .25
+LINE_CORRECTION_DEADBAND = .025
+LINE_MAX_FRAME_AGE_S = .15
+
+# Curvas fechadas sao confirmadas em dois frames e ficam travadas para o mesmo
+# lado ate que a nova reta esteja vertical e centralizada. Assim um canto nao
+# volta a ser interpretado como reta no meio do giro.
+LINE_CORNER_ENTRY_HEADING_DEG = 48.
+LINE_CORNER_SIDE_HEADING_DEG = 35.
+LINE_CORNER_TARGET_MIN = .35
+LINE_CORNER_CONFIRM_FRAMES = 2
+LINE_CORNER_MIN_CORRECTION = .72
+LINE_CORNER_FINISH_CORRECTION = .35
+LINE_CORNER_EXIT_HEADING_DEG = 18.
+LINE_CORNER_EXIT_LATERAL = .18
+LINE_CORNER_EXIT_TARGET = .28
+LINE_CORNER_EXIT_FRAMES = 3
+LINE_CORNER_TIMEOUT_S = 1.6
+LINE_CORNER_LOST_HOLD_S = .65
+LINE_TRACK_LOST_HOLD_S = .25
+
+# Mantidos somente para o angulo legado consumido por decisoes de alto nivel
+# (verde, entrada e ferramentas antigas). Os motores do segue-linha normal nao
+# usam mais esta mistura.
 BOTTOM_CENTER_CONTROL = True
 BOTTOM_CENTER_WEIGHT = .7
 BOTTOM_CENTER_MIN_Y = .75

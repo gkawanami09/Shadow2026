@@ -22,6 +22,11 @@ from shared.dados_compartilhados import (add_time_value, black_average,
                                          publicar_resultado_visao_rapida,
                                          preferencia_linha_esquerda,
                                          red_candidate, red_detected, status,
+                                         steering_correction,
+                                         steering_heading,
+                                         steering_lateral_error,
+                                         steering_left_pwm,
+                                         steering_right_pwm, steering_state,
                                          terminate, timer, turn_dir,
                                          vision_ready)
 from visao import linha as line_module
@@ -158,6 +163,8 @@ def vision_loop(debug=False):
             angulo_frame = 0.
             ponto_inferior_x_frame = camera_x / 2
             ponto_inferior_y_frame = 0.
+            ponto_alvo_x_frame = camera_x / 2
+            ponto_alvo_y_frame = 0.
             area_linha_frame = 0.
             candidato_verde_frame = False
             candidato_vermelho_frame = False
@@ -318,6 +325,8 @@ def vision_loop(debug=False):
                 )
                 angulo_frame = float(line_angle.value)
                 line_angle_y.value = int(poi[1])
+                ponto_alvo_x_frame = float(poi[0])
+                ponto_alvo_y_frame = float(poi[1])
 
 
 
@@ -392,6 +401,8 @@ def vision_loop(debug=False):
                 angulo=angulo_frame,
                 ponto_inferior_x=ponto_inferior_x_frame,
                 ponto_inferior_y=ponto_inferior_y_frame,
+                ponto_alvo_x=ponto_alvo_x_frame,
+                ponto_alvo_y=ponto_alvo_y_frame,
                 area_linha=area_linha_frame,
                 candidato_verde=candidato_verde_frame,
                 candidato_vermelho=candidato_vermelho_frame,
@@ -449,8 +460,37 @@ def vision_loop(debug=False):
                         1,
                         cv2.LINE_AA,
                     )
+                nomes_controle = ("TRACK", "CORNER", "LOST", "SPECIAL")
+                indice_controle = int(steering_state.value)
+                nome_controle = (
+                    nomes_controle[indice_controle]
+                    if 0 <= indice_controle < len(nomes_controle)
+                    else "?"
+                )
                 cv2.putText(cv2_img, f"{fps} fps  ang={line_angle.value}  {line_status.value}",
                             (5, camera_y - 8), cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
+                cv2.putText(
+                    cv2_img,
+                    f"ctl={nome_controle} c={steering_correction.value:+.2f} "
+                    f"L={steering_left_pwm.value} R={steering_right_pwm.value}",
+                    (5, camera_y - 24),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    .35,
+                    (255, 0, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    cv2_img,
+                    f"lateral={steering_lateral_error.value:+.2f} "
+                    f"rumo={steering_heading.value:+.0f}deg",
+                    (5, camera_y - 40),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    .35,
+                    (255, 0, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
                 cv2.putText(cv2_img, str(status.value), (5, 14),
                             cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
                 cv2.putText(

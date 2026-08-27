@@ -51,6 +51,19 @@ line_status = manager.Value("i", "line_detected")  # "line_detected"; "gap_detec
 
 status = manager.Value("i", "Parado")
 
+# Telemetria do controlador normal. O estado e numerico para nao consultar o
+# Manager em cada frame: 0 TRACK, 1 CORNER, 2 LOST, 3 manobra especial.
+STEERING_TRACK = 0
+STEERING_CORNER = 1
+STEERING_LOST = 2
+STEERING_SPECIAL = 3
+steering_state = Value("b", STEERING_TRACK)
+steering_correction = Value("d", 0.)
+steering_lateral_error = Value("d", 0.)
+steering_heading = Value("d", 0.)
+steering_left_pwm = Value("i", 0)
+steering_right_pwm = Value("i", 0)
+
 # ----------------------------------------------------------------------------
 # Missão completa (shadow/mission.py)
 # ----------------------------------------------------------------------------
@@ -84,6 +97,8 @@ class ResultadoVisaoRapida(NamedTuple):
     angulo: float
     ponto_inferior_x: float
     ponto_inferior_y: float
+    ponto_alvo_x: float
+    ponto_alvo_y: float
     area_linha: float
     candidato_verde: bool
     candidato_vermelho: bool
@@ -91,7 +106,7 @@ class ResultadoVisaoRapida(NamedTuple):
 
 # Um único bloqueio publica todos os campos. O controle nunca usa uma mistura
 # do ângulo de um frame com o ponto inferior do frame seguinte.
-_resultado_visao_rapida = Array("d", 11, lock=True)
+_resultado_visao_rapida = Array("d", 13, lock=True)
 
 
 def publicar_resultado_visao_rapida(
@@ -103,6 +118,8 @@ def publicar_resultado_visao_rapida(
     angulo,
     ponto_inferior_x,
     ponto_inferior_y,
+    ponto_alvo_x,
+    ponto_alvo_y,
     area_linha,
     candidato_verde,
     candidato_vermelho,
@@ -117,9 +134,11 @@ def publicar_resultado_visao_rapida(
         dados[5] = float(angulo)
         dados[6] = float(ponto_inferior_x)
         dados[7] = float(ponto_inferior_y)
-        dados[8] = float(area_linha)
-        dados[9] = bool(candidato_verde)
-        dados[10] = bool(candidato_vermelho)
+        dados[8] = float(ponto_alvo_x)
+        dados[9] = float(ponto_alvo_y)
+        dados[10] = float(area_linha)
+        dados[11] = bool(candidato_verde)
+        dados[12] = bool(candidato_vermelho)
 
 
 def ler_resultado_visao_rapida():
@@ -134,9 +153,11 @@ def ler_resultado_visao_rapida():
         angulo=dados[5],
         ponto_inferior_x=dados[6],
         ponto_inferior_y=dados[7],
-        area_linha=dados[8],
-        candidato_verde=bool(dados[9]),
-        candidato_vermelho=bool(dados[10]),
+        ponto_alvo_x=dados[8],
+        ponto_alvo_y=dados[9],
+        area_linha=dados[10],
+        candidato_verde=bool(dados[11]),
+        candidato_vermelho=bool(dados[12]),
     )
 
 
