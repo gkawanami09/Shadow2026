@@ -42,7 +42,39 @@ def _mascara_ao_redor(*, topo=True, esquerda=False, direita=False,
     return mascara
 
 
+def _cena_intersecao_direita(angulo=0):
+    """Reproduz a cruz da imagem: reto + ramo direito + verde no quadrante."""
+    preto = np.zeros((config.camera_y, config.camera_x), dtype=np.uint8)
+    verde = np.zeros_like(preto)
+    cv2.rectangle(preto, (100, 0), (154, config.camera_y - 1), 255, -1)
+    cv2.rectangle(preto, (100, 94), (300, 140), 255, -1)
+    cv2.rectangle(verde, (154, 141), (209, 192), 255, -1)
+    if angulo:
+        matriz = cv2.getRotationMatrix2D((154, 141), angulo, 1.)
+        tamanho = (config.camera_x, config.camera_y)
+        preto = cv2.warpAffine(
+            preto, matriz, tamanho, flags=cv2.INTER_NEAREST)
+        verde = cv2.warpAffine(
+            verde, matriz, tamanho, flags=cv2.INTER_NEAREST)
+    preto[verde > 0] = 0
+    contornos, _ = cv2.findContours(
+        verde, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    return contornos, preto
+
+
 class ValidacaoVerdeTests(unittest.TestCase):
+    def test_intersecao_que_continua_reto_obedece_ao_verde(self):
+        contornos, preto = _cena_intersecao_direita()
+        self.assertEqual(check_green(contornos, preto), "right")
+
+    def test_verde_torto_positivo_continua_valido(self):
+        contornos, preto = _cena_intersecao_direita(25)
+        self.assertEqual(check_green(contornos, preto), "right")
+
+    def test_verde_torto_negativo_continua_valido(self):
+        contornos, preto = _cena_intersecao_direita(-25)
+        self.assertEqual(check_green(contornos, preto), "right")
+
     def test_verde_para_esquerda_exige_preto_acima_e_a_direita(self):
         direcao = check_green(
             [_quadrado()], _mascara_ao_redor(topo=True, direita=True))
@@ -91,18 +123,23 @@ class ValidacaoVerdeTests(unittest.TestCase):
             "straight",
         )
 
-    def test_direcao_precisa_de_tres_quadros_consecutivos(self):
-        confirmador = ConfirmadorVerde(frames=3)
-        self.assertEqual(confirmador.atualizar("left"), "straight")
+    def test_direcao_precisa_de_dois_votos(self):
+        confirmador = ConfirmadorVerde(frames=2, janela=4)
         self.assertEqual(confirmador.atualizar("left"), "straight")
         self.assertEqual(confirmador.atualizar("left"), "left")
 
-    def test_quadro_invalido_zerar_confirmacao(self):
-        confirmador = ConfirmadorVerde(frames=3)
-        confirmador.atualizar("right")
+    def test_um_quadro_ruim_entre_votos_ainda_confirma(self):
+        confirmador = ConfirmadorVerde(frames=2, janela=4)
         confirmador.atualizar("right")
         self.assertEqual(confirmador.atualizar("straight"), "straight")
-        self.assertEqual(confirmador.atualizar("right"), "straight")
+        self.assertEqual(confirmador.atualizar("right"), "right")
+
+    def test_votos_de_lados_opostos_nao_autorizam_curva(self):
+        confirmador = ConfirmadorVerde(frames=2, janela=4)
+        confirmador.atualizar("right")
+        confirmador.atualizar("left")
+        confirmador.atualizar("right")
+        self.assertEqual(confirmador.atualizar("left"), "straight")
 
 
 if __name__ == "__main__":
