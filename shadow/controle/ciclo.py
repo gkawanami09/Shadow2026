@@ -749,14 +749,32 @@ def control_loop():
                 if usar_controle_linha:
                     pwm_esquerda, pwm_direita = mix_line_pwm(
                         correcao_linha, command_speed)
-                    steering_state.value = (
-                        STEERING_CORNER if saida_linha.estado == CORNER
-                        else STEERING_LOST if saida_linha.estado == LOST
-                        else STEERING_TRACK
-                    )
                     steering_correction.value = correcao_linha
-                    steering_lateral_error.value = saida_linha.erro_lateral
-                    steering_heading.value = saida_linha.angulo_linha
+                    if saida_linha is None:
+                        # Aproximacao verde usa o mesmo mixer dos motores, mas
+                        # deliberadamente nao possui uma SaidaSegueLinha: ela
+                        # centraliza apenas o ponto inferior e ignora o rumo
+                        # futuro do ramo ate iniciar o tanque.
+                        steering_state.value = STEERING_SPECIAL
+                        steering_lateral_error.value = max(min(
+                            (
+                                resultado_visao.ponto_inferior_x
+                                - camera_x / 2
+                            ) / (camera_x / 2),
+                            1.,
+                        ), -1.)
+                        steering_heading.value = 0.
+                    else:
+                        steering_state.value = (
+                            STEERING_CORNER
+                            if saida_linha.estado == CORNER
+                            else STEERING_LOST
+                            if saida_linha.estado == LOST
+                            else STEERING_TRACK
+                        )
+                        steering_lateral_error.value = (
+                            saida_linha.erro_lateral)
+                        steering_heading.value = saida_linha.angulo_linha
                     steering_left_pwm.value = pwm_esquerda
                     steering_right_pwm.value = pwm_direita
                     steer_line(correcao_linha, command_speed)
