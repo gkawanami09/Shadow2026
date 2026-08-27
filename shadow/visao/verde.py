@@ -40,7 +40,9 @@ def check_green(contours_grn, black_image, debug_img=None):
         return "straight"
 
 
-@njit(cache=True)
+# Compilado durante aquecer_numba(). Nao persistir o cache torna o boot
+# resistente a desligamentos abruptos sem alterar o processamento dos frames.
+@njit(cache=False)
 def check_black(black_around_sign, i, green_box, black_image):
     green_box = green_box[green_box[:, 1].argsort()]
 

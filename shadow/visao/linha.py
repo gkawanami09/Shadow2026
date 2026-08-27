@@ -87,7 +87,10 @@ def determine_correct_line(contours_blk, preferir_esquerda=False,
     return blackline, blackline_crop
 
 
-@njit(cache=True)
+# O processo ja aquece esta funcao antes de abrir a camera. Manter o codigo
+# compilado somente em memoria evita que uma queda de energia deixe arquivos
+# .nbi/.nbc incompletos e impeça a visao de iniciar no boot seguinte.
+@njit(cache=False)
 def calculate_angle_numba(blackline, blackline_crop, last_bottom_point, average_line_point):
     max_gap = 1
     max_line_width = camera_x * .19
