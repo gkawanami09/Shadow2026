@@ -278,7 +278,7 @@ class LineCamera:
         if metadata_reader is None:
             print(
                 "[camera] metadata de crop/FPS indisponível; "
-                "calibração métrica indisponível; fallback PIXEL ativo"
+                "metadados métricos indisponíveis; verde simples ativo"
             )
             return
 
@@ -327,7 +327,7 @@ class LineCamera:
         print(
             "[camera] driver não confirmou crop/FPS solicitados "
             f"(crop={ultimo_crop}, FrameDuration={ultimo_frame_us}); "
-            "calibração métrica indisponível; fallback PIXEL ativo"
+            "metadados métricos indisponíveis; verde simples ativo"
         )
 
     def _configurar_foco(self):
@@ -570,8 +570,8 @@ class LineCamera:
             else:
                 print(
                     "[camera] stream principal não confirmado "
-                    f"(recebido={actual_main}); calibração métrica "
-                    "indisponível; fallback PIXEL ativo"
+                    f"(recebido={actual_main}); metadados métricos "
+                    "indisponíveis; verde simples ativo"
                 )
             if sensor_mode_sent:
                 actual_mode = _normalizar_modo_sensor(
@@ -583,12 +583,12 @@ class LineCamera:
         if self._main_stream_applied is None:
             print(
                 "[camera] driver não confirmou resolução/formato do stream; "
-                "calibração métrica indisponível; fallback PIXEL ativo"
+                "metadados métricos indisponíveis; verde simples ativo"
             )
         if sensor_mode_sent and self._sensor_mode_applied is None:
             print(
                 "[camera] driver não confirmou o modo bruto; "
-                "calibração métrica indisponível; fallback PIXEL ativo"
+                "metadados métricos indisponíveis; verde simples ativo"
             )
         self.picam2.start()
 

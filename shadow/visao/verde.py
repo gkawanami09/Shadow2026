@@ -27,34 +27,31 @@ class ConfirmadorVerde:
         self.frames_180 = max(1, int(frames_180))
         self.window = max(self.frames, int(window))
         self._historico = deque(maxlen=self.window)
-        self._contagem_180 = 0
 
     def atualizar(self, direcao):
-        if direcao == "turn_around":
-            # Dois marcadores validos no mesmo quadro tem prioridade sobre
-            # qualquer voto parcial de 90 graus.
-            self._historico.clear()
-            self._contagem_180 += 1
-            return (
-                "turn_around"
-                if self._contagem_180 >= self.frames_180
-                else "straight"
-            )
-
-        self._contagem_180 = 0
-        direcao = direcao if direcao in ("left", "right") else "straight"
-        self._historico.append(direcao)
-        if direcao == "straight":
-            return "straight"
-
-        oposta = "right" if direcao == "left" else "left"
-        votos = self._historico.count(direcao)
-        votos_opostos = self._historico.count(oposta)
-        return (
+        direcao = (
             direcao
-            if votos >= self.frames and votos > votos_opostos
+            if direcao in ("left", "right", "turn_around")
             else "straight"
         )
+        self._historico.append(direcao)
+
+        # Dois verdes sempre possuem prioridade. Enquanto ha evidencia dupla
+        # recente, um unico contorno perdido nao pode degradar 180 para 90.
+        votos_180 = self._historico.count("turn_around")
+        if votos_180 >= self.frames_180:
+            self._historico.clear()
+            return "turn_around"
+        if votos_180:
+            return "straight"
+
+        votos_esquerda = self._historico.count("left")
+        votos_direita = self._historico.count("right")
+        if votos_esquerda >= self.frames and votos_esquerda > votos_direita:
+            return "left"
+        if votos_direita >= self.frames and votos_direita > votos_esquerda:
+            return "right"
+        return "straight"
 
 
 def _marcador_plausivel(contour):
@@ -76,78 +73,38 @@ def _marcador_plausivel(contour):
 
 
 def _tem_segmento_continuo(roi, orientacao, borda_interna, minimo):
-    """Confirma uma linha continua e proxima da borda do marcador."""
+    """Confirma preto conectado e adjacente sem exigir linha horizontal."""
     if roi.size == 0 or minimo < 2:
         return False
     mascara = (roi > 0).astype(np.uint8) * 255
-    kernel = (
-        np.ones((1, minimo), dtype=np.uint8)
-        if orientacao == "horizontal"
-        else np.ones((minimo, 1), dtype=np.uint8)
+    mascara = cv2.morphologyEx(
+        mascara,
+        cv2.MORPH_CLOSE,
+        np.ones((3, 3), dtype=np.uint8),
     )
-    segmento = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel)
-    if not np.any(segmento):
-        return False
-
-    tamanho = (
-        roi.shape[0]
-        if borda_interna in ("top", "bottom")
-        else roi.shape[1]
+    quantidade, _rotulos, estatisticas, _centros = (
+        cv2.connectedComponentsWithStats(mascara, connectivity=8)
     )
-    alcance = max(3, int(round(tamanho * GREEN_BLACK_MAX_GAP_RATIO)))
-    if borda_interna == "bottom":
-        proximo = segmento[-alcance:, :]
-    elif borda_interna == "top":
-        proximo = segmento[:alcance, :]
-    elif borda_interna == "right":
-        proximo = segmento[:, -alcance:]
-    else:
-        proximo = segmento[:, :alcance]
-    return bool(np.any(proximo))
-
-
-def _ordenar_cantos(cantos):
-    """Ordena uma caixa rotacionada em topo-E, topo-D, baixo-D, baixo-E."""
-    pontos = np.asarray(cantos, dtype=np.float32)
-    ordenados = np.zeros((4, 2), dtype=np.float32)
-    soma = pontos.sum(axis=1)
-    diferenca = np.diff(pontos, axis=1).reshape(-1)
-    ordenados[0] = pontos[np.argmin(soma)]
-    ordenados[2] = pontos[np.argmax(soma)]
-    ordenados[1] = pontos[np.argmin(diferenca)]
-    ordenados[3] = pontos[np.argmax(diferenca)]
-    return ordenados
-
-
-def _retificar_entorno(green_box, black_image):
-    """Gira o entorno junto com o marcador antes de medir suas quatro faces."""
-    origem = _ordenar_cantos(green_box)
-    largura = max(
-        np.linalg.norm(origem[1] - origem[0]),
-        np.linalg.norm(origem[2] - origem[3]),
-    )
-    altura = max(
-        np.linalg.norm(origem[3] - origem[0]),
-        np.linalg.norm(origem[2] - origem[1]),
-    )
-    lado = max(3, int(round(max(largura, altura))))
-    margem = max(4, int(round(lado * GREEN_BLACK_ROI_SCALE)))
-    fim = margem + lado - 1
-    destino = np.array(
-        [[margem, margem], [fim, margem], [fim, fim], [margem, fim]],
-        dtype=np.float32,
-    )
-    matriz = cv2.getPerspectiveTransform(origem, destino)
-    tamanho = lado + 2 * margem
-    retificada = cv2.warpPerspective(
-        black_image,
-        matriz,
-        (tamanho, tamanho),
-        flags=cv2.INTER_NEAREST,
-        borderMode=cv2.BORDER_CONSTANT,
-        borderValue=0,
-    )
-    return retificada, margem, lado
+    altura_roi, largura_roi = mascara.shape
+    normal = altura_roi if borda_interna in ("top", "bottom") else largura_roi
+    alcance = max(2, int(round(normal * GREEN_BLACK_MAX_GAP_RATIO)))
+    for indice in range(1, quantidade):
+        x, y, largura, altura, area = estatisticas[indice]
+        toca = (
+            y + altura >= altura_roi - alcance
+            if borda_interna == "bottom" else
+            y <= alcance
+            if borda_interna == "top" else
+            x + largura >= largura_roi - alcance
+            if borda_interna == "right" else
+            x <= alcance
+        )
+        extensao = largura if orientacao == "horizontal" else altura
+        if toca and extensao >= minimo and area >= max(4, minimo * .12):
+            return max(1, int(round(
+                1000. * np.count_nonzero(mascara) / mascara.size
+            )))
+    return 0
 
 
 def check_green(contours_grn, black_image, debug_img=None):
@@ -162,10 +119,9 @@ def check_green(contours_grn, black_image, debug_img=None):
         check_black(black_around_sign, i, green_box, black_image)
         if debug_img is not None:
             leitura = black_around_sign[i]
-            geometria_valida = bool(
-                leitura[1]
-                and bool(leitura[2]) != bool(leitura[3])
-            )
+            leitura_esquerda, leitura_direita = (
+                determine_turn_direction((leitura,)))
+            geometria_valida = leitura_esquerda != leitura_direita
             # Vermelho significa apenas quadrado verde plausivel; verde
             # significa que topo + lado ja autorizaram uma ordem de curva.
             cor = (0, 255, 0) if geometria_valida else (0, 0, 255)
@@ -185,28 +141,31 @@ def check_green(contours_grn, black_image, debug_img=None):
 
 
 def check_black(black_around_sign, i, green_box, black_image):
-    """Mede linhas continuas acima e dos lados do quadrado verde."""
-    retificada, margem, lado = _retificar_entorno(green_box, black_image)
-    fim = margem + lado
-    # Pequeno recuo evita que a borda dilatada do proprio verde interfira,
-    # sem remover a linha preta imediatamente adjacente.
-    recuo = max(1, int(round(lado * .06)))
-    inicio_interno = margem + recuo
-    fim_interno = max(inicio_interno + 1, fim - recuo)
-    topo = retificada[0:margem, inicio_interno:fim_interno]
-    baixo = retificada[fim:fim + margem, inicio_interno:fim_interno]
-    esquerda = retificada[inicio_interno:fim_interno, 0:margem]
-    direita = retificada[inicio_interno:fim_interno, fim:fim + margem]
+    """Mede acima/lados no eixo da camera, como a logica antiga."""
+    altura_imagem, largura_imagem = black_image.shape[:2]
+    x, y, largura, altura = cv2.boundingRect(
+        np.asarray(green_box, dtype=np.float32))
+    lado = max(largura, altura, 3)
+    margem = max(4, int(round(lado * GREEN_BLACK_ROI_SCALE)))
+    folga = max(2, int(round(lado * .12)))
+    x0 = max(0, x - folga)
+    x1 = min(largura_imagem, x + largura + folga)
+    y0 = max(0, y - folga)
+    y1 = min(altura_imagem, y + altura + folga)
+    topo = black_image[max(0, y - margem):y, x0:x1]
+    baixo = black_image[y + altura:min(altura_imagem, y + altura + margem), x0:x1]
+    esquerda = black_image[y0:y1, max(0, x - margem):x]
+    direita = black_image[y0:y1, x + largura:min(largura_imagem, x + largura + margem)]
     minimo = max(2, int(round(lado * GREEN_BLACK_MIN_RUN_RATIO)))
 
-    black_around_sign[i, 0] = int(_tem_segmento_continuo(
-        baixo, "horizontal", "top", minimo))
-    black_around_sign[i, 1] = int(_tem_segmento_continuo(
-        topo, "horizontal", "bottom", minimo))
-    black_around_sign[i, 2] = int(_tem_segmento_continuo(
-        esquerda, "vertical", "right", minimo))
-    black_around_sign[i, 3] = int(_tem_segmento_continuo(
-        direita, "vertical", "left", minimo))
+    black_around_sign[i, 0] = _tem_segmento_continuo(
+        baixo, "horizontal", "top", minimo)
+    black_around_sign[i, 1] = _tem_segmento_continuo(
+        topo, "horizontal", "bottom", minimo)
+    black_around_sign[i, 2] = _tem_segmento_continuo(
+        esquerda, "vertical", "right", minimo)
+    black_around_sign[i, 3] = _tem_segmento_continuo(
+        direita, "vertical", "left", minimo)
     black_around_sign[i, 4] = int(np.ceil(np.max(green_box[:, 1])))
     return black_around_sign
 
@@ -224,12 +183,25 @@ def determine_turn_direction(black_around_sign):
         # ser a propria faixa de entrada quando o marcador ja chegou perto da
         # base; ele nao contradiz a ordem. Os dois lados continuam ambiguos e
         # nao autorizam um 90.
-        tem_topo = leitura[1] == 1
-        tem_esquerda = leitura[2] == 1
-        tem_direita = leitura[3] == 1
-        if tem_topo and tem_esquerda and not tem_direita:
+        tem_topo = leitura[1] > 0
+        suporte_esquerda = int(leitura[2])
+        suporte_direita = int(leitura[3])
+        # Em chegada diagonal a barra superior pode invadir as duas ROIs.
+        # O lado realmente adjacente ocupa claramente mais pixels; se a
+        # diferenca for pequena, a cena continua ambigua e o robo vai reto.
+        esquerda_domina = bool(
+            suporte_esquerda > 0
+            and (suporte_direita == 0
+                 or suporte_esquerda >= suporte_direita * 1.15)
+        )
+        direita_domina = bool(
+            suporte_direita > 0
+            and (suporte_esquerda == 0
+                 or suporte_direita >= suporte_esquerda * 1.15)
+        )
+        if tem_topo and esquerda_domina and not direita_domina:
             turn_right = True
-        elif tem_topo and tem_direita and not tem_esquerda:
+        elif tem_topo and direita_domina and not esquerda_domina:
             turn_left = True
 
     return turn_left, turn_right

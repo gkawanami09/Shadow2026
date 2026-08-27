@@ -2,7 +2,14 @@
 
 import cv2
 import numpy as np
-from numba import njit
+try:
+    from numba import njit
+except ModuleNotFoundError:  # ferramentas/testes fora da Raspberry
+    def njit(*args, **kwargs):
+        del kwargs
+        if args and callable(args[0]):
+            return args[0]
+        return lambda function: function
 
 from config import (BOTTOM_CENTER_CONTROL, BOTTOM_CENTER_MIN_Y,
                     BOTTOM_CENTER_WEIGHT,
@@ -25,7 +32,6 @@ def init_tracker():
 
 
 def contorno_atravessa_laterais(contorno):
-    """Indica a barra transversal de uma intersecao de borda a borda."""
     if contorno is None or np.asarray(contorno).size == 0:
         return False
     pontos_x = np.asarray(contorno)[:, 0, 0]
@@ -99,9 +105,6 @@ def determine_correct_line(contours_blk, preferir_esquerda=False,
     return blackline, blackline_crop
 
 
-# O processo aquece esta funcao antes de abrir a camera. O cache evita uma nova
-# compilacao a cada boot; aquecer_numba recupera automaticamente um indice que
-# tenha sido interrompido por uma queda de energia.
 @njit(cache=True)
 def calculate_angle_numba(blackline, blackline_crop, last_bottom_point, average_line_point):
     max_gap = 1
@@ -237,10 +240,6 @@ def calculate_angle(
 
     black_l_high = poi_no_crop[1][1] < camera_y * .5
     black_r_high = poi_no_crop[2][1] < camera_y * .5
-    atravessa_os_dois_lados = (
-        poi_no_crop[1][0] < camera_x * .02
-        and poi_no_crop[2][0] > camera_x * .98
-    )
 
     if not timer.get_timer("multiple_bottom"):
         final_poi = [multiple_bottom_side, camera_y]
@@ -250,8 +249,6 @@ def calculate_angle(
         final_poi = poi[index] if is_crop else poi_no_crop[index]
 
     elif preferir_reto:
-        # Intersecao sem marcador confirmado: um ramo transversal de apenas
-        # um lado tambem nao pode sequestrar o POI. O topo e a continuacao.
         final_poi = poi_no_crop[0]
 
     else:
@@ -279,6 +276,10 @@ def calculate_angle(
         else:
             final_poi = poi[0] if is_crop else poi_no_crop[0]
 
+            atravessa_os_dois_lados = (
+                poi_no_crop[1][0] < camera_x * 0.02
+                and poi_no_crop[2][0] > camera_x * 0.98
+            )
             largura_lateral = (
                 poi_no_crop[2][0] - poi_no_crop[1][0]
             )

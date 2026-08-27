@@ -42,12 +42,13 @@ Com o robô SOBRE a pista, na iluminação real da sala:
 
 Salve cada grupo com `s`. Valide com `python3 shadow/main.py --vision-only --debug`.
 
-## 2.1 Geometria opcional da Camera Module 3 Wide
+## 2.1 Verde simples da Camera Module 3 Wide
 
-Sem `shadow/calibracao_camera_wide.npz`, o verde funciona em coordenadas da
-imagem, normalizando tamanho e distâncias pela largura medida da própria linha.
-Esse é o modo padrão do robô e não exige tabuleiro. A calibração abaixo é
-opcional e melhora a precisão métrica nas bordas muito distorcidas da lente.
+O modo usado pelo robô não exige tabuleiro nem arquivo `.npz`. Ele preserva a
+lógica anterior à troca da câmera: valida um quadrado verde somente quando há
+preto acima e no lado interno, confirma a mesma ordem em três de cinco frames
+e então trava a manobra. A seção de tabuleiro abaixo é apenas uma ferramenta
+experimental e não participa do segue-linha atual.
 
 Para usar a melhoria opcional, imprima um tabuleiro de **8×6 quadrados
 de 10 mm** (7×5 cantos internos). O arquivo pronto é
