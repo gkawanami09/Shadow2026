@@ -272,6 +272,10 @@ class ControladorSegueLinha:
             and math.isfinite(float(ponto_futuro_x))
             and math.isfinite(float(ponto_futuro_y))
         )
+        # O ponto inferior representa onde a faixa realmente cruza a base do
+        # robo. Ele nunca pode desaparecer do comando: o ponto futuro antecipa
+        # o rumo, mas esta parcela fecha continuamente o alinhamento fisico.
+        erro_inferior = config.LINE_LATERAL_GAIN * erro_lateral
         angulo_futuro_bruto = angulo_linha
         if futuro_valido:
             angulo_futuro_bruto = angulo_para_ponto_futuro(
@@ -290,14 +294,15 @@ class ControladorSegueLinha:
                 )
             angulo_controle = self._angulo_futuro_filtrado
             erro_base = (
-                config.LINE_FUTURE_GAIN
+                erro_inferior
+                + config.LINE_FUTURE_GAIN
                 * math.sin(math.radians(angulo_controle))
             )
         else:
             self._angulo_futuro_filtrado = None
             angulo_controle = angulo_linha
             erro_base = (
-                config.LINE_LATERAL_GAIN * erro_lateral
+                erro_inferior
                 + config.LINE_HEADING_GAIN
                 * math.sin(math.radians(angulo_linha))
             )
@@ -348,6 +353,19 @@ class ControladorSegueLinha:
                 <= config.LINE_CORNER_EXIT_HEADING_DEG
             )
         )
+        # O horizonte sozinho pode ficar central durante um 90 verdadeiro.
+        # So solte uma curva ja confirmada quando a geometria junto da base
+        # tambem tiver mudado de lado; caso contrario o robo abandona o giro
+        # antes de trazer a nova reta para o centro inferior.
+        base_cruzou_centro = (
+            self._canto_sinal != 0
+            and self._canto_sinal * erro_lateral
+            < -config.LINE_CORNER_EXIT_LATERAL
+        )
+        rumo_local_contradiz_canto = (
+            self._canto_sinal != 0
+            and self._canto_sinal * angulo_linha < -5.
+        )
         correcao = self._atualizar_canto(
             angulo_linha=angulo_linha,
             erro_lateral=erro_lateral,
@@ -357,7 +375,12 @@ class ControladorSegueLinha:
             agora=agora,
             permitir_novo_canto=not retorno_visivel,
             cancelar_canto=(
-                retorno_visivel or futuro_contradiz_canto),
+                base_cruzou_centro
+                or (
+                    futuro_contradiz_canto
+                    and rumo_local_contradiz_canto
+                )
+            ),
         )
         correcao = max(min(correcao, 1.), -1.)
         self._ultima_correcao = correcao

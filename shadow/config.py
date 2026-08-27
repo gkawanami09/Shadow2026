@@ -168,10 +168,10 @@ LINE_DERIVATIVE_LIMIT = .25
 LINE_CORRECTION_DEADBAND = .025
 LINE_MAX_FRAME_AGE_S = .15
 
-# Pure pursuit visual. O ponto local continua protegendo cantos e perdas, mas
-# o movimento normal mira do centro do robo para um ponto distante do contorno
-# completo. Se a linha desvia e volta dentro da imagem, o alvo futuro prevalece
-# sobre os desvios intermediarios.
+# Pure pursuit visual. O ponto futuro antecipa o rumo no contorno completo,
+# enquanto o ponto inferior continua fechando o erro junto da base do robo.
+# Assim um desvio que volta na imagem nao vira varios giros completos, mas a
+# faixa tambem nunca deixa de ser puxada para o centro fisico do chassi.
 LINE_PATH_SAMPLE_BANDS = 20
 LINE_PATH_MIN_VERTICAL_SPAN_RATIO = .28
 LINE_PATH_MIN_SAMPLES = 7

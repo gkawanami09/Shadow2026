@@ -68,34 +68,10 @@ class SteeringTests(unittest.TestCase):
 
         self.assertEqual(self.arduino.chamadas, [("lado", 80, -80)])
 
-    def test_canto_esquerdo_ancora_camera_no_eixo_dianteiro(self):
-        rodas = direcao.mix_line_wheels(
-            -.72, LINE_FOLLOW_SPEED, front_anchor=True)
+    def test_canto_fechado_mantem_os_eixos_sincronizados(self):
+        direcao.steer_line(-.72, LINE_FOLLOW_SPEED)
 
-        self.assertEqual(rodas, (-8, -70, 18, 80))
-        self.assertLess(abs(rodas[0]), abs(rodas[1]))
-        self.assertLess(abs(rodas[2]), abs(rodas[3]))
-        self.assertLessEqual(max(map(abs, rodas)), LINE_FOLLOW_PWM)
-
-    def test_canto_direito_ancorado_e_espelho_do_esquerdo(self):
-        esquerda = direcao.mix_line_wheels(
-            -.72, LINE_FOLLOW_SPEED, front_anchor=True)
-        direita = direcao.mix_line_wheels(
-            .72, LINE_FOLLOW_SPEED, front_anchor=True)
-
-        self.assertEqual(
-            direita,
-            (esquerda[2], esquerda[3], esquerda[0], esquerda[1]),
-        )
-
-    def test_steer_line_ancorado_envia_as_quatro_rodas(self):
-        direcao.steer_line(
-            -.72, LINE_FOLLOW_SPEED, front_anchor=True)
-
-        self.assertEqual(
-            self.arduino.chamadas,
-            [("rodas", -8, -70, 18, 80)],
-        )
+        self.assertEqual(self.arduino.chamadas, [("lado", -35, 80)])
 
 
 if __name__ == "__main__":

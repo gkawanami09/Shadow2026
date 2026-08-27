@@ -89,7 +89,7 @@ class SeguidorLinhaTests(unittest.TestCase):
         self.assertGreater(direita, 0.)
         self.assertAlmostEqual(direita, -esquerda)
 
-    def test_ponto_futuro_central_ignora_desvios_intermediarios(self):
+    def test_ponto_futuro_central_ainda_alinha_a_base_do_robo(self):
         saidas = [
             self.quadro(
                 a_frente=True,
@@ -101,9 +101,13 @@ class SeguidorLinhaTests(unittest.TestCase):
         ]
 
         self.assertTrue(all(saida.estado == TRACK for saida in saidas))
-        self.assertTrue(all(saida.correcao == 0. for saida in saidas))
+        self.assertTrue(all(saida.correcao > 0. for saida in saidas))
+        self.assertAlmostEqual(
+            saidas[-1].correcao,
+            config.LINE_LATERAL_GAIN * (76. / 224.),
+        )
 
-    def test_retorno_futuro_suprime_canto_sem_preto_no_corredor_central(self):
+    def test_retorno_futuro_suprime_canto_mas_conserva_alinhamento_da_base(self):
         saidas = [
             self.quadro(
                 a_frente=False,
@@ -115,7 +119,7 @@ class SeguidorLinhaTests(unittest.TestCase):
         ]
 
         self.assertTrue(all(saida.estado == TRACK for saida in saidas))
-        self.assertTrue(all(saida.correcao == 0. for saida in saidas))
+        self.assertTrue(all(saida.correcao > 0. for saida in saidas))
 
     def test_controle_segue_o_futuro_mesmo_se_o_local_aponta_ao_contrario(self):
         saida = self.quadro(
@@ -226,6 +230,49 @@ class SeguidorLinhaTests(unittest.TestCase):
         self.assertEqual(recuperado.estado, CORNER)
         self.assertGreaterEqual(
             recuperado.correcao, config.LINE_CORNER_MIN_CORRECTION)
+
+    def test_futuro_central_sozinho_nao_abandona_90_real(self):
+        self.quadro(
+            a_frente=False, alvo=(447., 126.), futuro=(380., 80.))
+        armado = self.quadro(
+            a_frente=False, alvo=(447., 126.), futuro=(380., 80.))
+
+        saidas = [
+            self.quadro(
+                a_frente=False,
+                inferior=(300., 251.),
+                alvo=(447., 126.),
+                futuro=(224., 20.),
+            )
+            for _ in range(3)
+        ]
+
+        self.assertEqual(armado.estado, CORNER)
+        self.assertTrue(all(saida.estado == CORNER for saida in saidas))
+        self.assertTrue(all(
+            saida.correcao >= config.LINE_CORNER_MIN_CORRECTION
+            for saida in saidas
+        ))
+
+    def test_base_que_cruza_o_centro_interrompe_excesso_de_giro(self):
+        self.quadro(a_frente=False, alvo=(447., 126.))
+        armado = self.quadro(a_frente=False, alvo=(447., 126.))
+
+        cruzou_1 = self.quadro(
+            a_frente=True,
+            inferior=(170., 251.),
+            alvo=(224., 20.),
+        )
+        cruzou_2 = self.quadro(
+            a_frente=True,
+            inferior=(170., 251.),
+            alvo=(224., 20.),
+        )
+
+        self.assertEqual(armado.estado, CORNER)
+        self.assertEqual(cruzou_1.estado, CORNER)
+        self.assertEqual(cruzou_2.estado, TRACK)
+        self.assertLess(cruzou_2.correcao, 0.)
 
     def test_canto_sai_so_depois_de_tres_frames_alinhados(self):
         self.quadro(a_frente=False, alvo=(447., 126.))
