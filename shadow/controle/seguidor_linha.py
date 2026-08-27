@@ -310,7 +310,8 @@ class ControladorSegueLinha:
 
         retorno_visivel = (
             futuro_valido
-            and bool(linha_a_frente)
+            and float(ponto_futuro_y)
+            <= config.camera_y * config.LINE_FUTURE_RETURN_MAX_Y_RATIO
             and abs(angulo_linha) >= config.LINE_CORNER_SIDE_HEADING_DEG
             and (
                 angulo_linha * angulo_futuro_bruto <= 0.

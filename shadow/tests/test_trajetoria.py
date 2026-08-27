@@ -60,6 +60,31 @@ class PontoFuturoTests(unittest.TestCase):
         self.assertTrue(futuro.valido)
         self.assertAlmostEqual(futuro.x, 224., delta=15.)
 
+    def test_reflexos_no_zigzag_nao_encurtam_o_ponto_futuro(self):
+        pontos = [
+            (224, 251), (75, 200), (385, 150),
+            (65, 90), (224, 5),
+        ]
+        mascara, contorno = linha(pontos, espessura=40)
+        # Buracos claros como os observados no video continuam dentro de um
+        # unico contorno, mas antes eram confundidos com ramos de um circulo.
+        for x, y, raio in (
+            (180, 184, 12),
+            (285, 164, 14),
+            (180, 112, 12),
+        ):
+            cv2.circle(mascara, (x, y), raio, 0, -1)
+
+        futuro = extrair_ponto_futuro(
+            contorno,
+            mascara_linha=mascara,
+            origem_x=224,
+        )
+
+        self.assertTrue(futuro.valido)
+        self.assertLess(futuro.y, 30.)
+        self.assertAlmostEqual(futuro.x, 224., delta=20.)
+
     def test_desvio_que_termina_a_direita_mira_a_direita(self):
         futuro = self.futuro([
             (224, 251), (130, 200), (318, 150),

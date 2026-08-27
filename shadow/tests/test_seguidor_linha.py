@@ -103,6 +103,20 @@ class SeguidorLinhaTests(unittest.TestCase):
         self.assertTrue(all(saida.estado == TRACK for saida in saidas))
         self.assertTrue(all(saida.correcao == 0. for saida in saidas))
 
+    def test_retorno_futuro_suprime_canto_sem_preto_no_corredor_central(self):
+        saidas = [
+            self.quadro(
+                a_frente=False,
+                inferior=(300., 251.),
+                alvo=(420., 126.),
+                futuro=(224., 10.),
+            )
+            for _ in range(3)
+        ]
+
+        self.assertTrue(all(saida.estado == TRACK for saida in saidas))
+        self.assertTrue(all(saida.correcao == 0. for saida in saidas))
+
     def test_controle_segue_o_futuro_mesmo_se_o_local_aponta_ao_contrario(self):
         saida = self.quadro(
             a_frente=True,

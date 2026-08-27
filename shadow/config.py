@@ -177,13 +177,20 @@ LINE_PATH_MIN_VERTICAL_SPAN_RATIO = .28
 LINE_PATH_MIN_SAMPLES = 7
 LINE_PATH_MAX_BAND_GAP = 2
 LINE_PATH_MAX_LATERAL_JUMP_PX = camera_x * .30
+# Reflexos das luzes abrem pequenos vazios dentro da faixa preta. Eles nao
+# sao bifurcacoes: intervalos proximos sao reunidos e uma separacao so limita
+# o ponto futuro quando for larga e persistir por varias bandas da imagem.
+LINE_PATH_INTERVAL_MERGE_GAP_PX = camera_x * .055
+LINE_PATH_BRANCH_MIN_GAP_PX = camera_x * .11
+LINE_PATH_BRANCH_MIN_BANDS = 4
 LINE_FUTURE_FRACTION = 1.0
 LINE_FUTURE_SMOOTH_RADIUS = 1
 LINE_FUTURE_GAIN = 1.05
 LINE_FUTURE_FILTER = .45
-# Quando existe preto material a frente e o rumo local se desfaz antes do
-# ponto futuro, essa diagonal nao pode armar a memoria de um canto de 90.
+# Quando o rumo local se desfaz antes de um ponto futuro realmente distante,
+# essa diagonal nao pode armar a memoria de um canto de 90.
 LINE_FUTURE_RETURN_RATIO = .65
+LINE_FUTURE_RETURN_MAX_Y_RATIO = .65
 
 # Curvas fechadas sao confirmadas em dois frames e ficam travadas para o mesmo
 # lado ate que a nova reta esteja vertical e centralizada. Assim um canto nao
