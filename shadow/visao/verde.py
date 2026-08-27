@@ -7,7 +7,8 @@ from config import (GREEN_BLACK_MAX_GAP_RATIO, GREEN_BLACK_MIN_RUN_RATIO,
                     GREEN_BLACK_ROI_SCALE, GREEN_CONFIRM_FRAMES,
                     GREEN_MARKER_MAX_ASPECT, GREEN_MARKER_MEMORY,
                     GREEN_MARKER_MIN_ASPECT, GREEN_MARKER_MIN_RECT_FILL,
-                    GREEN_MIN_AREA, GREEN_VOTE_THRESHOLD, GREEN_VOTE_WINDOW,
+                    GREEN_MIN_AREA, GREEN_TURN_AROUND_CONFIRM_FRAMES,
+                    GREEN_VOTE_THRESHOLD, GREEN_VOTE_WINDOW,
                     LINE_CROP_GREEN, LINE_CROP_NORMAL, camera_y)
 from shared.dados_compartilhados import (add_time_value, get_time_average,
                                          line_crop, timer, turn_dir)
@@ -16,8 +17,10 @@ from shared.dados_compartilhados import (add_time_value, get_time_average,
 class ConfirmadorVerde:
     """So libera a mesma geometria em quadros consecutivos."""
 
-    def __init__(self, frames=GREEN_CONFIRM_FRAMES):
+    def __init__(self, frames=GREEN_CONFIRM_FRAMES,
+                 frames_180=GREEN_TURN_AROUND_CONFIRM_FRAMES):
         self.frames = max(1, int(frames))
+        self.frames_180 = max(1, int(frames_180))
         self._direcao = "straight"
         self._contagem = 0
 
@@ -31,7 +34,10 @@ class ConfirmadorVerde:
             self._contagem = 1
         else:
             self._contagem += 1
-        return direcao if self._contagem >= self.frames else "straight"
+        confirmacoes = (
+            self.frames_180 if direcao == "turn_around" else self.frames
+        )
+        return direcao if self._contagem >= confirmacoes else "straight"
 
 
 def _marcador_plausivel(contour):
@@ -144,12 +150,14 @@ def check_green(contours_grn, black_image, debug_img=None):
     turn_left, turn_right, left_bottom, right_bottom = (
         determine_turn_direction(black_around_sign)
     )
+    # O par tem prioridade absoluta. Sem esta ordem, perder um dos contornos
+    # por um frame pode deixar a memoria de 90 graus vencer o retorno.
+    if turn_left and turn_right and not (left_bottom and right_bottom):
+        return "turn_around"
     if turn_left and not turn_right and not left_bottom:
         return "left"
     if turn_right and not turn_left and not right_bottom:
         return "right"
-    if turn_left and turn_right and not (left_bottom and right_bottom):
-        return "turn_around"
     return "straight"
 
 

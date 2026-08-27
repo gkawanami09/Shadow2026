@@ -62,7 +62,30 @@ def _cena_intersecao_direita(angulo=0):
     return contornos, preto
 
 
+def _dois_verdes_validos():
+    esquerdo = _quadrado(x=70, y=130, lado=52)
+    direito = _quadrado(x=300, y=130, lado=52)
+    preto = np.zeros((config.camera_y, config.camera_x), dtype=np.uint8)
+    preto |= _mascara_ao_redor(
+        topo=True, direita=True, x=70, y=130, lado=52)
+    preto |= _mascara_ao_redor(
+        topo=True, esquerda=True, x=300, y=130, lado=52)
+    return [esquerdo, direito], preto
+
+
 class ValidacaoVerdeTests(unittest.TestCase):
+    def test_dois_verdes_validos_tem_prioridade_de_180(self):
+        contornos, preto = _dois_verdes_validos()
+        self.assertEqual(check_green(contornos, preto), "turn_around")
+
+    def test_180_cancela_confirmacao_parcial_de_90(self):
+        confirmador = ConfirmadorVerde(frames=3, frames_180=1)
+        self.assertEqual(confirmador.atualizar("left"), "straight")
+        self.assertEqual(confirmador.atualizar("left"), "straight")
+        self.assertEqual(
+            confirmador.atualizar("turn_around"), "turn_around")
+        self.assertEqual(confirmador.atualizar("left"), "straight")
+
     def test_intersecao_que_continua_reto_obedece_ao_verde(self):
         contornos, preto = _cena_intersecao_direita()
         self.assertEqual(check_green(contornos, preto), "right")

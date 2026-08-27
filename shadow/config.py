@@ -260,6 +260,7 @@ GREEN_BLACK_ROI_SCALE = .9                # alcance da busca ao redor do verde
 GREEN_BLACK_MIN_RUN_RATIO = .42           # linha continua, nao media de pixels
 GREEN_BLACK_MAX_GAP_RATIO = .28           # precisa estar logo junto do quadrado
 GREEN_CONFIRM_FRAMES = 3                  # nunca soma falsos verdes separados
+GREEN_TURN_AROUND_CONFIRM_FRAMES = 1      # dois verdes validos tem prioridade
 GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)
