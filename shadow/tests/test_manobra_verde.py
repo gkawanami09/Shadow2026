@@ -35,29 +35,25 @@ class ManobraVerdeTests(unittest.TestCase):
     def test_ramo_distante_ainda_nao_inicia_tanque(self):
         self.assertFalse(ramo_pronto_para_giro(
             "right",
-            ponto_alvo_x=config.camera_x - 1,
-            ponto_alvo_y=config.camera_y * .30,
+            faixa_transversal_y=config.camera_y * .30,
         ))
 
     def test_ramo_direito_proximo_inicia_tanque(self):
         self.assertTrue(ramo_pronto_para_giro(
             "right",
-            ponto_alvo_x=config.camera_x - 1,
-            ponto_alvo_y=config.camera_y * .70,
+            faixa_transversal_y=config.camera_y * .70,
         ))
 
     def test_ramo_esquerdo_proximo_inicia_tanque(self):
         self.assertTrue(ramo_pronto_para_giro(
             "left",
-            ponto_alvo_x=1,
-            ponto_alvo_y=config.camera_y * .70,
+            faixa_transversal_y=config.camera_y * .70,
         ))
 
-    def test_alvo_do_lado_oposto_nao_desfaz_direcao_travada(self):
+    def test_faixa_ausente_nao_inicia_tanque(self):
         self.assertFalse(ramo_pronto_para_giro(
             "right",
-            ponto_alvo_x=1,
-            ponto_alvo_y=config.camera_y * .80,
+            faixa_transversal_y=-1,
         ))
 
 

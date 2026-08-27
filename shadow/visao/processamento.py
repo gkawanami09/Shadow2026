@@ -37,6 +37,7 @@ from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_valu
 from visao.linha import calculate_angle, determine_correct_line
 from visao.trajetoria import extrair_ponto_futuro
 from visao.verde import check_green, latch_turn_direction
+from visao.faixa_verde import altura_faixa_transversal
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
 
 # Cores carregadas do config.ini (fallback: valores do config.py)
@@ -176,6 +177,7 @@ def vision_loop(debug=False):
             ponto_futuro_x_frame = camera_x / 2
             ponto_futuro_y_frame = camera_y
             ponto_futuro_valido_frame = False
+            faixa_transversal_y_frame = -1.
             area_linha_frame = 0.
             candidato_verde_frame = False
             candidato_vermelho_frame = False
@@ -308,6 +310,10 @@ def vision_loop(debug=False):
                     "straight" if preferir_esquerda else direcao_marcada
                 )
                 preferir_esquerda_geometria = preferir_esquerda
+                faixa_transversal_y_frame = altura_faixa_transversal(
+                    black_image,
+                    direcao_marcada,
+                )
                 blackline, black_line_crop = determine_correct_line(
                     contours_blk,
                     preferir_esquerda=preferir_esquerda_geometria,
@@ -390,6 +396,16 @@ def vision_loop(debug=False):
                         cv2.circle(
                             cv2_img, alvo_futuro, 6,
                             (0, 165, 255), 2, cv2.LINE_AA)
+                    if faixa_transversal_y_frame >= 0.:
+                        y_transversal = int(round(faixa_transversal_y_frame))
+                        cv2.line(
+                            cv2_img,
+                            (0, y_transversal),
+                            (camera_x - 1, y_transversal),
+                            (0, 255, 255),
+                            1,
+                            cv2.LINE_AA,
+                        )
                     cv2.circle(cv2_img, (camera_x // 2, camera_y - 4),
                                5, (255, 0, 0), -1, cv2.LINE_AA)
 
@@ -445,6 +461,7 @@ def vision_loop(debug=False):
                 ponto_futuro_x=ponto_futuro_x_frame,
                 ponto_futuro_y=ponto_futuro_y_frame,
                 ponto_futuro_valido=ponto_futuro_valido_frame,
+                faixa_transversal_y=faixa_transversal_y_frame,
             )
 
             if not vision_ready.value:

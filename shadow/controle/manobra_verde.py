@@ -24,9 +24,7 @@ def correcao_aproximacao(ponto_inferior_x, *, largura=config.camera_x):
 def ramo_pronto_para_giro(
     direcao,
     *,
-    ponto_alvo_x,
-    ponto_alvo_y,
-    largura=config.camera_x,
+    faixa_transversal_y,
     altura=config.camera_y,
 ):
     """Indica quando o ramo escolhido chegou perto do eixo do robo.
@@ -40,14 +38,8 @@ def ramo_pronto_para_giro(
     if not sinal:
         return False
 
-    x = float(ponto_alvo_x)
-    y = float(ponto_alvo_y)
-    if not math.isfinite(x) or not math.isfinite(y):
+    y = float(faixa_transversal_y)
+    if not math.isfinite(y) or y < 0.:
         return False
 
-    deslocamento_lateral = sinal * (x - float(largura) / 2.)
-    alvo_baixo = y >= float(altura) * config.GREEN_APPROACH_BRANCH_MIN_Y_RATIO
-    return (
-        deslocamento_lateral >= config.GREEN_APPROACH_BRANCH_SIDE_MIN_PX
-        and alvo_baixo
-    )
+    return y >= float(altura) * config.GREEN_APPROACH_BRANCH_MIN_Y_RATIO

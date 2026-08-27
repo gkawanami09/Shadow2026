@@ -260,11 +260,13 @@ GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)
 # A aproximacao nao e mais um avanco cego. A visao trava o ramo marcado e o
 # segue-linha continua alinhando a base ate o alvo lateral chegar nesta regiao.
 # O tempo existe apenas como limite de seguranca caso a geometria congele.
-GREEN_APPROACH_TIME = .35                 # s — limite maximo da aproximacao
-GREEN_APPROACH_BRANCH_SIDE_MIN_PX = 70    # alvo precisa estar no lado marcado
-GREEN_APPROACH_BRANCH_MIN_Y_RATIO = .58   # e proximo da base antes do tanque
+GREEN_APPROACH_TIME = .65                 # s — depois disso para, nunca gira
+GREEN_APPROACH_BRANCH_MIN_Y_RATIO = .50   # transversal no meio antes do tanque
 GREEN_APPROACH_MAX_CORRECTION = .32       # centraliza entrada sem antecipar giro
 GREEN_APPROACH_SPEED = .5                 # base PWM 60, preserva a manobra
+GREEN_BRANCH_TRANSVERSE_MIN_RUN_PX = 90   # preto horizontal continuo
+GREEN_BRANCH_CENTER_TOLERANCE_PX = 45     # trecho deve tocar o eixo da camera
+GREEN_BRANCH_CONFIRM_FRAMES = 2           # evita liberar tanque por um ruido
 GREEN_TURN_BLIND_TIME = .30                # s — giro sem aceitar leitura da camera
 GREEN_TURN_SIDE_MIN_ERROR_PX = 55          # linha alvo deve primeiro entrar pelo lado marcado
 GREEN_TURN_CENTER_TOLERANCE_PX = 35        # px — ponto inferior aceito no centro da camera

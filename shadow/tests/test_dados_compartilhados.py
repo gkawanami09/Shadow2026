@@ -64,6 +64,7 @@ class ResultadoVisaoRapidaTests(unittest.TestCase):
             ponto_futuro_x=230,
             ponto_futuro_y=30,
             ponto_futuro_valido=True,
+            faixa_transversal_y=126,
         )
         resultado = ler_resultado_visao_rapida()
 
@@ -83,6 +84,7 @@ class ResultadoVisaoRapidaTests(unittest.TestCase):
         self.assertEqual(resultado.ponto_futuro_x, 230)
         self.assertEqual(resultado.ponto_futuro_y, 30)
         self.assertTrue(resultado.ponto_futuro_valido)
+        self.assertEqual(resultado.faixa_transversal_y, 126)
 
 
 if __name__ == "__main__":

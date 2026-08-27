@@ -175,6 +175,7 @@ def control_loop():
     green_reverse_until = None
     green_turn_deadline = 0.
     green_target_seen = False
+    green_transversal_frames = 0
     green_armed = True
     green_rearm_after = 0.
     monitor_obstaculo = MonitorObstaculo()
@@ -493,6 +494,7 @@ def control_loop():
                     green_reverse_until = None
                     green_turn_deadline = 0.
                     green_target_seen = False
+                    green_transversal_frames = 0
                     green_turn_target.value = 0
                     green_armed = False
                     green_rearm_after = (
@@ -542,13 +544,22 @@ def control_loop():
                     and green_turn_started is None
                     and green_reverse_until is None
                 )
-                if aproximando_ramo_verde and (
-                    ramo_pronto_para_giro(
+                transversal_pronta = (
+                    aproximando_ramo_verde
+                    and ramo_pronto_para_giro(
                         green_direction,
-                        ponto_alvo_x=resultado_visao.ponto_alvo_x,
-                        ponto_alvo_y=resultado_visao.ponto_alvo_y,
+                        faixa_transversal_y=(
+                            resultado_visao.faixa_transversal_y),
                     )
-                    or now >= green_approach_until
+                )
+                green_transversal_frames = (
+                    green_transversal_frames + 1
+                    if transversal_pronta else 0
+                )
+                if (
+                    aproximando_ramo_verde
+                    and green_transversal_frames
+                    >= config.GREEN_BRANCH_CONFIRM_FRAMES
                 ):
                     green_turn_started = now
                     green_turn_deadline = now + GREEN_TURN_TIMEOUT
@@ -656,6 +667,7 @@ def control_loop():
                         resultado_visao.linha_detectada
                         and now - resultado_visao.publicado_em
                         <= config.LINE_MAX_FRAME_AGE_S
+                        and now < green_approach_until
                     )
                     if aproximacao_valida:
                         usar_controle_linha = True
@@ -666,7 +678,12 @@ def control_loop():
                         angle = 190
                     status.value = (
                         f'Verde {green_direction} — ramo travado, '
-                        'centralizando entrada')
+                        + (
+                            'centralizando entrada'
+                            if now < green_approach_until
+                            else 'PARADO aguardando transversal no meio'
+                        )
+                    )
                 elif green_direction is not None:
                     if green_turn_started is None:
                         green_turn_started = now

@@ -105,11 +105,12 @@ class ResultadoVisaoRapida(NamedTuple):
     ponto_futuro_x: float
     ponto_futuro_y: float
     ponto_futuro_valido: bool
+    faixa_transversal_y: float
 
 
 # Um único bloqueio publica todos os campos. O controle nunca usa uma mistura
 # do ângulo de um frame com o ponto inferior do frame seguinte.
-_resultado_visao_rapida = Array("d", 16, lock=True)
+_resultado_visao_rapida = Array("d", 17, lock=True)
 
 
 def publicar_resultado_visao_rapida(
@@ -129,6 +130,7 @@ def publicar_resultado_visao_rapida(
     ponto_futuro_x,
     ponto_futuro_y,
     ponto_futuro_valido,
+    faixa_transversal_y,
 ):
     with _resultado_visao_rapida.get_lock():
         dados = _resultado_visao_rapida.get_obj()
@@ -148,6 +150,7 @@ def publicar_resultado_visao_rapida(
         dados[13] = float(ponto_futuro_x)
         dados[14] = float(ponto_futuro_y)
         dados[15] = bool(ponto_futuro_valido)
+        dados[16] = float(faixa_transversal_y)
 
 
 def ler_resultado_visao_rapida():
@@ -170,6 +173,7 @@ def ler_resultado_visao_rapida():
         ponto_futuro_x=dados[13],
         ponto_futuro_y=dados[14],
         ponto_futuro_valido=bool(dados[15]),
+        faixa_transversal_y=dados[16],
     )
 
 
