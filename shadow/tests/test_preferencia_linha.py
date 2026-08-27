@@ -152,6 +152,26 @@ class PreferenciaLinhaTests(unittest.TestCase):
         self.assertLess(angulo_esquerda, -40)
         self.assertLess(ponto_esquerda[0], 224)
 
+    def test_intersecao_sem_verde_ignora_escolha_lateral(self):
+        contorno = np.array(
+            [[[0, 110]], [[447, 110]], [[447, 150]], [[0, 150]]],
+            dtype=np.int32,
+        )
+        recorte_vazio = np.empty((0, 1, 2), dtype=np.int32)
+
+        angulo, ponto, _ = calculate_angle(
+            contorno,
+            recorte_vazio,
+            average_line_angle=35,
+            turn_direction="straight",
+            last_bottom_point=224,
+            average_line_point=224,
+            preferir_reto=True,
+        )
+
+        self.assertAlmostEqual(ponto[0], 224, delta=1)
+        self.assertAlmostEqual(angulo, 0, delta=1)
+
 
 if __name__ == "__main__":
     unittest.main()

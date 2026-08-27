@@ -24,6 +24,17 @@ def init_tracker():
     multiple_bottom_side = camera_x / 2
 
 
+def contorno_atravessa_laterais(contorno):
+    """Indica a barra transversal de uma intersecao de borda a borda."""
+    if contorno is None or np.asarray(contorno).size == 0:
+        return False
+    pontos_x = np.asarray(contorno)[:, 0, 0]
+    return bool(
+        np.min(pontos_x) < camera_x * .02
+        and np.max(pontos_x) > camera_x * .98
+    )
+
+
 def determine_correct_line(contours_blk, preferir_esquerda=False,
                            turn_direction=None):
     """Escolhe o contorno mantendo o ramo verde ja marcado."""
@@ -214,6 +225,7 @@ def calculate_angle(
     last_bottom_point,
     average_line_point,
     preferir_esquerda=False,
+    preferir_reto=False,
 ):
     global multiple_bottom_side
 
@@ -225,6 +237,10 @@ def calculate_angle(
 
     black_l_high = poi_no_crop[1][1] < camera_y * .5
     black_r_high = poi_no_crop[2][1] < camera_y * .5
+    atravessa_os_dois_lados = (
+        poi_no_crop[1][0] < camera_x * .02
+        and poi_no_crop[2][0] > camera_x * .98
+    )
 
     if not timer.get_timer("multiple_bottom"):
         final_poi = [multiple_bottom_side, camera_y]
@@ -232,6 +248,11 @@ def calculate_angle(
     elif turn_direction in ["left", "right"]:
         index = 1 if turn_direction == "left" else 2
         final_poi = poi[index] if is_crop else poi_no_crop[index]
+
+    elif preferir_reto and atravessa_os_dois_lados:
+        # Intersecao sem marcador confirmado: a barra transversal nao pode
+        # sequestrar o POI. O topo pertence ao ramo que continua em frente.
+        final_poi = poi_no_crop[0]
 
     else:
         if black_top:
@@ -258,10 +279,6 @@ def calculate_angle(
         else:
             final_poi = poi[0] if is_crop else poi_no_crop[0]
 
-            atravessa_os_dois_lados = (
-                poi_no_crop[1][0] < camera_x * 0.02
-                and poi_no_crop[2][0] > camera_x * 0.98
-            )
             largura_lateral = (
                 poi_no_crop[2][0] - poi_no_crop[1][0]
             )

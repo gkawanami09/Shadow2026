@@ -253,7 +253,13 @@ PIVOT_RECOVERY_EXIT_ANGLE = 40
 # Verde
 # ----------------------------------------------------------------------------
 GREEN_MIN_AREA = 2500                     # area minima do marcador
-GREEN_ROI_MEAN = 125                      # "lado e preto" se media > 125
+GREEN_MARKER_MIN_ASPECT = .5              # quadrado tolerando perspectiva
+GREEN_MARKER_MAX_ASPECT = 2.0
+GREEN_MARKER_MIN_RECT_FILL = .58          # rejeita reflexos/manchas alongadas
+GREEN_BLACK_ROI_SCALE = .9                # alcance da busca ao redor do verde
+GREEN_BLACK_MIN_RUN_RATIO = .42           # linha continua, nao media de pixels
+GREEN_BLACK_MAX_GAP_RATIO = .28           # precisa estar logo junto do quadrado
+GREEN_CONFIRM_FRAMES = 3                  # direcao igual em quadros consecutivos
 GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)

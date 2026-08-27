@@ -34,9 +34,10 @@ from visao import verde as green_module
 from visao.captura import LineCamera
 from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
-from visao.linha import calculate_angle, determine_correct_line
+from visao.linha import (calculate_angle, contorno_atravessa_laterais,
+                         determine_correct_line)
 from visao.trajetoria import extrair_ponto_futuro
-from visao.verde import check_green, latch_turn_direction
+from visao.verde import ConfirmadorVerde, check_green, latch_turn_direction
 from visao.faixa_verde import altura_faixa_transversal
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
 
@@ -142,6 +143,7 @@ def vision_loop(debug=False):
     # Matriz usada para reduzir ruídos das máscaras.
     kernal = np.ones((3, 3), np.uint8)
     confirmador_vermelho = ConfirmadorVermelho()
+    confirmador_verde = ConfirmadorVerde()
 
     # Contador e limitador de imagens por segundo.
     fps_time = time.perf_counter()
@@ -281,17 +283,16 @@ def vision_loop(debug=False):
 
             # Procura os marcadores verdes normalmente. A validacao da prata
             # nao altera a logica de verde.
-            candidato_verde_frame = any(
-                cv2.contourArea(contorno) > config.GREEN_MIN_AREA
-                for contorno in contours_grn
-            )
-            green_candidate.value = candidato_verde_frame
             if len(contours_grn) > 0:
-                turn_direction = check_green(
+                direcao_verde_bruta = check_green(
                     contours_grn, black_image,
                     debug_img=cv2_img if debug else None)
             else:
-                turn_direction = "straight"
+                direcao_verde_bruta = "straight"
+            candidato_verde_frame = direcao_verde_bruta != "straight"
+            green_candidate.value = candidato_verde_frame
+            turn_direction = confirmador_verde.atualizar(
+                direcao_verde_bruta)
 
             time_turn_direction = latch_turn_direction(
                 turn_direction, time_turn_direction)
@@ -307,6 +308,20 @@ def vision_loop(debug=False):
                     "right" if alvo_verde == 1 else
                     "straight" if alvo_verde == 2 else turn_dir.value
                 )
+                verde_autorizado = (
+                    alvo_verde in (-1, 1)
+                    or turn_direction in ("left", "right", "turn_around")
+                )
+                intersecao_sem_verde = bool(
+                    not verde_autorizado
+                    and linha_a_frente_frame
+                    and any(
+                        contorno_atravessa_laterais(contorno)
+                        for contorno in contours_blk
+                    )
+                )
+                if intersecao_sem_verde:
+                    direcao_marcada = "straight"
                 direcao_geometria = (
                     "straight" if preferir_esquerda else direcao_marcada
                 )
@@ -340,6 +355,7 @@ def vision_loop(debug=False):
                     last_bottom_point_x,
                     last_average_line_point,
                     preferir_esquerda=preferir_esquerda_geometria,
+                    preferir_reto=intersecao_sem_verde,
                 )
                 angulo_frame = float(line_angle.value)
                 line_angle_y.value = int(poi[1])
@@ -354,6 +370,10 @@ def vision_loop(debug=False):
                 ponto_futuro_x_frame = ponto_futuro.x
                 ponto_futuro_y_frame = ponto_futuro.y
                 ponto_futuro_valido_frame = ponto_futuro.valido
+                if intersecao_sem_verde:
+                    # A busca distante pode cair no ramo lateral da cruz.
+                    # Neste caso o alvo local central e a observacao segura.
+                    ponto_futuro_valido_frame = False
 
 
 

@@ -2,94 +2,172 @@
 
 import cv2
 import numpy as np
-from numba import njit
 
-from config import (GREEN_MARKER_MEMORY, GREEN_MIN_AREA, GREEN_ROI_MEAN,
-                    GREEN_VOTE_THRESHOLD, GREEN_VOTE_WINDOW, LINE_CROP_GREEN,
-                    LINE_CROP_NORMAL, camera_x, camera_y)
-from shared.dados_compartilhados import (add_time_value, get_time_average, line_crop,
-                               timer, turn_dir)
-from visao.cache_numba import aquecer_com_cache_recuperavel
+from config import (GREEN_BLACK_MAX_GAP_RATIO, GREEN_BLACK_MIN_RUN_RATIO,
+                    GREEN_BLACK_ROI_SCALE, GREEN_CONFIRM_FRAMES,
+                    GREEN_MARKER_MAX_ASPECT, GREEN_MARKER_MEMORY,
+                    GREEN_MARKER_MIN_ASPECT, GREEN_MARKER_MIN_RECT_FILL,
+                    GREEN_MIN_AREA, GREEN_VOTE_THRESHOLD, GREEN_VOTE_WINDOW,
+                    LINE_CROP_GREEN, LINE_CROP_NORMAL, camera_y)
+from shared.dados_compartilhados import (add_time_value, get_time_average,
+                                         line_crop, timer, turn_dir)
+
+
+class ConfirmadorVerde:
+    """So libera uma direcao repetida em quadros consecutivos."""
+
+    def __init__(self, frames=GREEN_CONFIRM_FRAMES):
+        self.frames = max(1, int(frames))
+        self._direcao = "straight"
+        self._contagem = 0
+
+    def atualizar(self, direcao):
+        if direcao == "straight":
+            self._direcao = "straight"
+            self._contagem = 0
+            return "straight"
+        if direcao == self._direcao:
+            self._contagem += 1
+        else:
+            self._direcao = direcao
+            self._contagem = 1
+        return direcao if self._contagem >= self.frames else "straight"
+
+
+def _marcador_plausivel(contour):
+    """Rejeita manchas verdes que nao podem ser um quadrado da pista."""
+    area = float(cv2.contourArea(contour))
+    if area <= GREEN_MIN_AREA:
+        return False
+    _centro, (largura, altura), _angulo = cv2.minAreaRect(contour)
+    largura = float(largura)
+    altura = float(altura)
+    if largura <= 0. or altura <= 0.:
+        return False
+    aspecto = largura / altura
+    preenchimento = area / max(largura * altura, 1.)
+    return bool(
+        GREEN_MARKER_MIN_ASPECT <= aspecto <= GREEN_MARKER_MAX_ASPECT
+        and preenchimento >= GREEN_MARKER_MIN_RECT_FILL
+    )
+
+
+def _tem_segmento_continuo(roi, orientacao, borda_interna, minimo):
+    """Confirma uma linha continua e proxima da borda do marcador."""
+    if roi.size == 0 or minimo < 2:
+        return False
+    mascara = (roi > 0).astype(np.uint8) * 255
+    kernel = (
+        np.ones((1, minimo), dtype=np.uint8)
+        if orientacao == "horizontal"
+        else np.ones((minimo, 1), dtype=np.uint8)
+    )
+    segmento = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel)
+    if not np.any(segmento):
+        return False
+
+    tamanho = (
+        roi.shape[0]
+        if borda_interna in ("top", "bottom")
+        else roi.shape[1]
+    )
+    alcance = max(3, int(round(tamanho * GREEN_BLACK_MAX_GAP_RATIO)))
+    if borda_interna == "bottom":
+        proximo = segmento[-alcance:, :]
+    elif borda_interna == "top":
+        proximo = segmento[:alcance, :]
+    elif borda_interna == "right":
+        proximo = segmento[:, -alcance:]
+    else:
+        proximo = segmento[:, :alcance]
+    return bool(np.any(proximo))
 
 
 def check_green(contours_grn, black_image, debug_img=None):
-    black_around_sign = np.zeros((len(contours_grn), 5), dtype=np.int16)  # [[b,t,l,r,lp], [b,t,l,r,lp]]
+    """Retorna apenas direcoes sustentadas pela geometria preta obrigatoria."""
+    black_around_sign = np.zeros((len(contours_grn), 5), dtype=np.int16)
 
     for i, contour in enumerate(contours_grn):
-        area = cv2.contourArea(contour)
-        if area <= GREEN_MIN_AREA:
+        if not _marcador_plausivel(contour):
             continue
 
         green_box = cv2.boxPoints(cv2.minAreaRect(contour))
         if debug_img is not None:
-            draw_box = np.intp(green_box)
-            cv2.drawContours(debug_img, [draw_box], -1, (0, 0, 255), 2)
-        # ``check_black`` apenas lê a máscara. Copiá-la para cada contorno
-        # verde gastava memória e tempo sem proteger nenhum dado.
-        black_around_sign = check_black(
-            black_around_sign, i, green_box, black_image)
+            cv2.drawContours(
+                debug_img, [np.intp(green_box)], -1, (0, 0, 255), 2)
+        check_black(black_around_sign, i, green_box, black_image)
 
-    turn_left, turn_right, left_bottom, right_bottom = determine_turn_direction(black_around_sign)
-
+    turn_left, turn_right, left_bottom, right_bottom = (
+        determine_turn_direction(black_around_sign)
+    )
     if turn_left and not turn_right and not left_bottom:
         return "left"
-    elif turn_right and not turn_left and not right_bottom:
+    if turn_right and not turn_left and not right_bottom:
         return "right"
-    elif turn_left and turn_right and not (left_bottom and right_bottom):
+    if turn_left and turn_right and not (left_bottom and right_bottom):
         return "turn_around"
-    else:
-        return "straight"
+    return "straight"
 
 
-# Compilado durante aquecer_numba() e reutilizado nos proximos boots. Se uma
-# queda de energia interromper o indice, o aquecimento o refaz uma unica vez.
-@njit(cache=True)
 def check_black(black_around_sign, i, green_box, black_image):
-    green_box = green_box[green_box[:, 1].argsort()]
+    """Mede linhas continuas acima e dos lados do quadrado verde."""
+    x0 = max(int(np.floor(np.min(green_box[:, 0]))), 0)
+    x1 = min(
+        int(np.ceil(np.max(green_box[:, 0]))) + 1,
+        black_image.shape[1],
+    )
+    y0 = max(int(np.floor(np.min(green_box[:, 1]))), 0)
+    y1 = min(
+        int(np.ceil(np.max(green_box[:, 1]))) + 1,
+        black_image.shape[0],
+    )
+    largura = x1 - x0
+    altura = y1 - y0
+    if largura < 3 or altura < 3:
+        return black_around_sign
 
-    marker_height = green_box[-1][1] - green_box[0][1]
+    alcance = max(
+        4,
+        int(round(max(largura, altura) * GREEN_BLACK_ROI_SCALE)),
+    )
+    margem_x = max(1, int(round(largura * .08)))
+    margem_y = max(1, int(round(altura * .08)))
+    minimo_horizontal = max(
+        2, int(round(largura * GREEN_BLACK_MIN_RUN_RATIO)))
+    minimo_vertical = max(
+        2, int(round(altura * GREEN_BLACK_MIN_RUN_RATIO)))
 
-    black_around_sign[i, 4] = int(green_box[2][1])
+    topo = black_image[
+        max(0, y0 - alcance):y0,
+        x0 + margem_x:max(x0 + margem_x + 1, x1 - margem_x),
+    ]
+    baixo = black_image[
+        y1:min(black_image.shape[0], y1 + alcance),
+        x0 + margem_x:max(x0 + margem_x + 1, x1 - margem_x),
+    ]
+    esquerda = black_image[
+        y0 + margem_y:max(y0 + margem_y + 1, y1 - margem_y),
+        max(0, x0 - alcance):x0,
+    ]
+    direita = black_image[
+        y0 + margem_y:max(y0 + margem_y + 1, y1 - margem_y),
+        x1:min(black_image.shape[1], x1 + alcance),
+    ]
 
-    # Bottom
-    roi_b = black_image[int(green_box[2][1]):np.minimum(int(green_box[2][1] + (marker_height * 0.8)), camera_y), np.minimum(int(green_box[2][0]), int(green_box[3][0])):np.maximum(int(green_box[2][0]), int(green_box[3][0]))]
-    if roi_b.size > 0:
-        if np.mean(roi_b[:]) > GREEN_ROI_MEAN:
-            black_around_sign[i, 0] = 1
-
-    # Top
-    roi_t = black_image[np.maximum(int(green_box[1][1] - (marker_height * 0.8)), 0):int(green_box[1][1]), np.minimum(np.maximum(int(green_box[0][0]), 0), np.maximum(int(green_box[1][0]), 0)):np.maximum(np.maximum(int(green_box[0][0]), 0), np.maximum(int(green_box[1][0]), 0))]
-    if roi_t.size > 0:
-        if np.mean(roi_t[:]) > GREEN_ROI_MEAN:
-            black_around_sign[i, 1] = 1
-
-    green_box = green_box[green_box[:, 0].argsort()]
-
-    # Left
-    roi_l = black_image[np.minimum(int(green_box[0][1]), int(green_box[1][1])):np.maximum(int(green_box[0][1]), int(green_box[1][1])), np.maximum(int(green_box[1][0] - (marker_height * 0.8)), 0):int(green_box[1][0])]
-    if roi_l.size > 0:
-        if np.mean(roi_l[:]) > GREEN_ROI_MEAN:
-            black_around_sign[i, 2] = 1
-
-    # Right
-    roi_r = black_image[np.minimum(int(green_box[2][1]), int(green_box[3][1])):np.maximum(int(green_box[2][1]), int(green_box[3][1])), int(green_box[2][0]):np.minimum(int(green_box[2][0] + (marker_height * 0.8)), camera_x)]
-    if roi_r.size > 0:
-        if np.mean(roi_r[:]) > GREEN_ROI_MEAN:
-            black_around_sign[i, 3] = 1
-
+    black_around_sign[i, 0] = int(_tem_segmento_continuo(
+        baixo, "horizontal", "top", minimo_horizontal))
+    black_around_sign[i, 1] = int(_tem_segmento_continuo(
+        topo, "horizontal", "bottom", minimo_horizontal))
+    black_around_sign[i, 2] = int(_tem_segmento_continuo(
+        esquerda, "vertical", "right", minimo_vertical))
+    black_around_sign[i, 3] = int(_tem_segmento_continuo(
+        direita, "vertical", "left", minimo_vertical))
+    black_around_sign[i, 4] = y1
     return black_around_sign
 
 
 def aquecer_numba():
-    """Compila a análise antes de o primeiro verde aparecer na pista."""
-    acumulador = np.zeros((1, 5), dtype=np.int16)
-    caixa = np.array(
-        [[180, 120], [220, 120], [180, 160], [220, 160]],
-        dtype=np.float32,
-    )
-    mascara = np.zeros((camera_y, camera_x), dtype=np.uint8)
-    aquecer_com_cache_recuperavel(
-        check_black, acumulador, 0, caixa, mascara)
+    """Mantem a API de inicializacao; a validacao agora usa OpenCV."""
 
 
 def determine_turn_direction(black_around_sign):
@@ -98,34 +176,34 @@ def determine_turn_direction(black_around_sign):
     left_bottom = False
     right_bottom = False
 
-    for i in black_around_sign:
-        if np.sum(i[:4]) == 2:
-            if i[1] == 1 and i[2] == 1:
+    for leitura in black_around_sign:
+        # Exatamente topo + um lado. Preto embaixo ou dos dois lados torna a
+        # cena ambigua e, portanto, nunca autoriza uma curva.
+        if np.sum(leitura[:4]) == 2:
+            if leitura[1] == 1 and leitura[2] == 1:
                 turn_right = True
-                if i[4] > camera_y * 0.95:
+                if leitura[4] > camera_y * .95:
                     right_bottom = True
-            elif i[1] == 1 and i[3] == 1:
+            elif leitura[1] == 1 and leitura[3] == 1:
                 turn_left = True
-                if i[4] > camera_y * 0.95:
+                if leitura[4] > camera_y * .95:
                     left_bottom = True
 
     return turn_left, turn_right, left_bottom, right_bottom
 
 
 def average_direction(turn_direction):
-    turn_dir_num = 0
-
     if turn_direction == "left":
-        turn_dir_num = -1
-    elif turn_direction == "right":
-        turn_dir_num = 1
-
-    return turn_dir_num
+        return -1
+    if turn_direction == "right":
+        return 1
+    return 0
 
 
 def latch_turn_direction(turn_direction, time_turn_direction):
-    """Confirma a direção por vários quadros e guarda uma memória curta."""
-    time_turn_direction = add_time_value(time_turn_direction, average_direction(turn_direction))
+    """Confirma a direcao por varios quadros e guarda uma memoria curta."""
+    time_turn_direction = add_time_value(
+        time_turn_direction, average_direction(turn_direction))
     avg_turn_dir = get_time_average(time_turn_direction, GREEN_VOTE_WINDOW)
 
     if avg_turn_dir > GREEN_VOTE_THRESHOLD:
@@ -133,10 +211,12 @@ def latch_turn_direction(turn_direction, time_turn_direction):
     elif avg_turn_dir < -GREEN_VOTE_THRESHOLD:
         timer.set_timer("left_marker", GREEN_MARKER_MEMORY)
 
-    if not timer.get_timer("right_marker") and not turn_direction == "turn_around" and avg_turn_dir >= 0:
+    if (not timer.get_timer("right_marker")
+            and turn_direction != "turn_around" and avg_turn_dir >= 0):
         turn_dir.value = "right"
         line_crop.value = LINE_CROP_GREEN
-    elif not timer.get_timer("left_marker") and not turn_direction == "turn_around" and avg_turn_dir <= 0:
+    elif (not timer.get_timer("left_marker")
+          and turn_direction != "turn_around" and avg_turn_dir <= 0):
         turn_dir.value = "left"
         line_crop.value = LINE_CROP_GREEN
     else:
