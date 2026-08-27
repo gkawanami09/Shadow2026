@@ -14,6 +14,8 @@ from shared.dados_compartilhados import (  # noqa: E402
     empty_time_arr,
     get_time_average,
     ler_resultado_visao_rapida,
+    ler_resultado_trajetoria_linha,
+    publicar_resultado_trajetoria_linha,
     publicar_resultado_visao_rapida,
 )
 
@@ -73,6 +75,29 @@ class ResultadoVisaoRapidaTests(unittest.TestCase):
         self.assertEqual(resultado.area_linha, 8123)
         self.assertFalse(resultado.candidato_verde)
         self.assertTrue(resultado.candidato_vermelho)
+
+    def test_publicacao_da_trajetoria_e_atomica(self):
+        sequencia_antes = ler_resultado_trajetoria_linha().sequencia
+        publicar_resultado_trajetoria_linha(
+            publicado_em=15.,
+            valida=True,
+            lateral=.2,
+            orientacao=-.1,
+            curvatura=.3,
+            confianca=.9,
+            largura_normalizada=.08,
+            amostras=9,
+        )
+        resultado = ler_resultado_trajetoria_linha()
+
+        self.assertEqual(resultado.sequencia, sequencia_antes + 1)
+        self.assertEqual(resultado.publicado_em, 15.)
+        self.assertTrue(resultado.valida)
+        self.assertEqual(resultado.lateral, .2)
+        self.assertEqual(resultado.orientacao, -.1)
+        self.assertEqual(resultado.curvatura, .3)
+        self.assertEqual(resultado.confianca, .9)
+        self.assertEqual(resultado.amostras, 9)
 
 
 if __name__ == "__main__":

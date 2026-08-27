@@ -24,6 +24,7 @@ from controle.parada_vermelho import stop_for_red
 from controle.velocidade import get_speed
 from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
 from controle.direcao import init_steering, sleep_steering, steer
+from controle.seguidor_omni import ControladorSeguidorOmni
 from controle.retorno import turn_around
 from comunicacao_serial.arduino import Arduino
 from shared.dados_compartilhados import (add_time_value, empty_time_arr,
@@ -36,6 +37,7 @@ from shared.dados_compartilhados import (add_time_value, empty_time_arr,
                                green_turn_target,
                                last_bottom_point,
                                last_bottom_point_y,
+                               ler_resultado_trajetoria_linha,
                                ler_resultado_visao_rapida,
                                line_ahead, line_angle,
                                line_detected,
@@ -175,6 +177,7 @@ def control_loop():
         else None
     )
     modo_rapido_anterior = False
+    seguidor_omni = ControladorSeguidorOmni()
     obstaculo_retry_after = 0.
     preferencia_linha_esquerda.value = False
     green_turn_target.value = 0
@@ -691,16 +694,37 @@ def control_loop():
                     and -180 <= angle <= 180
                     and abs(angle) > config.LINE_REAR_PIVOT_START_ANGLE
                 )
-                steer(
-                    angle,
-                    command_speed,
-                    center_pivot=center_pivot,
-                    rear_pivot_enabled=rear_pivot,
-                    rear_pivot_start_angle=config.LINE_REAR_PIVOT_START_ANGLE,
-                    rear_pivot_full_angle=config.LINE_REAR_PIVOT_FULL_ANGLE,
-                    rear_pivot_max_blend=config.LINE_REAR_PIVOT_MAX_BLEND,
-                    rear_pivot_rear_scale=config.LINE_REAR_PIVOT_REAR_SCALE,
+                usar_v2 = (
+                    config.LINE_FOLLOWER_V2_ENABLED
+                    and green_direction is None
+                    and not preferencia_linha_esquerda.value
+                    and direcao_visual == "straight"
+                    and line_detected.value
+                    and -180 <= angle <= 180
                 )
+                comando_v2_enviado = False
+                if usar_v2:
+                    comando_v2_enviado = seguidor_omni.atualizar(
+                        ler_resultado_trajetoria_linha(),
+                        command_speed,
+                        agora=now,
+                    )
+                    if comando_v2_enviado:
+                        status.value = (
+                            "Seguindo Linha V2 — " + seguidor_omni.modo)
+
+                if not comando_v2_enviado:
+                    seguidor_omni.reset()
+                    steer(
+                        angle,
+                        command_speed,
+                        center_pivot=center_pivot,
+                        rear_pivot_enabled=rear_pivot,
+                        rear_pivot_start_angle=config.LINE_REAR_PIVOT_START_ANGLE,
+                        rear_pivot_full_angle=config.LINE_REAR_PIVOT_FULL_ANGLE,
+                        rear_pivot_max_blend=config.LINE_REAR_PIVOT_MAX_BLEND,
+                        rear_pivot_rear_scale=config.LINE_REAR_PIVOT_REAR_SCALE,
+                    )
 
                 time_last_angles = add_time_value(time_last_angles, line_angle.value)
             elif line_status.value == "stop":

@@ -103,7 +103,7 @@ right_correction = 1
 # ----------------------------------------------------------------------------
 # Velocidades
 # ----------------------------------------------------------------------------
-LINE_FOLLOW_PWM = 75
+LINE_FOLLOW_PWM = 80
 LINE_FOLLOW_SPEED = LINE_FOLLOW_PWM / MAX_PWM
 # Uma câmera Wide vê a linha sair pela lateral muito antes da curva terminar,
 # mas manter uma curva antiga por 0,7 s levava o robô para fora da pista.
@@ -123,7 +123,7 @@ RAMPA_DESCIDA_PWM = 50
 RAMPA_SUBIDA_SPEED = RAMPA_SUBIDA_PWM / MAX_PWM
 RAMPA_DESCIDA_SPEED = RAMPA_DESCIDA_PWM / MAX_PWM
 
-# O segue-linha usa PWM 75 diretamente. O controlador adaptativo permanece no
+# O segue-linha usa PWM 80 diretamente. O controlador adaptativo permanece no
 # projeto para uma calibração futura, mas não participa dos comandos atuais.
 RETA_RAPIDA_HABILITADA = False
 VELOCIDADE_RETA_RAPIDA = LINE_FOLLOW_SPEED
@@ -154,6 +154,32 @@ LINE_CROP_GREEN = .45                     # durante curva verde
 BOTTOM_CENTER_CONTROL = True
 BOTTOM_CENTER_WEIGHT = .35
 BOTTOM_CENTER_MIN_Y = .82
+
+# Seguidor visual V2. Ele usa somente camera e motores: MPU/encoder nao fazem
+# parte do caminho critico. Quando a geometria multiponto nao e confiavel, o
+# ciclo volta ao seguidor angular acima sem interromper o movimento.
+LINE_FOLLOWER_V2_ENABLED = True
+LINE_V2_MIN_CONFIDENCE = .52
+LINE_V2_MAX_RESULT_AGE_S = .12
+LINE_V2_FILTER_TAU_S = .07
+LINE_V2_WHEEL_MAX_PWM = LINE_FOLLOW_PWM
+LINE_V2_MIN_FORWARD_RATIO = .38
+LINE_V2_CURVE_SPEED_REDUCTION = .58
+LINE_V2_LATERAL_KP_PWM = 18.
+LINE_V2_LATERAL_MAX_PWM = 14.
+LINE_V2_HEADING_KP_PWM = 46.
+LINE_V2_LATERAL_YAW_KP_PWM = 20.
+LINE_V2_CURVATURE_FF_PWM = 18.
+LINE_V2_ROTATION_MAX_PWM = 58.
+LINE_V2_ERROR_DEADBAND = .025
+LINE_V2_MAX_PWM_STEP = 14.
+
+# Geometria fisica atual (metros). O termo de rotacao de uma base omni em X
+# usa metade do entre-eixos mais metade da bitola: 0,070 + 0,0675 = 0,1375 m.
+LINE_WHEELBASE_M = .140
+LINE_TRACK_WIDTH_M = .135
+LINE_WHEEL_DIAMETER_M = .050
+LINE_OMNI_ROTATION_ARM_M = (LINE_WHEELBASE_M + LINE_TRACK_WIDTH_M) / 2.
 
 # Mistura diferencial de tanque do segue-linha: o erro da câmera cria uma
 # diferença contínua entre os lados esquerdo e direito.

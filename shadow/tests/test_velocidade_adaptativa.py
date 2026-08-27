@@ -70,11 +70,11 @@ class VelocidadeAdaptativaTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_configuracao_principal_usa_pwm_75_sem_modo_adaptativo(self):
-        self.assertEqual(config.LINE_FOLLOW_PWM, 75)
+    def test_configuracao_principal_usa_pwm_80_sem_modo_adaptativo(self):
+        self.assertEqual(config.LINE_FOLLOW_PWM, 80)
         self.assertAlmostEqual(
             config.LINE_FOLLOW_SPEED * config.MAX_PWM,
-            75.,
+            80.,
         )
         self.assertFalse(config.RETA_RAPIDA_HABILITADA)
 

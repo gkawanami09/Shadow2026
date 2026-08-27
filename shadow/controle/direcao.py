@@ -20,6 +20,26 @@ def init_steering(arduino_instance):
     arduino = arduino_instance
 
 
+def drive_omni(forward_pwm, lateral_pwm, rotation_pwm, wheel_limit_pwm):
+    """Mistura uma base omni em X e preserva a direcao ao saturar.
+
+    Ordem fisica do protocolo: frente esquerda, traseira esquerda, frente
+    direita, traseira direita. Positivo lateral e rotacao apontam a direita.
+    """
+    limite = max(0., min(float(wheel_limit_pwm), float(MAX_PWM)))
+    rodas = [
+        float(forward_pwm) + float(lateral_pwm) + float(rotation_pwm),
+        float(forward_pwm) - float(lateral_pwm) + float(rotation_pwm),
+        float(forward_pwm) - float(lateral_pwm) - float(rotation_pwm),
+        float(forward_pwm) + float(lateral_pwm) - float(rotation_pwm),
+    ]
+    pico = max(abs(valor) for valor in rodas)
+    if pico > limite and pico > 0.:
+        escala = limite / pico
+        rodas = [valor * escala for valor in rodas]
+    return arduino.rodas(*(int(round(valor)) for valor in rodas))
+
+
 def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=False,
           toque_frente_direita_pwm=0, center_pivot=None,
           rear_pivot_start_angle=None, rear_pivot_full_angle=None,

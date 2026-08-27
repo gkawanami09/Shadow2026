@@ -19,6 +19,7 @@ from shared.dados_compartilhados import (add_time_value, black_average,
                                          line_ahead, line_angle, line_angle_y,
                                          line_detected, line_size,
                                          line_status, min_line_size,
+                                         publicar_resultado_trajetoria_linha,
                                          publicar_resultado_visao_rapida,
                                          preferencia_linha_esquerda,
                                          red_candidate, red_detected, status,
@@ -30,6 +31,7 @@ from visao.captura import LineCamera
 from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.linha import calculate_angle, determine_correct_line
+from visao.trajetoria_linha import EstimativaTrajetoria, estimar_trajetoria
 from visao.verde import check_green, latch_turn_direction
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
 
@@ -161,6 +163,7 @@ def vision_loop(debug=False):
             area_linha_frame = 0.
             candidato_verde_frame = False
             candidato_vermelho_frame = False
+            trajetoria_frame = EstimativaTrajetoria()
             hsv_image = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2HSV)
             green_image = cv2.inRange(hsv_image, green_min, green_max)
             red_image = cv2.bitwise_or(
@@ -319,7 +322,13 @@ def vision_loop(debug=False):
                 angulo_frame = float(line_angle.value)
                 line_angle_y.value = int(poi[1])
 
-
+                # O V2 observa o mesmo contorno que o rastreador legado ja
+                # escolheu. Assim verde/intersecoes nao ganham um segundo e
+                # potencialmente divergente seletor de ramo.
+                trajetoria_frame = estimar_trajetoria(
+                    blackline,
+                    black_image.shape,
+                )
 
                 time_line_angle = add_time_value(time_line_angle, line_angle.value)
                 time_last_bottom_point_x = add_time_value(time_last_bottom_point_x, bottom_point[0])
@@ -347,6 +356,30 @@ def vision_loop(debug=False):
                     cv2.circle(cv2_img, (int(bottom_point[0]), int(bottom_point[1])), 5, (255, 255, 0), 1, cv2.LINE_AA)
                     cv2.circle(cv2_img, (camera_x // 2, camera_y - 4),
                                5, (255, 0, 0), -1, cv2.LINE_AA)
+                    for ponto_x, ponto_y in trajetoria_frame.pontos:
+                        cv2.circle(
+                            cv2_img,
+                            (int(round(ponto_x)), int(round(ponto_y))),
+                            2,
+                            (255, 0, 255),
+                            -1,
+                            cv2.LINE_AA,
+                        )
+                    cv2.putText(
+                        cv2_img,
+                        "V2 lat={:+.2f} ori={:+.2f} cur={:+.2f} c={:.2f}".format(
+                            trajetoria_frame.lateral,
+                            trajetoria_frame.orientacao,
+                            trajetoria_frame.curvatura,
+                            trajetoria_frame.confianca,
+                        ),
+                        (5, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        .4,
+                        (255, 0, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
 
             else:
                 linha_detectada_frame = False
@@ -384,8 +417,9 @@ def vision_loop(debug=False):
             processamento_ms = (
                 time.perf_counter() - inicio_processamento
             ) * 1000.
+            publicado_em = time.monotonic()
             publicar_resultado_visao_rapida(
-                publicado_em=time.monotonic(),
+                publicado_em=publicado_em,
                 processamento_ms=processamento_ms,
                 linha_detectada=linha_detectada_frame,
                 linha_a_frente=linha_a_frente_frame,
@@ -395,6 +429,16 @@ def vision_loop(debug=False):
                 area_linha=area_linha_frame,
                 candidato_verde=candidato_verde_frame,
                 candidato_vermelho=candidato_vermelho_frame,
+            )
+            publicar_resultado_trajetoria_linha(
+                publicado_em=publicado_em,
+                valida=trajetoria_frame.valida,
+                lateral=trajetoria_frame.lateral,
+                orientacao=trajetoria_frame.orientacao,
+                curvatura=trajetoria_frame.curvatura,
+                confianca=trajetoria_frame.confianca,
+                largura_normalizada=trajetoria_frame.largura_normalizada,
+                amostras=trajetoria_frame.amostras,
             )
 
             if not vision_ready.value:
