@@ -123,19 +123,21 @@ class ValidacaoVerdeTests(unittest.TestCase):
             "straight",
         )
 
-    def test_direcao_precisa_de_dois_votos(self):
-        confirmador = ConfirmadorVerde(frames=2, janela=4)
+    def test_direcao_precisa_de_tres_quadros_consecutivos(self):
+        confirmador = ConfirmadorVerde(frames=3)
+        self.assertEqual(confirmador.atualizar("left"), "straight")
         self.assertEqual(confirmador.atualizar("left"), "straight")
         self.assertEqual(confirmador.atualizar("left"), "left")
 
-    def test_um_quadro_ruim_entre_votos_ainda_confirma(self):
-        confirmador = ConfirmadorVerde(frames=2, janela=4)
+    def test_quadro_invalido_zerar_confirmacao(self):
+        confirmador = ConfirmadorVerde(frames=3)
+        confirmador.atualizar("right")
         confirmador.atualizar("right")
         self.assertEqual(confirmador.atualizar("straight"), "straight")
-        self.assertEqual(confirmador.atualizar("right"), "right")
+        self.assertEqual(confirmador.atualizar("right"), "straight")
 
     def test_votos_de_lados_opostos_nao_autorizam_curva(self):
-        confirmador = ConfirmadorVerde(frames=2, janela=4)
+        confirmador = ConfirmadorVerde(frames=3)
         confirmador.atualizar("right")
         confirmador.atualizar("left")
         confirmador.atualizar("right")

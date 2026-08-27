@@ -1,13 +1,10 @@
 """Detecta e confirma os marcadores verdes do percurso."""
 
-from collections import deque
-
 import cv2
 import numpy as np
 
 from config import (GREEN_BLACK_MAX_GAP_RATIO, GREEN_BLACK_MIN_RUN_RATIO,
                     GREEN_BLACK_ROI_SCALE, GREEN_CONFIRM_FRAMES,
-                    GREEN_CONFIRM_WINDOW_FRAMES,
                     GREEN_MARKER_MAX_ASPECT, GREEN_MARKER_MEMORY,
                     GREEN_MARKER_MIN_ASPECT, GREEN_MARKER_MIN_RECT_FILL,
                     GREEN_MIN_AREA, GREEN_VOTE_THRESHOLD, GREEN_VOTE_WINDOW,
@@ -17,27 +14,24 @@ from shared.dados_compartilhados import (add_time_value, get_time_average,
 
 
 class ConfirmadorVerde:
-    """So libera uma direcao com votos repetidos numa janela curta."""
+    """So libera a mesma geometria em quadros consecutivos."""
 
-    def __init__(self, frames=GREEN_CONFIRM_FRAMES,
-                 janela=GREEN_CONFIRM_WINDOW_FRAMES):
+    def __init__(self, frames=GREEN_CONFIRM_FRAMES):
         self.frames = max(1, int(frames))
-        self._historico = deque(maxlen=max(self.frames, int(janela)))
+        self._direcao = "straight"
+        self._contagem = 0
 
     def atualizar(self, direcao):
-        self._historico.append(direcao)
-        candidatas = ("left", "right", "turn_around")
-        contagens = {
-            candidata: self._historico.count(candidata)
-            for candidata in candidatas
-        }
-        vencedora = max(candidatas, key=contagens.get)
-        if contagens[vencedora] < self.frames:
+        if direcao == "straight":
+            self._direcao = "straight"
+            self._contagem = 0
             return "straight"
-        # Votos conflitantes nao podem escolher uma curva por desempate.
-        if sum(valor > 0 for valor in contagens.values()) > 1:
-            return "straight"
-        return vencedora
+        if direcao != self._direcao:
+            self._direcao = direcao
+            self._contagem = 1
+        else:
+            self._contagem += 1
+        return direcao if self._contagem >= self.frames else "straight"
 
 
 def _marcador_plausivel(contour):
