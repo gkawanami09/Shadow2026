@@ -120,11 +120,30 @@ class ValidacaoVerdeTests(unittest.TestCase):
                 topo=True, esquerda=True, direita=True))
         self.assertEqual(direcao, "straight")
 
-    def test_preto_em_baixo_tambem_invalida_o_marcador(self):
+    def test_preto_em_baixo_nao_apaga_topo_e_lado_validos(self):
         direcao = check_green(
             [_quadrado()], _mascara_ao_redor(
                 topo=True, direita=True, baixo=True))
-        self.assertEqual(direcao, "straight")
+        self.assertEqual(direcao, "left")
+
+    def test_verde_cortado_na_borda_direita_continua_valido(self):
+        verde = np.zeros(
+            (config.camera_y, config.camera_x), dtype=np.uint8)
+        x, y = config.camera_x - 58, 130
+        cv2.rectangle(
+            verde, (x, y), (config.camera_x - 1, y + 68), 255, -1)
+        contornos, _ = cv2.findContours(
+            verde, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        preto = _mascara_ao_redor(
+            topo=True,
+            esquerda=True,
+            baixo=True,
+            x=x,
+            y=y,
+            lado=58,
+        )
+
+        self.assertEqual(check_green(contornos, preto), "right")
 
     def test_ruido_preto_descontinuo_nao_passa(self):
         mascara = np.zeros(

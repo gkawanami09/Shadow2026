@@ -12,7 +12,7 @@ from config import (GREEN_BLACK_MAX_GAP_RATIO, GREEN_BLACK_MIN_RUN_RATIO,
                     GREEN_MARKER_MIN_ASPECT, GREEN_MARKER_MIN_RECT_FILL,
                     GREEN_MIN_AREA, GREEN_TURN_AROUND_CONFIRM_FRAMES,
                     GREEN_VOTE_THRESHOLD, GREEN_VOTE_WINDOW,
-                    LINE_CROP_GREEN, LINE_CROP_NORMAL, camera_y)
+                    LINE_CROP_GREEN, LINE_CROP_NORMAL)
 from shared.dados_compartilhados import (add_time_value, get_time_average,
                                          line_crop, timer, turn_dir)
 
@@ -159,21 +159,27 @@ def check_green(contours_grn, black_image, debug_img=None):
             continue
 
         green_box = cv2.boxPoints(cv2.minAreaRect(contour))
-        if debug_img is not None:
-            cv2.drawContours(
-                debug_img, [np.intp(green_box)], -1, (0, 0, 255), 2)
         check_black(black_around_sign, i, green_box, black_image)
+        if debug_img is not None:
+            leitura = black_around_sign[i]
+            geometria_valida = bool(
+                leitura[1]
+                and bool(leitura[2]) != bool(leitura[3])
+            )
+            # Vermelho significa apenas quadrado verde plausivel; verde
+            # significa que topo + lado ja autorizaram uma ordem de curva.
+            cor = (0, 255, 0) if geometria_valida else (0, 0, 255)
+            cv2.drawContours(
+                debug_img, [np.intp(green_box)], -1, cor, 2)
 
-    turn_left, turn_right, left_bottom, right_bottom = (
-        determine_turn_direction(black_around_sign)
-    )
+    turn_left, turn_right = determine_turn_direction(black_around_sign)
     # O par tem prioridade absoluta. Sem esta ordem, perder um dos contornos
     # por um frame pode deixar a memoria de 90 graus vencer o retorno.
-    if turn_left and turn_right and not (left_bottom and right_bottom):
+    if turn_left and turn_right:
         return "turn_around"
-    if turn_left and not turn_right and not left_bottom:
+    if turn_left and not turn_right:
         return "left"
-    if turn_right and not turn_left and not right_bottom:
+    if turn_right and not turn_left:
         return "right"
     return "straight"
 
@@ -212,23 +218,21 @@ def aquecer_numba():
 def determine_turn_direction(black_around_sign):
     turn_left = False
     turn_right = False
-    left_bottom = False
-    right_bottom = False
 
     for leitura in black_around_sign:
-        # Exatamente topo + um lado. Preto embaixo ou dos dois lados torna a
-        # cena ambigua e, portanto, nunca autoriza uma curva.
-        if np.sum(leitura[:4]) == 2:
-            if leitura[1] == 1 and leitura[2] == 1:
-                turn_right = True
-                if leitura[4] > camera_y * .95:
-                    right_bottom = True
-            elif leitura[1] == 1 and leitura[3] == 1:
-                turn_left = True
-                if leitura[4] > camera_y * .95:
-                    left_bottom = True
+        # A regra da pista e topo + o lado oposto ao giro. Preto abaixo pode
+        # ser a propria faixa de entrada quando o marcador ja chegou perto da
+        # base; ele nao contradiz a ordem. Os dois lados continuam ambiguos e
+        # nao autorizam um 90.
+        tem_topo = leitura[1] == 1
+        tem_esquerda = leitura[2] == 1
+        tem_direita = leitura[3] == 1
+        if tem_topo and tem_esquerda and not tem_direita:
+            turn_right = True
+        elif tem_topo and tem_direita and not tem_esquerda:
+            turn_left = True
 
-    return turn_left, turn_right, left_bottom, right_bottom
+    return turn_left, turn_right
 
 
 def average_direction(turn_direction):

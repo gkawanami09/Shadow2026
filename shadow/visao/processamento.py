@@ -573,6 +573,18 @@ def vision_loop(debug=False):
                     1,
                     cv2.LINE_AA,
                 )
+                cv2.putText(
+                    cv2_img,
+                    f"verde raw={direcao_verde_bruta} "
+                    f"confirmado={turn_direction} "
+                    f"alvo={green_turn_target.value}",
+                    (5, camera_y - 56),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    .35,
+                    (0, 200, 0),
+                    1,
+                    cv2.LINE_AA,
+                )
                 cv2.putText(cv2_img, str(status.value), (5, 14),
                             cv2.FONT_HERSHEY_SIMPLEX, .4, (0, 255, 255), 1)
                 cv2.putText(
