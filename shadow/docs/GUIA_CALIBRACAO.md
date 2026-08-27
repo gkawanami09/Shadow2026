@@ -42,10 +42,14 @@ Com o robô SOBRE a pista, na iluminação real da sala:
 
 Salve cada grupo com `s`. Valide com `python3 shadow/main.py --vision-only --debug`.
 
-## 2.1 Geometria obrigatória da Camera Module 3 Wide
+## 2.1 Geometria opcional da Camera Module 3 Wide
 
-O verde competitivo só arma com um artefato válido em
-`shadow/calibracao_camera_wide.npz`. Imprima um tabuleiro de **8×6 quadrados
+Sem `shadow/calibracao_camera_wide.npz`, o verde funciona em coordenadas da
+imagem, normalizando tamanho e distâncias pela largura medida da própria linha.
+Esse é o modo padrão do robô e não exige tabuleiro. A calibração abaixo é
+opcional e melhora a precisão métrica nas bordas muito distorcidas da lente.
+
+Para usar a melhoria opcional, imprima um tabuleiro de **8×6 quadrados
 de 10 mm** (7×5 cantos internos). O arquivo pronto é
 `tools/tabuleiro_wide_8x6_10mm.svg`; imprima em 100%/tamanho real, sem
 "ajustar à página", e confira um quadrado com régua. Com a
@@ -91,12 +95,10 @@ Valide sem motores:
 python3 main.py --vision-only --debug
 ```
 
-O console deve mostrar `calibracao wide valida`. Sem isso, somente
-`--vision-only` continua disponível para diagnóstico; qualquer execução com
-controle mantém LED apagado e motores bloqueados. Isso impede que o robô entre
-em uma interseção competitiva sem conseguir interpretar o verde. Antes de
-publicar esse estado, o runtime reaplica a `LensPosition` salva e confere o
-valor retornado pelo metadata da câmera.
+Com o arquivo, o console mostra `calibracao wide valida`. Sem ele, deve mostrar
+`verde ativo em modo PIXEL relativo a largura da linha`; os motores e as
+decisões verdes continuam ativos. Quando o artefato existe, o runtime reaplica
+a `LensPosition` salva e confere o valor retornado pelo metadata da câmera.
 
 ### Sinal opcional do MPU
 

@@ -71,6 +71,16 @@ red_min_2 = np.array(config.RED_MIN_2_DEFAULT)
 red_max_2 = np.array(config.RED_MAX_2_DEFAULT)
 
 
+def _green_topology_mode(calibration):
+    """Retorna o referencial autorizado para decidir o verde."""
+
+    if calibration is not None:
+        return "metric"
+    if config.GREEN_PIXEL_FALLBACK_ENABLED:
+        return "pixel"
+    return "disabled"
+
+
 def update_color_values():
     global black_max_normal_top, black_max_normal_bottom, \
         black_max_ramp_down_top, green_min, green_max, \
@@ -280,11 +290,18 @@ def vision_loop(debug=False, record_dir=None):
         )
     except (WideCalibrationError, RuntimeError) as err:
         calibracao_wide = None
-        green_calibration_ready.value = False
-        print(
-            "[visao] verde competitivo DESARMADO: calibracao wide "
-            f"ausente/incompativel ({err})"
-        )
+        modo_topologia_verde = _green_topology_mode(calibracao_wide)
+        green_calibration_ready.value = modo_topologia_verde != "disabled"
+        if modo_topologia_verde == "pixel":
+            print(
+                "[visao] calibracao wide ausente; verde ativo em modo "
+                f"PIXEL relativo a largura da linha ({err})"
+            )
+        else:
+            print(
+                "[visao] verde DESARMADO: calibracao wide "
+                f"ausente/incompativel ({err})"
+            )
     else:
         green_calibration_ready.value = True
         print(
@@ -470,15 +487,20 @@ def vision_loop(debug=False, record_dir=None):
                 except (WideCalibrationError, cv2.error, ValueError) as err:
                     print(
                         "[visao] calibracao wide falhou em runtime; "
-                        f"verde desarmado ({err})"
+                        f"mudando para modo PIXEL ({err})"
                     )
                     calibracao_wide = None
-                    green_calibration_ready.value = False
+                    green_calibration_ready.value = bool(
+                        config.GREEN_PIXEL_FALLBACK_ENABLED)
+                    rastreador_ramo_travado.reset()
                     ponto_entrada_topologia = (camera_x / 2, camera_y - 1)
                     homografia_topologia = None
             else:
                 ponto_entrada_topologia = (camera_x / 2, camera_y - 1)
                 homografia_topologia = None
+
+            modo_topologia_verde = _green_topology_mode(calibracao_wide)
+            topologia_verde_ativa = modo_topologia_verde != "disabled"
 
             observacao_topologica = rastreador_topologia.update(
                 topologia_preta,
@@ -500,7 +522,7 @@ def vision_loop(debug=False, record_dir=None):
                     else calibracao_wide.unrectify_points
                 ),
             )
-            if calibracao_wide is not None:
+            if topologia_verde_ativa:
                 consumido = int(green_decision_consumed_id.value)
                 if consumido > ultimo_consumido_verde:
                     if confirmador_evento_verde.consume(
@@ -510,8 +532,8 @@ def vision_loop(debug=False, record_dir=None):
                     ultimo_consumido_verde = consumido
                 evento_verde = confirmador_evento_verde.update(evento_bruto)
             else:
-                # Vision-only ainda mostra toda a geometria, mas nenhum motor
-                # pode receber uma decisao sem a escala fisica validada.
+                # A geometria continua visivel no debug, mas nao publica uma
+                # decisao quando tanto a metrica quanto o fallback estao off.
                 evento_verde = empty_observation(
                     sequencia_topologia, instante_evento)
 
@@ -521,7 +543,7 @@ def vision_loop(debug=False, record_dir=None):
             # pontos invalida o token, sem procurar outra linha parecida.
             ramo_travado = LockedBranchResult()
             if (
-                calibracao_wide is not None
+                topologia_verde_ativa
                 and evento_verde.committed
                 and evento_verde.decision in (
                     GreenDecision.LEFT,
@@ -530,11 +552,15 @@ def vision_loop(debug=False, record_dir=None):
                 )
                 and evento_verde.target_branch_token > 0
             ):
-                frame_ramo = calibracao_wide.rectify(
-                    cv2.cvtColor(cv2_img, cv2.COLOR_BGR2GRAY))
-                alvo_ramo_retificado = calibracao_wide.rectify_points((
-                    evento_verde.target_branch,
-                ))[0]
+                frame_cinza_cru = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2GRAY)
+                if calibracao_wide is not None:
+                    frame_ramo = calibracao_wide.rectify(frame_cinza_cru)
+                    alvo_ramo_analise = calibracao_wide.rectify_points((
+                        evento_verde.target_branch,
+                    ))[0]
+                else:
+                    frame_ramo = frame_cinza_cru
+                    alvo_ramo_analise = evento_verde.target_branch
                 mesmo_ramo = bool(
                     rastreador_ramo_travado.decision_id
                     == evento_verde.decision_id
@@ -564,7 +590,7 @@ def vision_loop(debug=False, record_dir=None):
                                     branch_token=(
                                         evento_verde.target_branch_token),
                                     junction=evento_verde.junction_center,
-                                    target=alvo_ramo_retificado,
+                                    target=alvo_ramo_analise,
                                     line_width_px=(
                                         observacao_topologica.line_width_px),
                                 )
@@ -582,7 +608,7 @@ def vision_loop(debug=False, record_dir=None):
                             decision_id=evento_verde.decision_id,
                             branch_token=evento_verde.target_branch_token,
                             junction=evento_verde.junction_center,
-                            target=alvo_ramo_retificado,
+                            target=alvo_ramo_analise,
                             line_width_px=(
                                 observacao_topologica.line_width_px),
                         )
@@ -596,9 +622,15 @@ def vision_loop(debug=False, record_dir=None):
             ramo_travado_y_cru = -1.0
             if ramo_travado.valid:
                 try:
-                    ponto_ramo_cru = calibracao_wide.unrectify_points((
+                    ponto_ramo_analise = (
                         (ramo_travado.bottom_x, ramo_travado.bottom_y),
-                    ))[0]
+                    )
+                    ponto_ramo_cru = (
+                        calibracao_wide.unrectify_points(
+                            ponto_ramo_analise)[0]
+                        if calibracao_wide is not None
+                        else ponto_ramo_analise[0]
+                    )
                     ramo_travado_x_cru = float(ponto_ramo_cru[0])
                     ramo_travado_y_cru = float(ponto_ramo_cru[1])
                 except (cv2.error, TypeError, ValueError):
@@ -695,7 +727,7 @@ def vision_loop(debug=False, record_dir=None):
                     alvo_verde in (-1, 1)
                     or turn_direction in ("left", "right", "turn_around")
                 )
-                if calibracao_wide is not None:
+                if topologia_verde_ativa:
                     # O ramo reto fica preso ao evento confirmado, e nao
                     # apenas ao classificador do frame atual. No meio da
                     # travessia a barra lateral pode sair da imagem e a
@@ -737,7 +769,7 @@ def vision_loop(debug=False, record_dir=None):
                     "straight" if preferir_esquerda else direcao_marcada
                 )
                 preferir_esquerda_geometria = preferir_esquerda
-                if (calibracao_wide is not None
+                if (topologia_verde_ativa
                         and observacao_topologica.junction_image is not None
                         and direcao_marcada in ("left", "right")):
                     faixa_transversal_y_frame = float(
@@ -883,7 +915,7 @@ def vision_loop(debug=False, record_dir=None):
                 black_mask=entry_black_mask,
                 ramp_black_mask=entry_ramp_black_mask)
 
-            if calibracao_wide is not None:
+            if topologia_verde_ativa:
                 confirmador_evento_verde.note_rearm_frame(
                     junction_visible=_juncao_presente_para_saida(
                         observacao_topologica),
@@ -949,8 +981,16 @@ def vision_loop(debug=False, record_dir=None):
                         "decision": evento_verde.decision.name,
                         "confidence": evento_verde.confidence,
                         "coordinate_frames": {
-                            "entry_tangent": "ground_xy_right_forward",
-                            "junction": "rectified_pixels",
+                            "entry_tangent": (
+                                "ground_xy_right_forward"
+                                if calibracao_wide is not None
+                                else "raw_pixel_xy_right_forward"
+                            ),
+                            "junction": (
+                                "rectified_pixels"
+                                if calibracao_wide is not None
+                                else "raw_frame_pixels"
+                            ),
                             "target_branch": "raw_frame_pixels",
                         },
                         "entry_tangent": evento_verde.entry_tangent,

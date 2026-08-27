@@ -18,6 +18,7 @@ sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
 from tools.calibrar_camera_wide import (  # noqa: E402
+    _draw_capture_status,
     board_object_points,
     build_parser,
     calibrate_fisheye,
@@ -82,6 +83,19 @@ def make_calibration(metadata=None, **matrix_changes):
 
 
 class WideCalibrationArtifactTests(unittest.TestCase):
+    def test_overlay_aceita_cantos_float64_do_normalizador(self):
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        columns, rows = INNER_CORNERS
+        corners = np.asarray(
+            [((column + 1) * 15.0, (row + 1) * 15.0)
+             for row in range(rows) for column in range(columns)],
+            dtype=np.float64,
+        ).reshape(-1, 1, 2)
+
+        display = _draw_capture_status(frame, corners, 0, 20)
+
+        self.assertEqual(display.shape, frame.shape)
+
     def test_cli_usa_o_caminho_central_do_config(self):
         args = build_parser().parse_args([])
         self.assertEqual(

@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 import types
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -42,6 +43,7 @@ from visao.intersecao_verde import (  # noqa: E402
 )
 from visao.processamento import (  # noqa: E402
     _evento_bruto_topologia,
+    _green_topology_mode,
     _juncao_presente_para_saida,
     _preferencia_esquerda_permitida,
 )
@@ -70,6 +72,17 @@ def observacao_topologica(*, propagada=False, target=(280.0, 90.0)):
 
 
 class AdaptadorEventoTopologicoTests(unittest.TestCase):
+    def test_fallback_pixel_autoriza_topologia_sem_calibracao(self):
+        with mock.patch.object(config, "GREEN_PIXEL_FALLBACK_ENABLED", True):
+            self.assertEqual(_green_topology_mode(None), "pixel")
+
+    def test_fallback_pode_ser_desativado_explicitamente(self):
+        with mock.patch.object(config, "GREEN_PIXEL_FALLBACK_ENABLED", False):
+            self.assertEqual(_green_topology_mode(None), "disabled")
+
+    def test_calibracao_tem_prioridade_sobre_fallback(self):
+        self.assertEqual(_green_topology_mode(object()), "metric")
+
     def test_entrada_propagada_nao_e_publicada_como_geometria_visivel(self):
         evento = _evento_bruto_topologia(
             observacao_topologica(propagada=True),
@@ -148,6 +161,17 @@ class AdaptadorEventoTopologicoTests(unittest.TestCase):
             (250.0, config.camera_y * .90),
         )
         self.assertTrue(evento.ready_to_turn)
+
+    def test_alvo_em_pixels_crus_nao_precisa_conversao(self):
+        evento = _evento_bruto_topologia(
+            observacao_topologica(target=(280.0, 90.0)),
+            sequencia=4,
+            timestamp=.4,
+            target_to_raw=None,
+        )
+
+        self.assertEqual(evento.target_branch, (280.0, 90.0))
+        self.assertEqual(evento.target_branch_token, 77)
 
     def test_preferencia_residual_nao_supera_straight_comprometido(self):
         comprometido = GreenObservation(

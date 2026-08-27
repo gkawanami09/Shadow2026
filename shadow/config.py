@@ -260,7 +260,11 @@ PIVOT_RECOVERY_EXIT_ANGLE = 40
 # local porque depende da lente, foco, altura e montagem deste robo; portanto o
 # arquivo gerado nao deve ser copiado de outra camera.
 GREEN_WIDE_CALIBRATION_PATH = SHADOW_ROOT / "calibracao_camera_wide.npz"
-GREEN_WIDE_CALIBRATION_REQUIRED = True
+# A homografia melhora a precisao nas bordas, mas nao e obrigatoria. Sem o
+# artefato NPZ, a topologia usa pixels normalizados pela largura medida da
+# propria linha (nenhuma escala ou arquivo de calibracao e inventado).
+GREEN_WIDE_CALIBRATION_REQUIRED = False
+GREEN_PIXEL_FALLBACK_ENABLED = True
 GREEN_WIDE_CALIBRATION_MAX_ERROR_PX = .8
 GREEN_WIDE_HOMOGRAPHY_MAX_ERROR_MM = 1.5
 GREEN_WIDE_CALIBRATION_MIN_VIEWS = 20

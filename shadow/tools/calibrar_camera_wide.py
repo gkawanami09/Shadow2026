@@ -315,7 +315,12 @@ def calculate_ground_homography(
 def _draw_capture_status(frame, corners, captured, requested):
     display = frame.copy()
     if corners is not None:
-        cv2.drawChessboardCorners(display, INNER_CORNERS, corners, True)
+        cv2.drawChessboardCorners(
+            display,
+            INNER_CORNERS,
+            np.asarray(corners, dtype=np.float32).reshape(-1, 1, 2),
+            True,
+        )
     color = (0, 255, 0) if corners is not None else (0, 0, 255)
     lines = (
         f"INTRINSECA {captured}/{requested}",
@@ -398,7 +403,12 @@ def capture_ground_frame(camera):
         corners = detect_board_corners(frame)
         display = frame.copy()
         if corners is not None:
-            cv2.drawChessboardCorners(display, INNER_CORNERS, corners, True)
+            cv2.drawChessboardCorners(
+                display,
+                INNER_CORNERS,
+                np.asarray(corners, dtype=np.float32).reshape(-1, 1, 2),
+                True,
+            )
         cv2.putText(
             display,
             "HOMOGRAFIA: plano + alinhado  ESPACO=aceitar  Q=sair",
