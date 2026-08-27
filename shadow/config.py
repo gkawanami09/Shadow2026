@@ -157,8 +157,8 @@ LINE_CROP_GREEN = .45                     # durante curva verde
 # mas o ponto à frente deve pesar mais para o eixo central do chassi prever a
 # curva em vez de corrigir tardiamente em cima da linha.
 BOTTOM_CENTER_CONTROL = True
-BOTTOM_CENTER_WEIGHT = .35
-BOTTOM_CENTER_MIN_Y = .82
+BOTTOM_CENTER_WEIGHT = .70
+BOTTOM_CENTER_MIN_Y = .75
 
 # Seguidor visual V2. Ele usa somente camera e motores: MPU/encoder nao fazem
 # parte do caminho critico. Quando a geometria multiponto nao e confiavel, o
@@ -170,14 +170,25 @@ LINE_V2_FILTER_TAU_S = .07
 LINE_V2_WHEEL_MAX_PWM = LINE_FOLLOW_PWM
 LINE_V2_MIN_FORWARD_RATIO = .38
 LINE_V2_CURVE_SPEED_REDUCTION = .58
-LINE_V2_LATERAL_KP_PWM = 18.
-LINE_V2_LATERAL_MAX_PWM = 14.
-LINE_V2_HEADING_KP_PWM = 46.
-LINE_V2_LATERAL_YAW_KP_PWM = 20.
+LINE_V2_LATERAL_KP_PWM = 28.
+LINE_V2_LATERAL_MAX_PWM = 20.
+LINE_V2_HEADING_KP_PWM = 50.
+LINE_V2_LATERAL_YAW_KP_PWM = 24.
 LINE_V2_CURVATURE_FF_PWM = 18.
 LINE_V2_ROTATION_MAX_PWM = 58.
 LINE_V2_ERROR_DEADBAND = .025
 LINE_V2_MAX_PWM_STEP = 14.
+
+# Corredor central com histerese. Ao sair cerca de 22 px do centro, o robo
+# reduz o avanco e prioriza trazer a faixa de volta. So libera a antecipacao
+# normal quando o erro cai para aproximadamente 10 px, evitando alternancia.
+LINE_V2_CENTER_ENTER_ERROR = .10
+LINE_V2_CENTER_EXIT_ERROR = .045
+LINE_V2_RECENTER_FORWARD_RATIO = .55
+LINE_V2_RECENTER_LATERAL_KP_PWM = 48.
+LINE_V2_RECENTER_LATERAL_MAX_PWM = 32.
+LINE_V2_RECENTER_LATERAL_YAW_KP_PWM = 42.
+LINE_V2_RECENTER_CURVATURE_SCALE = .25
 
 # Geometria fisica atual (metros). O termo de rotacao de uma base omni em X
 # usa metade do entre-eixos mais metade da bitola: 0,070 + 0,0675 = 0,1375 m.

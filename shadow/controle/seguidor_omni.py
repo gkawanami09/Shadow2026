@@ -16,6 +16,7 @@ class ControladorSeguidorOmni:
         self._ultimo_t = None
         self._filtrado = np.zeros(3, dtype=np.float64)
         self._rodas_anteriores = None
+        self._recentrando = False
         self.modo = "fallback"
 
     @staticmethod
@@ -70,6 +71,15 @@ class ControladorSeguidorOmni:
         orientacao = self._zona_morta(float(orientacao))
         curvatura = self._zona_morta(float(curvatura))
 
+        # O ponto inferior representa a faixa exatamente no eixo da camera.
+        # Histerese impede que ruido perto da borda do corredor ligue/desligue
+        # o modo a cada frame.
+        if self._recentrando:
+            if abs(lateral) <= config.LINE_V2_CENTER_EXIT_ERROR:
+                self._recentrando = False
+        elif abs(lateral) >= config.LINE_V2_CENTER_ENTER_ERROR:
+            self._recentrando = True
+
         severidade = min(max(
             abs(orientacao),
             abs(curvatura) * .85,
@@ -83,16 +93,37 @@ class ControladorSeguidorOmni:
             config.LINE_V2_MIN_FORWARD_RATIO,
             1. - config.LINE_V2_CURVE_SPEED_REDUCTION * severidade,
         )
+        if self._recentrando:
+            proporcao_frente = min(
+                proporcao_frente,
+                config.LINE_V2_RECENTER_FORWARD_RATIO,
+            )
         frente = pwm_base * proporcao_frente
+        ganho_lateral = (
+            config.LINE_V2_RECENTER_LATERAL_KP_PWM
+            if self._recentrando else config.LINE_V2_LATERAL_KP_PWM
+        )
+        limite_lateral = (
+            config.LINE_V2_RECENTER_LATERAL_MAX_PWM
+            if self._recentrando else config.LINE_V2_LATERAL_MAX_PWM
+        )
+        ganho_yaw_lateral = (
+            config.LINE_V2_RECENTER_LATERAL_YAW_KP_PWM
+            if self._recentrando else config.LINE_V2_LATERAL_YAW_KP_PWM
+        )
+        escala_curvatura = (
+            config.LINE_V2_RECENTER_CURVATURE_SCALE
+            if self._recentrando else 1.
+        )
         lateral_pwm = float(np.clip(
-            config.LINE_V2_LATERAL_KP_PWM * lateral,
-            -config.LINE_V2_LATERAL_MAX_PWM,
-            config.LINE_V2_LATERAL_MAX_PWM,
+            ganho_lateral * lateral,
+            -limite_lateral,
+            limite_lateral,
         ))
         rotacao_pwm = float(np.clip(
             config.LINE_V2_HEADING_KP_PWM * orientacao
-            + config.LINE_V2_LATERAL_YAW_KP_PWM * lateral
-            + config.LINE_V2_CURVATURE_FF_PWM * curvatura,
+            + ganho_yaw_lateral * lateral
+            + config.LINE_V2_CURVATURE_FF_PWM * curvatura * escala_curvatura,
             -config.LINE_V2_ROTATION_MAX_PWM,
             config.LINE_V2_ROTATION_MAX_PWM,
         ))
@@ -114,6 +145,10 @@ class ControladorSeguidorOmni:
         frente = float(np.mean(rodas))
         lateral_pwm = float((rodas[0] - rodas[1] - rodas[2] + rodas[3]) / 4.)
         rotacao_pwm = float((rodas[0] + rodas[1] - rodas[2] - rodas[3]) / 4.)
-        self.modo = "curva" if severidade >= .32 else "normal"
+        self.modo = (
+            "recentrando" if self._recentrando
+            else "curva" if severidade >= .32
+            else "normal"
+        )
         drive_omni(frente, lateral_pwm, rotacao_pwm, limite)
         return True

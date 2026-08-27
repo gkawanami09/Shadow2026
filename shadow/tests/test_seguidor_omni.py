@@ -71,6 +71,27 @@ class SeguidorOmniTests(unittest.TestCase):
 
         self.assertGreater(fe, te)
         self.assertGreater(td, fd)
+        self.assertEqual(self.controle.modo, "recentrando")
+
+    def test_erro_fora_do_corredor_reduz_avanco(self):
+        self.controle.atualizar(
+            _resultado(40., lateral=.20),
+            config.LINE_FOLLOW_SPEED,
+            agora=40.,
+        )
+        rodas_deslocadas = self.arduino.chamadas[-1]
+
+        self.assertEqual(self.controle.modo, "recentrando")
+        self.assertLess(sum(rodas_deslocadas) / 4., 50.)
+
+    def test_pequeno_erro_permanece_no_modo_normal(self):
+        self.controle.atualizar(
+            _resultado(50., lateral=.06),
+            config.LINE_FOLLOW_SPEED,
+            agora=50.,
+        )
+
+        self.assertEqual(self.controle.modo, "normal")
 
     def test_resultado_antigo_pede_fallback_sem_mover(self):
         enviado = self.controle.atualizar(

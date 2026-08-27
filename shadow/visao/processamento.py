@@ -356,6 +356,20 @@ def vision_loop(debug=False):
                     cv2.circle(cv2_img, (int(bottom_point[0]), int(bottom_point[1])), 5, (255, 255, 0), 1, cv2.LINE_AA)
                     cv2.circle(cv2_img, (camera_x // 2, camera_y - 4),
                                5, (255, 0, 0), -1, cv2.LINE_AA)
+                    margem_central = int(round(
+                        camera_x / 2 * config.LINE_V2_CENTER_ENTER_ERROR))
+                    for corredor_x in (
+                        camera_x // 2 - margem_central,
+                        camera_x // 2 + margem_central,
+                    ):
+                        cv2.line(
+                            cv2_img,
+                            (corredor_x, 0),
+                            (corredor_x, camera_y - 1),
+                            (255, 255, 0),
+                            1,
+                            cv2.LINE_AA,
+                        )
                     for ponto_x, ponto_y in trajetoria_frame.pontos:
                         cv2.circle(
                             cv2_img,
