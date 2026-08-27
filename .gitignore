@@ -2,3 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+
+# Calibração geométrica depende da lente e montagem deste robô.
+shadow/calibracao_camera_wide.npz
+shadow/captures/calibracao_wide/

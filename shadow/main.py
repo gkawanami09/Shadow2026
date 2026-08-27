@@ -14,10 +14,10 @@ from multiprocessing import Process, shared_memory  # noqa: E402
 import config  # noqa: E402
 
 
-def iniciar_visao(debug):
+def iniciar_visao(debug, record_dir=None):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     from visao.processamento import vision_loop
-    vision_loop(debug)
+    vision_loop(debug, record_dir=record_dir)
 
 
 def iniciar_controle():
@@ -45,6 +45,10 @@ def main():
                         help="mostra a janela com o frame anotado")
     parser.add_argument("--vision-only", action="store_true",
                         help="roda apenas o processo de visão (bring-up)")
+    parser.add_argument(
+        "--record-vision", metavar="DIRETORIO",
+        help="grava frames crus e telemetria JSONL sincronizada",
+    )
     args = parser.parse_args()
 
     motor_lock = None
@@ -61,7 +65,8 @@ def main():
 
     shm = _criar_memoria_debug() if args.debug else None
 
-    vision_p = Process(target=iniciar_visao, args=(args.debug,),
+    vision_p = Process(target=iniciar_visao,
+                       args=(args.debug, args.record_vision),
                        name="shadow-visao")
     vision_p.start()
 

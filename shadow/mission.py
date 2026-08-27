@@ -140,10 +140,10 @@ def rescue_return_action(returncode):
     return RESCUE_RETURN_STOPPED
 
 
-def iniciar_visao(debug):
+def iniciar_visao(debug, record_dir=None):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     from visao.processamento import vision_loop
-    vision_loop(debug)
+    vision_loop(debug, record_dir=record_dir)
 
 
 def iniciar_controle():
@@ -215,6 +215,13 @@ class MissionSystem:
             "line_status": "line_detected",
             "turn_dir": "straight",
             "green_turn_target": 0,
+            "green_calibration_ready": False,
+            "green_decision_consumed_id": 0,
+            "green_control_state": 0,
+            "green_locked_decision": 0,
+            "green_fault_stop": False,
+            "green_topology_junction_visible": False,
+            "green_rearmed_decision_id": 0,
             "preferencia_linha_esquerda": False,
             "red_detected": False,
             "red_candidate": False,
@@ -239,7 +246,9 @@ class MissionSystem:
         self._definir_compartilhado("status", "Inicializando percurso")
 
         vision = Process(
-            target=iniciar_visao, args=(self.args.debug,), name="shadow-visao")
+            target=iniciar_visao,
+            args=(self.args.debug, getattr(self.args, "record_vision", None)),
+            name="shadow-visao")
         vision.start()
         time.sleep(.5)
         control = Process(target=iniciar_controle, name="shadow-controle")
@@ -263,6 +272,18 @@ class MissionSystem:
         )
         while time.monotonic() < prazo:
             if not all(child.is_alive() for child in self.children):
+                estado_verde = int(getattr(
+                    getattr(self.shared, "green_control_state", None),
+                    "value",
+                    0,
+                ))
+                decisao_verde = int(getattr(
+                    getattr(self.shared, "green_locked_decision", None),
+                    "value",
+                    0,
+                ))
+                if estado_verde not in (0, 6) or decisao_verde != 0:
+                    self._definir_compartilhado("green_fault_stop", True)
                 return False
             texto = str(self.shared.status.value).lower()
             if "pronto" in texto or "seguindo linha" in texto:
@@ -285,6 +306,18 @@ class MissionSystem:
             if self.shared.terminate.value:
                 return "quit"
             if not all(child.is_alive() for child in self.children):
+                estado_verde = int(getattr(
+                    getattr(self.shared, "green_control_state", None),
+                    "value",
+                    0,
+                ))
+                decisao_verde = int(getattr(
+                    getattr(self.shared, "green_locked_decision", None),
+                    "value",
+                    0,
+                ))
+                if estado_verde not in (0, 6) or decisao_verde != 0:
+                    self._definir_compartilhado("green_fault_stop", True)
                 # Um filho caiu: pode ter sido exceção, Ctrl-C ou o próprio
                 # fim normal do controle. Quem decide é o flag já lido acima.
                 return "child_died"
@@ -449,6 +482,21 @@ class MissionSystem:
         self.shared.red_finished.value = False
         self.shared.status.value = "Reiniciando missao - aguardando Arduino"
 
+    def exigir_rearme_fisico_se_fault_stop(self, motivo):
+        """Impede que a supervisao apague uma parada persistente.
+
+        O filho de controle termina quando perde a sessao serial ou entra em
+        ``FAULT_STOP``. Uma reconexao USB breve nao prova que o robo foi
+        reposicionado; antes de limpar os compartilhados, o operador precisa
+        cumprir o mesmo ciclo fisico exigido apos uma falha do resgate.
+        """
+
+        campo = getattr(self.shared, "green_fault_stop", None)
+        if campo is None or not bool(campo.value):
+            return False
+        self.aguardar_ciclo_do_arduino(motivo)
+        return True
+
     def _encerrar_resgate_para_recuperacao(self):
         # A chamada de resgate e sincrona. Quando a execucao chega aqui, o
         # ``finally`` dela ja fechou camera, serial, workers e trava.
@@ -466,6 +514,10 @@ class MissionSystem:
         if not self._lock_held:
             self.motor_lock.acquire()
             self._lock_held = True
+        # Centralizado aqui para cobrir tanto a morte durante o percurso
+        # quanto a corrida em que o controle cai antes de wait_line_ready.
+        # Este teste ocorre necessariamente antes de limpar o flag.
+        self.exigir_rearme_fisico_se_fault_stop(motivo)
         self._preparar_nova_tentativa()
         print("[missao] recursos limpos; tentando iniciar o percurso")
         time.sleep(config.MISSION_RECOVERY_DELAY_S)
@@ -558,6 +610,9 @@ def parse_args():
     parser.add_argument(
         "--debug", action="store_true",
         help="repassa --debug para as duas fases")
+    parser.add_argument(
+        "--record-vision", metavar="DIRETORIO",
+        help="grava frames crus/JSONL sincronizados durante o percurso")
     parser.add_argument(
         "--rescue-camera-index", type=int, default=None,
         help="índice da câmera de resgate (padrão: config_resgate)")

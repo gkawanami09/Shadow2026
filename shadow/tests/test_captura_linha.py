@@ -14,10 +14,24 @@ import config
 import config_resgate
 from visao.captura import (LineCamera, escolher_fps_captura,
                            escolher_modo_sensor_campo_aberto,
+                           normalizar_recorte_metadata,
+                           normalizar_identidade_sensor,
                            obter_recorte_maximo)
 
 
 class LineCameraSelectionTests(unittest.TestCase):
+    def test_identidade_real_do_sensor_e_canonica(self):
+        self.assertEqual(
+            normalizar_identidade_sensor({"Model": " IMX708-Wide "}),
+            "imx708_wide",
+        )
+        self.assertEqual(
+            normalizar_identidade_sensor({"SensorModel": "IMX 708 Wide"}),
+            "imx_708_wide",
+        )
+        self.assertEqual(normalizar_identidade_sensor({}), "unknown")
+        self.assertEqual(normalizar_identidade_sensor(None), "unknown")
+
     def test_captura_e_processamento_preservam_aspecto_16_por_9(self):
         self.assertEqual(config.CAPTURE_WIDTH * 9, config.CAPTURE_HEIGHT * 16)
         self.assertEqual(config.camera_x * 9, config.camera_y * 16)
@@ -30,6 +44,12 @@ class LineCameraSelectionTests(unittest.TestCase):
         self.assertEqual(
             obter_recorte_maximo({"ScalerCrop": ((0, 0, 1, 1),
                                                   (0, 0, 4608, 2592))}),
+            (0, 0, 4608, 2592),
+        )
+        self.assertEqual(
+            normalizar_recorte_metadata(SimpleNamespace(
+                x=0, y=0, width=4608, height=2592,
+            )),
             (0, 0, 4608, 2592),
         )
 
@@ -125,6 +145,117 @@ class LineCameraSelectionTests(unittest.TestCase):
             (25000, 25000),
         )
         self.assertFalse(configuracoes[0]["queue"])
+
+    def test_camera_expoe_sensor_modo_e_crop_reais(self):
+        configuracoes = []
+        controles = []
+
+        class FakePicamera2:
+            sensor_modes = (
+                {
+                    "size": (1536, 864),
+                    "bit_depth": 10,
+                    "fps": 120.0,
+                    "crop_limits": (768, 432, 3072, 1728),
+                },
+                {
+                    "size": (2304, 1296),
+                    "bit_depth": 10,
+                    "fps": 56.0,
+                    "crop_limits": (0, 0, 4608, 2592),
+                },
+            )
+            camera_controls = {
+                "ScalerCrop": ((0, 0, 1, 1), (0, 0, 4608, 2592)),
+            }
+
+            @staticmethod
+            def global_camera_info():
+                return [
+                    {"Model": "ov5647"},
+                    {"Model": "IMX708 Wide"},
+                ]
+
+            def __init__(self, camera_num):
+                self.camera_num = camera_num
+                self.configuration = None
+
+            def create_video_configuration(self, **kwargs):
+                configuracoes.append(kwargs)
+                return kwargs
+
+            def configure(self, configuration):
+                self.configuration = configuration
+
+            def camera_configuration(self):
+                return self.configuration
+
+            def start(self):
+                pass
+
+            def set_controls(self, values):
+                controles.append(values)
+
+            @staticmethod
+            def capture_metadata():
+                return {
+                    "ScalerCrop": (0, 0, 4608, 2592),
+                    "FrameDuration": 25000,
+                }
+
+        fake_module = SimpleNamespace(Picamera2=FakePicamera2)
+        with (
+            mock.patch.dict(sys.modules, {"picamera2": fake_module}),
+            mock.patch("visao.captura.time.sleep"),
+        ):
+            camera = LineCamera()
+
+        self.assertEqual(camera.camera_index, config.LINE_CAMERA_INDEX)
+        self.assertEqual(camera.sensor_id, "imx708_wide")
+        self.assertEqual(
+            camera.sensor_mode,
+            {"output_size": (2304, 1296), "bit_depth": 10},
+        )
+        self.assertEqual(camera.scaler_crop, (0, 0, 4608, 2592))
+        self.assertEqual(
+            camera.capture_mode_id,
+            "LineCamera:448x252@40.00:full-fov;"
+            "sensor-mode=2304x1296x10;crop=0,0,4608,2592",
+        )
+        self.assertIn({"ScalerCrop": (0, 0, 4608, 2592)}, controles)
+        self.assertEqual(
+            configuracoes[0]["sensor"],
+            {"output_size": (2304, 1296), "bit_depth": 10},
+        )
+
+    def test_assinatura_competitiva_exige_readback_de_crop_fps_e_sensor(self):
+        camera = LineCamera.__new__(LineCamera)
+        camera.sensor_id = config.LINE_CAMERA_SENSOR_ID
+        camera._sensor_mode_applied = {
+            "output_size": (2304, 1296), "bit_depth": 10,
+        }
+        camera._main_stream_applied = None
+        camera._scaler_crop_applied = None
+        camera._capture_fps_confirmed = None
+        camera.capture_fps = 40.
+        with self.assertRaisesRegex(RuntimeError, "stream principal"):
+            _ = camera.capture_mode_id
+
+        camera._main_stream_applied = {
+            "size": (config.CAPTURE_WIDTH, config.CAPTURE_HEIGHT),
+            "format": "RGB888",
+        }
+        with self.assertRaisesRegex(RuntimeError, "ScalerCrop"):
+            _ = camera.capture_mode_id
+
+        camera._scaler_crop_applied = (0, 0, 4608, 2592)
+        with self.assertRaisesRegex(RuntimeError, "FrameDuration"):
+            _ = camera.capture_mode_id
+
+        camera._capture_fps_confirmed = 40.
+        camera.sensor_id = "ov5647"
+        with self.assertRaisesRegex(RuntimeError, "sensor"):
+            _ = camera.capture_mode_id
 
     def test_driver_que_recusa_modo_rapido_reabre_em_quarenta_fps(self):
         configuracoes = []
@@ -296,7 +427,7 @@ class LineCameraSelectionTests(unittest.TestCase):
             }),
             mock.patch("visao.captura.time.sleep"),
         ):
-            LineCamera()
+            camera = LineCamera()
 
         self.assertEqual(ciclos_af, [True])
         self.assertIn({"AfRange": "full"}, controles_aplicados)
@@ -305,6 +436,75 @@ class LineCameraSelectionTests(unittest.TestCase):
             controles_aplicados,
         )
         self.assertNotIn({"AfMode": "continuous"}, controles_aplicados)
+        self.assertAlmostEqual(camera.lens_position, 12.5)
+
+    def test_aplica_e_confirma_lens_position_salva(self):
+        controles_aplicados = []
+
+        class FakeCamera:
+            def set_controls(self, values):
+                controles_aplicados.append(values)
+
+            @staticmethod
+            def capture_metadata():
+                return {"LensPosition": 13.625}
+
+        camera = LineCamera.__new__(LineCamera)
+        camera.picam2 = FakeCamera()
+        camera._lens_position_confirmed = None
+        controls = SimpleNamespace(
+            AfModeEnum=SimpleNamespace(Manual="manual"),
+        )
+        with mock.patch.dict(
+            sys.modules,
+            {"libcamera": SimpleNamespace(controls=controls)},
+        ):
+            confirmada = camera.aplicar_posicao_lente(13.64)
+
+        self.assertAlmostEqual(confirmada, 13.625)
+        self.assertAlmostEqual(camera.lens_position, 13.625)
+        self.assertEqual(
+            controles_aplicados,
+            [{"AfMode": "manual", "LensPosition": 13.64}],
+        )
+
+    def test_lens_position_nao_confirmada_falha_fechado(self):
+        class FakeCamera:
+            @staticmethod
+            def set_controls(_values):
+                pass
+
+            @staticmethod
+            def capture_metadata():
+                return {"LensPosition": 8.0}
+
+        camera = LineCamera.__new__(LineCamera)
+        camera.picam2 = FakeCamera()
+        camera._lens_position_confirmed = None
+        controls = SimpleNamespace(
+            AfModeEnum=SimpleNamespace(Manual="manual"),
+        )
+        with (
+            mock.patch.dict(
+                sys.modules,
+                {"libcamera": SimpleNamespace(controls=controls)},
+            ),
+            mock.patch("visao.captura.time.sleep"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "não foi confirmada"):
+                camera.aplicar_posicao_lente(13.5, tentativas=2)
+
+        self.assertIsNone(camera.lens_position)
+
+    def test_assinatura_competitiva_exige_modo_bruto_confirmado(self):
+        camera = LineCamera.__new__(LineCamera)
+        camera._sensor_mode_applied = None
+        camera._scaler_crop_applied = None
+        camera._capture_fps_confirmed = None
+        camera.sensor_id = config.LINE_CAMERA_SENSOR_ID
+        camera.capture_fps = 40.
+        with self.assertRaisesRegex(RuntimeError, "modo bruto"):
+            _ = camera.capture_mode_id
 
     def test_frame_no_tamanho_do_algoritmo_nao_e_redimensionado(self):
         class FrameFalso:
@@ -317,11 +517,35 @@ class LineCameraSelectionTests(unittest.TestCase):
             capture_array=lambda _stream: frame,
         )
 
-        with mock.patch("visao.captura.cv2.resize") as resize:
-            devolvido = camera.get_frame()
+        devolvido = camera.get_frame()
 
         self.assertIs(devolvido, frame)
-        resize.assert_not_called()
+
+    def test_frame_com_geometria_inesperada_falha_sem_esticar(self):
+        class FrameFalso:
+            ndim = 3
+            shape = (480, 640, 3)
+
+        camera = LineCamera.__new__(LineCamera)
+        camera.picam2 = SimpleNamespace(
+            capture_array=lambda _stream: FrameFalso(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "mudou de geometria"):
+            camera.get_frame()
+
+    def test_frame_com_quatro_canais_falha_sem_mascarar_formato(self):
+        class FrameFalso:
+            ndim = 3
+            shape = (config.camera_y, config.camera_x, 4)
+
+        camera = LineCamera.__new__(LineCamera)
+        camera.picam2 = SimpleNamespace(
+            capture_array=lambda _stream: FrameFalso(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "mudou de geometria"):
+            camera.get_frame()
 
     def test_line_and_rescue_use_different_fixed_indices(self):
         self.assertEqual(config.LINE_CAMERA_INDEX, 1)

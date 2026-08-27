@@ -1294,7 +1294,10 @@ void configurar_mpu() {
 // ======================================================
 // RESPOSTA COMPLETA DO MPU
 // ======================================================
-void responder_mpu() {
+void responder_mpu(
+  unsigned long request_id,
+  bool echo_id
+) {
   if (
     !mpu_disponivel
   ) {
@@ -1313,6 +1316,16 @@ void responder_mpu() {
   Serial.print(
     "OK MPU"
   );
+  if (
+    echo_id
+  ) {
+    Serial.print(
+      " ID="
+    );
+    Serial.print(
+      request_id
+    );
+  }
   Serial.print(
     " PITCH="
   );
@@ -1671,11 +1684,14 @@ void processar_comando(
       "MPU"
     ) == 0
   ) {
-    // MPU sem parametros.
+    // MPU sem parametros (consulta manual/legada).
     if (
       primeiro == NULL
     ) {
-      responder_mpu();
+      responder_mpu(
+        0,
+        false
+      );
       return;
     }
     // Os comandos MPU abaixo aceitam apenas
@@ -1685,6 +1701,27 @@ void processar_comando(
     ) {
       Serial.println(
         "ERRO PARAMETROS_INVALIDOS"
+      );
+      return;
+    }
+    // MPU <id>
+    //
+    // O ID trafega de ponta a ponta para uma resposta atrasada nunca ser
+    // confundida com a consulta seguinte pela Raspberry.
+    char* fim_id_mpu;
+    unsigned long id_mpu = strtoul(
+      primeiro,
+      &fim_id_mpu,
+      10
+    );
+    if (
+      primeiro[0] != '\0' &&
+      fim_id_mpu[0] == '\0' &&
+      id_mpu > 0
+    ) {
+      responder_mpu(
+        id_mpu,
+        true
       );
       return;
     }

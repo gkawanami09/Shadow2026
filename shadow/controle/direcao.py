@@ -11,11 +11,68 @@ from config import (FRONT_ANCHORED_STEERING, FRONT_ANCHOR_FULL_ANGLE,
 
 # Instancia definida por init_steering() no processo de controle (ou nos tools).
 arduino = None
+_motion_guard = None
+_motion_observer = None
 
 
 def init_steering(arduino_instance):
-    global arduino
+    global arduino, _motion_guard, _motion_observer
     arduino = arduino_instance
+    # Cada processo/sessao comeca sem herdar a trava da utilizacao anterior.
+    # O controle competitivo instala seu predicado logo depois desta chamada;
+    # ferramentas e o processo de resgate continuam com o comportamento antigo.
+    _motion_guard = None
+    _motion_observer = None
+
+
+def set_motion_observer(callback=None):
+    """Publica o par PWM efetivamente enviado, inclusive giros bloqueantes."""
+
+    global _motion_observer
+    if callback is not None and not callable(callback):
+        raise TypeError("motion observer precisa ser callable ou None")
+    _motion_observer = callback
+
+
+def _publish_motion(left_pwm, right_pwm):
+    if _motion_observer is None:
+        return
+    try:
+        _motion_observer(int(round(left_pwm)), int(round(right_pwm)))
+    except Exception:
+        # Diagnostico nunca pode impedir uma parada/comando de seguranca.
+        pass
+
+
+def set_motion_guard(predicate=None):
+    """Instala uma permissao fail-closed avaliada antes e durante movimentos.
+
+    O predicado pertence ao processo que possui a serial. Se ele devolver
+    falso ou levantar uma excecao, qualquer comando passa a ser PARAR. Isso
+    tambem interrompe esperas bloqueantes de gap/retorno em no maximo 50 ms.
+    """
+    global _motion_guard
+    if predicate is not None and not callable(predicate):
+        raise TypeError("motion guard precisa ser callable ou None")
+    _motion_guard = predicate
+
+
+def motion_allowed():
+    if _motion_guard is None:
+        return True
+    try:
+        return bool(_motion_guard())
+    except Exception:
+        return False
+
+
+def _stop_if_guarded():
+    if motion_allowed():
+        return False
+    if arduino is not None:
+        arduino.parar()
+    _publish_motion(0, 0)
+    return True
 
 
 def mix_line_pwm(correction, speed):
@@ -42,8 +99,15 @@ def mix_line_pwm(correction, speed):
 
 def steer_line(correction, speed):
     """Envia o controle normal por pares: FE=TE e FD=TD."""
+    if _stop_if_guarded():
+        return False
     speed_left, speed_right = mix_line_pwm(correction, speed)
-    return arduino.lado(speed_left, speed_right)
+    sent = arduino.lado(speed_left, speed_right)
+    _publish_motion(
+        speed_left if sent is not False else 0,
+        speed_right if sent is not False else 0,
+    )
+    return sent
 
 
 def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=False,
@@ -55,9 +119,16 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
     e valores negativos viram para a esquerda.
     """
 
+    # PARAR sempre continua permitido. Para qualquer outro comando, uma trava
+    # negada transforma a tentativa em parada sem depender do chamador.
+    if angle != 190 and _stop_if_guarded():
+        return False
+
     # stop
     if angle == 190:
-        return arduino.parar()
+        sent = arduino.parar()
+        _publish_motion(0, 0)
+        return sent
 
     # backward
     elif angle == 200:
@@ -89,7 +160,9 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
 
     else:
         # angulo fora do vocabulario: para por seguranca
-        return arduino.parar()
+        sent = arduino.parar()
+        _publish_motion(0, 0)
+        return sent
 
     # Para erros grandes, desloca progressivamente o centro de giro para a
     # frente do chassi. No limite, as rodas dianteiras ficam quase paradas e
@@ -131,17 +204,25 @@ def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=Fals
         toque = float(toque_frente_direita_pwm) / MAX_PWM
         front_right = min(max(front_right + toque, -1.), 1.)
 
-        return arduino.rodas(
-            round(front_left * MAX_PWM),
-            round(rear_left * MAX_PWM),
-            round(front_right * MAX_PWM),
-            round(rear_right * MAX_PWM),
+        fe = round(front_left * MAX_PWM)
+        te = round(rear_left * MAX_PWM)
+        fd = round(front_right * MAX_PWM)
+        td = round(rear_right * MAX_PWM)
+        sent = arduino.rodas(fe, te, fd, td)
+        _publish_motion(
+            round((fe + te) / 2) if sent is not False else 0,
+            round((fd + td) / 2) if sent is not False else 0,
         )
+        return sent
     else:
-        return arduino.lado(
-            round(speed_left * MAX_PWM),
-            round(speed_right * MAX_PWM),
+        left_pwm = round(speed_left * MAX_PWM)
+        right_pwm = round(speed_right * MAX_PWM)
+        sent = arduino.lado(left_pwm, right_pwm)
+        _publish_motion(
+            left_pwm if sent is not False else 0,
+            right_pwm if sent is not False else 0,
         )
+        return sent
 
 
 def sleep_steering(duration):
@@ -151,6 +232,9 @@ def sleep_steering(duration):
         remaining = end - time.monotonic()
         if remaining <= 0:
             break
+        if _stop_if_guarded():
+            return False
         if arduino is not None:
             arduino.refresh()
         time.sleep(min(.05, remaining))
+    return True

@@ -8,6 +8,9 @@ from typing import NamedTuple
 import numpy as np
 
 import config
+from controle.estado_verde import (GREEN_OBSERVATION_ATOMIC_SIZE,
+                                    GreenDecision, GreenManeuverState,
+                                    GreenObservation, empty_observation)
 from shared.gerenciadores import ConfigManager, Timer
 
 config_manager = ConfigManager(str(config.CONFIG_INI_PATH))
@@ -64,6 +67,70 @@ steering_heading = Value("d", 0.)
 steering_left_pwm = Value("i", 0)
 steering_right_pwm = Value("i", 0)
 
+
+class ComandoMotores(NamedTuple):
+    command_id: int
+    publicado_em: float
+    esquerda: int
+    direita: int
+
+
+_comando_motores = Array("d", 4, lock=True)
+
+
+def publicar_comando_motores(esquerda, direita, *, publicado_em=None):
+    with _comando_motores.get_lock():
+        dados = _comando_motores.get_obj()
+        dados[0] += 1
+        dados[1] = (
+            time.monotonic() if publicado_em is None else float(publicado_em))
+        dados[2] = int(esquerda)
+        dados[3] = int(direita)
+
+
+def ler_comando_motores():
+    with _comando_motores.get_lock():
+        dados = tuple(_comando_motores.get_obj())
+    return ComandoMotores(
+        command_id=int(dados[0]),
+        publicado_em=float(dados[1]),
+        esquerda=int(dados[2]),
+        direita=int(dados[3]),
+    )
+
+# ----------------------------------------------------------------------------
+# Intersecoes e marcadores verdes
+# ----------------------------------------------------------------------------
+# A direcao e publicada como parte de uma unica observacao coerente. Os
+# valores antigos ``turn_dir`` e ``green_turn_target`` permanecem apenas para
+# compatibilidade com ferramentas/rotinas antigas; o controle competitivo nao
+# deve montar uma decisao lendo esses campos separadamente.
+INTERSECTION_NONE = int(GreenDecision.NONE)
+INTERSECTION_PENDING = int(GreenDecision.PENDING)
+INTERSECTION_STRAIGHT = int(GreenDecision.STRAIGHT)
+INTERSECTION_LEFT = int(GreenDecision.LEFT)
+INTERSECTION_RIGHT = int(GreenDecision.RIGHT)
+INTERSECTION_UTURN = int(GreenDecision.UTURN)
+
+GREEN_STATE_FOLLOW = int(GreenManeuverState.FOLLOW)
+GREEN_STATE_OBSERVE = int(GreenManeuverState.OBSERVE)
+GREEN_STATE_COMMITTED = int(GreenManeuverState.COMMITTED)
+GREEN_STATE_APPROACH = int(GreenManeuverState.APPROACH)
+GREEN_STATE_TURNING = int(GreenManeuverState.TURNING)
+GREEN_STATE_REACQUIRE = int(GreenManeuverState.REACQUIRE)
+GREEN_STATE_COOLDOWN = int(GreenManeuverState.COOLDOWN)
+GREEN_STATE_FAULT_STOP = int(GreenManeuverState.FAULT_STOP)
+
+green_calibration_ready = Value("b", False)
+green_decision_consumed_id = Value("q", 0)
+green_control_state = Value("b", GREEN_STATE_FOLLOW)
+green_locked_decision = Value("b", INTERSECTION_NONE)
+green_control_yaw = Value("d", float("nan"))
+green_fault_stop = Value("b", False)
+green_topology_junction_visible = Value("b", False)
+# ACK da visão: decisão consumida cujo cooldown topológico realmente terminou.
+green_rearmed_decision_id = Value("q", 0)
+
 # ----------------------------------------------------------------------------
 # Missão completa (shadow/mission.py)
 # ----------------------------------------------------------------------------
@@ -106,15 +173,45 @@ class ResultadoVisaoRapida(NamedTuple):
     ponto_futuro_y: float
     ponto_futuro_valido: bool
     faixa_transversal_y: float
+    juncao_topologica_visivel: bool
+    locked_branch_token: int
+    locked_branch_valid: bool
+    locked_branch_bottom_x: float
+    locked_branch_bottom_y: float
 
 
 # Um único bloqueio publica todos os campos. O controle nunca usa uma mistura
 # do ângulo de um frame com o ponto inferior do frame seguinte.
-_resultado_visao_rapida = Array("d", 17, lock=True)
+_resultado_visao_rapida = Array("d", 22, lock=True)
+
+# ``double`` mantem a estrutura contigua e barata entre processos. IDs sao
+# contadores pequenos, portanto continuam exatamente representaveis.
+_observacao_intersecao = Array(
+    "d", empty_observation().as_atomic_values(), lock=True)
+
+
+def publicar_observacao_intersecao(observacao):
+    """Publica um GreenObservation inteiro sob um unico lock."""
+    if not isinstance(observacao, GreenObservation):
+        raise TypeError("observacao precisa ser GreenObservation")
+    with _observacao_intersecao.get_lock():
+        dados = _observacao_intersecao.get_obj()
+        valores = observacao.as_atomic_values()
+        for indice, valor in enumerate(valores):
+            dados[indice] = valor
+
+
+def ler_observacao_intersecao():
+    with _observacao_intersecao.get_lock():
+        dados = tuple(_observacao_intersecao.get_obj())
+    if len(dados) != GREEN_OBSERVATION_ATOMIC_SIZE:
+        raise RuntimeError("memoria compartilhada verde com tamanho invalido")
+    return GreenObservation.from_atomic_values(dados)
 
 
 def publicar_resultado_visao_rapida(
     *,
+    sequencia=None,
     publicado_em,
     processamento_ms,
     linha_detectada,
@@ -131,10 +228,21 @@ def publicar_resultado_visao_rapida(
     ponto_futuro_y,
     ponto_futuro_valido,
     faixa_transversal_y,
+    juncao_topologica_visivel,
+    locked_branch_token=0,
+    locked_branch_valid=False,
+    locked_branch_bottom_x=-1.0,
+    locked_branch_bottom_y=-1.0,
 ):
     with _resultado_visao_rapida.get_lock():
         dados = _resultado_visao_rapida.get_obj()
-        dados[0] += 1
+        if sequencia is None:
+            dados[0] += 1
+        else:
+            sequencia = int(sequencia)
+            if sequencia < 0:
+                raise ValueError("sequencia da visao nao pode ser negativa")
+            dados[0] = sequencia
         dados[1] = float(publicado_em)
         dados[2] = float(processamento_ms)
         dados[3] = bool(linha_detectada)
@@ -151,6 +259,11 @@ def publicar_resultado_visao_rapida(
         dados[14] = float(ponto_futuro_y)
         dados[15] = bool(ponto_futuro_valido)
         dados[16] = float(faixa_transversal_y)
+        dados[17] = bool(juncao_topologica_visivel)
+        dados[18] = max(int(locked_branch_token), 0)
+        dados[19] = bool(locked_branch_valid)
+        dados[20] = float(locked_branch_bottom_x)
+        dados[21] = float(locked_branch_bottom_y)
 
 
 def ler_resultado_visao_rapida():
@@ -174,6 +287,11 @@ def ler_resultado_visao_rapida():
         ponto_futuro_y=dados[14],
         ponto_futuro_valido=bool(dados[15]),
         faixa_transversal_y=dados[16],
+        juncao_topologica_visivel=bool(dados[17]),
+        locked_branch_token=int(dados[18]),
+        locked_branch_valid=bool(dados[19]),
+        locked_branch_bottom_x=dados[20],
+        locked_branch_bottom_y=dados[21],
     )
 
 

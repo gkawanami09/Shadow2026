@@ -22,6 +22,8 @@ class LeituraMpu:
     pitch_graus: float
     roll_graus: float
     yaw_graus: float
+    received_at: float = 0.0
+    request_generation: int = 0
 
 
 class Arduino:
@@ -44,6 +46,9 @@ class Arduino:
         self._mpu_deadline = 0.0
         self._mpu_ready = False
         self._mpu_value = None
+        self._mpu_generation = 0
+        self._mpu_pending_generation = 0
+        self._mpu_requested_at = 0.0
         self._rampa_pending = False
         self._rampa_deadline = 0.0
         self._rampa_ready = False
@@ -302,9 +307,12 @@ class Arduino:
         ):
             return False
         self._mpu_pending = True
-        self._mpu_deadline = time.monotonic() + timeout
+        self._mpu_generation += 1
+        self._mpu_pending_generation = self._mpu_generation
+        self._mpu_requested_at = time.monotonic()
+        self._mpu_deadline = self._mpu_requested_at + timeout
         self._mpu_value = None
-        self._write_line("MPU")
+        self._write_line(f"MPU {self._mpu_pending_generation}")
         if not self._connected:
             self._mpu_pending = False
             return False
@@ -333,6 +341,8 @@ class Arduino:
         self._mpu_ready = False
         self._mpu_value = None
         self._mpu_deadline = 0.0
+        self._mpu_pending_generation = 0
+        self._mpu_requested_at = 0.0
 
     def zerar_mpu(self, timeout=0.5):
         """Zera a referencia relativa de pitch, roll e yaw com o robo parado."""
@@ -602,13 +612,22 @@ class Arduino:
                     if "=" in campo
                 )
                 try:
+                    response_generation = int(campos["ID"])
+                    if response_generation != self._mpu_pending_generation:
+                        # Resposta pertencente a uma requisição expirada. A
+                        # pendente atual continua aguardando seu próprio ID.
+                        return
                     self._mpu_value = LeituraMpu(
                         pitch_graus=float(campos["PITCH"]),
                         roll_graus=float(campos["ROLL"]),
                         yaw_graus=float(campos["YAW"]),
+                        received_at=time.monotonic(),
+                        request_generation=response_generation,
                     )
                 except (KeyError, ValueError):
-                    self._mpu_value = None
+                    # Firmware antigo ou resposta sem proveniência: deixa a
+                    # consulta expirar e remove a autoridade do MPU.
+                    return
                 self._mpu_pending = False
                 self._mpu_ready = True
                 return
