@@ -293,7 +293,6 @@ GREEN_MPU_QUERY_INTERVAL_S = .04
 GREEN_MPU_RESPONSE_TIMEOUT_S = .12
 GREEN_MPU_SLOWDOWN_DEG = 70.
 GREEN_MPU_SLOW_SPEED = .32
-GREEN_MPU_TARGET_ARM_DEG = 40.           # evita confundir a linha de entrada
 GREEN_MPU_COMPLETION_MIN_DEG = 70.        # nao libera o ramo antes de girar de fato
 GREEN_MPU_HARD_LIMIT_DEG = 94.
 GREEN_REVERSE_TIME = 0.                    # controlador continuo nao recua ao alinhar

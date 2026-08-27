@@ -10,21 +10,21 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GREEN_APPROACH_SPEED, GREEN_APPROACH_TIME,
                     GREEN_REVERSE_SPEED, GREEN_REVERSE_TIME,
                     GREEN_TURN_BLIND_TIME, GREEN_TURN_CENTER_TOLERANCE_PX,
-                    GREEN_TURN_SIDE_MIN_ERROR_PX, GREEN_TURN_SPEED,
-                     GREEN_TURN_TIMEOUT, LINE_FOLLOW_SPEED,
-                     MIN_LINE_SIZE_DEFAULT,
-                     TURN_AROUND_GREEN_COOLDOWN, VISION_READY_TIMEOUT,
-                     camera_x, camera_y)
+                    GREEN_TURN_SPEED, GREEN_TURN_TIMEOUT, LINE_FOLLOW_SPEED,
+                    MIN_LINE_SIZE_DEFAULT, TURN_AROUND_GREEN_COOLDOWN,
+                    VISION_READY_TIMEOUT, camera_x, camera_y)
 from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
     desviar_obstaculo,
 )
 from controle.parada_vermelho import stop_for_red
-from controle.manobra_verde import (correcao_aproximacao,
-                                    alinhamento_verde_pode_concluir,
+from controle.manobra_verde import (alinhamento_verde_pode_concluir,
+                                    controle_visual_verde_liberado,
+                                    correcao_aproximacao,
                                     deve_iniciar_giro_verde,
                                     progresso_giro_mpu,
+                                    ramo_marcado_visto_pela_camera,
                                     ramo_pronto_para_giro)
 from controle.velocidade import get_speed
 from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
@@ -614,7 +614,9 @@ def control_loop():
                     green_mpu_turn_origin = green_mpu_last_yaw
                     aproximando_ramo_verde = False
 
-                if green_direction is None or green_turn_started is not None:
+                if (green_direction is None
+                        or (green_turn_started is not None
+                            and green_target_seen)):
                     saida_linha = controlador_linha.atualizar(
                         sequencia=resultado_visao.sequencia,
                         publicado_em=resultado_visao.publicado_em,
@@ -635,8 +637,10 @@ def control_loop():
                         agora=now,
                     )
                 else:
-                    # Verde possui uma manobra deliberada independente; sua
-                    # geometria nao pode armar a memoria de um canto preto.
+                    # Na aproximacao e no inicio do tanque, a faixa de entrada
+                    # ainda domina a imagem. Ela nao pode contaminar a memoria
+                    # do controlador antes de o ramo marcado chegar pelo lado
+                    # correto.
                     controlador_linha.suspender()
                     saida_linha = None
 
@@ -747,9 +751,10 @@ def control_loop():
                     # segue-linha. Curvas moderadas ficam diferenciais e o
                     # tanque aparece somente quando a geometria realmente
                     # pede uma correcao extrema.
-                    controle_ramo_valido = (
+                    controle_ramo_valido = controle_visual_verde_liberado(
+                        green_target_seen,
                         saida_linha is not None
-                        and saida_linha.comando_valido
+                        and saida_linha.comando_valido,
                     )
                     if controle_ramo_valido:
                         usar_controle_linha = True
@@ -829,17 +834,13 @@ def control_loop():
                         # que o marcador escolheu. Isso evita capturar o ramo
                         # anterior que ainda cruza o campo da camera.
                         ramo_armado_pela_camera = (
-                            linha_ramo_recente
-                            and lado_esperado * erro_inferior
-                            >= GREEN_TURN_SIDE_MIN_ERROR_PX
+                            ramo_marcado_visto_pela_camera(
+                                linha_ramo_recente,
+                                erro_inferior,
+                                lado_esperado,
+                            )
                         )
-                        ramo_armado_pelo_mpu = (
-                            giro_mpu is not None
-                            and giro_mpu
-                            >= config.GREEN_MPU_TARGET_ARM_DEG
-                        )
-                        if (ramo_armado_pela_camera
-                                or ramo_armado_pelo_mpu):
+                        if ramo_armado_pela_camera:
                             green_target_seen = True
                             green_transversal_frames = 0
                             green_last_signed_error = (

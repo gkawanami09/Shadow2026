@@ -67,6 +67,35 @@ def deve_iniciar_giro_verde(
     )
 
 
+def ramo_marcado_visto_pela_camera(
+    linha_recente,
+    erro_inferior,
+    lado_esperado,
+):
+    """Confirma que a faixa escolhida chegou pela lateral correta.
+
+    O MPU mede quanto o chassi girou, mas nao distingue a faixa de entrada do
+    ramo marcado. Autorizar o controle visual apenas pelo yaw fazia a linha de
+    entrada reassumir o comando no meio do 90 e desfazer o giro verde.
+    """
+    try:
+        erro = float(erro_inferior)
+        lado = float(lado_esperado)
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        linha_recente
+        and math.isfinite(erro)
+        and lado in (-1., 1.)
+        and lado * erro >= config.GREEN_TURN_SIDE_MIN_ERROR_PX
+    )
+
+
+def controle_visual_verde_liberado(ramo_camera_visto, comando_valido):
+    """So entrega os motores ao seguidor depois de ver o ramo marcado."""
+    return bool(ramo_camera_visto and comando_valido)
+
+
 def ramo_chegou_ao_centro(
     erro_inferior,
     erro_assinado_anterior,

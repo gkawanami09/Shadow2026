@@ -11,10 +11,12 @@ sys.path.insert(0, str(SHADOW_ROOT))
 import config  # noqa: E402
 from controle.manobra_verde import (  # noqa: E402
     alinhamento_verde_pode_concluir,
+    controle_visual_verde_liberado,
     deve_iniciar_giro_verde,
     correcao_aproximacao,
     progresso_giro_mpu,
     ramo_chegou_ao_centro,
+    ramo_marcado_visto_pela_camera,
     ramo_pronto_para_giro,
 )
 
@@ -79,6 +81,24 @@ class ManobraVerdeTests(unittest.TestCase):
             linha_recente=True,
         ))
 
+    def test_linha_de_entrada_nao_libera_controle_visual_do_verde(self):
+        self.assertFalse(ramo_marcado_visto_pela_camera(
+            True, 0., 1))
+        self.assertFalse(controle_visual_verde_liberado(False, True))
+
+    def test_ramo_direito_na_base_libera_controle_visual(self):
+        self.assertTrue(ramo_marcado_visto_pela_camera(
+            True, config.GREEN_TURN_SIDE_MIN_ERROR_PX + 1, 1))
+        self.assertTrue(controle_visual_verde_liberado(True, True))
+
+    def test_ramo_oposto_nao_pode_cancelar_giro_verde(self):
+        self.assertFalse(ramo_marcado_visto_pela_camera(
+            True, -(config.GREEN_TURN_SIDE_MIN_ERROR_PX + 1), 1))
+
+    def test_frame_antigo_nao_declara_que_encontrou_ramo(self):
+        self.assertFalse(ramo_marcado_visto_pela_camera(
+            False, config.camera_x, 1))
+
     def test_ramo_que_salta_sobre_centro_tambem_conclui(self):
         self.assertTrue(ramo_chegou_ao_centro(-60, 70, 1))
 
@@ -87,7 +107,7 @@ class ManobraVerdeTests(unittest.TestCase):
 
     def test_mpu_nao_deixa_concluir_verde_com_apenas_40_graus(self):
         self.assertFalse(alinhamento_verde_pode_concluir(
-            0, 60, 1, config.GREEN_MPU_TARGET_ARM_DEG))
+            0, 60, 1, 40.))
 
     def test_mpu_e_centro_persistente_podem_concluir_verde(self):
         self.assertTrue(alinhamento_verde_pode_concluir(
