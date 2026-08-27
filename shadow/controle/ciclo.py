@@ -699,7 +699,7 @@ def control_loop():
                     if saida_linha.estado == CORNER:
                         lado = 'direita' if correcao_linha > 0 else 'esquerda'
                         status.value = (
-                            f'Curva fechada {lado} — alinhando nova reta')
+                            f'Curva fechada {lado} — eixo dianteiro ancorado')
                     elif saida_linha.estado == LOST:
                         status.value = (
                             'Linha fora da imagem — mantendo ultimo giro')
@@ -724,7 +724,19 @@ def control_loop():
                     steering_heading.value = saida_linha.angulo_linha
                     steering_left_pwm.value = pwm_esquerda
                     steering_right_pwm.value = pwm_direita
-                    steer_line(correcao_linha, command_speed)
+                    ancorar_eixo_dianteiro = (
+                        saida_linha.estado == CORNER
+                        or (
+                            saida_linha.estado == LOST
+                            and abs(correcao_linha)
+                            >= config.LINE_CORNER_MIN_CORRECTION
+                        )
+                    )
+                    steer_line(
+                        correcao_linha,
+                        command_speed,
+                        front_anchor=ancorar_eixo_dianteiro,
+                    )
                 else:
                     steering_state.value = STEERING_SPECIAL
                     steering_correction.value = 0.

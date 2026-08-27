@@ -40,10 +40,53 @@ def mix_line_pwm(correction, speed):
     return round(speed_left * MAX_PWM), round(speed_right * MAX_PWM)
 
 
-def steer_line(correction, speed):
-    """Envia o controle normal por pares: FE=TE e FD=TD."""
-    speed_left, speed_right = mix_line_pwm(correction, speed)
-    return arduino.lado(speed_left, speed_right)
+def mix_line_wheels(correction, speed, *, front_anchor=False):
+    """Distribui o segue-linha nas quatro rodas.
+
+    Em TRACK, preserva exatamente o comando por lados. Em um canto fechado,
+    reduz a frente e concentra o giro na traseira para que o eixo da camera
+    nao avance alem do vertice antes de enxergar a nova reta.
+    """
+    correction = max(min(float(correction), 1.), -1.)
+    speed = max(min(float(speed), 1.), 0.)
+    left, right = mix_line_pwm(correction, speed)
+    wheels = (left, left, right, right)  # FE, TE, FD, TD
+
+    angle = abs(correction) * 180.
+    if (
+        not front_anchor
+        or not FRONT_ANCHORED_STEERING
+        or angle <= FRONT_ANCHOR_START_ANGLE
+    ):
+        return wheels
+
+    span = max(FRONT_ANCHOR_FULL_ANGLE - FRONT_ANCHOR_START_ANGLE, 1)
+    blend = min(
+        (angle - FRONT_ANCHOR_START_ANGLE) / span,
+        FRONT_ANCHOR_MAX_BLEND,
+    )
+    left_limit = round(min(speed * left_correction, 1.) * MAX_PWM)
+    right_limit = round(min(speed * right_correction, 1.) * MAX_PWM)
+
+    if correction > 0:  # direita: traseira esquerda avanca e direita recua
+        anchor_te, anchor_td = left_limit, -right_limit
+    else:               # esquerda: traseira esquerda recua e direita avanca
+        anchor_te, anchor_td = -left_limit, right_limit
+
+    front_left = round(left * (1. - blend))
+    rear_left = round(left * (1. - blend) + anchor_te * blend)
+    front_right = round(right * (1. - blend))
+    rear_right = round(right * (1. - blend) + anchor_td * blend)
+    return front_left, rear_left, front_right, rear_right
+
+
+def steer_line(correction, speed, *, front_anchor=False):
+    """Envia o controle normal, ancorando a frente apenas em cantos."""
+    fe, te, fd, td = mix_line_wheels(
+        correction, speed, front_anchor=front_anchor)
+    if fe == te and fd == td:
+        return arduino.lado(fe, fd)
+    return arduino.rodas(fe, te, fd, td)
 
 
 def steer(angle=190., speed=.8, front_reverse_assist=0., rear_pivot_enabled=False,
