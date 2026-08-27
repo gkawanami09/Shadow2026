@@ -30,6 +30,12 @@ class RetornoTests(unittest.TestCase):
                     patch.object(retorno, "sleep_steering") as sleep:
                 next_direction = retorno.turn_around("l")
 
+            self.assertEqual(steer.call_args_list[0].args, (0, .7))
+            self.assertEqual(
+                sleep.call_args_list[0].args,
+                (config.TURN_AROUND_PREROLL,),
+            )
+            self.assertEqual(config.TURN_AROUND_PREROLL, .275)
             pivots = [call.args for call in steer.call_args_list
                       if call.args and abs(call.args[0]) == 180]
             self.assertTrue(pivots)
