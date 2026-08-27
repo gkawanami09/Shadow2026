@@ -107,9 +107,12 @@ def vision_loop(debug=False):
     # uma thread deixa o consumo mais uniforme e ainda cabe folgado em 25 ms.
     cv2.setNumThreads(max(1, int(config.VISION_OPENCV_THREADS)))
     line_module.init_tracker()
+    inicio_aquecimento = time.perf_counter()
     print("[visão] preparando cálculos rápidos...")
     line_module.aquecer_numba()
     green_module.aquecer_numba()
+    print("[visão] cálculos prontos em "
+          f"{time.perf_counter() - inicio_aquecimento:.2f}s")
 
     bottom_y = camera_y
 

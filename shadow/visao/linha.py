@@ -10,6 +10,7 @@ from config import (BOTTOM_CENTER_CONTROL, BOTTOM_CENTER_MIN_Y,
                     OBSTACLE_LEFT_PREFERENCE_MIN_SPAN_RATIO,
                     camera_x, camera_y)
 from shared.dados_compartilhados import line_crop, timer, turn_dir
+from visao.cache_numba import aquecer_com_cache_recuperavel
 
 x_last = camera_x / 2
 y_last = camera_y / 2
@@ -87,10 +88,10 @@ def determine_correct_line(contours_blk, preferir_esquerda=False,
     return blackline, blackline_crop
 
 
-# O processo ja aquece esta funcao antes de abrir a camera. Manter o codigo
-# compilado somente em memoria evita que uma queda de energia deixe arquivos
-# .nbi/.nbc incompletos e impeça a visao de iniciar no boot seguinte.
-@njit(cache=False)
+# O processo aquece esta funcao antes de abrir a camera. O cache evita uma nova
+# compilacao a cada boot; aquecer_numba recupera automaticamente um indice que
+# tenha sido interrompido por uma queda de energia.
+@njit(cache=True)
 def calculate_angle_numba(blackline, blackline_crop, last_bottom_point, average_line_point):
     max_gap = 1
     max_line_width = camera_x * .19
@@ -196,7 +197,8 @@ def aquecer_numba():
         [[180, 100], [268, 100], [268, 240], [180, 240]],
         dtype=np.int32,
     ).reshape((-1, 1, 2))
-    calculate_angle_numba(
+    aquecer_com_cache_recuperavel(
+        calculate_angle_numba,
         contorno,
         contorno,
         camera_x / 2,

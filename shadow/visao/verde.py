@@ -9,6 +9,7 @@ from config import (GREEN_MARKER_MEMORY, GREEN_MIN_AREA, GREEN_ROI_MEAN,
                     LINE_CROP_NORMAL, camera_x, camera_y)
 from shared.dados_compartilhados import (add_time_value, get_time_average, line_crop,
                                timer, turn_dir)
+from visao.cache_numba import aquecer_com_cache_recuperavel
 
 
 def check_green(contours_grn, black_image, debug_img=None):
@@ -40,9 +41,9 @@ def check_green(contours_grn, black_image, debug_img=None):
         return "straight"
 
 
-# Compilado durante aquecer_numba(). Nao persistir o cache torna o boot
-# resistente a desligamentos abruptos sem alterar o processamento dos frames.
-@njit(cache=False)
+# Compilado durante aquecer_numba() e reutilizado nos proximos boots. Se uma
+# queda de energia interromper o indice, o aquecimento o refaz uma unica vez.
+@njit(cache=True)
 def check_black(black_around_sign, i, green_box, black_image):
     green_box = green_box[green_box[:, 1].argsort()]
 
@@ -87,7 +88,8 @@ def aquecer_numba():
         dtype=np.float32,
     )
     mascara = np.zeros((camera_y, camera_x), dtype=np.uint8)
-    check_black(acumulador, 0, caixa, mascara)
+    aquecer_com_cache_recuperavel(
+        check_black, acumulador, 0, caixa, mascara)
 
 
 def determine_turn_direction(black_around_sign):

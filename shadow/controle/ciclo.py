@@ -113,16 +113,16 @@ def control_loop():
         return
     init_steering(arduino)
     steer()  # motores parados desde o inicio
-    arduino.led("ACESO")
     if mission_mode.value:
         # Uma sessao da missao nunca reconecta em movimento. Se a placa cair,
         # o supervisor cria uma tentativa nova depois do reposicionamento.
         arduino.travar_sessao()
-    print("[controle] LED ACESO: modo segue-linha")
 
     last_turn_dir = "l"
 
     # espera a visao publicar o primeiro frame processado
+    status.value = "Preparando visao - motores parados"
+    print("[controle] aguardando primeiro frame da visao; motores parados")
     wait_start = time.perf_counter()
     while not vision_ready.value and not terminate.value:
         if not arduino.connected:
@@ -152,6 +152,10 @@ def control_loop():
             arduino.close()
         return
 
+    # O LED passa a significar que camera e controle estao realmente prontos.
+    # Assim nao existe mais uma espera silenciosa depois de ele acender.
+    arduino.led("ACESO")
+    print("[controle] LED ACESO: segue-linha pronto")
     line_status.value = "line_detected"
     status.value = "Shadow2026 pronto — aguardando linha"
     print("Shadow2026 ready — awaiting line")
