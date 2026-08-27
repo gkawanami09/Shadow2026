@@ -7,7 +7,9 @@ import cv2
 
 from config import (CAPTURE_FPS, CAPTURE_FPS_FALLBACK, CAPTURE_HEIGHT,
                     CAPTURE_WIDTH, LENS_POSITION, LINE_CAMERA_INDEX,
-                    camera_x, camera_y)
+                    LINE_CAMERA_EXPOSURE_VALUE,
+                    LINE_CAMERA_LOCK_AUTO_CONTROLS,
+                    LINE_CAMERA_WARMUP_S, camera_x, camera_y)
 
 
 def escolher_fps_captura(modos_sensor):
@@ -164,8 +166,7 @@ class LineCamera:
 
         self._abrir_campo_de_visao()
         self._configurar_foco()
-
-        time.sleep(0.1)
+        self._estabilizar_imagem()
 
     def _abrir_campo_de_visao(self):
         """Pede ao libcamera o sensor inteiro, sem zoom/crop digital."""
@@ -207,6 +208,44 @@ class LineCamera:
                 print(f"[camera] foco manual: LensPosition={LENS_POSITION}")
         except Exception as err:
             print(f"[camera] controle de foco ignorado (módulo sem AF?): {err}")
+
+    def _estabilizar_imagem(self):
+        """Evita que muito preto no quadro altere brilho e cor da pista."""
+        if not hasattr(self.picam2, "set_controls"):
+            time.sleep(.1)
+            return
+
+        try:
+            self.picam2.set_controls({
+                "AeEnable": True,
+                "AwbEnable": True,
+                "ExposureValue": float(LINE_CAMERA_EXPOSURE_VALUE),
+            })
+        except Exception as err:
+            print(f"[camera] compensacao de exposicao ignorada: {err}")
+
+        time.sleep(float(LINE_CAMERA_WARMUP_S))
+        if not LINE_CAMERA_LOCK_AUTO_CONTROLS:
+            return
+        if not hasattr(self.picam2, "capture_metadata"):
+            print("[camera] metadata indisponivel; AE/AWB permanecem automaticos")
+            return
+
+        try:
+            metadata = self.picam2.capture_metadata()
+            controles = {"AeEnable": False, "AwbEnable": False}
+            for nome in ("ExposureTime", "AnalogueGain", "ColourGains"):
+                valor = metadata.get(nome)
+                if valor is not None:
+                    controles[nome] = valor
+            self.picam2.set_controls(controles)
+            print(
+                "[camera] exposicao e balanco de branco travados: "
+                f"ExposureTime={metadata.get('ExposureTime', '?')} "
+                f"AnalogueGain={metadata.get('AnalogueGain', '?')}"
+            )
+        except Exception as err:
+            print(f"[camera] trava de exposicao/AWB ignorada: {err}")
 
     def _configurar_e_iniciar(self, fps):
         self.capture_fps = float(fps)

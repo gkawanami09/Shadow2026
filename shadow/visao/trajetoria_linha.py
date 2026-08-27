@@ -88,18 +88,26 @@ def estimar_trajetoria(contorno, formato_imagem):
     lateral = float(np.clip(c, -1., 1.))
     orientacao = float(np.clip(b, -1., 1.))
     curvatura = float(np.clip(2. * a, -1., 1.))
-    largura_norm = float(np.median(larguras) / largura)
+    larguras_norm = np.asarray(larguras, dtype=np.float64) / largura
+    largura_norm = float(np.median(larguras_norm))
     cobertura = min(len(pontos) / len(niveis), 1.)
     erro_ajuste = float(np.sqrt(np.mean(residuos ** 2)))
     qualidade_ajuste = float(np.clip(1. - erro_ajuste / .16, 0., 1.))
-    largura_ok = float(np.clip((.30 - largura_norm) / .18, 0., 1.))
-    confianca = cobertura * qualidade_ajuste * largura_ok
+    # A camera esta a 4,5 cm do piso. Uma faixa normal fica enorme no rodape
+    # e estreita ao longe; isso e perspectiva, nao ambiguidade. Intersecoes
+    # sao identificadas por um pico irregular no perfil de largura.
+    largura_prevista = np.polyval(np.polyfit(v, larguras_norm, 1), v)
+    erro_largura = float(np.sqrt(np.mean(
+        (larguras_norm - largura_prevista) ** 2)))
+    qualidade_largura = float(np.clip(1. - erro_largura / .16, 0., 1.))
+    maior_largura = float(np.max(larguras_norm))
+    confianca = cobertura * qualidade_ajuste * qualidade_largura
 
     # Uma barra transversal ou intersecao inteira nao e uma trajetoria unica.
     valida = bool(
         len(pontos) >= 6
         and largura_norm >= .008
-        and largura_norm < .28
+        and maior_largura < .78
         and confianca >= .35
         and np.isfinite((lateral, orientacao, curvatura, confianca)).all()
     )

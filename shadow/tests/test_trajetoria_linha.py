@@ -50,6 +50,15 @@ class EstimadorTrajetoriaTests(unittest.TestCase):
         self.assertTrue(resultado.valida)
         self.assertGreater(resultado.orientacao, .25)
 
+    def test_perspectiva_baixa_aceita_linha_larga_no_rodape(self):
+        resultado = estimar_trajetoria(_contorno([
+            (105, 55), (145, 55), (390, 251), (155, 251),
+        ]), (ALTURA, LARGURA))
+
+        self.assertTrue(resultado.valida)
+        self.assertGreater(resultado.confianca, .52)
+        self.assertGreater(resultado.largura_normalizada, .20)
+
     def test_barra_transversal_nao_vira_trajetoria(self):
         resultado = estimar_trajetoria(_contorno([
             (20, 195), (428, 195), (428, 230), (20, 230),
