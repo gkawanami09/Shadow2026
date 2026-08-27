@@ -13,6 +13,7 @@ from controle.seguidor_linha import (  # noqa: E402
     CORNER,
     LOST,
     TRACK,
+    ZIGZAG,
     ControladorSegueLinha,
     erros_da_geometria,
 )
@@ -31,6 +32,7 @@ class SeguidorLinhaTests(unittest.TestCase):
         a_frente=True,
         inferior=(224., 251.),
         alvo=(224., 20.),
+        zigzag=False,
         dt=.02,
     ):
         self.sequencia += 1
@@ -44,6 +46,7 @@ class SeguidorLinhaTests(unittest.TestCase):
             ponto_inferior_y=inferior[1],
             ponto_alvo_x=alvo[0],
             ponto_alvo_y=alvo[1],
+            zigzag_detectado=zigzag,
             agora=self.agora,
         )
 
@@ -155,6 +158,47 @@ class SeguidorLinhaTests(unittest.TestCase):
 
         self.assertEqual(saida.estado, TRACK)
         self.assertEqual(congelada.estado, LOST)
+
+    def test_zigzag_confirma_em_dois_frames_e_manda_reto(self):
+        primeiro = self.quadro(
+            a_frente=False, alvo=(447., 126.), zigzag=True)
+        segundo = self.quadro(
+            a_frente=False, alvo=(447., 126.), zigzag=True)
+
+        self.assertEqual(primeiro.estado, TRACK)
+        self.assertNotEqual(primeiro.estado, CORNER)
+        self.assertEqual(segundo.estado, ZIGZAG)
+        self.assertEqual(segundo.correcao, 0.)
+
+    def test_zigzag_conserva_reto_durante_memoria_curta(self):
+        self.quadro(alvo=(340., 100.), zigzag=True)
+        self.quadro(alvo=(340., 100.), zigzag=True)
+        memoria = self.quadro(alvo=(224., 20.), zigzag=False, dt=.10)
+
+        self.assertEqual(memoria.estado, ZIGZAG)
+        self.assertEqual(memoria.correcao, 0.)
+
+    def test_canto_forte_interrompe_memoria_do_zigzag(self):
+        self.quadro(alvo=(340., 100.), zigzag=True)
+        self.quadro(alvo=(340., 100.), zigzag=True)
+        primeiro = self.quadro(
+            a_frente=False, alvo=(447., 126.), zigzag=False)
+        segundo = self.quadro(
+            a_frente=False, alvo=(447., 126.), zigzag=False)
+
+        self.assertNotEqual(primeiro.estado, ZIGZAG)
+        self.assertEqual(segundo.estado, CORNER)
+
+    def test_saida_do_zigzag_nao_produz_pico_derivativo(self):
+        self.quadro(alvo=(340., 100.), zigzag=True)
+        self.quadro(alvo=(340., 100.), zigzag=True)
+        saida = self.quadro(
+            inferior=(244., 251.), alvo=(244., 20.),
+            zigzag=False, dt=config.ZIGZAG_HOLD_S + .01)
+
+        esperado = config.LINE_LATERAL_GAIN * (20. / (config.camera_x / 2.))
+        self.assertEqual(saida.estado, TRACK)
+        self.assertAlmostEqual(saida.correcao, esperado)
 
 
 if __name__ == "__main__":

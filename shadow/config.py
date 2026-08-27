@@ -185,6 +185,25 @@ LINE_CORNER_TIMEOUT_S = 1.6
 LINE_CORNER_LOST_HOLD_S = .65
 LINE_TRACK_LOST_HOLD_S = .25
 
+# Zigue-zague OBR: a camera wide enxerga varios segmentos no mesmo frame.
+# Em vez de perseguir cada diagonal, a visao confirma que o centro da faixa
+# alterna de lado pelo menos tres vezes e termina perto do eixo por onde
+# entrou. O controle entao atravessa o desenho reto no mesmo PWM 80.
+ZIGZAG_ENABLED = True
+ZIGZAG_SAMPLE_BANDS = 18
+ZIGZAG_MIN_VERTICAL_SPAN_RATIO = .42
+ZIGZAG_MIN_BAND_COVERAGE = .72
+ZIGZAG_DIRECTION_NOISE_PX = 5.
+ZIGZAG_MIN_RUN_PX = camera_x * .075
+ZIGZAG_MIN_RUNS = 3
+ZIGZAG_MIN_TOTAL_SPAN_PX = camera_x * .16
+ZIGZAG_MAX_NET_OFFSET_PX = camera_x * .16
+# Uma faixa horizontal muito larga denuncia degrau/L, nao diagonal alternada.
+ZIGZAG_MAX_BAND_WIDTH_PX = camera_x * .34
+ZIGZAG_CONFIRM_FRAMES = 2
+ZIGZAG_HOLD_S = .25
+ZIGZAG_CORNER_RELEASE_HEADING_DEG = 48.
+
 # Mantidos somente para o angulo legado consumido por decisoes de alto nivel
 # (verde, entrada e ferramentas antigas). Os motores do segue-linha normal nao
 # usam mais esta mistura.

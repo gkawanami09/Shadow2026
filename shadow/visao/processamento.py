@@ -37,6 +37,7 @@ from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_valu
 from visao.linha import calculate_angle, determine_correct_line
 from visao.verde import check_green, latch_turn_direction
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
+from visao.zigzag import detectar_zigzag
 
 # Cores carregadas do config.ini (fallback: valores do config.py)
 black_min = np.array(config.BLACK_MIN_DEFAULT)
@@ -172,6 +173,7 @@ def vision_loop(debug=False):
             area_linha_frame = 0.
             candidato_verde_frame = False
             candidato_vermelho_frame = False
+            zigzag_detectado_frame = False
             hsv_image = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2HSV)
             green_image = cv2.inRange(hsv_image, green_min, green_max)
             red_image = cv2.bitwise_or(
@@ -308,6 +310,14 @@ def vision_loop(debug=False):
                 )
                 area_linha_frame = float(cv2.contourArea(blackline))
                 line_size.value = area_linha_frame
+                zigzag_detectado_frame = (
+                    line_status.value == "line_detected"
+                    and not candidato_verde_frame
+                    and not candidato_vermelho_frame
+                    and not preferir_esquerda
+                    and direcao_marcada == "straight"
+                    and detectar_zigzag(blackline)
+                )
 
                 # Calcula a geometria do gap.
                 if line_status.value == "gap_detected":
@@ -410,6 +420,7 @@ def vision_loop(debug=False):
                 area_linha=area_linha_frame,
                 candidato_verde=candidato_verde_frame,
                 candidato_vermelho=candidato_vermelho_frame,
+                zigzag_detectado=zigzag_detectado_frame,
             )
 
             if not vision_ready.value:
@@ -464,7 +475,8 @@ def vision_loop(debug=False):
                         1,
                         cv2.LINE_AA,
                     )
-                nomes_controle = ("TRACK", "CORNER", "LOST", "SPECIAL")
+                nomes_controle = (
+                    "TRACK", "CORNER", "LOST", "SPECIAL", "ZIGZAG")
                 indice_controle = int(steering_state.value)
                 nome_controle = (
                     nomes_controle[indice_controle]

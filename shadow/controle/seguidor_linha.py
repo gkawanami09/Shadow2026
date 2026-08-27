@@ -15,6 +15,7 @@ import config
 TRACK = "TRACK"
 CORNER = "CORNER"
 LOST = "LOST"
+ZIGZAG = "ZIGZAG"
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,8 @@ class ControladorSegueLinha:
         self._canto_candidato_frames = 0
         self._canto_alinhado_frames = 0
         self._canto_iniciado_em = None
+        self._zigzag_candidato_frames = 0
+        self._zigzag_ativo_ate = None
         self._ultima_saida = SaidaSegueLinha(0., TRACK, 0., 0., False)
 
     def suspender(self):
@@ -192,6 +195,39 @@ class ControladorSegueLinha:
         self._canto_alinhado_frames = 0
         self._canto_iniciado_em = None
 
+    def _atualizar_zigzag(
+        self,
+        *,
+        detectado,
+        linha_a_frente,
+        angulo_linha,
+        agora,
+    ):
+        """Confirma a geometria e conserva um avanco reto por poucos frames."""
+        if detectado:
+            self._zigzag_candidato_frames += 1
+            if self._zigzag_candidato_frames >= config.ZIGZAG_CONFIRM_FRAMES:
+                self._zigzag_ativo_ate = agora + config.ZIGZAG_HOLD_S
+        else:
+            self._zigzag_candidato_frames = 0
+            # Nao carregar o atalho reto para dentro de um 90 graus real que
+            # apareca imediatamente depois do zigue-zague.
+            canto_forte = (
+                not linha_a_frente
+                and abs(angulo_linha)
+                >= config.ZIGZAG_CORNER_RELEASE_HEADING_DEG
+            )
+            if canto_forte:
+                self._zigzag_ativo_ate = None
+
+        ativo = (
+            self._zigzag_ativo_ate is not None
+            and agora <= self._zigzag_ativo_ate
+        )
+        if not ativo:
+            self._zigzag_ativo_ate = None
+        return ativo
+
     def atualizar(
         self,
         *,
@@ -203,6 +239,7 @@ class ControladorSegueLinha:
         ponto_inferior_y,
         ponto_alvo_x,
         ponto_alvo_y,
+        zigzag_detectado=False,
         agora=None,
     ):
         agora = time.monotonic() if agora is None else float(agora)
@@ -255,14 +292,34 @@ class ControladorSegueLinha:
         self._ultimo_visto_em = agora
         self._perdida_desde = None
 
-        correcao = self._atualizar_canto(
-            angulo_linha=angulo_linha,
-            erro_lateral=erro_lateral,
-            erro_alvo=erro_alvo,
+        zigzag_ativo = self._atualizar_zigzag(
+            detectado=bool(zigzag_detectado),
             linha_a_frente=bool(linha_a_frente),
-            correcao=correcao,
+            angulo_linha=angulo_linha,
             agora=agora,
         )
+        if zigzag_ativo:
+            self._limpar_canto()
+            self.estado = ZIGZAG
+            correcao = 0.
+            # As diagonais ignoradas nao podem produzir um pico derivativo ao
+            # sair do ladrilho e reencontrar a reta.
+            self._derivada_filtrada = 0.
+            self._ultimo_erro_base = None
+        elif zigzag_detectado:
+            # Primeiro frame: ainda nao corta caminho, mas tambem nao deixa a
+            # diagonal armar a memoria de um canto de 90 graus.
+            self._limpar_canto()
+            self.estado = TRACK
+        else:
+            correcao = self._atualizar_canto(
+                angulo_linha=angulo_linha,
+                erro_lateral=erro_lateral,
+                erro_alvo=erro_alvo,
+                linha_a_frente=bool(linha_a_frente),
+                correcao=correcao,
+                agora=agora,
+            )
         correcao = max(min(correcao, 1.), -1.)
         self._ultima_correcao = correcao
         self._ultima_saida = SaidaSegueLinha(
