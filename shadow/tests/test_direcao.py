@@ -73,6 +73,26 @@ class SteeringTests(unittest.TestCase):
 
         self.assertEqual(self.arduino.chamadas, [("lado", -35, 80)])
 
+    def test_tanque_fechado_gira_os_lados_em_sentidos_opostos(self):
+        direcao.steer_line(.72, LINE_FOLLOW_SPEED, tank=True)
+
+        self.assertEqual(self.arduino.chamadas, [("lado", 80, -80)])
+
+    def test_tanque_fechado_e_espelhado_para_esquerda(self):
+        direcao.steer_line(-.72, LINE_FOLLOW_SPEED, tank=True)
+
+        self.assertEqual(self.arduino.chamadas, [("lado", -80, 80)])
+
+    def test_histerese_mantem_tanque_ate_correcao_ficar_baixa(self):
+        self.assertTrue(direcao.atualizar_tanque_curva_fechada(
+            "CORNER", .72, False))
+        self.assertTrue(direcao.atualizar_tanque_curva_fechada(
+            "CORNER", .50, True))
+        self.assertFalse(direcao.atualizar_tanque_curva_fechada(
+            "CORNER", .40, True))
+        self.assertFalse(direcao.atualizar_tanque_curva_fechada(
+            "TRACK", .90, True))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -201,6 +201,11 @@ LINE_CORNER_TARGET_MIN = .35
 LINE_CORNER_CONFIRM_FRAMES = 2
 LINE_CORNER_MIN_CORRECTION = .72
 LINE_CORNER_FINISH_CORRECTION = .35
+# Curva fechada confirmada usa tanque simetrico na parte forte. A histerese
+# impede alternancia entre tanque e diferencial perto do limiar; abaixo da
+# saida, o controle continuo termina de centralizar a nova reta.
+LINE_TANK_ENTRY_CORRECTION = .68
+LINE_TANK_EXIT_CORRECTION = .45
 LINE_CORNER_EXIT_HEADING_DEG = 18.
 LINE_CORNER_EXIT_LATERAL = .18
 LINE_CORNER_EXIT_TARGET = .28

@@ -28,7 +28,8 @@ from controle.manobra_verde import (alinhamento_verde_pode_concluir,
                                     ramo_pronto_para_giro)
 from controle.velocidade import get_speed
 from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
-from controle.direcao import (init_steering, mix_line_pwm, sleep_steering,
+from controle.direcao import (atualizar_tanque_curva_fechada, init_steering,
+                              mix_line_pwm, mix_tank_pwm, sleep_steering,
                               steer, steer_line)
 from controle.retorno import turn_around
 from controle.seguidor_linha import CORNER, LOST, ControladorSegueLinha
@@ -172,6 +173,7 @@ def control_loop():
     no_black_since = None
     gap_retry_after = 0.0
     controlador_linha = ControladorSegueLinha()
+    tanque_curva_fechada = False
     green_direction = None
     green_approach_until = 0.
     green_turn_started = None
@@ -911,7 +913,21 @@ def control_loop():
                 # a observação o robô fica parado; quando aparece preto além da
                 # faixa este mesmo segue-linha continua em velocidade normal.
                 if usar_controle_linha:
-                    pwm_esquerda, pwm_direita = mix_line_pwm(
+                    if saida_linha is not None:
+                        tanque_curva_fechada = (
+                            atualizar_tanque_curva_fechada(
+                                saida_linha.estado,
+                                correcao_linha,
+                                tanque_curva_fechada,
+                            )
+                        )
+                    else:
+                        tanque_curva_fechada = False
+                    misturador = (
+                        mix_tank_pwm
+                        if tanque_curva_fechada else mix_line_pwm
+                    )
+                    pwm_esquerda, pwm_direita = misturador(
                         correcao_linha, command_speed)
                     steering_correction.value = correcao_linha
                     if saida_linha is None:
@@ -941,8 +957,16 @@ def control_loop():
                         steering_heading.value = saida_linha.angulo_linha
                     steering_left_pwm.value = pwm_esquerda
                     steering_right_pwm.value = pwm_direita
-                    steer_line(correcao_linha, command_speed)
+                    if tanque_curva_fechada:
+                        status.value = (
+                            'Curva fechada — tanque centralizando nova reta')
+                    steer_line(
+                        correcao_linha,
+                        command_speed,
+                        tank=tanque_curva_fechada,
+                    )
                 else:
+                    tanque_curva_fechada = False
                     steering_state.value = STEERING_SPECIAL
                     steering_correction.value = 0.
                     steering_lateral_error.value = 0.

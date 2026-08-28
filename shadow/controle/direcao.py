@@ -6,8 +6,9 @@ from config import (FRONT_ANCHORED_STEERING, FRONT_ANCHOR_FULL_ANGLE,
                     FRONT_ANCHOR_MAX_BLEND, FRONT_ANCHOR_REAR_SCALE,
                     FRONT_ANCHOR_START_ANGLE,
                     MAX_PWM, PIVOT_FRONT_REVERSE_MIN_PWM,
-                    PIVOT_FRONT_REVERSE_SCALE, left_correction, max_turn_angle,
-                    right_correction)
+                    PIVOT_FRONT_REVERSE_SCALE, LINE_TANK_ENTRY_CORRECTION,
+                    LINE_TANK_EXIT_CORRECTION, left_correction,
+                    max_turn_angle, right_correction)
 
 # Instancia definida por init_steering() no processo de controle (ou nos tools).
 arduino = None
@@ -40,9 +41,34 @@ def mix_line_pwm(correction, speed):
     return round(speed_left * MAX_PWM), round(speed_right * MAX_PWM)
 
 
-def steer_line(correction, speed):
+def atualizar_tanque_curva_fechada(estado, correction, ativo=False):
+    """Histerese do tanque: entra forte e sai perto do alinhamento."""
+    if estado not in ("CORNER", "LOST"):
+        return False
+    limite = (
+        LINE_TANK_EXIT_CORRECTION if ativo
+        else LINE_TANK_ENTRY_CORRECTION
+    )
+    return abs(float(correction)) >= limite
+
+
+def mix_tank_pwm(correction, speed):
+    """Gira no centro do chassi com os dois lados em sentidos opostos."""
+    correction = max(min(float(correction), 1.), -1.)
+    speed = max(min(float(speed), 1.), 0.)
+    pwm_esquerda = round(speed * left_correction * MAX_PWM)
+    pwm_direita = round(speed * right_correction * MAX_PWM)
+    if correction > 0.:
+        return pwm_esquerda, -pwm_direita
+    if correction < 0.:
+        return -pwm_esquerda, pwm_direita
+    return 0, 0
+
+
+def steer_line(correction, speed, *, tank=False):
     """Envia o controle normal por pares: FE=TE e FD=TD."""
-    speed_left, speed_right = mix_line_pwm(correction, speed)
+    misturador = mix_tank_pwm if tank else mix_line_pwm
+    speed_left, speed_right = misturador(correction, speed)
     return arduino.lado(speed_left, speed_right)
 
 
