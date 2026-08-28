@@ -1,6 +1,7 @@
 """Detecta e confirma os marcadores verdes do percurso."""
 
 from collections import deque
+import time
 
 import cv2
 import numpy as np
@@ -52,6 +53,42 @@ class ConfirmadorVerde:
         if votos_direita >= self.frames and votos_direita > votos_esquerda:
             return "right"
         return "straight"
+
+
+class DirecaoVerdePersistente:
+    """Guarda o marcador ate a topologia encontrar o ramo correspondente.
+
+    A deteccao simples autoriza o lado; a geometria de caminho continua sendo
+    responsabilidade do seguidor moderno. Um par de verdes pode promover um
+    90 ja visto para 180, mas um lado nunca troca pelo oposto por ruido.
+    """
+
+    def __init__(self, memoria=GREEN_MARKER_MEMORY):
+        self.confirmador = ConfirmadorVerde()
+        self.memoria = max(float(memoria), .35)
+        self.direcao = "straight"
+        self.ate = 0.0
+
+    def reset(self):
+        self.confirmador = ConfirmadorVerde()
+        self.direcao = "straight"
+        self.ate = 0.0
+
+    def atualizar(self, direcao_bruta, instante=None):
+        agora = time.monotonic() if instante is None else float(instante)
+        confirmada = self.confirmador.atualizar(direcao_bruta)
+        if (confirmada == "turn_around"
+                and direcao_bruta == "turn_around"):
+            self.direcao = confirmada
+            self.ate = agora + self.memoria
+        elif (confirmada in ("left", "right")
+              and direcao_bruta == confirmada):
+            if self.direcao in ("straight", confirmada):
+                self.direcao = confirmada
+                self.ate = agora + self.memoria
+        if agora > self.ate:
+            self.direcao = "straight"
+        return self.direcao
 
 
 def _marcador_plausivel(contour):
@@ -107,16 +144,47 @@ def _tem_segmento_continuo(roi, orientacao, borda_interna, minimo):
     return 0
 
 
-def check_green(contours_grn, black_image, debug_img=None):
-    """Retorna apenas direcoes sustentadas pela geometria preta obrigatoria."""
+def _referencial_da_entrada(black_image, entry_forward):
+    """Alinha a direcao futura da linha ao topo da imagem."""
+    if entry_forward is None:
+        return black_image, None
+    vetor = np.asarray(entry_forward, dtype=np.float64).reshape(2)
+    norma = float(np.linalg.norm(vetor))
+    if norma < 1e-6 or not np.all(np.isfinite(vetor)):
+        return black_image, None
+    vetor /= norma
+    angulo = float(np.degrees(np.arctan2(vetor[1], vetor[0])) + 90.)
+    if abs(angulo) < 2.:
+        return black_image, None
+    altura, largura = black_image.shape[:2]
+    matriz = cv2.getRotationMatrix2D(
+        (largura / 2., altura / 2.), angulo, 1.)
+    alinhada = cv2.warpAffine(
+        black_image, matriz, (largura, altura),
+        flags=cv2.INTER_NEAREST, borderValue=0)
+    return alinhada, matriz
+
+
+def check_green(contours_grn, black_image, debug_img=None,
+                entry_forward=None):
+    """Valida verde antes do preto no referencial da linha de entrada."""
+    contours_grn = tuple(contours_grn)
+    black_alinhado, matriz_alinhamento = _referencial_da_entrada(
+        black_image, entry_forward)
     black_around_sign = np.zeros((len(contours_grn), 5), dtype=np.int16)
 
     for i, contour in enumerate(contours_grn):
         if not _marcador_plausivel(contour):
             continue
 
-        green_box = cv2.boxPoints(cv2.minAreaRect(contour))
-        check_black(black_around_sign, i, green_box, black_image)
+        green_box_original = cv2.boxPoints(cv2.minAreaRect(contour))
+        green_box = green_box_original
+        if matriz_alinhamento is not None:
+            green_box = cv2.transform(
+                green_box_original.reshape(1, -1, 2),
+                matriz_alinhamento,
+            ).reshape(-1, 2)
+        check_black(black_around_sign, i, green_box, black_alinhado)
         if debug_img is not None:
             leitura = black_around_sign[i]
             leitura_esquerda, leitura_direita = (
@@ -126,7 +194,7 @@ def check_green(contours_grn, black_image, debug_img=None):
             # significa que topo + lado ja autorizaram uma ordem de curva.
             cor = (0, 255, 0) if geometria_valida else (0, 0, 255)
             cv2.drawContours(
-                debug_img, [np.intp(green_box)], -1, cor, 2)
+                debug_img, [np.intp(green_box_original)], -1, cor, 2)
 
     turn_left, turn_right = determine_turn_direction(black_around_sign)
     # O par tem prioridade absoluta. Sem esta ordem, perder um dos contornos

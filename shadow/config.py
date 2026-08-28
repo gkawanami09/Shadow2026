@@ -152,8 +152,8 @@ PASSO_VELOCIDADE_RETA_RAPIDA = .01
 # ----------------------------------------------------------------------------
 MIN_LINE_SIZE_DEFAULT = 3000              # area minima do contorno
 BLACK_AVG_SIDE_MASK = 21                  # mascara lateral se imagem limpa
-LINE_CROP_INITIAL = .6
-LINE_CROP_NORMAL = .6
+LINE_CROP_INITIAL = .52
+LINE_CROP_NORMAL = .52
 LINE_CROP_GREEN = .45                     # durante curva verde
 
 # O controle visual separa dois erros que antes eram misturados em um unico
@@ -313,7 +313,7 @@ GREEN_RELEASE_MEMORY_S = .55              # neutraliza o voto residual ao sair
 # A aproximacao nao e mais um avanco cego. A visao trava o ramo marcado e o
 # segue-linha continua alinhando a base ate o alvo lateral chegar nesta regiao.
 # O tempo existe apenas como limite de seguranca caso a geometria congele.
-GREEN_APPROACH_TIME = .25                 # s — wide no eixo: evita passar do vertice
+GREEN_APPROACH_TIME = 1.35                # s — limite; a posicao libera antes
 GREEN_APPROACH_BRANCH_MIN_Y_RATIO = .82   # camera no eixo frontal: gira bem abaixo
 GREEN_APPROACH_MAX_CORRECTION = .32       # centraliza entrada sem antecipar giro
 GREEN_APPROACH_SPEED = .5                 # base PWM 60, preserva a manobra
@@ -343,7 +343,7 @@ GREEN_MPU_SLOWDOWN_DEG = 70.
 GREEN_MPU_SLOW_SPEED = .32
 GREEN_MPU_COMPLETION_MIN_DEG = 70.        # nao libera o ramo antes de girar de fato
 GREEN_MPU_HARD_LIMIT_DEG = 94.
-GREEN_REVERSE_TIME = .5                   # re curta da logica antiga
+GREEN_REVERSE_TIME = 0.                    # controlador continuo nao recua ao alinhar
 GREEN_REVERSE_SPEED = .4                  # PWM 48
 # Quando um verde confirmado indica uma curva, desloca o historico usado
 # para escolher entre ramos concorrentes. Isso faz o ramo indicado vencer a
@@ -408,7 +408,6 @@ T_180_TEST_STOP = False                   # True isola e para definitivamente ap
 T_180_SEARCH_SPEED = .4                   # procura devagar para nao atravessar a linha entre frames
 T_180_SEARCH_TIMEOUT = 1.5                # s — complemento visual maximo
 T_180_EXIT_BOTTOM_PX = 30                 # px — tolerancia ao redor da bolinha inferior central
-T_180_CONFIRM_TIME = .10                  # estabilidade temporal da busca antiga
 T_180_CONFIRM_FRAMES = 3                  # somente tres frames NOVOS encerram o retorno
 T_180_POST_REVERSE_TIMEOUT = .40          # confirma novamente depois da re
 T_180_MPU_SLOWDOWN_DEG = 145.             # desacelera perto do retorno completo

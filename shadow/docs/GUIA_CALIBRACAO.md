@@ -42,85 +42,13 @@ Com o robô SOBRE a pista, na iluminação real da sala:
 
 Salve cada grupo com `s`. Valide com `python3 shadow/main.py --vision-only --debug`.
 
-## 2.1 Verde simples da Camera Module 3 Wide
+## 2.1 Câmera Wide e verde (sem tabuleiro)
 
-O modo usado pelo robô não exige tabuleiro nem arquivo `.npz`. Ele preserva a
-lógica anterior à troca da câmera: valida um quadrado verde somente quando há
-preto acima e no lado interno, confirma a mesma ordem em três de cinco frames
-e então trava a manobra. A seção de tabuleiro abaixo é apenas uma ferramenta
-experimental e não participa do segue-linha atual.
-
-Para usar a melhoria opcional, imprima um tabuleiro de **8×6 quadrados
-de 10 mm** (7×5 cantos internos). O arquivo pronto é
-`tools/tabuleiro_wide_8x6_10mm.svg`; imprima em 100%/tamanho real, sem
-"ajustar à página", e confira um quadrado com régua. Com a
-câmera na montagem definitiva do robô, execute na Raspberry:
-
-```bash
-cd ~/inova/shadow
-python3 tools/calibrar_camera_wide.py \
-  --output /home/pi/inova/shadow/calibracao_camera_wide.npz \
-  --save-captures /home/pi/inova/shadow/captures/calibracao_wide
-```
-
-1. Pressione `ESPAÇO` em 20 poses realmente diferentes: centro, quatro
-   cantos, perto, longe e várias inclinações. Poses repetidas são rejeitadas.
-2. Na segunda etapa, ponha o tabuleiro plano no chão, centralizado e alinhado
-   ao eixo longitudinal do robô, com a borda próxima embaixo da imagem, e
-   pressione `ESPAÇO`.
-3. A ferramenta só salva se o erro fisheye for no máximo `0,8 px` e o erro da
-   homografia for no máximo `1,5 mm`. O arquivo também fica vinculado ao índice
-   e modelo reais da câmera, resolução 448×252, modo bruto do sensor, crop
-   máximo, FPS e `LensPosition` confirmada pelo metadata. Artefatos antigos de
-   schema 1 ou 2 devem ser refeitos.
-
-Se calibrar a partir de imagens já gravadas, informe explicitamente a mesma
-assinatura e o mesmo foco usados na captura:
-
-```bash
-python3 tools/calibrar_camera_wide.py \
-  --images captures/calibracao_wide \
-  --homography-image captures/tabuleiro_plano.png \
-  --sensor imx708_wide \
-  --capture-mode 'LineCamera:448x252@40.00:full-fov;sensor-mode=2304x1296x10;crop=0,0,4608,2592' \
-  --lens-position 13.641
-```
-
-Copie os valores exibidos pela câmera que produziu as imagens. `unknown`, modo
-bruto ausente, foco não finito ou foco não confirmado nunca geram uma
-calibração competitiva.
-
-Valide sem motores:
-
-```bash
-python3 main.py --vision-only --debug
-```
-
-Com o arquivo, o console mostra `calibracao wide valida`. Sem ele, deve mostrar
-`verde ativo em modo PIXEL relativo a largura da linha`; os motores e as
-decisões verdes continuam ativos. Quando o artefato existe, o runtime reaplica
-a `LensPosition` salva e confere o valor retornado pelo metadata da câmera.
-
-### Sinal opcional do MPU
-
-O MPU não escolhe o lado do verde: ele apenas desacelera e limita um giro já
-travado pela câmera. Por segurança,
-`GREEN_MPU_POSITIVE_IS_RIGHT = None` deixa o controle verde em modo somente
-câmera. Com as rodas suspensas, observe o yaw ao girar fisicamente o robô para
-a direita e configure em `config.py`:
-
-- `True` se o yaw aumentar ao girar para a direita;
-- `False` se o yaw diminuir ao girar para a direita.
-
-Nunca escolha esse valor por tentativa com o robô no chão. Uma amostra velha,
-repetida ou separada por uma lacuna perde autoridade durante a manobra atual;
-a identidade visual do ramo continua sendo a referência.
-
-Antes de habilitar o MPU, regrave no Uno o firmware atual de
-`arduino/motor_controller`: as consultas assíncronas agora usam `MPU <id>` e o
-Uno devolve o mesmo `ID`. Isso impede que uma resposta atrasada seja atribuída
-à manobra seguinte. Com firmware antigo, o sistema permanece seguro em modo
-somente câmera, mas o MPU verde não terá autoridade.
+A câmera wide usa o campo de visão máximo configurado na captura. O verde é
+validado diretamente em pixels: quadrado verde antes do preto, com preto acima
+e no lado interno da interseção. A topologia da linha escolhe o ramo futuro e
+o controle acompanha esse caminho. Nenhum tabuleiro ou arquivo
+\`calibracao_camera_wide.npz\` é necessário.
 
 ## 2.2 Entrada no resgate: prata + contexto preto
 
