@@ -9,6 +9,7 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
                     GREEN_APPROACH_SPEED, GREEN_APPROACH_TIME,
                     GREEN_REVERSE_SPEED, GREEN_REVERSE_TIME,
+                    GREEN_TURN_BLIND_TIME, GREEN_TURN_CENTER_TOLERANCE_PX,
                     GREEN_TURN_SPEED, GREEN_TURN_TIMEOUT, LINE_FOLLOW_SPEED,
                     MIN_LINE_SIZE_DEFAULT, TURN_AROUND_GREEN_COOLDOWN,
                     VISION_READY_TIMEOUT, camera_x, camera_y)
@@ -22,7 +23,6 @@ from controle.manobra_verde import (alinhamento_verde_pode_concluir,
                                     controle_visual_verde_liberado,
                                     correcao_aproximacao,
                                     deve_iniciar_giro_verde,
-                                    pode_procurar_ramo_verde,
                                     progresso_giro_mpu,
                                     ramo_marcado_visto_pela_camera,
                                     ramo_pronto_para_giro)
@@ -767,9 +767,9 @@ def control_loop():
                         # timeout e o MPU impedem giro indefinido.
                         angle = -180 if green_direction == "left" else 180
 
+                    elapsed_turn = now - green_turn_started
                     giro_mpu = progresso_giro_mpu(
                         green_mpu_turn_origin, green_mpu_last_yaw)
-                    tempo_giro_verde = now - green_turn_started
                     if (giro_mpu is not None
                             and giro_mpu >= config.GREEN_MPU_SLOWDOWN_DEG):
                         command_speed = min(
@@ -784,12 +784,9 @@ def control_loop():
                     lado_esperado = -1 if green_direction == "left" else 1
 
                     if (giro_mpu is not None
-                            and giro_mpu >= config.GREEN_MPU_HARD_LIMIT_DEG
-                            and not (
-                                green_target_seen and linha_ramo_recente)):
-                        # O MPU limita somente uma procura perdida. Com o ramo
-                        # marcado visivel, a camera continua guiando-o ate o
-                        # centro, qualquer que seja o angulo da curva.
+                            and giro_mpu >= config.GREEN_MPU_HARD_LIMIT_DEG):
+                        # Se a camera perder a faixa por um frame, o chassi
+                        # ainda nao pode atravessar completamente os 90 graus.
                         green_direction = None
                         green_turn_started = None
                         green_reverse_until = None
@@ -807,6 +804,13 @@ def control_loop():
                         status.value = (
                             'Verde limitado pelo MPU '
                             f'({giro_mpu:.0f} graus) — parada de seguranca')
+                    elif elapsed_turn < GREEN_TURN_BLIND_TIME:
+                        # A linha de entrada ainda pode estar sob o robo. O
+                        # controle visual ja atua, mas nao pode encerrar a
+                        # manobra durante esta janela curta.
+                        status.value = (
+                            f'Verde {green_direction} — encaixando ramo '
+                            f'({GREEN_TURN_BLIND_TIME:.1f} s)')
                     elif now >= green_turn_deadline:
                         # Sem esta trava um falso contorno poderia deixar o
                         # tanque girando indefinidamente. Nao da re, pois o
@@ -828,13 +832,11 @@ def control_loop():
                             'Verde — ramo marcado nao foi encontrado; '
                             'parada de seguranca')
                     elif not green_target_seen:
-                        pode_procurar = pode_procurar_ramo_verde(
-                            giro_mpu, tempo_giro_verde)
-                        # Antes de 45 graus a faixa de entrada ainda domina a
-                        # camera e nao pode ser confundida com a ramificacao.
-                        ramo_armado_pela_camera = bool(
-                            pode_procurar
-                            and ramo_marcado_visto_pela_camera(
+                        # Aceita a linha apenas depois de ela aparecer no lado
+                        # que o marcador escolheu. Isso evita capturar o ramo
+                        # anterior que ainda cruza o campo da camera.
+                        ramo_armado_pela_camera = (
+                            ramo_marcado_visto_pela_camera(
                                 linha_ramo_recente,
                                 erro_inferior,
                                 lado_esperado,
@@ -849,19 +851,9 @@ def control_loop():
                                 f'Verde {green_direction} — ramo apareceu '
                                 'no lado marcado')
                         else:
-                            if pode_procurar:
-                                status.value = (
-                                    f'Verde {green_direction} — procurando '
-                                    'ramo no lado marcado')
-                            else:
-                                progresso_texto = (
-                                    f'{giro_mpu:.0f} graus'
-                                    if giro_mpu is not None
-                                    else f'{tempo_giro_verde:.2f} s sem MPU'
-                                )
-                                status.value = (
-                                    f'Verde {green_direction} — giro inicial '
-                                    f'45 graus ({progresso_texto})')
+                            status.value = (
+                                f'Verde {green_direction} — procurando '
+                                'ramo no lado marcado')
                     elif linha_ramo_recente:
                         alinhamento_pronto = alinhamento_verde_pode_concluir(
                             erro_inferior,

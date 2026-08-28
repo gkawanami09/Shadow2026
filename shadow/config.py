@@ -112,7 +112,7 @@ right_correction = 1
 # ----------------------------------------------------------------------------
 # Velocidades
 # ----------------------------------------------------------------------------
-LINE_FOLLOW_PWM = 70
+LINE_FOLLOW_PWM = 80
 LINE_FOLLOW_SPEED = LINE_FOLLOW_PWM / MAX_PWM
 LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair brevemente da imagem
 
@@ -287,6 +287,7 @@ GREEN_BRANCH_CONFIRM_FRAMES = 2           # evita liberar tanque por um ruido
 GREEN_STRAIGHT_TOP_Y_RATIO = .32          # faixa futura onde a saida deve chegar
 GREEN_STRAIGHT_BOTTOM_Y_RATIO = .72       # entrada precisa vir da base do robo
 GREEN_STRAIGHT_CORRIDOR_RATIO = .20       # tolera chegada inclinada na camera wide
+GREEN_TURN_BLIND_TIME = .30                # s — giro sem aceitar leitura da camera
 GREEN_TURN_SIDE_MIN_ERROR_PX = 55          # linha alvo deve primeiro entrar pelo lado marcado
 GREEN_TURN_CENTER_TOLERANCE_PX = 35        # px — ponto inferior aceito no centro da camera
 GREEN_TURN_CENTER_CONFIRM_FRAMES = 3       # nunca conclui por um frame central
@@ -295,10 +296,9 @@ GREEN_TURN_SPEED = .5                     # base PWM 60, preserva o giro
 GREEN_MPU_ENABLED = True                  # camera guia; MPU limita excesso de giro
 GREEN_MPU_QUERY_INTERVAL_S = .04
 GREEN_MPU_RESPONSE_TIMEOUT_S = .12
-GREEN_MPU_BRANCH_SEARCH_MIN_DEG = 45.     # antes disso ignora a linha de entrada
-GREEN_BRANCH_SEARCH_FALLBACK_S = .40      # usa somente se o MPU nao responder
 GREEN_MPU_SLOWDOWN_DEG = 70.
 GREEN_MPU_SLOW_SPEED = .32
+GREEN_MPU_COMPLETION_MIN_DEG = 70.        # nao libera o ramo antes de girar de fato
 GREEN_MPU_HARD_LIMIT_DEG = 94.
 GREEN_REVERSE_TIME = 0.                    # controlador continuo nao recua ao alinhar
 GREEN_REVERSE_SPEED = .4                  # PWM 48

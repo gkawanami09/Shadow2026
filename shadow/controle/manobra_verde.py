@@ -96,24 +96,6 @@ def controle_visual_verde_liberado(ramo_camera_visto, comando_valido):
     return bool(ramo_camera_visto and comando_valido)
 
 
-def pode_procurar_ramo_verde(progresso_mpu, tempo_giro):
-    """So procura o ramo depois do giro inicial de 45 graus.
-
-    Com MPU, a medida angular tem autoridade. O tempo e apenas um fallback
-    para o robo continuar funcional caso uma leitura deixe de chegar.
-    """
-    if progresso_mpu is not None:
-        try:
-            progresso = float(progresso_mpu)
-        except (TypeError, ValueError):
-            return False
-        return bool(
-            math.isfinite(progresso)
-            and progresso >= config.GREEN_MPU_BRANCH_SEARCH_MIN_DEG
-        )
-    return float(tempo_giro) >= config.GREEN_BRANCH_SEARCH_FALLBACK_S
-
-
 def ramo_chegou_ao_centro(
     erro_inferior,
     erro_assinado_anterior,
@@ -138,12 +120,18 @@ def alinhamento_verde_pode_concluir(
     lado_esperado,
     progresso_mpu,
 ):
-    """Conclui quando o ramo escolhido chega ao centro da camera.
+    """Exige giro material antes de aceitar a linha central como saida.
 
-    O ramo ja precisou aparecer primeiro no lado indicado pelo verde. Portanto
-    o MPU nao define angulo minimo: uma saida curva pode encaixar com 50, 70
-    ou 90 graus. O MPU permanece apenas como protecao contra uma busca perdida.
+    Sem essa trava, a linha de entrada ainda central podia encerrar a manobra
+    logo depois de o MPU apenas armar a procura do ramo. Sem leitura do MPU, a
+    camera continua suficiente: nesse caso o ramo obrigatoriamente ja apareceu
+    no lado marcado antes de chegar aqui.
     """
+    if progresso_mpu is not None:
+        progresso = float(progresso_mpu)
+        if (not math.isfinite(progresso)
+                or progresso < config.GREEN_MPU_COMPLETION_MIN_DEG):
+            return False
     return ramo_chegou_ao_centro(
         erro_inferior,
         erro_assinado_anterior,

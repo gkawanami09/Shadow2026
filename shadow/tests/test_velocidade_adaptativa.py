@@ -67,11 +67,11 @@ class VelocidadeAdaptativaTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_configuracao_principal_usa_pwm_70_sem_modo_adaptativo(self):
-        self.assertEqual(config.LINE_FOLLOW_PWM, 70)
+    def test_configuracao_principal_usa_pwm_80_sem_modo_adaptativo(self):
+        self.assertEqual(config.LINE_FOLLOW_PWM, 80)
         self.assertAlmostEqual(
             config.LINE_FOLLOW_SPEED * config.MAX_PWM,
-            70.,
+            80.,
         )
         self.assertFalse(config.RETA_RAPIDA_HABILITADA)
 
@@ -114,7 +114,8 @@ class VelocidadeAdaptativaTests(unittest.TestCase):
             config.LINE_FOLLOW_SPEED
             + config.PASSO_VELOCIDADE_RETA_RAPIDA,
         )
-        self.assertLess(velocidades[14], self.teto_teste)
+        self.assertAlmostEqual(velocidades[14],
+                               self.teto_teste)
         self.assertAlmostEqual(velocidades[-1],
                                self.teto_teste)
         self.assertLessEqual(max(velocidades),

@@ -45,15 +45,15 @@ class SteeringTests(unittest.TestCase):
     def test_mixer_continuo_cruza_o_zero_sem_salto(self):
         self.assertEqual(
             direcao.mix_line_pwm(.25, LINE_FOLLOW_SPEED),
-            (70, 35),
+            (80, 40),
         )
         self.assertEqual(
             direcao.mix_line_pwm(.50, LINE_FOLLOW_SPEED),
-            (70, 0),
+            (80, 0),
         )
         self.assertEqual(
             direcao.mix_line_pwm(.75, LINE_FOLLOW_SPEED),
-            (70, -35),
+            (80, -40),
         )
 
     def test_mixer_e_simetrico_para_esquerda_e_direita(self):
@@ -61,27 +61,27 @@ class SteeringTests(unittest.TestCase):
         esquerda = direcao.mix_line_pwm(-.75, LINE_FOLLOW_SPEED)
 
         self.assertEqual(direita, tuple(reversed(esquerda)))
-        self.assertEqual(direita, (70, -35))
+        self.assertEqual(direita, (80, -40))
 
     def test_pivo_total_usa_os_dois_pares_sem_separar_eixos(self):
         direcao.steer_line(1., LINE_FOLLOW_SPEED)
 
-        self.assertEqual(self.arduino.chamadas, [("lado", 70, -70)])
+        self.assertEqual(self.arduino.chamadas, [("lado", 80, -80)])
 
     def test_canto_fechado_mantem_os_eixos_sincronizados(self):
         direcao.steer_line(-.72, LINE_FOLLOW_SPEED)
 
-        self.assertEqual(self.arduino.chamadas, [("lado", -31, 70)])
+        self.assertEqual(self.arduino.chamadas, [("lado", -35, 80)])
 
     def test_tanque_fechado_gira_os_lados_em_sentidos_opostos(self):
         direcao.steer_line(.72, LINE_FOLLOW_SPEED, tank=True)
 
-        self.assertEqual(self.arduino.chamadas, [("lado", 70, -70)])
+        self.assertEqual(self.arduino.chamadas, [("lado", 80, -80)])
 
     def test_tanque_fechado_e_espelhado_para_esquerda(self):
         direcao.steer_line(-.72, LINE_FOLLOW_SPEED, tank=True)
 
-        self.assertEqual(self.arduino.chamadas, [("lado", -70, 70)])
+        self.assertEqual(self.arduino.chamadas, [("lado", -80, 80)])
 
     def test_histerese_mantem_tanque_ate_correcao_ficar_baixa(self):
         self.assertTrue(direcao.atualizar_tanque_curva_fechada(
