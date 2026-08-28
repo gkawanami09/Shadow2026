@@ -96,6 +96,24 @@ def controle_visual_verde_liberado(ramo_camera_visto, comando_valido):
     return bool(ramo_camera_visto and comando_valido)
 
 
+def pode_procurar_ramo_verde(progresso_mpu, tempo_giro):
+    """So procura o ramo depois do giro inicial de 45 graus.
+
+    Com MPU, a medida angular tem autoridade. O tempo e apenas um fallback
+    para o robo continuar funcional caso uma leitura deixe de chegar.
+    """
+    if progresso_mpu is not None:
+        try:
+            progresso = float(progresso_mpu)
+        except (TypeError, ValueError):
+            return False
+        return bool(
+            math.isfinite(progresso)
+            and progresso >= config.GREEN_MPU_BRANCH_SEARCH_MIN_DEG
+        )
+    return float(tempo_giro) >= config.GREEN_BRANCH_SEARCH_FALLBACK_S
+
+
 def ramo_chegou_ao_centro(
     erro_inferior,
     erro_assinado_anterior,

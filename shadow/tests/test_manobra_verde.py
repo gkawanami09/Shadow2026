@@ -15,6 +15,7 @@ from controle.manobra_verde import (  # noqa: E402
     deve_iniciar_giro_verde,
     correcao_aproximacao,
     progresso_giro_mpu,
+    pode_procurar_ramo_verde,
     ramo_chegou_ao_centro,
     ramo_marcado_visto_pela_camera,
     ramo_pronto_para_giro,
@@ -22,6 +23,18 @@ from controle.manobra_verde import (  # noqa: E402
 
 
 class ManobraVerdeTests(unittest.TestCase):
+    def test_nao_procura_ramo_antes_de_45_graus(self):
+        self.assertFalse(pode_procurar_ramo_verde(44.9, 2.))
+
+    def test_procura_ramo_a_partir_de_45_graus(self):
+        self.assertTrue(pode_procurar_ramo_verde(45., 0.))
+
+    def test_sem_mpu_usa_fallback_temporal(self):
+        self.assertFalse(pode_procurar_ramo_verde(
+            None, config.GREEN_BRANCH_SEARCH_FALLBACK_S - .01))
+        self.assertTrue(pode_procurar_ramo_verde(
+            None, config.GREEN_BRANCH_SEARCH_FALLBACK_S))
+
     def test_aproximacao_reta_nao_antecipa_ramo_travado(self):
         self.assertEqual(correcao_aproximacao(config.camera_x / 2), 0.)
 

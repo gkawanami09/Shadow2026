@@ -22,6 +22,7 @@ from controle.manobra_verde import (alinhamento_verde_pode_concluir,
                                     controle_visual_verde_liberado,
                                     correcao_aproximacao,
                                     deve_iniciar_giro_verde,
+                                    pode_procurar_ramo_verde,
                                     progresso_giro_mpu,
                                     ramo_marcado_visto_pela_camera,
                                     ramo_pronto_para_giro)
@@ -768,6 +769,7 @@ def control_loop():
 
                     giro_mpu = progresso_giro_mpu(
                         green_mpu_turn_origin, green_mpu_last_yaw)
+                    tempo_giro_verde = now - green_turn_started
                     if (giro_mpu is not None
                             and giro_mpu >= config.GREEN_MPU_SLOWDOWN_DEG):
                         command_speed = min(
@@ -826,11 +828,13 @@ def control_loop():
                             'Verde — ramo marcado nao foi encontrado; '
                             'parada de seguranca')
                     elif not green_target_seen:
-                        # Aceita a linha apenas depois de ela aparecer no lado
-                        # que o marcador escolheu. Isso evita capturar o ramo
-                        # anterior que ainda cruza o campo da camera.
-                        ramo_armado_pela_camera = (
-                            ramo_marcado_visto_pela_camera(
+                        pode_procurar = pode_procurar_ramo_verde(
+                            giro_mpu, tempo_giro_verde)
+                        # Antes de 45 graus a faixa de entrada ainda domina a
+                        # camera e nao pode ser confundida com a ramificacao.
+                        ramo_armado_pela_camera = bool(
+                            pode_procurar
+                            and ramo_marcado_visto_pela_camera(
                                 linha_ramo_recente,
                                 erro_inferior,
                                 lado_esperado,
@@ -845,9 +849,19 @@ def control_loop():
                                 f'Verde {green_direction} — ramo apareceu '
                                 'no lado marcado')
                         else:
-                            status.value = (
-                                f'Verde {green_direction} — procurando '
-                                'ramo no lado marcado')
+                            if pode_procurar:
+                                status.value = (
+                                    f'Verde {green_direction} — procurando '
+                                    'ramo no lado marcado')
+                            else:
+                                progresso_texto = (
+                                    f'{giro_mpu:.0f} graus'
+                                    if giro_mpu is not None
+                                    else f'{tempo_giro_verde:.2f} s sem MPU'
+                                )
+                                status.value = (
+                                    f'Verde {green_direction} — giro inicial '
+                                    f'45 graus ({progresso_texto})')
                     elif linha_ramo_recente:
                         alinhamento_pronto = alinhamento_verde_pode_concluir(
                             erro_inferior,
