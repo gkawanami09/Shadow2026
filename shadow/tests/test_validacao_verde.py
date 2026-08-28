@@ -12,7 +12,8 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
-from visao.verde import ConfirmadorVerde, check_green  # noqa: E402
+from visao.verde import (ConfirmadorVerde, check_green,
+                         has_plausible_green)  # noqa: E402
 
 
 def _quadrado(x=160, y=130, lado=60):
@@ -74,6 +75,29 @@ def _dois_verdes_validos():
 
 
 class ValidacaoVerdeTests(unittest.TestCase):
+    def test_circulo_com_preto_acima_e_ao_lado_autoriza_curva(self):
+        preto = np.zeros((config.camera_y, config.camera_x), dtype=np.uint8)
+        verde = np.zeros_like(preto)
+        cv2.circle(preto, (175, 88), 68, 255, 22)
+        cv2.rectangle(preto, (164, 145), (186, 251), 255, -1)
+        cv2.rectangle(preto, (230, 77), (340, 99), 255, -1)
+        cv2.rectangle(verde, (190, 164), (245, 219), 255, -1)
+        cv2.rectangle(verde, (286, 101), (341, 156), 255, -1)
+        preto[verde > 0] = 0
+        contornos, _ = cv2.findContours(
+            verde, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        self.assertEqual(check_green(contornos, preto), "right")
+
+    def test_verde_plausivel_e_guardado_mesmo_antes_de_validar(self):
+        confirmador = ConfirmadorVerde(frames=3, window=5)
+        self.assertTrue(has_plausible_green([_quadrado()]))
+        confirmador.atualizar("straight", candidato=True)
+        self.assertTrue(confirmador.candidato_ativo)
+        for _ in range(5):
+            confirmador.atualizar("straight", candidato=False)
+        self.assertFalse(confirmador.candidato_ativo)
+
     def test_dois_verdes_validos_tem_prioridade_de_180(self):
         contornos, preto = _dois_verdes_validos()
         self.assertEqual(check_green(contornos, preto), "turn_around")

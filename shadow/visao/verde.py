@@ -27,9 +27,18 @@ class ConfirmadorVerde:
         self.frames_180 = max(1, int(frames_180))
         self.window = max(self.frames, int(window))
         self._historico = deque(maxlen=self.window)
+        self._candidatos = deque(maxlen=self.window)
         self._contagem_180 = 0
 
-    def atualizar(self, direcao):
+    @property
+    def candidato_ativo(self):
+        """Mantem na memoria um verde plausivel durante a janela de votos."""
+        return any(self._candidatos)
+
+    def atualizar(self, direcao, candidato=None):
+        if candidato is None:
+            candidato = direcao != "straight"
+        self._candidatos.append(bool(candidato))
         if direcao == "turn_around":
             # Dois marcadores validos no mesmo quadro tem prioridade sobre
             # qualquer voto parcial de 90 graus.
@@ -75,84 +84,45 @@ def _marcador_plausivel(contour):
     )
 
 
-def _tem_segmento_continuo(roi, orientacao, borda_interna, minimo):
-    """Confirma uma linha continua e proxima da borda do marcador."""
-    if roi.size == 0 or minimo < 2:
-        return False
+def has_plausible_green(contours_grn):
+    """Informa se algum verde merece ser guardado na memoria curta."""
+    return any(_marcador_plausivel(contorno) for contorno in contours_grn)
+
+
+def _forca_preto_proximo(roi, borda_interna, lado):
+    """Mede uma faixa preta conectada, mesmo curva ou diagonal."""
+    if roi.size == 0:
+        return 0
     mascara = (roi > 0).astype(np.uint8) * 255
-    kernel = (
-        np.ones((1, minimo), dtype=np.uint8)
-        if orientacao == "horizontal"
-        else np.ones((minimo, 1), dtype=np.uint8)
-    )
-    segmento = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel)
-    if not np.any(segmento):
-        return False
+    mascara = cv2.morphologyEx(
+        mascara, cv2.MORPH_CLOSE, np.ones((3, 3), dtype=np.uint8))
+    quantidade, _rotulos, stats, _centros = cv2.connectedComponentsWithStats(
+        mascara, connectivity=8)
+    alcance = max(3, int(round(lado * GREEN_BLACK_MAX_GAP_RATIO)))
+    area_minima = max(10, int(round(lado * lado * .025)))
+    extensao_minima = max(4, int(round(lado * GREEN_BLACK_MIN_RUN_RATIO * .65)))
 
-    tamanho = (
-        roi.shape[0]
-        if borda_interna in ("top", "bottom")
-        else roi.shape[1]
-    )
-    alcance = max(3, int(round(tamanho * GREEN_BLACK_MAX_GAP_RATIO)))
-    if borda_interna == "bottom":
-        proximo = segmento[-alcance:, :]
-    elif borda_interna == "top":
-        proximo = segmento[:alcance, :]
-    elif borda_interna == "right":
-        proximo = segmento[:, -alcance:]
-    else:
-        proximo = segmento[:, :alcance]
-    return bool(np.any(proximo))
-
-
-def _ordenar_cantos(cantos):
-    """Ordena uma caixa rotacionada em topo-E, topo-D, baixo-D, baixo-E."""
-    pontos = np.asarray(cantos, dtype=np.float32)
-    ordenados = np.zeros((4, 2), dtype=np.float32)
-    soma = pontos.sum(axis=1)
-    diferenca = np.diff(pontos, axis=1).reshape(-1)
-    ordenados[0] = pontos[np.argmin(soma)]
-    ordenados[2] = pontos[np.argmax(soma)]
-    ordenados[1] = pontos[np.argmin(diferenca)]
-    ordenados[3] = pontos[np.argmax(diferenca)]
-    return ordenados
-
-
-def _retificar_entorno(green_box, black_image):
-    """Gira o entorno junto com o marcador antes de medir suas quatro faces."""
-    origem = _ordenar_cantos(green_box)
-    largura = max(
-        np.linalg.norm(origem[1] - origem[0]),
-        np.linalg.norm(origem[2] - origem[3]),
-    )
-    altura = max(
-        np.linalg.norm(origem[3] - origem[0]),
-        np.linalg.norm(origem[2] - origem[1]),
-    )
-    lado = max(3, int(round(max(largura, altura))))
-    margem = max(4, int(round(lado * GREEN_BLACK_ROI_SCALE)))
-    fim = margem + lado - 1
-    destino = np.array(
-        [[margem, margem], [fim, margem], [fim, fim], [margem, fim]],
-        dtype=np.float32,
-    )
-    matriz = cv2.getPerspectiveTransform(origem, destino)
-    tamanho = lado + 2 * margem
-    retificada = cv2.warpPerspective(
-        black_image,
-        matriz,
-        (tamanho, tamanho),
-        flags=cv2.INTER_NEAREST,
-        borderMode=cv2.BORDER_CONSTANT,
-        borderValue=0,
-    )
-    return retificada, margem, lado
+    maior = 0
+    for indice in range(1, quantidade):
+        x, y, w, h, area = stats[indice]
+        if area < area_minima or max(w, h) < extensao_minima:
+            continue
+        if borda_interna == "bottom":
+            toca = y + h >= roi.shape[0] - alcance
+        elif borda_interna == "top":
+            toca = y <= alcance
+        elif borda_interna == "right":
+            toca = x + w >= roi.shape[1] - alcance
+        else:
+            toca = x <= alcance
+        if toca:
+            maior = max(maior, int(area))
+    return maior
 
 
 def check_green(contours_grn, black_image, debug_img=None):
     """Retorna apenas direcoes sustentadas pela geometria preta obrigatoria."""
-    black_around_sign = np.zeros((len(contours_grn), 5), dtype=np.int16)
+    black_around_sign = np.zeros((len(contours_grn), 5), dtype=np.int32)
 
     for i, contour in enumerate(contours_grn):
         if not _marcador_plausivel(contour):
@@ -163,8 +133,7 @@ def check_green(contours_grn, black_image, debug_img=None):
         if debug_img is not None:
             leitura = black_around_sign[i]
             geometria_valida = bool(
-                leitura[1]
-                and bool(leitura[2]) != bool(leitura[3])
+                leitura[1] and (leitura[2] or leitura[3])
             )
             # Vermelho significa apenas quadrado verde plausivel; verde
             # significa que topo + lado ja autorizaram uma ordem de curva.
@@ -185,28 +154,32 @@ def check_green(contours_grn, black_image, debug_img=None):
 
 
 def check_black(black_around_sign, i, green_box, black_image):
-    """Mede linhas continuas acima e dos lados do quadrado verde."""
-    retificada, margem, lado = _retificar_entorno(green_box, black_image)
-    fim = margem + lado
-    # Pequeno recuo evita que a borda dilatada do proprio verde interfira,
-    # sem remover a linha preta imediatamente adjacente.
-    recuo = max(1, int(round(lado * .06)))
-    inicio_interno = margem + recuo
-    fim_interno = max(inicio_interno + 1, fim - recuo)
-    topo = retificada[0:margem, inicio_interno:fim_interno]
-    baixo = retificada[fim:fim + margem, inicio_interno:fim_interno]
-    esquerda = retificada[inicio_interno:fim_interno, 0:margem]
-    direita = retificada[inicio_interno:fim_interno, fim:fim + margem]
-    minimo = max(2, int(round(lado * GREEN_BLACK_MIN_RUN_RATIO)))
+    """Mede preto acima e nos lados, sem exigir segmentos a 90 graus."""
+    altura_img, largura_img = black_image.shape[:2]
+    x, y, w, h = cv2.boundingRect(np.asarray(green_box, dtype=np.float32))
+    lado = max(3, int(round(max(w, h))))
+    margem = max(4, int(round(lado * GREEN_BLACK_ROI_SCALE)))
+    abertura = max(2, int(round(lado * .35)))
 
-    black_around_sign[i, 0] = int(_tem_segmento_continuo(
-        baixo, "horizontal", "top", minimo))
-    black_around_sign[i, 1] = int(_tem_segmento_continuo(
-        topo, "horizontal", "bottom", minimo))
-    black_around_sign[i, 2] = int(_tem_segmento_continuo(
-        esquerda, "vertical", "right", minimo))
-    black_around_sign[i, 3] = int(_tem_segmento_continuo(
-        direita, "vertical", "left", minimo))
+    x0 = max(0, x - abertura)
+    x1 = min(largura_img, x + w + abertura)
+    # Uma pequena sobreposicao aceita arco/diagonal tocando o canto. A forca
+    # das componentes abaixo impede a faixa superior de virar dois lados.
+    y0 = max(0, y - int(round(lado * .18)))
+    y1 = min(altura_img, y + h + abertura)
+    topo = black_image[max(0, y - margem):y, x0:x1]
+    baixo = black_image[y + h:min(altura_img, y + h + margem), x0:x1]
+    esquerda = black_image[y0:y1, max(0, x - margem):x]
+    direita = black_image[y0:y1, x + w:min(largura_img, x + w + margem)]
+
+    black_around_sign[i, 0] = _forca_preto_proximo(
+        baixo, "top", lado)
+    black_around_sign[i, 1] = _forca_preto_proximo(
+        topo, "bottom", lado)
+    black_around_sign[i, 2] = _forca_preto_proximo(
+        esquerda, "right", lado)
+    black_around_sign[i, 3] = _forca_preto_proximo(
+        direita, "left", lado)
     black_around_sign[i, 4] = int(np.ceil(np.max(green_box[:, 1])))
     return black_around_sign
 
@@ -222,11 +195,20 @@ def determine_turn_direction(black_around_sign):
     for leitura in black_around_sign:
         # A regra da pista e topo + o lado oposto ao giro. Preto abaixo pode
         # ser a propria faixa de entrada quando o marcador ja chegou perto da
-        # base; ele nao contradiz a ordem. Os dois lados continuam ambiguos e
-        # nao autorizam um 90.
-        tem_topo = leitura[1] == 1
-        tem_esquerda = leitura[2] == 1
-        tem_direita = leitura[3] == 1
+        # base; ele nao contradiz a ordem. Se um arco invade os dois recortes,
+        # vale o lado claramente mais conectado; lados equivalentes seguem
+        # ambiguos e nao inventam uma curva.
+        tem_topo = leitura[1] > 0
+        forca_esquerda = leitura[2]
+        forca_direita = leitura[3]
+        tem_esquerda = (
+            forca_esquerda > 0
+            and (forca_direita == 0 or forca_esquerda > forca_direita * 1.25)
+        )
+        tem_direita = (
+            forca_direita > 0
+            and (forca_esquerda == 0 or forca_direita > forca_esquerda * 1.25)
+        )
         if tem_topo and tem_esquerda and not tem_direita:
             turn_right = True
         elif tem_topo and tem_direita and not tem_esquerda:

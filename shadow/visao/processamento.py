@@ -36,7 +36,8 @@ from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.linha import calculate_angle, determine_correct_line
 from visao.trajetoria import extrair_ponto_futuro
-from visao.verde import ConfirmadorVerde, check_green, latch_turn_direction
+from visao.verde import (ConfirmadorVerde, check_green,
+                         has_plausible_green, latch_turn_direction)
 from visao.faixa_verde import (altura_faixa_transversal,
                                tem_continuacao_reta)
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
@@ -289,10 +290,11 @@ def vision_loop(debug=False):
                     debug_img=cv2_img if debug else None)
             else:
                 direcao_verde_bruta = "straight"
-            candidato_verde_frame = direcao_verde_bruta != "straight"
-            green_candidate.value = candidato_verde_frame
+            candidato_verde_agora = has_plausible_green(contours_grn)
             turn_direction = confirmador_verde.atualizar(
-                direcao_verde_bruta)
+                direcao_verde_bruta, candidato=candidato_verde_agora)
+            candidato_verde_frame = confirmador_verde.candidato_ativo
+            green_candidate.value = candidato_verde_frame
 
             time_turn_direction = latch_turn_direction(
                 turn_direction, time_turn_direction)
