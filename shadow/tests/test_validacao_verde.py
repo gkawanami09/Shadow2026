@@ -144,11 +144,11 @@ class ValidacaoVerdeTests(unittest.TestCase):
                 topo=True, esquerda=True, direita=True))
         self.assertEqual(direcao, "straight")
 
-    def test_preto_em_baixo_nao_apaga_topo_e_lado_validos(self):
+    def test_preto_em_baixo_invalida_verde_como_na_logica_antiga(self):
         direcao = check_green(
             [_quadrado()], _mascara_ao_redor(
                 topo=True, direita=True, baixo=True))
-        self.assertEqual(direcao, "left")
+        self.assertEqual(direcao, "straight")
 
     def test_verde_cortado_na_borda_direita_continua_valido(self):
         verde = np.zeros(
@@ -161,7 +161,6 @@ class ValidacaoVerdeTests(unittest.TestCase):
         preto = _mascara_ao_redor(
             topo=True,
             esquerda=True,
-            baixo=True,
             x=x,
             y=y,
             lado=58,

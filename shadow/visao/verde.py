@@ -120,6 +120,23 @@ def _forca_preto_proximo(roi, borda_interna, lado):
     return maior
 
 
+def _tem_preto_inferior(roi, lado):
+    """Rejeita uma faixa larga sob o verde, ignorando risco lateral fino."""
+    if roi.size == 0:
+        return False
+    mascara = (roi > 0).astype(np.uint8) * 255
+    quantidade, _rotulos, stats, _centros = cv2.connectedComponentsWithStats(
+        mascara, connectivity=8)
+    largura_minima = max(
+        4, int(round(lado * GREEN_BLACK_MIN_RUN_RATIO)))
+    alcance = max(3, int(round(lado * GREEN_BLACK_MAX_GAP_RATIO)))
+    for indice in range(1, quantidade):
+        _x, y, w, _h, area = stats[indice]
+        if y <= alcance and w >= largura_minima and area >= largura_minima * 2:
+            return True
+    return False
+
+
 def check_green(contours_grn, black_image, debug_img=None):
     """Retorna apenas direcoes sustentadas pela geometria preta obrigatoria."""
     black_around_sign = np.zeros((len(contours_grn), 5), dtype=np.int32)
@@ -133,7 +150,9 @@ def check_green(contours_grn, black_image, debug_img=None):
         if debug_img is not None:
             leitura = black_around_sign[i]
             geometria_valida = bool(
-                leitura[1] and (leitura[2] or leitura[3])
+                not leitura[0]
+                and leitura[1]
+                and (leitura[2] or leitura[3])
             )
             # Vermelho significa apenas quadrado verde plausivel; verde
             # significa que topo + lado ja autorizaram uma ordem de curva.
@@ -168,12 +187,26 @@ def check_black(black_around_sign, i, green_box, black_image):
     y0 = max(0, y - int(round(lado * .18)))
     y1 = min(altura_img, y + h + abertura)
     topo = black_image[max(0, y - margem):y, x0:x1]
-    baixo = black_image[y + h:min(altura_img, y + h + margem), x0:x1]
+    # Copia a regiao inferior antiga usando a aresta real do retangulo
+    # rotacionado. Assim a lateral de um verde diagonal nao vira "embaixo".
+    cantos_y = green_box[np.argsort(green_box[:, 1])]
+    altura_marcador = max(1., float(
+        cantos_y[-1, 1] - cantos_y[0, 1]))
+    baixo_y0 = max(0, int(cantos_y[2, 1]))
+    baixo_y1 = min(
+        altura_img,
+        int(round(cantos_y[2, 1] + altura_marcador * .8)),
+    )
+    baixo_x0 = max(0, int(min(cantos_y[2, 0], cantos_y[3, 0])))
+    baixo_x1 = min(
+        largura_img,
+        int(max(cantos_y[2, 0], cantos_y[3, 0])),
+    )
+    baixo = black_image[baixo_y0:baixo_y1, baixo_x0:baixo_x1]
     esquerda = black_image[y0:y1, max(0, x - margem):x]
     direita = black_image[y0:y1, x + w:min(largura_img, x + w + margem)]
 
-    black_around_sign[i, 0] = _forca_preto_proximo(
-        baixo, "top", lado)
+    black_around_sign[i, 0] = int(_tem_preto_inferior(baixo, lado))
     black_around_sign[i, 1] = _forca_preto_proximo(
         topo, "bottom", lado)
     black_around_sign[i, 2] = _forca_preto_proximo(
@@ -193,12 +226,15 @@ def determine_turn_direction(black_around_sign):
     turn_right = False
 
     for leitura in black_around_sign:
-        # A regra da pista e topo + o lado oposto ao giro. Preto abaixo pode
-        # ser a propria faixa de entrada quando o marcador ja chegou perto da
-        # base; ele nao contradiz a ordem. Se um arco invade os dois recortes,
-        # vale o lado claramente mais conectado; lados equivalentes seguem
-        # ambiguos e nao inventam uma curva.
+        # Repete a regra antiga: preto acima e obrigatorio, enquanto qualquer
+        # preto conectado abaixo invalida completamente este marcador.
+        tem_baixo = leitura[0] > 0
         tem_topo = leitura[1] > 0
+        if tem_baixo or not tem_topo:
+            continue
+
+        # Se um arco invade os dois recortes, vale o lado claramente mais
+        # conectado; lados equivalentes seguem ambiguos e nao inventam curva.
         forca_esquerda = leitura[2]
         forca_direita = leitura[3]
         tem_esquerda = (
@@ -209,9 +245,9 @@ def determine_turn_direction(black_around_sign):
             forca_direita > 0
             and (forca_esquerda == 0 or forca_direita > forca_esquerda * 1.25)
         )
-        if tem_topo and tem_esquerda and not tem_direita:
+        if tem_esquerda and not tem_direita:
             turn_right = True
-        elif tem_topo and tem_direita and not tem_esquerda:
+        elif tem_direita and not tem_esquerda:
             turn_left = True
 
     return turn_left, turn_right
