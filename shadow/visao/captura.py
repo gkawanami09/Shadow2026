@@ -3,9 +3,10 @@
 import math
 import time
 
+import cv2
+
 from config import (CAPTURE_FPS, CAPTURE_FPS_FALLBACK, CAPTURE_HEIGHT,
                     CAPTURE_WIDTH, LENS_POSITION, LINE_CAMERA_INDEX,
-                    LINE_CAMERA_SENSOR_ID,
                     LINE_CAMERA_EXPOSURE_VALUE,
                     LINE_CAMERA_LOCK_AUTO_CONTROLS,
                     LINE_CAMERA_WARMUP_S, camera_x, camera_y)
@@ -108,72 +109,6 @@ def obter_recorte_maximo(camera_controls):
     return recorte
 
 
-def normalizar_recorte_metadata(recorte_bruto):
-    """Converte tuple/libcamera.Rectangle em ``(x, y, w, h)`` validado."""
-
-    try:
-        recorte = tuple(int(valor) for valor in recorte_bruto)
-    except (TypeError, ValueError):
-        try:
-            recorte = (
-                int(recorte_bruto.x),
-                int(recorte_bruto.y),
-                int(recorte_bruto.width),
-                int(recorte_bruto.height),
-            )
-        except (AttributeError, TypeError, ValueError):
-            return None
-    if len(recorte) != 4 or recorte[2] <= 0 or recorte[3] <= 0:
-        return None
-    return recorte
-
-
-def normalizar_identidade_sensor(camera_info):
-    """Extrai o modelo realmente anunciado por ``global_camera_info``."""
-    if not isinstance(camera_info, dict):
-        return "unknown"
-    value = None
-    for key in ("Model", "model", "SensorModel", "sensor_model"):
-        candidate = camera_info.get(key)
-        if candidate is not None and str(candidate).strip():
-            value = str(candidate).strip().casefold()
-            break
-    if value is None:
-        return "unknown"
-    return "_".join(value.replace("-", " ").split())
-
-
-def _normalizar_modo_sensor(modo):
-    if not isinstance(modo, dict):
-        return None
-    try:
-        largura, altura = modo["output_size"]
-        bit_depth = int(modo["bit_depth"])
-        largura = int(largura)
-        altura = int(altura)
-    except (KeyError, TypeError, ValueError):
-        return None
-    if largura <= 0 or altura <= 0 or bit_depth <= 0:
-        return None
-    return {
-        "output_size": (largura, altura),
-        "bit_depth": bit_depth,
-    }
-
-
-def _normalizar_stream_principal(stream):
-    if not isinstance(stream, dict):
-        return None
-    try:
-        tamanho = tuple(int(valor) for valor in stream["size"])
-        formato = str(stream["format"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    if len(tamanho) != 2 or tamanho[0] <= 0 or tamanho[1] <= 0:
-        return None
-    return {"size": tamanho, "format": formato}
-
-
 class LineCamera:
     def __init__(self):
         from picamera2 import Picamera2  # import local: so existe no Pi
@@ -185,23 +120,9 @@ class LineCamera:
                 f"{LINE_CAMERA_INDEX} indisponivel; detectadas: "
                 f"{camera_info}"
             )
-        selected_info = camera_info[LINE_CAMERA_INDEX]
-        self.camera_index = int(LINE_CAMERA_INDEX)
-        self.camera_info = (
-            dict(selected_info)
-            if isinstance(selected_info, dict)
-            else {"raw": str(selected_info)}
-        )
-        self.sensor_id = normalizar_identidade_sensor(self.camera_info)
-        self._sensor_mode_applied = None
-        self._main_stream_applied = None
-        self._scaler_crop_requested = None
-        self._scaler_crop_applied = None
-        self._capture_fps_confirmed = None
-        self._lens_position_confirmed = None
         print(
             "[camera] abrindo camera de segue-linha explicita "
-            f"{LINE_CAMERA_INDEX} (flat 2, sensor={self.sensor_id})"
+            f"{LINE_CAMERA_INDEX} (flat 2)"
         )
         self.picam2 = Picamera2(camera_num=LINE_CAMERA_INDEX)
 
@@ -246,7 +167,6 @@ class LineCamera:
         self._abrir_campo_de_visao()
         # AE/AWB precisam enxergar alguns frames antes do único ciclo de AF.
         self._estabilizar_imagem()
-        self._confirmar_geometria_e_fps()
         self._configurar_foco()
 
     def _abrir_campo_de_visao(self):
@@ -261,74 +181,9 @@ class LineCamera:
 
         try:
             self.picam2.set_controls({"ScalerCrop": recorte})
-            self._scaler_crop_requested = tuple(recorte)
-            print(
-                "[camera] campo de visão máximo solicitado: "
-                f"ScalerCrop={recorte}"
-            )
+            print(f"[camera] campo de visão máximo: ScalerCrop={recorte}")
         except Exception as err:
             print(f"[camera] ScalerCrop máximo ignorado pelo driver: {err}")
-
-    def _confirmar_geometria_e_fps(self, *, tentativas=6):
-        """Confirma por metadata o crop e o FrameDuration realmente aplicados."""
-
-        self._scaler_crop_applied = None
-        self._capture_fps_confirmed = None
-        metadata_reader = getattr(self.picam2, "capture_metadata", None)
-        if metadata_reader is None:
-            print(
-                "[camera] metadata de crop/FPS indisponível; "
-                "calibração métrica indisponível; fallback PIXEL ativo"
-            )
-            return
-
-        alvo_crop = self._scaler_crop_requested
-        alvo_frame_us = int(round(1_000_000 / float(self.capture_fps)))
-        ultimo_crop = None
-        ultimo_frame_us = None
-        for _ in range(max(int(tentativas), 1)):
-            try:
-                metadata = metadata_reader()
-            except Exception:
-                time.sleep(.02)
-                continue
-            if isinstance(metadata, dict):
-                ultimo_crop = normalizar_recorte_metadata(
-                    metadata.get("ScalerCrop"))
-                try:
-                    ultimo_frame_us = float(metadata.get("FrameDuration"))
-                except (TypeError, ValueError):
-                    ultimo_frame_us = None
-            crop_ok = bool(
-                alvo_crop is not None and ultimo_crop == alvo_crop)
-            fps_ok = bool(
-                ultimo_frame_us is not None
-                and math.isfinite(ultimo_frame_us)
-                and ultimo_frame_us > 0.
-                and math.isclose(
-                    ultimo_frame_us,
-                    alvo_frame_us,
-                    rel_tol=.02,
-                    abs_tol=50.,
-                )
-            )
-            if crop_ok and fps_ok:
-                self._scaler_crop_applied = ultimo_crop
-                self._capture_fps_confirmed = 1_000_000. / ultimo_frame_us
-                self.capture_fps = self._capture_fps_confirmed
-                print(
-                    "[camera] crop/FPS confirmados pelo metadata: "
-                    f"ScalerCrop={ultimo_crop}, "
-                    f"FrameDuration={ultimo_frame_us:.0f} us"
-                )
-                return
-            time.sleep(.02)
-
-        print(
-            "[camera] driver não confirmou crop/FPS solicitados "
-            f"(crop={ultimo_crop}, FrameDuration={ultimo_frame_us}); "
-            "calibração métrica indisponível; fallback PIXEL ativo"
-        )
 
     def _configurar_foco(self):
         """Foca uma vez na partida e depois mantém a lente imóvel.
@@ -384,93 +239,23 @@ class LineCamera:
                     })
                     print("[camera] LensPosition inválida; foco atual mantido")
                     return
-                posicao = self.aplicar_posicao_lente(posicao)
+                self.picam2.set_controls({
+                    "AfMode": controls.AfModeEnum.Manual,
+                    "LensPosition": posicao,
+                })
                 resultado = "confirmado" if sucesso else "melhor tentativa"
                 print(
                     "[camera] autofocus de partida "
                     f"{resultado}; foco travado em LensPosition={posicao:.3f}"
                 )
             else:
-                posicao = self.aplicar_posicao_lente(LENS_POSITION)
-                print(f"[camera] foco manual: LensPosition={posicao:.3f}")
+                self.picam2.set_controls({
+                    "AfMode": controls.AfModeEnum.Manual,
+                    "LensPosition": LENS_POSITION,
+                })
+                print(f"[camera] foco manual: LensPosition={LENS_POSITION}")
         except Exception as err:
             print(f"[camera] controle de foco ignorado (módulo sem AF?): {err}")
-
-    def aplicar_posicao_lente(self, lens_position, *, tentativas=6):
-        """Aplica foco manual e confirma pelo metadata antes da competição."""
-        from visao.calibracao_wide import (LENS_POSITION_TOLERANCE,
-                                           validate_lens_position)
-
-        alvo = validate_lens_position(lens_position)
-        if (
-            not hasattr(self.picam2, "set_controls")
-            or not hasattr(self.picam2, "capture_metadata")
-        ):
-            self._lens_position_confirmed = None
-            raise RuntimeError(
-                "Picamera2 não permite aplicar e confirmar LensPosition")
-        try:
-            from libcamera import controls
-        except ImportError as error:
-            self._lens_position_confirmed = None
-            raise RuntimeError(
-                "libcamera indisponível para aplicar LensPosition") from error
-        try:
-            af_manual = controls.AfModeEnum.Manual
-        except AttributeError as error:
-            self._lens_position_confirmed = None
-            raise RuntimeError(
-                "libcamera não expõe o modo de foco manual") from error
-
-        try:
-            quantidade = int(tentativas)
-        except (TypeError, ValueError) as error:
-            raise RuntimeError("quantidade de confirmações de foco inválida") from error
-        if quantidade <= 0:
-            raise RuntimeError("quantidade de confirmações de foco inválida")
-
-        self._lens_position_confirmed = None
-        try:
-            self.picam2.set_controls({
-                "AfMode": af_manual,
-                "LensPosition": alvo,
-            })
-        except Exception as error:
-            raise RuntimeError(
-                "Picamera2 recusou a LensPosition da calibração") from error
-        ultima_posicao = None
-        ultimo_erro = None
-        for _ in range(quantidade):
-            try:
-                metadata = self.picam2.capture_metadata()
-            except Exception as error:
-                ultimo_erro = error
-                time.sleep(.02)
-                continue
-            try:
-                confirmada = float(metadata.get("LensPosition"))
-            except (AttributeError, TypeError, ValueError):
-                confirmada = float("nan")
-            if math.isfinite(confirmada):
-                ultima_posicao = confirmada
-                if math.isclose(
-                    confirmada,
-                    alvo,
-                    rel_tol=0.,
-                    abs_tol=LENS_POSITION_TOLERANCE,
-                ):
-                    self._lens_position_confirmed = confirmada
-                    return confirmada
-            time.sleep(.02)
-
-        detalhe = (
-            f"metadata indisponível: {ultimo_erro}"
-            if ultimo_erro is not None and ultima_posicao is None
-            else "metadata ausente"
-            if ultima_posicao is None
-            else f"metadata={ultima_posicao:.4f}, alvo={alvo:.4f}"
-        )
-        raise RuntimeError(f"LensPosition não foi confirmada ({detalhe})")
 
     def _estabilizar_imagem(self):
         """Evita que muito preto no quadro altere brilho e cor da pista."""
@@ -512,8 +297,6 @@ class LineCamera:
             print(f"[camera] trava de exposicao/AWB ignorada: {err}")
 
     def _configurar_e_iniciar(self, fps):
-        self._sensor_mode_applied = None
-        self._main_stream_applied = None
         self.capture_fps = float(fps)
         frame_us = int(round(1_000_000 / self.capture_fps))
         print(
@@ -535,7 +318,6 @@ class LineCamera:
             # recortado só por ele ser mais rápido.
             opcoes["sensor"] = self._sensor_config
 
-        sensor_mode_sent = False
         try:
             video_config = self.picam2.create_video_configuration(
                 **opcoes,
@@ -543,13 +325,11 @@ class LineCamera:
                 # remove até um período de atraso escondido da fila interna.
                 queue=False,
             )
-            sensor_mode_sent = self._sensor_config is not None
         except TypeError:
             try:
                 # Versões intermediárias podem aceitar o controle de FPS, mas
                 # ainda não conhecer o argumento ``queue``.
                 video_config = self.picam2.create_video_configuration(**opcoes)
-                sensor_mode_sent = self._sensor_config is not None
             except TypeError:
                 # Picamera2 antigo não aceita ``sensor``. Continua funcional,
                 # mas não há como garantir o modo do sensor por essa API.
@@ -558,91 +338,7 @@ class LineCamera:
                 )
 
         self.picam2.configure(video_config)
-        try:
-            configured = self.picam2.camera_configuration()
-            actual_main = _normalizar_stream_principal(
-                configured.get("main"))
-            if actual_main == {
-                "size": (CAPTURE_WIDTH, CAPTURE_HEIGHT),
-                "format": "RGB888",
-            }:
-                self._main_stream_applied = actual_main
-            else:
-                print(
-                    "[camera] stream principal não confirmado "
-                    f"(recebido={actual_main}); calibração métrica "
-                    "indisponível; fallback PIXEL ativo"
-                )
-            if sensor_mode_sent:
-                actual_mode = _normalizar_modo_sensor(
-                    configured.get("sensor"))
-                if actual_mode is not None:
-                    self._sensor_mode_applied = actual_mode
-        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
-            pass
-        if self._main_stream_applied is None:
-            print(
-                "[camera] driver não confirmou resolução/formato do stream; "
-                "calibração métrica indisponível; fallback PIXEL ativo"
-            )
-        if sensor_mode_sent and self._sensor_mode_applied is None:
-            print(
-                "[camera] driver não confirmou o modo bruto; "
-                "calibração métrica indisponível; fallback PIXEL ativo"
-            )
         self.picam2.start()
-
-    @property
-    def sensor_mode(self):
-        """Modo bruto que o driver confirmou, ou ``None`` se incerto."""
-        if self._sensor_mode_applied is None:
-            return None
-        return dict(self._sensor_mode_applied)
-
-    @property
-    def scaler_crop(self):
-        """Maior crop confirmado pelo metadata, ou ``None`` se incerto."""
-        return self._scaler_crop_applied
-
-    @property
-    def lens_position(self):
-        """LensPosition manual confirmada pelo metadata, ou ``None``."""
-        return self._lens_position_confirmed
-
-    @property
-    def capture_mode_id(self):
-        """Assinatura canônica do modo geométrico realmente configurado."""
-        from visao.calibracao_wide import build_capture_mode_id
-
-        sensor_esperado = str(LINE_CAMERA_SENSOR_ID).strip().casefold()
-        if self.sensor_id.casefold() != sensor_esperado:
-            raise RuntimeError(
-                "sensor da câmera de linha difere do hardware calibrado: "
-                f"{self.sensor_id} != {sensor_esperado}"
-            )
-        if self._sensor_mode_applied is None:
-            raise RuntimeError(
-                "modo bruto do sensor não foi confirmado pelo Picamera2")
-        if self._main_stream_applied != {
-            "size": (CAPTURE_WIDTH, CAPTURE_HEIGHT),
-            "format": "RGB888",
-        }:
-            raise RuntimeError(
-                "resolução/formato do stream principal não foi confirmado")
-        if self._scaler_crop_applied is None:
-            raise RuntimeError(
-                "ScalerCrop máximo não foi confirmado pelo metadata")
-        if self._capture_fps_confirmed is None:
-            raise RuntimeError(
-                "FrameDuration/FPS não foi confirmado pelo metadata")
-
-        return build_capture_mode_id(
-            (camera_x, camera_y),
-            self._capture_fps_confirmed,
-            full_fov=self._sensor_mode_applied is not None,
-            sensor_mode=self._sensor_mode_applied,
-            scaler_crop=self._scaler_crop_applied,
-        )
 
     def sensor_modes(self):
         return self.picam2.sensor_modes
@@ -666,13 +362,12 @@ class LineCamera:
         `config.py` e em `config.ini`.
         """
         raw = self.picam2.capture_array("main")
-        if raw.ndim != 3 or raw.shape != (camera_y, camera_x, 3):
-            raise RuntimeError(
-                "stream principal mudou de geometria/formato em runtime: "
-                f"shape={getattr(raw, 'shape', None)}, esperado="
-                f"({camera_y}, {camera_x}, 3)"
-            )
-        return raw
+        if raw.ndim == 3 and raw.shape[2] == 4:
+            raw = cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
+        if raw.shape[1] == camera_x and raw.shape[0] == camera_y:
+            return raw
+        # Compatibilidade com drivers antigos que ignoram o tamanho solicitado.
+        return cv2.resize(raw, (camera_x, camera_y))
 
     def close(self):
         try:

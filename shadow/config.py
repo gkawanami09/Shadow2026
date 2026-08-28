@@ -76,7 +76,6 @@ OBSTACLE_RETRY_COOLDOWN_S = 1.0
 # Mapeamento físico atual do Pi 5: índice 0 = resgate; índice 1 = segue-linha
 # no flat 2. Nunca deixar Picamera2 escolher a câmera padrão neste processo.
 LINE_CAMERA_INDEX = 1
-LINE_CAMERA_SENSOR_ID = "imx708_wide"
 # A Camera Module 3 Wide usa um sensor 16:9. A saída já é pedida no tamanho
 # exato consumido pelo algoritmo: isso preserva o mesmo campo de visão e os
 # mesmos pontos de controle, mas elimina um resize OpenCV e uma cópia de
@@ -89,14 +88,13 @@ CAPTURE_FPS = 40
 CAPTURE_FPS_FALLBACK = 40
 camera_x = 448                            # resolução do algoritmo
 camera_y = 252
-# A montagem atual retornou 19.002 no autofocus. O valor fixo elimina o ciclo
-# mecânico demorado em toda partida; use None somente após mover a câmera.
-LENS_POSITION = 19.0
+# None executa um único autofocus na partida e trava a posição encontrada.
+# Um número continua permitindo a calibração manual em dioptrias.
+LENS_POSITION = None
 # Mantém exposição e balanço de branco automáticos. Fixar estes controles sem
 # calibração específica pode estourar toda a pista para branco.
 LINE_CAMERA_LOCK_AUTO_CONTROLS = False
-# AE/AWB continuam automáticos; oito frames estabilizam sem espera excessiva.
-LINE_CAMERA_WARMUP_S = .20
+LINE_CAMERA_WARMUP_S = .45
 LINE_CAMERA_EXPOSURE_VALUE = 0.0
 DEBUG_SHM_NAME = "shadow_shm_cam"
 DEBUG_SHM_SIZE = camera_x * camera_y * 3  # 338688 B
@@ -257,46 +255,6 @@ PIVOT_RECOVERY_EXIT_ANGLE = 40
 # ----------------------------------------------------------------------------
 # Verde
 # ----------------------------------------------------------------------------
-# O classificador topologico trabalha em coordenadas do chao. A calibracao e
-# local porque depende da lente, foco, altura e montagem deste robo; portanto o
-# arquivo gerado nao deve ser copiado de outra camera.
-GREEN_WIDE_CALIBRATION_PATH = SHADOW_ROOT / "calibracao_camera_wide.npz"
-# A homografia melhora a precisao nas bordas, mas nao e obrigatoria. Sem o
-# artefato NPZ, a topologia usa pixels normalizados pela largura medida da
-# propria linha (nenhuma escala ou arquivo de calibracao e inventado).
-GREEN_WIDE_CALIBRATION_REQUIRED = False
-GREEN_PIXEL_FALLBACK_ENABLED = True
-GREEN_WIDE_CALIBRATION_MAX_ERROR_PX = .8
-GREEN_WIDE_HOMOGRAPHY_MAX_ERROR_MM = 1.5
-GREEN_WIDE_CALIBRATION_MIN_VIEWS = 20
-GREEN_WIDE_BOARD_SQUARES = (8, 6)
-GREEN_WIDE_BOARD_INNER_CORNERS = (7, 5)
-GREEN_WIDE_BOARD_SQUARE_MM = 10.
-
-# Geometria fisica dos marcadores e da intersecao. Estes limites sao medidos
-# depois de remover a distorcao da wide e projetar a imagem no plano do piso.
-GREEN_TOPOLOGY_MARKER_MIN_MM = 18.
-GREEN_TOPOLOGY_MARKER_MAX_MM = 35.
-GREEN_TOPOLOGY_PRE_POST_MARGIN_RATIO = .35
-GREEN_TOPOLOGY_MIN_BRANCH_LINE_WIDTHS = 1.5
-GREEN_TOPOLOGY_ENTRY_HISTORY_FRAMES = 5
-GREEN_TOPOLOGY_CONFIRM_FRAMES = 3
-GREEN_TOPOLOGY_CONFIRM_WINDOW = 5
-GREEN_TOPOLOGY_SECOND_MARKER_WAIT_S = .35
-GREEN_TOPOLOGY_OBSERVE_TIMEOUT_S = .75
-GREEN_TOPOLOGY_PREDICTION_MAX_S = .20
-GREEN_TOPOLOGY_REARM_CLEAR_FRAMES = 5
-GREEN_TOPOLOGY_COOLDOWN_S = .55
-# Limite absoluto para a visao confirmar que a juncao desapareceu e que a
-# linha de saida estabilizou. Sem este prazo, uma camera/tracker congelado
-# deixaria o controle em COOLDOWN para sempre e ignoraria todos os verdes
-# seguintes sem parar o robo.
-GREEN_TOPOLOGY_COOLDOWN_TIMEOUT_S = 2.0
-GREEN_TOPOLOGY_PENDING_SPEED = 60 / MAX_PWM
-GREEN_TOPOLOGY_READY_Y_RATIO = .82
-GREEN_TOPOLOGY_READY_CONFIRM_FRAMES = 2
-GREEN_STRAIGHT_TARGET_WEIGHT = .70       # ramo topologico domina a centralizacao
-
 GREEN_MIN_AREA = 2500                     # area minima do marcador
 GREEN_MARKER_MIN_ASPECT = .5              # quadrado tolerando perspectiva
 GREEN_MARKER_MAX_ASPECT = 2.0
@@ -306,7 +264,7 @@ GREEN_BLACK_MIN_RUN_RATIO = .42           # linha continua, nao media de pixels
 GREEN_BLACK_MAX_GAP_RATIO = .28           # precisa estar logo junto do quadrado
 GREEN_CONFIRM_FRAMES = 3                  # leituras coerentes para autorizar 90
 GREEN_CONFIRM_WINDOW_FRAMES = 5           # tolera ate 2 falhas curtas da mascara
-GREEN_TURN_AROUND_CONFIRM_FRAMES = 3      # 180 nunca executa por quadro unico
+GREEN_TURN_AROUND_CONFIRM_FRAMES = 1      # dois verdes validos tem prioridade
 GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria
 GREEN_MARKER_MEMORY = .5                  # memoria do marcador (plano)
@@ -326,18 +284,11 @@ GREEN_STRAIGHT_BOTTOM_Y_RATIO = .72       # entrada precisa vir da base do robo
 GREEN_STRAIGHT_CORRIDOR_RATIO = .20       # tolera chegada inclinada na camera wide
 GREEN_TURN_BLIND_TIME = .30                # s — giro sem aceitar leitura da camera
 GREEN_TURN_SIDE_MIN_ERROR_PX = 55          # linha alvo deve primeiro entrar pelo lado marcado
-GREEN_LOCKED_BRANCH_MIN_Y_RATIO = .55
 GREEN_TURN_CENTER_TOLERANCE_PX = 35        # px — ponto inferior aceito no centro da camera
 GREEN_TURN_CENTER_CONFIRM_FRAMES = 3       # nunca conclui por um frame central
-GREEN_REACQUIRE_MIN_CORRECTION = .42       # pulso diferencial ao encaixar o ramo travado
-GREEN_REACQUIRE_MAX_CORRECTION = 1.0       # longe do centro ainda permite tanque completo
 GREEN_TURN_TIMEOUT = 2.0                   # s — para com seguranca se nao reencontrar o ramo
-GREEN_TURN_AROUND_TIMEOUT = 4.0            # s — inclui pre-roll, busca, re e validacao final
 GREEN_TURN_SPEED = .5                     # base PWM 60, preserva o giro
 GREEN_MPU_ENABLED = True                  # camera guia; MPU limita excesso de giro
-# Defina True se o yaw AUMENTA ao girar para a direita, False se DIMINUI.
-# None mantém o MPU sem autoridade até esse sinal físico ser conferido.
-GREEN_MPU_POSITIVE_IS_RIGHT = None
 GREEN_MPU_QUERY_INTERVAL_S = .04
 GREEN_MPU_RESPONSE_TIMEOUT_S = .12
 GREEN_MPU_SLOWDOWN_DEG = 70.
@@ -409,12 +360,7 @@ T_180_TEST_STOP = False                   # True isola e para definitivamente ap
 T_180_SEARCH_SPEED = .4                   # procura devagar para nao atravessar a linha entre frames
 T_180_SEARCH_TIMEOUT = 1.5                # s — complemento visual maximo
 T_180_EXIT_BOTTOM_PX = 30                 # px — tolerancia ao redor da bolinha inferior central
-T_180_CONFIRM_FRAMES = 3                  # somente tres frames NOVOS encerram o retorno
-T_180_POST_REVERSE_TIMEOUT = .40          # confirma novamente depois da re
-T_180_MPU_SLOWDOWN_DEG = 145.             # desacelera perto do retorno completo
-T_180_MPU_SLOW_SPEED = .32                # PWM ~38 durante acabamento com yaw
-T_180_MPU_MIN_COMPLETION_DEG = 140.       # evita aceitar a linha de entrada como saida
-T_180_MPU_HARD_LIMIT_DEG = 200.           # falha fechado antes de uma volta excessiva
+T_180_CONFIRM_TIME = .10                  # s — evita parar por um frame isolado
 TURN_AROUND_PREROLL = .275                # metade do avanco antigo de 0,55 s
 TURN_AROUND_REVERSE = .15                 # metade da ré após re-aquisitar a linha
 TURN_AROUND_REVERSE_EXTRA = .20           # metade do extra se line_size < 5500

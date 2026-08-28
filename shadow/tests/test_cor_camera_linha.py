@@ -22,8 +22,6 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
-from visao.captura import LineCamera  # noqa: E402
-from visao.captura_resgate import RescueCamera  # noqa: E402
 
 
 def matiz(bgr):
@@ -137,22 +135,15 @@ class OrdemDeCanaisDaCameraTests(unittest.TestCase):
             "COLOR_RGB2BGR", corpo,
             "a troca R<->B voltou para a camera de linha")
 
-    def test_as_duas_cameras_preservam_buffer_bgr_de_tres_canais(self):
-        frame = np.zeros((config.camera_y, config.camera_x, 3), dtype=np.uint8)
-        frame[0, 0] = VERMELHOS[0]
-
-        linha = LineCamera.__new__(LineCamera)
-        linha.picam2 = type("CameraFalsa", (), {
-            "capture_array": lambda _self, _stream: frame,
-        })()
-        resgate = RescueCamera.__new__(RescueCamera)
-        resgate.picam2 = type("CameraFalsa", (), {
-            "capture_array": lambda _self, _stream: frame,
-        })()
-        resgate._software_rotate = False
-
-        np.testing.assert_array_equal(linha.get_frame(), frame)
-        np.testing.assert_array_equal(resgate.get_frame(), frame)
+    def test_as_duas_cameras_tratam_a_cor_do_mesmo_jeito(self):
+        linha = (SHADOW_ROOT / "visao" / "captura.py").read_text(
+            encoding="utf-8").split("def get_frame")[1]
+        resgate = (SHADOW_ROOT / "visao" / "captura_resgate.py").read_text(
+            encoding="utf-8").split("def get_frame")[1]
+        for corpo, nome in ((linha, "linha"), (resgate, "resgate")):
+            self.assertIn(
+                "COLOR_BGRA2BGR", corpo,
+                f"camera de {nome} nao trata o buffer como BGR nativo")
 
 
 if __name__ == "__main__":

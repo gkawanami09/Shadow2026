@@ -1,6 +1,5 @@
 """Ciclo principal de decisões e movimentos do segue-linha."""
 
-import math
 import time
 
 import config
@@ -9,10 +8,11 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GAP_AVOID_TIMEOUT, GAP_MIN_LINE_SIZE_RETREAT,
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
                     GREEN_APPROACH_SPEED, GREEN_APPROACH_TIME,
+                    GREEN_REVERSE_SPEED, GREEN_REVERSE_TIME,
                     GREEN_TURN_BLIND_TIME, GREEN_TURN_CENTER_TOLERANCE_PX,
                     GREEN_TURN_SPEED, GREEN_TURN_TIMEOUT, LINE_FOLLOW_SPEED,
-                    MIN_LINE_SIZE_DEFAULT, VISION_READY_TIMEOUT,
-                    camera_x, camera_y)
+                    MIN_LINE_SIZE_DEFAULT, TURN_AROUND_GREEN_COOLDOWN,
+                    VISION_READY_TIMEOUT, camera_x, camera_y)
 from controle.orientacao_gap import drive_back_until_line, orientate_gap
 from controle.parada_obstaculo import (
     MonitorObstaculo,
@@ -20,21 +20,16 @@ from controle.parada_obstaculo import (
 )
 from controle.parada_vermelho import stop_for_red
 from controle.manobra_verde import (alinhamento_verde_pode_concluir,
+                                    controle_visual_verde_liberado,
                                     correcao_aproximacao,
-                                    correcao_reaquisicao_verde,
-                                    correcao_ramo_reto,
-                                    juncao_topologica_realmente_ausente,
+                                    deve_iniciar_giro_verde,
+                                    progresso_giro_mpu,
                                     ramo_marcado_visto_pela_camera,
-                                    ramo_travado_recente,
-                                    saida_topologica_real_estavel)
-from controle.estado_verde import (GreenDecision, GreenManeuverFSM,
-                                    GreenManeuverState, SignedYawTracker,
-                                    calibracao_permite_motores)
+                                    ramo_pronto_para_giro)
 from controle.velocidade import get_speed
 from controle.velocidade_adaptativa import ControladorVelocidadeAdaptativa
-from controle.direcao import (init_steering, set_motion_guard,
-                              set_motion_observer, sleep_steering, steer,
-                              steer_line)
+from controle.direcao import (init_steering, mix_line_pwm, sleep_steering,
+                              steer, steer_line)
 from controle.retorno import turn_around
 from controle.seguidor_linha import CORNER, LOST, ControladorSegueLinha
 from comunicacao_serial.arduino import Arduino
@@ -44,13 +39,6 @@ from shared.dados_compartilhados import (ENTRY_SILVER_BLACK_FOLLOW,
                                entry_silver_detected, entry_silver_reason,
                                entry_silver_state, entry_silver_votes,
                                green_candidate,
-                               green_calibration_ready,
-                               green_control_state,
-                               green_control_yaw,
-                               green_decision_consumed_id,
-                               green_fault_stop,
-                               green_locked_decision,
-                               green_rearmed_decision_id,
                                green_turn_target,
                                last_bottom_point,
                                last_bottom_point_y,
@@ -58,8 +46,6 @@ from shared.dados_compartilhados import (ENTRY_SILVER_BLACK_FOLLOW,
                                line_ahead, line_angle,
                                line_detected,
                                line_size, line_status, min_line_size,
-                               ler_observacao_intersecao,
-                               publicar_comando_motores,
                                mission_mode,
                                preferencia_linha_esquerda,
                                red_candidate, red_detected, red_finished,
@@ -123,12 +109,6 @@ def _reset_entry_silver(reason):
     entry_silver_state.value = ENTRY_SILVER_IDLE
 
 
-def _publicar_pwm_motores(esquerda, direita):
-    publicar_comando_motores(esquerda, direita)
-    steering_left_pwm.value = int(esquerda)
-    steering_right_pwm.value = int(direita)
-
-
 def control_loop():
     try:
         arduino = Arduino()
@@ -137,17 +117,11 @@ def control_loop():
         print(f"[controle] Arduino indisponivel: {erro}")
         return
     init_steering(arduino)
-    set_motion_observer(_publicar_pwm_motores)
-    set_motion_guard(lambda: calibracao_permite_motores(
-        obrigatoria=config.GREEN_WIDE_CALIBRATION_REQUIRED,
-        pronta=green_calibration_ready.value,
-    ))
     steer()  # motores parados desde o inicio
-    # Nenhuma sessao reconecta em movimento. Se o Uno cair, seu watchdog para
-    # os motores e esta execucao entra em falha; uma nova conexao exige um
-    # reinicio explicito, inclusive em ``main.py`` standalone.
-    arduino.travar_sessao()
-    epoca_serial_sessao = arduino.connection_epoch
+    if mission_mode.value:
+        # Uma sessao da missao nunca reconecta em movimento. Se a placa cair,
+        # o supervisor cria uma tentativa nova depois do reposicionamento.
+        arduino.travar_sessao()
 
     last_turn_dir = "l"
 
@@ -183,31 +157,6 @@ def control_loop():
             arduino.close()
         return
 
-    if not calibracao_permite_motores(
-        obrigatoria=config.GREEN_WIDE_CALIBRATION_REQUIRED,
-        pronta=green_calibration_ready.value,
-    ):
-        green_fault_stop.value = True
-        green_control_state.value = int(GreenManeuverState.FAULT_STOP)
-        green_locked_decision.value = int(GreenDecision.NONE)
-        status.value = (
-            'Calibracao wide obrigatoria ausente - motores bloqueados')
-        arduino.led("APAGADO")
-        print(
-            "[controle] calibracao wide obrigatoria ausente/incompativel; "
-            "LED APAGADO e motores bloqueados. Use --vision-only para "
-            "diagnostico ou execute tools/calibrar_camera_wide.py"
-        )
-        while not terminate.value and arduino.connected:
-            steer()
-            arduino.refresh(fail_closed=True)
-            time.sleep(.05)
-        try:
-            steer()
-        finally:
-            arduino.close()
-        return
-
     # O LED passa a significar que camera e controle estao realmente prontos.
     # Assim nao existe mais uma espera silenciosa depois de ele acender.
     arduino.led("ACESO")
@@ -224,32 +173,19 @@ def control_loop():
     gap_retry_after = 0.0
     controlador_linha = ControladorSegueLinha()
     green_direction = None
+    green_approach_until = 0.
     green_turn_started = None
+    green_reverse_until = None
+    green_turn_deadline = 0.
     green_target_seen = False
     green_transversal_frames = 0
     green_last_signed_error = None
     green_mpu_last_yaw = None
     green_mpu_turn_origin = None
     green_mpu_next_query = 0.
-    green_fsm = GreenManeuverFSM()
-    green_yaw_tracker = None
-    green_yaw_progress = None
-    green_mpu_last_timestamp = None
-    green_mpu_last_generation = 0
-    green_mpu_ativo = bool(
-        config.GREEN_MPU_ENABLED
-        and type(config.GREEN_MPU_POSITIVE_IS_RIGHT) is bool
-    )
-    if config.GREEN_MPU_ENABLED and not green_mpu_ativo:
-        print(
-            "[controle] MPU verde sem autoridade: configure "
-            "GREEN_MPU_POSITIVE_IS_RIGHT após conferir o sinal físico do yaw"
-        )
-    green_exit_stable_frames = 0
-    green_ready_last_sequence = -1
-    green_exit_last_sequence = -1
-    green_center_last_sequence = -1
-    calibration_warning_printed = False
+    green_release_until = 0.
+    green_armed = True
+    green_rearm_after = 0.
     monitor_obstaculo = MonitorObstaculo()
     velocidade_adaptativa = (
         ControladorVelocidadeAdaptativa()
@@ -260,10 +196,6 @@ def control_loop():
     obstaculo_retry_after = 0.
     preferencia_linha_esquerda.value = False
     green_turn_target.value = 0
-    green_control_state.value = int(GreenManeuverState.FOLLOW)
-    green_locked_decision.value = int(GreenDecision.NONE)
-    green_fault_stop.value = False
-    green_control_yaw.value = float("nan")
     preferencia_esquerda_inicio = 0.
     preferencia_esquerda_alinhada_desde = None
     entry_rearm_after = None
@@ -272,78 +204,10 @@ def control_loop():
 
     try:
         while not terminate.value:
-            if (not arduino.connected
-                    or arduino.connection_epoch != epoca_serial_sessao):
-                if not green_fsm.stopped:
-                    green_fsm.fault(
-                        "sessao serial perdida durante o controle",
-                        now=time.monotonic(),
-                    )
-                green_fault_stop.value = True
-                green_control_state.value = int(green_fsm.state)
+            if not arduino.connected:
                 status.value = 'Arduino desconectado - aguardando reinicio'
-                print(
-                    "[controle] sessao serial perdida; "
-                    "FAULT_STOP e encerrando sem reconectar"
-                )
-                steer()
+                print("[controle] Arduino desconectado; encerrando sessao")
                 return
-
-            # A calibracao e uma permissao global de movimento, nao apenas um
-            # teste do bloco de segue-linha. A mesma trava tambem vive em
-            # ``direcao`` e interrompe sleeps bloqueantes de gap/180 em ate
-            # 50 ms; aqui persistimos o FAULT_STOP e apagamos o LED.
-            if not calibracao_permite_motores(
-                obrigatoria=config.GREEN_WIDE_CALIBRATION_REQUIRED,
-                pronta=green_calibration_ready.value,
-            ):
-                agora_falha = time.monotonic()
-                if not green_fsm.stopped:
-                    green_fsm.fault(
-                        "calibracao wide obrigatoria perdida em runtime",
-                        now=agora_falha,
-                    )
-                green_fault_stop.value = True
-                green_control_state.value = int(
-                    GreenManeuverState.FAULT_STOP)
-                green_locked_decision.value = int(
-                    green_fsm.locked_direction)
-                status.value = (
-                    'Calibracao wide perdida - FAULT_STOP, motores parados')
-                if not calibration_warning_printed:
-                    calibration_warning_printed = True
-                    arduino.led("APAGADO")
-                    print(
-                        "[controle] calibracao wide perdida em runtime; "
-                        "LED APAGADO e motores bloqueados ate reiniciar")
-                steer()
-                arduino.refresh(fail_closed=True)
-                time.sleep(.02)
-                continue
-
-            if green_fsm.stopped:
-                # FAULT_STOP e persistente por projeto: somente reiniciar a
-                # sessao pode devolver autoridade ao seguidor comum.
-                green_fault_stop.value = True
-                green_control_state.value = int(
-                    GreenManeuverState.FAULT_STOP)
-                status.value = (
-                    'Verde FAULT_STOP - motores parados: '
-                    + green_fsm.fault_reason)
-                steer()
-                arduino.refresh(fail_closed=True)
-                time.sleep(.02)
-                continue
-
-            observacao_prioritaria = ler_observacao_intersecao()
-            observacao_prioritaria_recente = bool(
-                time.monotonic() - observacao_prioritaria.timestamp
-                <= config.LINE_MAX_FRAME_AGE_S
-            )
-            manobra_verde_em_observacao = bool(
-                observacao_prioritaria_recente
-                and observacao_prioritaria.decision != GreenDecision.NONE
-            )
 
             # A inclinacao vem do MPU no Arduino. A consulta e nao bloqueante:
             # enquanto uma resposta chega, o segue-linha continua enviando os
@@ -442,6 +306,10 @@ def control_loop():
                         obstaculo_retry_after,
                         agora_preferencia + config.OBSTACLE_RETRY_COOLDOWN_S,
                     )
+                    green_rearm_after = max(
+                        green_rearm_after,
+                        agora_preferencia + config.OBSTACLE_RETRY_COOLDOWN_S,
+                    )
                     status.value = 'Preferência esquerda concluída'
                     print(
                         "[controle] preferência esquerda concluída; "
@@ -454,8 +322,6 @@ def control_loop():
             # o laço volta diretamente ao segue-linha normal.
             if (
                 config.OBSTACLE_STOP_ENABLED
-                and green_fsm.state == GreenManeuverState.FOLLOW
-                and not manobra_verde_em_observacao
                 and not preferencia_linha_esquerda.value
                 and time.monotonic() >= obstaculo_retry_after
                 and monitor_obstaculo.atualizar(arduino)
@@ -475,14 +341,7 @@ def control_loop():
                 try:
                     desviar_obstaculo(
                         arduino,
-                        deve_encerrar=lambda: (
-                            terminate.value
-                            or not calibracao_permite_motores(
-                                obrigatoria=(
-                                    config.GREEN_WIDE_CALIBRATION_REQUIRED),
-                                pronta=green_calibration_ready.value,
-                            )
-                        ),
+                        deve_encerrar=lambda: terminate.value,
                     )
                     if terminate.value:
                         break
@@ -511,8 +370,12 @@ def control_loop():
                 controlador_linha.reset()
                 green_direction = None
                 green_turn_started = None
+                green_reverse_until = None
+                green_turn_deadline = 0.
                 green_target_seen = False
                 green_turn_target.value = 0
+                green_armed = False
+                green_rearm_after = obstaculo_retry_after
                 status.value = 'Seguindo linha'
                 print("[controle] retomando segue-linha normal")
                 continue
@@ -542,6 +405,9 @@ def control_loop():
             if line_status.value == "line_detected":
                 now = time.monotonic()
 
+                if (green_turn_target.value == 2
+                        and now >= green_release_until):
+                    green_turn_target.value = 0
                 if line_detected.value:
                     # Nunca inicie o teste apenas porque a camera acabou de
                     # ligar sem a linha no campo. Primeiro a linha precisa ter
@@ -596,8 +462,6 @@ def control_loop():
                 gap_allowed = (
                     GAP_ENABLED
                     and not test_no_black_active
-                    and green_fsm.state == GreenManeuverState.FOLLOW
-                    and not green_candidate.value
                     and now >= gap_retry_after
                 )
                 if (gap_allowed and not line_detected.value
@@ -615,295 +479,39 @@ def control_loop():
 
             # Continua seguindo enquanto não muda de estado.
             if line_status.value == "line_detected":
-                now = time.monotonic()
-                observacao_verde = ler_observacao_intersecao()
-                resultado_visao = ler_resultado_visao_rapida()
-                # O deadline do estado atual precisa vencer antes que um
-                # frame tardio possa promover OBSERVE->COMMITTED ou
-                # APPROACH->TURNING e substituir esse deadline.
-                if green_fsm.check_timeout(now=now):
-                    green_fault_stop.value = True
-                    green_control_state.value = int(green_fsm.state)
-                    steer()
-                    continue
-                observacao_verde_recente = (
-                    now - observacao_verde.timestamp
-                    <= config.LINE_MAX_FRAME_AGE_S
-                )
-                if not green_calibration_ready.value:
-                    if not calibration_warning_printed:
-                        print(
-                            "[controle] calibracao wide ausente/incompativel; "
-                            "verde desarmado, segue-linha comum preservado"
-                        )
-                        calibration_warning_printed = True
-                    if (config.GREEN_WIDE_CALIBRATION_REQUIRED
-                            or green_fsm.state not in (
-                                GreenManeuverState.FOLLOW,
-                                GreenManeuverState.COOLDOWN,
-                            )):
-                        green_fsm.fault(
-                            "calibracao wide obrigatoria perdida em runtime",
-                            now=now,
-                        )
-                elif observacao_verde_recente:
-                    evento_expirado_antes_do_controle = bool(
-                        observacao_verde.committed
-                        and green_fsm.state == GreenManeuverState.FOLLOW
-                        and resultado_visao.sequencia
-                        >= observacao_verde.sequence
-                        and juncao_topologica_realmente_ausente(
-                            resultado_visao, agora=now)
-                    )
-                    if evento_expirado_antes_do_controle:
-                        green_fsm.fault(
-                            "decisao verde expirou antes do controle",
-                            now=now,
-                        )
-                        green_fault_stop.value = True
-                        green_control_state.value = int(green_fsm.state)
-                        status.value = (
-                            "Decisao verde expirou - FAULT_STOP, "
-                            "motores parados"
-                        )
-                        steer()
-                        continue
-                    else:
-                        green_fsm.observe(
-                            observacao_verde,
-                            now=now,
-                            observe_timeout_s=(
-                                config.GREEN_TOPOLOGY_OBSERVE_TIMEOUT_S),
-                        )
-                    if (observacao_verde.decision == GreenDecision.NONE
-                            and green_fsm.state
-                            == GreenManeuverState.OBSERVE):
-                        green_fsm.cancel_observation(now=now)
-
-                if (green_fsm.state == GreenManeuverState.COMMITTED
-                        and green_fsm.event is not None):
-                    decisao = green_fsm.locked_direction
-                    green_fsm.begin_approach(
-                        now=now, timeout_s=GREEN_APPROACH_TIME)
-                    green_direction = {
-                        GreenDecision.LEFT: "left",
-                        GreenDecision.RIGHT: "right",
-                        GreenDecision.UTURN: "turn_around",
-                    }.get(decisao)
-                    green_turn_started = None
-                    green_target_seen = False
-                    green_transversal_frames = 0
-                    green_ready_last_sequence = -1
-                    green_exit_last_sequence = -1
-                    green_center_last_sequence = -1
-                    green_last_signed_error = None
-                    green_mpu_last_yaw = None
-                    green_mpu_turn_origin = None
-                    green_mpu_last_timestamp = None
-                    green_mpu_last_generation = 0
-                    green_control_yaw.value = float("nan")
-                    green_yaw_tracker = None
-                    green_yaw_progress = None
-                    green_mpu_next_query = now
-                    if hasattr(arduino, "cancelar_mpu"):
-                        arduino.cancelar_mpu()
-                    green_turn_target.value = (
-                        -1 if decisao == GreenDecision.LEFT else
-                        1 if decisao == GreenDecision.RIGHT else
-                        2 if decisao == GreenDecision.STRAIGHT else 0
-                    )
-
-                green_control_state.value = int(green_fsm.state)
-                green_locked_decision.value = int(
-                    green_fsm.locked_direction)
-                direcao_visual = {
-                    GreenDecision.LEFT: "left",
-                    GreenDecision.RIGHT: "right",
-                    GreenDecision.UTURN: "turn_around",
-                }.get(green_fsm.locked_direction, "straight")
-
-                status.value = (
-                    'Seguindo Linha — preferência esquerda'
-                    if preferencia_linha_esquerda.value
-                    else 'Seguindo Linha'
-                )
-
-                # Mantem uma amostra recente durante a aproximacao. Quando o
-                # tanque comeca ela vira a origem do giro, sem bloquear o
-                # controle com um comando ``MPU ZERO``.
-                if (green_direction is not None
-                        and green_mpu_ativo
-                        and hasattr(arduino, "iniciar_mpu")
-                        and hasattr(arduino, "poll_mpu")):
-                    mpu_concluido, leitura_mpu = arduino.poll_mpu()
-                    if mpu_concluido and leitura_mpu is not None:
-                        geracao_mpu = int(getattr(
-                            leitura_mpu, "request_generation", 0))
-                        instante_mpu = float(getattr(
-                            leitura_mpu, "received_at", 0.0))
-                        geracao_nova = bool(
-                            geracao_mpu > 0
-                            and geracao_mpu > green_mpu_last_generation
-                            and math.isfinite(instante_mpu)
-                            and 0. < instante_mpu <= now + .01
-                        )
-                        if geracao_nova:
-                            green_mpu_last_yaw = leitura_mpu.yaw_graus
-                            green_mpu_last_timestamp = instante_mpu
-                            green_mpu_last_generation = max(
-                                green_mpu_last_generation, geracao_mpu)
-                            green_control_yaw.value = green_mpu_last_yaw
-                            if green_yaw_tracker is not None:
-                                green_yaw_progress = green_yaw_tracker.update(
-                                    green_mpu_last_yaw,
-                                    green_mpu_last_timestamp,
-                                    now=now,
-                                )
-                    if now >= green_mpu_next_query:
-                        arduino.iniciar_mpu(
-                            timeout=config.GREEN_MPU_RESPONSE_TIMEOUT_S)
-                        green_mpu_next_query = (
-                            now + config.GREEN_MPU_QUERY_INTERVAL_S)
-                linha_verde_recente = (
-                    resultado_visao.linha_detectada
-                    and now - resultado_visao.publicado_em
-                    <= config.LINE_MAX_FRAME_AGE_S
-                )
-                evento_verde = green_fsm.event
-                if (green_fsm.state == GreenManeuverState.APPROACH
-                        and green_fsm.locked_direction
-                        in (GreenDecision.LEFT, GreenDecision.RIGHT,
-                            GreenDecision.UTURN)):
-                    geometria_pronta = bool(
-                        evento_verde is not None
-                        and evento_verde.ready_to_turn
-                        and evento_verde.junction_visible
-                        and not evento_verde.geometry_predicted
-                    )
-                    if (evento_verde is not None
-                            and evento_verde.sequence
-                            != green_ready_last_sequence):
-                        green_ready_last_sequence = evento_verde.sequence
-                        # Precisam ser dois frames NOVOS e consecutivos. Uma
-                        # perda/predicao entre eles zera a sequencia em vez de
-                        # deixar um voto antigo sobreviver.
-                        green_transversal_frames = (
-                            green_transversal_frames + 1
-                            if geometria_pronta else 0
-                        )
-                    if (evento_verde is not None
-                            and not evento_verde.junction_visible
-                            and not evento_verde.geometry_predicted
-                            and not evento_verde.ready_to_turn):
-                        green_fsm.fault(
-                            "geometria da juncao perdida por mais de 0,20 s",
-                            now=now,
-                        )
-                    elif (green_transversal_frames
-                          >= config.GREEN_TOPOLOGY_READY_CONFIRM_FRAMES):
-                        timeout_giro = (
-                            config.GREEN_TURN_AROUND_TIMEOUT
-                            if green_fsm.locked_direction
-                            == GreenDecision.UTURN
-                            else GREEN_TURN_TIMEOUT
-                        )
-                        green_fsm.begin_turn(
-                            now=now, timeout_s=timeout_giro)
-                        green_control_state.value = int(green_fsm.state)
-                        green_turn_started = now
-                        green_target_seen = False
-                        green_transversal_frames = 0
-                        green_mpu_turn_origin = green_mpu_last_yaw
-                        if green_direction in (
-                            "left", "right", "turn_around",
-                        ):
-                            decisao_yaw = {
-                                "left": GreenDecision.LEFT,
-                                "right": GreenDecision.RIGHT,
-                                "turn_around": GreenDecision.UTURN,
-                            }[green_direction]
-                            green_yaw_tracker = SignedYawTracker(
-                                decisao_yaw,
-                                positive_is_right=(
-                                    config.GREEN_MPU_POSITIVE_IS_RIGHT),
-                                max_age_s=max(
-                                    config.GREEN_MPU_RESPONSE_TIMEOUT_S * 2.,
-                                    .20,
-                                ),
-                            )
-                            if (green_mpu_last_yaw is not None
-                                    and green_mpu_last_timestamp is not None):
-                                green_yaw_progress = green_yaw_tracker.update(
-                                    green_mpu_last_yaw,
-                                    green_mpu_last_timestamp,
-                                    now=now,
-                                )
-
-                if green_fsm.check_timeout(now=now):
-                    green_fault_stop.value = True
-                    green_control_state.value = int(green_fsm.state)
-                    steer()
-                    continue
-
-                if (green_direction == "turn_around"
-                        and green_fsm.state == GreenManeuverState.TURNING):
+                # Uma leitura da direção por iteração mantém todas as decisões
+                # deste comando coerentes e evita várias consultas ao Manager.
+                direcao_visual = turn_dir.value
+                if (
+                    not preferencia_linha_esquerda.value
+                    and direcao_visual == "turn_around"
+                ):
                     status.value = 'Girando 180° para a direita'
+
                     if mission_mode.value:
+                        # Desarma ANTES do primeiro comando da manobra. A
+                        # visao ainda roda em paralelo, mas o resultado dela
+                        # sera descartado ate o rearme limpo pos-retorno.
                         entry_armed.value = False
                         _reset_entry_silver(
                             "prata desarmada durante giro de 180")
-                    epoca_serial_180 = arduino.connection_epoch
-                    resultado_180 = turn_around(
-                        last_turn_dir,
-                        require_alignment=True,
-                        arduino=(
-                            arduino if green_mpu_ativo else None
-                        ),
-                        yaw_tracker=green_yaw_tracker,
-                        yaw_callback=lambda value: setattr(
-                            green_control_yaw, "value", value),
-                        should_abort=lambda: bool(
-                            terminate.value
-                            or not arduino.connected
-                            or arduino.connection_epoch != epoca_serial_180
-                            or not green_calibration_ready.value
-                            or (
-                                green_fsm.deadline is not None
-                                and time.monotonic() >= green_fsm.deadline
-                            )
-                        ),
-                        expected_branch_token=(
-                            0 if green_fsm.event is None
-                            else green_fsm.event.target_branch_token
-                        ),
-                    )
-                    fim_180 = time.monotonic()
-                    if green_fsm.check_timeout(now=fim_180):
-                        green_fault_stop.value = True
-                        green_control_state.value = int(green_fsm.state)
-                        steer()
-                        continue
-                    if resultado_180 is None:
-                        green_fsm.fault(
-                            "180 nao reencontrou a linha de saida", now=fim_180)
-                        green_fault_stop.value = True
-                        steer()
-                        continue
-                    last_turn_dir = resultado_180
-                    green_fsm.begin_reacquire(now=time.monotonic())
-                    consumido = green_fsm.complete(
-                        now=time.monotonic(),
-                        timeout_s=(
-                            config.GREEN_TOPOLOGY_COOLDOWN_TIMEOUT_S),
-                    )
-                    green_decision_consumed_id.value = consumido
-                    green_control_state.value = int(green_fsm.state)
+
+                    last_turn_dir = turn_around(last_turn_dir)
                     controlador_linha.reset()
+                    # O filtro visual pode degradar "dois verdes" para apenas
+                    # left/right por alguns frames. Nao iniciar uma segunda
+                    # manobra com essa leitura residual.
                     green_direction = None
                     green_turn_started = None
+                    green_reverse_until = None
+                    green_turn_deadline = 0.
                     green_target_seen = False
-                    green_turn_target.value = 2
-                    green_exit_stable_frames = 0
+                    green_transversal_frames = 0
+                    green_last_signed_error = None
+                    green_turn_target.value = 0
+                    green_armed = False
+                    green_rearm_after = (
+                        time.monotonic() + TURN_AROUND_GREEN_COOLDOWN)
                     if mission_mode.value:
                         entry_rearm_after = (
                             time.monotonic()
@@ -911,49 +519,104 @@ def control_loop():
                         )
                         _reset_entry_silver(
                             "prata zerada apos giro de 180")
+                        print(
+                            "[controle] 180 concluido; prata permanece "
+                            "zerada ate o rearme")
                     continue
 
-                if (green_fsm.locked_direction == GreenDecision.STRAIGHT
-                        and green_fsm.state == GreenManeuverState.APPROACH):
-                    saida_reta_estavel = saida_topologica_real_estavel(
-                        resultado_visao,
-                        agora=now,
-                    )
-                    if (evento_verde is not None
-                            and resultado_visao.sequencia
-                            >= evento_verde.sequence
-                            and resultado_visao.sequencia
-                            != green_exit_last_sequence):
-                        green_exit_last_sequence = resultado_visao.sequencia
-                        green_exit_stable_frames = (
-                            green_exit_stable_frames + 1
-                            if saida_reta_estavel
-                            else 0
-                        )
-                    if green_exit_stable_frames >= 3:
-                        green_fsm.begin_turn(now=now)
-                        green_fsm.begin_reacquire(now=now)
-                        consumido = green_fsm.complete(
-                            now=now,
-                            timeout_s=(
-                                config.GREEN_TOPOLOGY_COOLDOWN_TIMEOUT_S),
-                        )
-                        green_decision_consumed_id.value = consumido
-                        green_control_state.value = int(green_fsm.state)
-                        green_turn_target.value = 2
-                        green_exit_stable_frames = 0
+                status.value = (
+                    'Seguindo Linha — preferência esquerda'
+                    if preferencia_linha_esquerda.value
+                    else 'Seguindo Linha'
+                )
 
-                controle_generico_bloqueado = bool(
+                now = time.monotonic()
+
+                if (time.monotonic() >= green_rearm_after
+                        and not preferencia_linha_esquerda.value
+                        and direcao_visual == "straight"
+                        and green_direction is None):
+                    green_armed = True
+
+                if (not preferencia_linha_esquerda.value
+                        and green_armed and green_direction is None
+                        and direcao_visual in ("left", "right")):
+                    green_direction = direcao_visual
+                    green_approach_until = now + GREEN_APPROACH_TIME
+                    green_turn_started = None
+                    green_reverse_until = None
+                    green_turn_deadline = 0.
+                    green_target_seen = False
+                    green_transversal_frames = 0
+                    green_last_signed_error = None
+                    green_mpu_last_yaw = None
+                    green_mpu_turn_origin = None
+                    green_mpu_next_query = now
+                    if hasattr(arduino, "cancelar_mpu"):
+                        arduino.cancelar_mpu()
+                    green_turn_target.value = (
+                        -1 if direcao_visual == "left" else 1)
+                    green_armed = False
+
+                resultado_visao = ler_resultado_visao_rapida()
+
+                # Mantem uma amostra recente durante a aproximacao. Quando o
+                # tanque comeca ela vira a origem do giro, sem bloquear o
+                # controle com um comando ``MPU ZERO``.
+                if (green_direction is not None
+                        and green_reverse_until is None
+                        and config.GREEN_MPU_ENABLED
+                        and hasattr(arduino, "iniciar_mpu")
+                        and hasattr(arduino, "poll_mpu")):
+                    mpu_concluido, leitura_mpu = arduino.poll_mpu()
+                    if mpu_concluido and leitura_mpu is not None:
+                        green_mpu_last_yaw = leitura_mpu.yaw_graus
+                    if now >= green_mpu_next_query:
+                        arduino.iniciar_mpu(
+                            timeout=config.GREEN_MPU_RESPONSE_TIMEOUT_S)
+                        green_mpu_next_query = (
+                            now + config.GREEN_MPU_QUERY_INTERVAL_S)
+                aproximando_ramo_verde = (
                     green_direction is not None
-                    or green_fsm.state in (
-                        GreenManeuverState.OBSERVE,
-                        GreenManeuverState.COMMITTED,
-                        GreenManeuverState.APPROACH,
-                        GreenManeuverState.TURNING,
-                        GreenManeuverState.REACQUIRE,
+                    and green_turn_started is None
+                    and green_reverse_until is None
+                )
+                transversal_pronta = (
+                    aproximando_ramo_verde
+                    and ramo_pronto_para_giro(
+                        green_direction,
+                        faixa_transversal_y=(
+                            resultado_visao.faixa_transversal_y),
                     )
                 )
-                if not controle_generico_bloqueado:
+                green_transversal_frames = (
+                    green_transversal_frames + 1
+                    if transversal_pronta else 0
+                )
+                linha_verde_recente = (
+                    resultado_visao.linha_detectada
+                    and now - resultado_visao.publicado_em
+                    <= config.LINE_MAX_FRAME_AGE_S
+                )
+                if (
+                    aproximando_ramo_verde
+                    and deve_iniciar_giro_verde(
+                        green_transversal_frames,
+                        agora=now,
+                        limite_aproximacao=green_approach_until,
+                        linha_recente=linha_verde_recente,
+                    )
+                ):
+                    green_turn_started = now
+                    green_turn_deadline = now + GREEN_TURN_TIMEOUT
+                    green_target_seen = False
+                    green_transversal_frames = 0
+                    green_mpu_turn_origin = green_mpu_last_yaw
+                    aproximando_ramo_verde = False
+
+                if (green_direction is None
+                        or (green_turn_started is not None
+                            and green_target_seen)):
                     saida_linha = controlador_linha.atualizar(
                         sequencia=resultado_visao.sequencia,
                         publicado_em=resultado_visao.publicado_em,
@@ -974,9 +637,10 @@ def control_loop():
                         agora=now,
                     )
                 else:
-                    # Enquanto a FSM verde possui autoridade, a intersecao nao
-                    # pode contaminar a memoria do seguidor generico. Ele so
-                    # recebe um frame novo depois da saida estar estabilizada.
+                    # Na aproximacao e no inicio do tanque, a faixa de entrada
+                    # ainda domina a imagem. Ela nao pode contaminar a memoria
+                    # do controlador antes de o ramo marcado chegar pelo lado
+                    # correto.
                     controlador_linha.suspender()
                     saida_linha = None
 
@@ -989,7 +653,6 @@ def control_loop():
                 if config.RETA_RAPIDA_HABILITADA:
                     permitir_reta_rapida = (
                         green_direction is None
-                        and green_fsm.state == GreenManeuverState.FOLLOW
                         and not preferencia_linha_esquerda.value
                         and line_detected.value
                         and line_ahead.value
@@ -1036,84 +699,20 @@ def control_loop():
                 usar_controle_linha = False
                 correcao_linha = 0.
 
-                if (green_fsm.state == GreenManeuverState.APPROACH
-                        and green_fsm.locked_direction
-                        == GreenDecision.STRAIGHT):
-                    command_speed = min(
-                        command_speed, config.GREEN_TOPOLOGY_PENDING_SPEED)
-
-                if green_fsm.state == GreenManeuverState.COOLDOWN:
-                    saida_estavel = saida_topologica_real_estavel(
-                        resultado_visao,
-                        agora=now,
-                    )
-                    if (resultado_visao.sequencia
-                            != green_exit_last_sequence):
-                        green_exit_last_sequence = resultado_visao.sequencia
-                        green_exit_stable_frames = (
-                            green_exit_stable_frames + 1
-                            if saida_estavel
-                            else 0
-                        )
-                    if (
-                        green_exit_stable_frames
-                        >= config.GREEN_TOPOLOGY_REARM_CLEAR_FRAMES
-                        and now - green_fsm.state_since
-                        >= config.GREEN_TOPOLOGY_COOLDOWN_S
-                        and int(green_rearmed_decision_id.value)
-                        >= green_fsm.decision_id
-                    ):
-                        green_fsm.release_cooldown(now=now)
-                        green_control_state.value = int(green_fsm.state)
-                        green_locked_decision.value = int(GreenDecision.NONE)
+                if (green_direction is not None
+                        and green_reverse_until is not None):
+                    if now < green_reverse_until:
+                        angle = 200
+                        command_speed = GREEN_REVERSE_SPEED
+                        status.value = 'Verde concluido — dando re curta'
+                    else:
+                        green_direction = None
+                        green_turn_started = None
+                        green_reverse_until = None
+                        green_turn_deadline = 0.
+                        green_target_seen = False
                         green_turn_target.value = 0
-                        green_exit_stable_frames = 0
-
-                if green_fsm.state == GreenManeuverState.OBSERVE:
-                    command_speed = config.GREEN_TOPOLOGY_PENDING_SPEED
-                    if linha_verde_recente:
-                        usar_controle_linha = True
-                        correcao_linha = correcao_aproximacao(
-                            resultado_visao.ponto_inferior_x)
-                        angle = round(correcao_linha * 180.)
-                        status.value = (
-                            'Verde PENDING - procurando segundo marcador')
-                    else:
-                        angle = 190
-                        status.value = (
-                            'Verde PENDING - PARADO sem linha de entrada')
-                elif (green_fsm.state == GreenManeuverState.APPROACH
-                      and green_fsm.locked_direction
-                      == GreenDecision.STRAIGHT):
-                    command_speed = config.GREEN_TOPOLOGY_PENDING_SPEED
-                    alvo_reto_x = (
-                        None if evento_verde is None
-                        else evento_verde.target_branch[0]
-                    )
-                    correcao_reta = correcao_ramo_reto(
-                        alvo_reto_x,
-                        resultado_visao.ponto_inferior_x,
-                    )
-                    if correcao_reta is None:
-                        green_fsm.fault(
-                            "evento STRAIGHT confirmado sem ramo alvo",
-                            now=now,
-                        )
-                        green_fault_stop.value = True
-                        green_control_state.value = int(green_fsm.state)
-                        angle = 190
-                        status.value = (
-                            'Verde STRAIGHT sem alvo topologico - FAULT_STOP')
-                    elif linha_verde_recente:
-                        usar_controle_linha = True
-                        correcao_linha = correcao_reta
-                        angle = round(correcao_linha * 180.)
-                        status.value = (
-                            'Intersecao - ramo reto topologico travado')
-                    else:
-                        angle = 190
-                        status.value = (
-                            'Intersecao reta - PARADO aguardando linha valida')
+                        angle = line_angle.value if line_detected.value else 190
                 elif green_direction is not None and green_turn_started is None:
                     # O ramo continua travado na visao, mas ainda nao comanda
                     # o rumo. Ate ele chegar perto da base, somente o ponto
@@ -1141,100 +740,68 @@ def control_loop():
                         )
                     )
                 elif green_direction is not None:
+                    if green_turn_started is None:
+                        green_turn_started = now
+                        green_turn_deadline = now + GREEN_TURN_TIMEOUT
+                        green_target_seen = False
+                        green_mpu_turn_origin = green_mpu_last_yaw
                     command_speed = GREEN_TURN_SPEED
-                    linha_ramo_recente = ramo_travado_recente(
-                        resultado_visao,
-                        (
-                            0 if evento_verde is None
-                            else evento_verde.target_branch_token
-                        ),
-                        agora=now,
-                    )
-                    erro_inferior = (
-                        resultado_visao.locked_branch_bottom_x
-                        - camera_x / 2
-                        if linha_ramo_recente
-                        else float("nan")
-                    )
-                    lado_esperado = (
-                        -1 if green_direction == "left" else 1)
 
-                    # Mesmo depois de o ramo aparecer, o seguidor generico
-                    # nao reassume. Um controlador dedicado usa somente o
-                    # ponto inferior da faixa ja selecionada pela direcao
-                    # travada e jamais consegue inverter o sinal do evento.
-                    if green_target_seen and linha_ramo_recente:
-                        correcao_reaquisicao = correcao_reaquisicao_verde(
-                            resultado_visao.locked_branch_bottom_x,
-                            lado_esperado,
-                        )
-                        if correcao_reaquisicao is None:
-                            green_fsm.fault(
-                                "ramo verde publicou ponto inferior invalido",
-                                now=now,
-                            )
-                            green_fault_stop.value = True
-                            usar_controle_linha = False
-                            angle = 190
-                        else:
-                            usar_controle_linha = True
-                            correcao_linha = correcao_reaquisicao
-                            angle = round(correcao_linha * 180.)
+                    # O ramo marcado passa pelo mesmo controlador continuo do
+                    # segue-linha. Curvas moderadas ficam diferenciais e o
+                    # tanque aparece somente quando a geometria realmente
+                    # pede uma correcao extrema.
+                    controle_ramo_valido = controle_visual_verde_liberado(
+                        green_target_seen,
+                        saida_linha is not None
+                        and saida_linha.comando_valido,
+                    )
+                    if controle_ramo_valido:
+                        usar_controle_linha = True
+                        correcao_linha = saida_linha.correcao
+                        angle = saida_linha.angulo_equivalente
                     else:
                         # Conserva o sentido travado numa perda momentanea. O
                         # timeout e o MPU impedem giro indefinido.
                         angle = -180 if green_direction == "left" else 180
 
-                    if usar_controle_linha:
-                        usar_controle_linha = True
-                        correcao_linha = (
-                            min(correcao_linha, 0.)
-                            if green_direction == "left"
-                            else max(correcao_linha, 0.)
-                        )
-                        angle = round(correcao_linha * 180.)
-
                     elapsed_turn = now - green_turn_started
-                    amostra_mpu_fresca = bool(
-                        green_mpu_last_timestamp is not None
-                        and 0. <= now - green_mpu_last_timestamp
-                        <= max(
-                            config.GREEN_MPU_RESPONSE_TIMEOUT_S * 2.,
-                            .20,
-                        )
-                    )
-                    giro_mpu = (
-                        green_yaw_progress.progress_deg
-                        if (green_yaw_progress is not None
-                            and green_yaw_progress.valid
-                            and amostra_mpu_fresca)
-                        else None
-                    )
-                    if (amostra_mpu_fresca
-                            and green_yaw_progress is not None
-                            and green_yaw_progress.wrong_direction):
-                        green_fsm.fault(
-                            "MPU confirmou giro no sentido oposto", now=now)
-                        green_fault_stop.value = True
-                        usar_controle_linha = False
-                        angle = 190
+                    giro_mpu = progresso_giro_mpu(
+                        green_mpu_turn_origin, green_mpu_last_yaw)
                     if (giro_mpu is not None
                             and giro_mpu >= config.GREEN_MPU_SLOWDOWN_DEG):
                         command_speed = min(
                             command_speed, config.GREEN_MPU_SLOW_SPEED)
+                    linha_ramo_recente = (
+                        resultado_visao.linha_detectada
+                        and now - resultado_visao.publicado_em
+                        <= config.LINE_MAX_FRAME_AGE_S
+                    )
+                    erro_inferior = (
+                        resultado_visao.ponto_inferior_x - camera_x / 2)
+                    lado_esperado = -1 if green_direction == "left" else 1
+
                     if (giro_mpu is not None
                             and giro_mpu >= config.GREEN_MPU_HARD_LIMIT_DEG):
-                        green_fsm.fault(
-                            "limite angular do MPU sem ramo alinhado",
-                            now=now,
-                        )
-                        green_fault_stop.value = True
-                        green_control_state.value = int(green_fsm.state)
+                        # Se a camera perder a faixa por um frame, o chassi
+                        # ainda nao pode atravessar completamente os 90 graus.
+                        green_direction = None
+                        green_turn_started = None
+                        green_reverse_until = None
+                        green_turn_deadline = 0.
+                        green_target_seen = False
+                        green_turn_target.value = 2
+                        green_release_until = (
+                            now + config.GREEN_RELEASE_MEMORY_S)
+                        green_armed = False
+                        green_rearm_after = (
+                            now + TURN_AROUND_GREEN_COOLDOWN)
+                        controlador_linha.reset()
                         usar_controle_linha = False
                         angle = 190
                         status.value = (
                             'Verde limitado pelo MPU '
-                            f'({giro_mpu:.0f} graus) — FAULT_STOP')
+                            f'({giro_mpu:.0f} graus) — parada de seguranca')
                     elif elapsed_turn < GREEN_TURN_BLIND_TIME:
                         # A linha de entrada ainda pode estar sob o robo. O
                         # controle visual ja atua, mas nao pode encerrar a
@@ -1242,6 +809,26 @@ def control_loop():
                         status.value = (
                             f'Verde {green_direction} — encaixando ramo '
                             f'({GREEN_TURN_BLIND_TIME:.1f} s)')
+                    elif now >= green_turn_deadline:
+                        # Sem esta trava um falso contorno poderia deixar o
+                        # tanque girando indefinidamente. Nao da re, pois o
+                        # ramo esperado nunca foi confirmado.
+                        green_direction = None
+                        green_turn_started = None
+                        green_reverse_until = None
+                        green_turn_deadline = 0.
+                        green_target_seen = False
+                        green_turn_target.value = 2
+                        green_release_until = (
+                            now + config.GREEN_RELEASE_MEMORY_S)
+                        green_armed = False
+                        green_rearm_after = now + TURN_AROUND_GREEN_COOLDOWN
+                        controlador_linha.reset()
+                        usar_controle_linha = False
+                        angle = 190
+                        status.value = (
+                            'Verde — ramo marcado nao foi encontrado; '
+                            'parada de seguranca')
                     elif not green_target_seen:
                         # Aceita a linha apenas depois de ela aparecer no lado
                         # que o marcador escolheu. Isso evita capturar o ramo
@@ -1255,11 +842,7 @@ def control_loop():
                         )
                         if ramo_armado_pela_camera:
                             green_target_seen = True
-                            green_fsm.begin_reacquire(
-                                now=now, timeout_s=GREEN_TURN_TIMEOUT)
-                            green_control_state.value = int(green_fsm.state)
                             green_transversal_frames = 0
-                            green_center_last_sequence = -1
                             green_last_signed_error = (
                                 lado_esperado * erro_inferior)
                             status.value = (
@@ -1276,56 +859,35 @@ def control_loop():
                             lado_esperado,
                             giro_mpu,
                         )
-                        if (resultado_visao.sequencia
-                                != green_center_last_sequence):
-                            green_center_last_sequence = (
-                                resultado_visao.sequencia)
-                            green_transversal_frames = (
-                                green_transversal_frames + 1
-                                if alinhamento_pronto else 0
-                            )
+                        green_transversal_frames = (
+                            green_transversal_frames + 1
+                            if alinhamento_pronto else 0
+                        )
                         if (green_transversal_frames
                                 >= config.GREEN_TURN_CENTER_CONFIRM_FRAMES):
-                            consumido = green_fsm.complete(
-                                now=now,
-                                timeout_s=(
-                                    config.GREEN_TOPOLOGY_COOLDOWN_TIMEOUT_S),
-                            )
-                            if not consumido:
-                                green_fsm.fault(
-                                    "sequencia de estados verde invalida",
-                                    now=now,
-                                )
-                                green_fault_stop.value = True
-                            else:
-                                green_decision_consumed_id.value = consumido
-                            green_control_state.value = int(green_fsm.state)
                             green_direction = None
                             green_turn_started = None
+                            green_reverse_until = None
+                            green_turn_deadline = 0.
                             green_target_seen = False
                             green_turn_target.value = 2
-                            green_exit_stable_frames = 0
+                            green_release_until = (
+                                now + config.GREEN_RELEASE_MEMORY_S)
                             controlador_linha.reset()
                             usar_controle_linha = False
                             angle = 190
                             status.value = (
                                 'Verde concluido — ramo alinhado no centro')
                         else:
-                            if (resultado_visao.sequencia
-                                    == green_center_last_sequence):
-                                green_last_signed_error = (
-                                    lado_esperado * erro_inferior)
+                            green_last_signed_error = (
+                                lado_esperado * erro_inferior)
                             status.value = (
                                 f'Verde {green_direction} — trazendo ramo '
                                 'para o centro '
                                 f'({green_transversal_frames}/'
                                 f'{config.GREEN_TURN_CENTER_CONFIRM_FRAMES})')
                     else:
-                        if (resultado_visao.sequencia
-                                != green_center_last_sequence):
-                            green_center_last_sequence = (
-                                resultado_visao.sequencia)
-                            green_transversal_frames = 0
+                        green_transversal_frames = 0
                         status.value = (
                             f'Verde {green_direction} — trazendo ramo '
                             'para o centro')
@@ -1349,6 +911,8 @@ def control_loop():
                 # a observação o robô fica parado; quando aparece preto além da
                 # faixa este mesmo segue-linha continua em velocidade normal.
                 if usar_controle_linha:
+                    pwm_esquerda, pwm_direita = mix_line_pwm(
+                        correcao_linha, command_speed)
                     steering_correction.value = correcao_linha
                     if saida_linha is None:
                         # Aproximacao verde usa o mesmo mixer dos motores, mas
@@ -1375,12 +939,16 @@ def control_loop():
                         steering_lateral_error.value = (
                             saida_linha.erro_lateral)
                         steering_heading.value = saida_linha.angulo_linha
+                    steering_left_pwm.value = pwm_esquerda
+                    steering_right_pwm.value = pwm_direita
                     steer_line(correcao_linha, command_speed)
                 else:
                     steering_state.value = STEERING_SPECIAL
                     steering_correction.value = 0.
                     steering_lateral_error.value = 0.
                     steering_heading.value = 0.
+                    steering_left_pwm.value = 0
+                    steering_right_pwm.value = 0
                     steer(angle, command_speed)
 
             elif line_status.value == "stop":
@@ -1440,24 +1008,10 @@ def control_loop():
             iteration_limit_time = time.perf_counter()
 
     finally:
-        # Uma excecao Python durante uma manobra nao pode apagar o estado que
-        # obriga o supervisor a exigir reposicionamento/ciclo fisico.
-        if (
-            green_fsm.state not in (
-                GreenManeuverState.FOLLOW,
-                GreenManeuverState.COOLDOWN,
-            )
-            or green_fsm.event is not None
-        ):
-            green_fault_stop.value = True
         preferencia_linha_esquerda.value = False
         green_turn_target.value = 0
-        green_control_state.value = int(GreenManeuverState.FOLLOW)
-        green_locked_decision.value = int(GreenDecision.NONE)
-        green_control_yaw.value = float("nan")
         status.value = "Parado"
         try:
             steer()  # PARAR
         finally:
-            set_motion_observer(None)
             arduino.close()

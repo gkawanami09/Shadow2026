@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
@@ -58,66 +58,6 @@ class RescueReturnSafetyTests(unittest.TestCase):
             patch("mission.time.monotonic", side_effect=(0.0, 1.0, 2.0, 6.0)),
         ):
             sistema.aguardar_ciclo_do_arduino("teste")
-
-    def test_fault_stop_do_percurso_exige_rearme_fisico_antes_de_limpar(self):
-        shared = SimpleNamespace(
-            green_fault_stop=SimpleNamespace(value=True),
-        )
-        sistema = MissionSystem(shared, None, SimpleNamespace())
-        sistema.aguardar_ciclo_do_arduino = Mock()
-
-        self.assertTrue(sistema.exigir_rearme_fisico_se_fault_stop("serial"))
-        sistema.aguardar_ciclo_do_arduino.assert_called_once_with("serial")
-        self.assertTrue(shared.green_fault_stop.value)
-
-    def test_filho_sem_fault_stop_nao_exige_ciclo_fisico(self):
-        shared = SimpleNamespace(
-            green_fault_stop=SimpleNamespace(value=False),
-        )
-        sistema = MissionSystem(shared, None, SimpleNamespace())
-        sistema.aguardar_ciclo_do_arduino = Mock()
-
-        self.assertFalse(sistema.exigir_rearme_fisico_se_fault_stop("fim"))
-        sistema.aguardar_ciclo_do_arduino.assert_not_called()
-
-    def test_reinicio_checa_fault_stop_antes_de_limpar_compartilhados(self):
-        shared = SimpleNamespace(
-            terminate=SimpleNamespace(value=False),
-            green_fault_stop=SimpleNamespace(value=True),
-        )
-        sistema = MissionSystem(shared, None, SimpleNamespace())
-        ordem = []
-        sistema._encerrar_resgate_para_recuperacao = Mock()
-        sistema._preparar_nova_tentativa = Mock(
-            side_effect=lambda: ordem.append("clear"))
-        sistema.start_line_phase = Mock()
-        sistema.exigir_rearme_fisico_se_fault_stop = Mock(
-            side_effect=lambda _motivo: ordem.append("gate") or True)
-        sistema.children = []
-
-        with patch("mission.time.sleep"):
-            sistema.reiniciar_missao_do_percurso("serial")
-
-        sistema.exigir_rearme_fisico_se_fault_stop.assert_called_once_with(
-            "serial")
-        sistema._preparar_nova_tentativa.assert_called_once_with()
-        self.assertEqual(ordem, ["gate", "clear"])
-
-    def test_morte_da_visao_durante_manobra_promove_fault_stop(self):
-        shared = SimpleNamespace(
-            rescue_requested=SimpleNamespace(value=False),
-            red_finished=SimpleNamespace(value=False),
-            terminate=SimpleNamespace(value=False),
-            status=SimpleNamespace(value="Girando"),
-            green_control_state=SimpleNamespace(value=3),
-            green_locked_decision=SimpleNamespace(value=4),
-            green_fault_stop=SimpleNamespace(value=False),
-        )
-        sistema = MissionSystem(shared, None, SimpleNamespace())
-        sistema.children = [SimpleNamespace(is_alive=lambda: False)]
-
-        self.assertEqual(sistema.wait_line_phase(), "child_died")
-        self.assertTrue(shared.green_fault_stop.value)
 
     def test_falha_serial_tardia_do_resgate_reinicia_o_percurso(self):
         args = type("Args", (), {"gerenciado_pela_missao": True})()

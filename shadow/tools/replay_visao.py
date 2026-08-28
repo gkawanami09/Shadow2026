@@ -35,8 +35,6 @@ Exemplos::
 """
 
 import argparse
-import hashlib
-import json
 from pathlib import Path
 import sys
 import time
@@ -199,142 +197,11 @@ class PerfilTriangulos:
         return self._anotar(frame, getattr(self, "_ultimas", {}))
 
 
-class PerfilVerde:
-    """Reexecuta topologia+votacao verde sobre PNGs crus, sem controle."""
-
-    nome = "verde"
-    camera = "linha"
-
-    def __init__(self, *, calibracao=None, manifest=None):
-        import config
-        from controle.estado_verde import (GreenDecision,
-                                            GreenDecisionTracker,
-                                            GreenObservation)
-        from visao.calibracao_wide import carregar_calibracao
-        from visao.intersecao_verde import (GreenTopologyTracker,
-                                             TopologyConfig)
-        self.config = config
-        self.GreenDecision = GreenDecision
-        self.GreenObservation = GreenObservation
-        dados = {}
-        if manifest is not None:
-            dados = json.loads(Path(manifest).read_text(encoding="utf-8"))
-        caminho = Path(
-            calibracao or dados.get("calibration_path")
-            or config.GREEN_WIDE_CALIBRATION_PATH)
-        if not caminho.is_file():
-            raise SystemExit(f"calibracao wide ausente: {caminho}")
-        esperado = dados.get("calibration_sha256")
-        atual = hashlib.sha256(caminho.read_bytes()).hexdigest()
-        if esperado and esperado != atual:
-            raise SystemExit("hash da calibracao difere do manifesto")
-        self.calibration = carregar_calibracao(
-            caminho, resolution=(config.camera_x, config.camera_y))
-        self.black_min = np.array(
-            dados.get("black_min", config.BLACK_MIN_DEFAULT))
-        self.black_top = np.array(
-            dados.get("black_max_top", config.BLACK_MAX_NORMAL_TOP_DEFAULT))
-        self.black_bottom = np.array(
-            dados.get(
-                "black_max_bottom", config.BLACK_MAX_NORMAL_BOTTOM_DEFAULT))
-        self.green_min = np.array(
-            dados.get("green_min", config.GREEN_MIN_DEFAULT))
-        self.green_max = np.array(
-            dados.get("green_max", config.GREEN_MAX_DEFAULT))
-        self.topology = GreenTopologyTracker(config=TopologyConfig(
-            marker_min_mm=config.GREEN_TOPOLOGY_MARKER_MIN_MM,
-            marker_max_mm=config.GREEN_TOPOLOGY_MARKER_MAX_MM,
-            pre_post_margin_sides=(
-                config.GREEN_TOPOLOGY_PRE_POST_MARGIN_RATIO),
-            min_branch_length_widths=(
-                config.GREEN_TOPOLOGY_MIN_BRANCH_LINE_WIDTHS),
-            tangent_history_frames=(
-                config.GREEN_TOPOLOGY_ENTRY_HISTORY_FRAMES),
-        ))
-        self.decisions = GreenDecisionTracker(
-            confirm_frames=config.GREEN_TOPOLOGY_CONFIRM_FRAMES,
-            window_frames=config.GREEN_TOPOLOGY_CONFIRM_WINDOW,
-            second_marker_wait_s=(
-                config.GREEN_TOPOLOGY_SECOND_MARKER_WAIT_S),
-            prediction_max_s=config.GREEN_TOPOLOGY_PREDICTION_MAX_S,
-        )
-        self.sequence = 0
-        self.last_topology = None
-
-    def processar(self, frame, timestamp):
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        green = cv2.inRange(hsv, self.green_min, self.green_max)
-        black = cv2.inRange(frame, self.black_min, self.black_bottom)
-        top = int(frame.shape[0] * .4)
-        black[:top] = cv2.inRange(
-            frame[:top], self.black_min, self.black_top)
-        black = cv2.bitwise_and(black, cv2.bitwise_not(green))
-        black = self.calibration.rectify_mask(black)
-        green = self.calibration.rectify_mask(green)
-        entry = tuple(self.calibration.rectify_points((
-            (self.config.camera_x / 2, self.config.camera_y - 1),
-        ))[0])
-        topology = self.topology.update(
-            black,
-            green,
-            image_to_ground=self.calibration.pixel_to_ground,
-            entry_point=entry,
-        )
-        self.last_topology = topology
-        self.sequence += 1
-        decision = self.GreenDecision(int(topology.decision))
-        target = (-1.0, -1.0)
-        token = 0
-        if topology.target_branch is not None:
-            target = tuple(self.calibration.unrectify_points((
-                topology.target_branch.target_image,
-            ))[0])
-            token = topology.target_branch.branch_token
-        event = self.decisions.update(self.GreenObservation(
-            sequence=self.sequence,
-            junction_id=topology.junction_id,
-            decision_id=0,
-            timestamp=timestamp,
-            decision=decision,
-            confidence=topology.confidence,
-            entry_tangent=topology.entry_tangent,
-            junction_center=(
-                (-1.0, -1.0) if topology.junction_image is None
-                else topology.junction_image),
-            target_branch=target,
-            target_branch_token=token,
-            ready_to_turn=bool(
-                topology.junction_image is not None
-                and topology.junction_image[1]
-                >= self.config.camera_y
-                * self.config.GREEN_TOPOLOGY_READY_Y_RATIO),
-            junction_visible=bool(
-                topology.junction_image is not None
-                and not topology.entry_propagated),
-            geometry_predicted=topology.entry_propagated,
-            marker_ids=topology.marker_ids,
-        ))
-        return decision != self.GreenDecision.NONE, {
-            "confirmado": event.committed,
-            "decisao": event.decision.name,
-            "decision_id": event.decision_id,
-            "token": event.target_branch_token,
-            "motivo": topology.reason,
-        }
-
-    def anotar(self, frame, deteccao):
-        del deteccao
-        from visao.intersecao_verde import draw_topology_debug
-        rectified = self.calibration.rectify(frame)
-        return draw_topology_debug(rectified, self.last_topology)
-
-
 PERFIS = {
     "entrada": PerfilEntrada,
     "saida": PerfilSaida,
     "vitima": PerfilVitima,
     "triangulos": PerfilTriangulos,
-    "verde": PerfilVerde,
 }
 
 
@@ -356,10 +223,6 @@ def parse_args():
     parser.add_argument(
         "--alvo", choices=("any", "black", "silver"), default="any",
         help="tipo de esfera aceito no perfil vitima")
-    parser.add_argument("--calibracao", type=Path,
-                        help="NPZ wide para o perfil verde")
-    parser.add_argument("--manifest", type=Path,
-                        help="manifesto da gravacao para replay verde")
     parser.add_argument(
         "--fps", type=float, default=30.0,
         help="cadência simulada dos timestamps (padrão: 30)")
@@ -372,15 +235,8 @@ def parse_args():
 def main():
     args = parse_args()
     classe = PERFIS[args.perfil]
-    if args.perfil == "vitima":
-        perfil = classe(alvo=args.alvo)
-    elif args.perfil == "verde":
-        perfil = classe(
-            calibracao=args.calibracao,
-            manifest=args.manifest,
-        )
-    else:
-        perfil = classe()
+    perfil = (
+        classe(alvo=args.alvo) if args.perfil == "vitima" else classe())
 
     if args.salvar is not None:
         args.salvar.mkdir(parents=True, exist_ok=True)

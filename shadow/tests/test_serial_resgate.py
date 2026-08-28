@@ -75,9 +75,6 @@ class RescueSerialLedTests(unittest.TestCase):
         arduino._mpu_deadline = 0.0
         arduino._mpu_ready = False
         arduino._mpu_value = None
-        arduino._mpu_generation = 0
-        arduino._mpu_pending_generation = 0
-        arduino._mpu_requested_at = 0.0
         arduino._rampa_pending = False
         arduino._rampa_deadline = 0.0
         arduino._rampa_ready = False
@@ -208,38 +205,15 @@ class RescueSerialLedTests(unittest.TestCase):
         arduino = self._connected_arduino()
 
         self.assertTrue(arduino.iniciar_mpu(timeout=0.05))
-        self.assertEqual(arduino._ser.writes, [b"MPU 1\n"])
-        arduino._ser.feed(
-            b"OK MPU ID=1 PITCH=1.25 ROLL=-2.5 YAW=91.0\n")
+        self.assertEqual(arduino._ser.writes, [b"MPU\n"])
+        arduino._ser.feed(b"OK MPU PITCH=1.25 ROLL=-2.5 YAW=91.0\n")
         concluido, leitura = arduino.poll_mpu()
         self.assertTrue(concluido)
         self.assertEqual(leitura.yaw_graus, 91.0)
         self.assertEqual(leitura.pitch_graus, 1.25)
-        self.assertGreater(leitura.received_at, 0.0)
-        self.assertEqual(leitura.request_generation, 1)
 
         arduino._ser.reply_on_write = b"OK MPU ZERO\n"
         self.assertTrue(arduino.zerar_mpu(timeout=0.05))
-
-    def test_resposta_mpu_atrasada_nao_vira_a_geracao_seguinte(self):
-        arduino = self._connected_arduino()
-        with patch(
-            "comunicacao_serial.arduino.time.monotonic",
-            side_effect=(10.0, 10.1, 10.2, 10.21, 10.22, 10.23),
-        ):
-            self.assertTrue(arduino.iniciar_mpu(timeout=.05))
-            self.assertEqual(arduino.poll_mpu(), (True, None))
-            self.assertTrue(arduino.iniciar_mpu(timeout=.05))
-            arduino._ser.feed(
-                b"OK MPU ID=1 PITCH=0 ROLL=0 YAW=123\n")
-            self.assertEqual(arduino.poll_mpu(), (False, None))
-            arduino._ser.feed(
-                b"OK MPU ID=2 PITCH=0 ROLL=0 YAW=7\n")
-            concluido, leitura = arduino.poll_mpu()
-
-        self.assertTrue(concluido)
-        self.assertEqual(leitura.request_generation, 2)
-        self.assertEqual(leitura.yaw_graus, 7.)
 
     def test_mpu_zero_ignora_resposta_antiga_e_espera_confirmacao_exata(self):
         arduino = self._connected_arduino()

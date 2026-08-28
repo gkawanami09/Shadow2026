@@ -2,7 +2,6 @@
 """Inicia os processos de visão e controle do segue-linha."""
 
 import argparse
-import os
 import signal
 import sys
 import time
@@ -10,22 +9,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Impede bibliotecas numericas de acordarem todos os nucleos nos imports.
-for _variavel_threads in (
-    "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-    "NUMEXPR_NUM_THREADS", "NUMBA_NUM_THREADS",
-):
-    os.environ.setdefault(_variavel_threads, "1")
-
 from multiprocessing import Process, shared_memory  # noqa: E402
 
 import config  # noqa: E402
 
 
-def iniciar_visao(debug, record_dir=None):
+def iniciar_visao(debug):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     from visao.processamento import vision_loop
-    vision_loop(debug, record_dir=record_dir)
+    vision_loop(debug)
 
 
 def iniciar_controle():
@@ -53,10 +45,6 @@ def main():
                         help="mostra a janela com o frame anotado")
     parser.add_argument("--vision-only", action="store_true",
                         help="roda apenas o processo de visão (bring-up)")
-    parser.add_argument(
-        "--record-vision", metavar="DIRETORIO",
-        help="grava frames crus e telemetria JSONL sincronizada",
-    )
     args = parser.parse_args()
 
     motor_lock = None
@@ -73,14 +61,13 @@ def main():
 
     shm = _criar_memoria_debug() if args.debug else None
 
-    vision_p = Process(target=iniciar_visao,
-                       args=(args.debug, args.record_vision),
+    vision_p = Process(target=iniciar_visao, args=(args.debug,),
                        name="shadow-visao")
     vision_p.start()
 
     control_p = None
     if not args.vision_only:
-        # O controle ja espera o primeiro frame com os motores parados.
+        time.sleep(.5)
         control_p = Process(target=iniciar_controle, name="shadow-controle")
         control_p.start()
 

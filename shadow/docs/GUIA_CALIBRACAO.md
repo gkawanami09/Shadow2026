@@ -42,15 +42,7 @@ Com o robô SOBRE a pista, na iluminação real da sala:
 
 Salve cada grupo com `s`. Valide com `python3 shadow/main.py --vision-only --debug`.
 
-## 2.1 Câmera Wide e verde (sem tabuleiro)
-
-A câmera wide usa o campo de visão máximo configurado na captura. O verde é
-validado diretamente em pixels: quadrado verde antes do preto, com preto acima
-e no lado interno da interseção. A topologia da linha escolhe o ramo futuro e
-o controle acompanha esse caminho. Nenhum tabuleiro ou arquivo
-\`calibracao_camera_wide.npz\` é necessário.
-
-## 2.2 Entrada no resgate: prata + contexto preto
+## 2.1 Entrada no resgate: prata + contexto preto
 
 O modelo reconhece a prata da entrada. Ao primeiro frame alinhado e sem uma
 linha preta à frente, o robô para e observa a prata por um segundo inteiro.
@@ -72,7 +64,7 @@ começa em .45; reduza no máximo até .40 somente se a prata real continuar
 abaixo disso, pois valores menores tornam mais provável aceitar claridade da
 rampa como candidata.
 
-## 2.3 Faixa PRETA de saída e triângulos (câmera de resgate)
+## 2.2 Faixa PRETA de saída e triângulos (câmera de resgate)
 
 Os limiares estão em `config_resgate.py` (`EXIT_BLACK_*`, `MARKER_*`). Eles
 não têm grupo no calibrador de linha de propósito: pertencem à outra câmera.
@@ -90,19 +82,19 @@ python3 shadow/tools/replay_visao.py --perfil saida --frames <fotos_da_vitima_pr
 O segundo comando é o teste que importa: a vítima preta e a soleira preta
 têm a mesma cor, e é a geometria que as separa.
 
-## 3. O que provavelmente precisa de retune (Wide 120° diagonal, ~4,5 cm)
+## 3. O que provavelmente precisa de retune (fish-eye 160°, 8 cm, 35°)
 
 | Constante | Onde | Sintoma se errada |
 |---|---|---|
 | `min_line_size` (3000) | config.py | Linha fina/distante ignorada (suba a câmera nos testes) ou ruído aceito. Com fish-eye a linha próxima fica GRANDE — se contornos de ruído passarem, suba |
 | `GAP_NOT_A_STUB_SIZE` (17000) | config.py | Com a linha maior no near-field, um toco de gap pode passar de 17000 e abortar a orientação → suba proporcionalmente ao que `line_size` mostra no `--debug` |
 | `RED_MIN_CONTOUR` (15000) | config.py | Vermelho nunca dispara (fish-eye encolhe a faixa no topo) → desça; especks disparam → suba |
-| `GREEN_TOPOLOGY_MARKER_MIN_MM/MAX_MM` (18/35) | config.py | Marcador físico rejeitado depois da retificação; confirme primeiro impressão e homografia, não calibre em pixels |
+| `GREEN_MIN_AREA` (2500) | config.py | Marcador ignorado de longe (desça) ou ruído verde aceito (suba) |
 | `T_180` (0.82 s) | config.py | Giro de 180° passa/falta ângulo — cronometre e ajuste (depende de atrito e bateria) |
 | `T_SWEEP_RIGHT` (0.35 s) | config.py | Varredura do gap curta/longa demais para ~45° |
 | `max_turn_angle` (110) | config.py | Oscilação na reta → suba um pouco (ex.: 120); curvas moles → desça |
 | `left/right_correction` (1/1) | config.py | Robô puxa para um lado em linha reta |
-| `LENS_POSITION` (`None`) | config.py | `None` faz autofocus durante a calibração; o artefato salva essa posição e o runtime precisa reaplicá-la e confirmá-la antes de armar o verde |
+| `LENS_POSITION` (`None`) | config.py | `None` usa autofocus contínuo na faixa completa da Camera Module 3 Wide; use valor numérico somente para travar um foco manual já calibrado |
 
 ## 4. Frações geométricas (raramente precisam mudar)
 
@@ -121,9 +113,3 @@ mostrar o POI saltando errado em interseções, e anote o que mudou.
 2. No chão, reta a velocidade padrão: oscilação ≤ ±3 cm.
 3. Curva de 90°, curva arredondada, gap de 5/10/15 cm, verdes nos 4 casos,
    vermelho — na ordem dos gates das Fases C-F do RUNBOOK.
-
-Para registrar uma falha reproduzível, acrescente
-`--record-vision /home/pi/inova/diagnosticos`. A pasta receberá uma subpasta
-de PNGs lossless e um JSONL sincronizado por `frame_index`, `sequence` e
-`decision_id`, com estado, direção travada, PWM e yaw. O caminho exato de
-cada PNG aparece em `raw_frame`; duas sessões nunca reutilizam o mesmo nome.

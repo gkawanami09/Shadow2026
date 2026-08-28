@@ -3,7 +3,6 @@
 import sys
 from pathlib import Path
 import unittest
-import math
 
 import cv2
 import numpy as np
@@ -13,8 +12,7 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
-from visao.verde import (ConfirmadorVerde, DirecaoVerdePersistente,
-                         check_green)  # noqa: E402
+from visao.verde import ConfirmadorVerde, check_green  # noqa: E402
 
 
 def _quadrado(x=160, y=130, lado=60):
@@ -64,11 +62,6 @@ def _cena_intersecao_direita(angulo=0):
     return contornos, preto
 
 
-def _frente_rotacionada(angulo):
-    radianos = math.radians(angulo)
-    return (-math.sin(radianos), -math.cos(radianos))
-
-
 def _dois_verdes_validos():
     esquerdo = _quadrado(x=70, y=130, lado=52)
     direito = _quadrado(x=300, y=130, lado=52)
@@ -98,16 +91,12 @@ class ValidacaoVerdeTests(unittest.TestCase):
         self.assertEqual(check_green(contornos, preto), "right")
 
     def test_verde_torto_positivo_continua_valido(self):
-        contornos, preto = _cena_intersecao_direita(40)
-        self.assertEqual(check_green(
-            contornos, preto, entry_forward=_frente_rotacionada(40)),
-            "right")
+        contornos, preto = _cena_intersecao_direita(25)
+        self.assertEqual(check_green(contornos, preto), "right")
 
     def test_verde_torto_negativo_continua_valido(self):
-        contornos, preto = _cena_intersecao_direita(-40)
-        self.assertEqual(check_green(
-            contornos, preto, entry_forward=_frente_rotacionada(-40)),
-            "right")
+        contornos, preto = _cena_intersecao_direita(-25)
+        self.assertEqual(check_green(contornos, preto), "right")
 
     def test_verde_para_esquerda_exige_preto_acima_e_a_direita(self):
         direcao = check_green(
@@ -195,23 +184,6 @@ class ValidacaoVerdeTests(unittest.TestCase):
         confirmador.atualizar("left")
         confirmador.atualizar("right")
         self.assertEqual(confirmador.atualizar("left"), "straight")
-
-    def test_direcao_confirmada_persiste_ate_o_ramo_aparecer(self):
-        memoria = DirecaoVerdePersistente(memoria=.5)
-        memoria.atualizar("right", 1.00)
-        memoria.atualizar("right", 1.02)
-        self.assertEqual(memoria.atualizar("right", 1.04), "right")
-        self.assertEqual(memoria.atualizar("straight", 1.30), "right")
-        self.assertEqual(memoria.atualizar("straight", 1.60), "straight")
-
-    def test_dois_verdes_promovem_90_pendente_para_180(self):
-        memoria = DirecaoVerdePersistente(memoria=.5)
-        for instante in (1.00, 1.02, 1.04):
-            resultado = memoria.atualizar("left", instante)
-        self.assertEqual(resultado, "left")
-        for instante in (1.06, 1.08, 1.10):
-            resultado = memoria.atualizar("turn_around", instante)
-        self.assertEqual(resultado, "turn_around")
 
 
 if __name__ == "__main__":
