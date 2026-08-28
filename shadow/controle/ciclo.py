@@ -9,7 +9,6 @@ from config import (CONTROL_MAX_ITERATIONS, GAP_AVOID_RETREAT_TIME, GAP_AVOID_SP
                     GAP_MISSING_CONFIRM_TIME, GAP_REJECT_COOLDOWN,
                     GREEN_APPROACH_SPEED, GREEN_APPROACH_TIME,
                     GREEN_REVERSE_SPEED, GREEN_REVERSE_TIME,
-                    GREEN_TURN_BLIND_TIME, GREEN_TURN_CENTER_TOLERANCE_PX,
                     GREEN_TURN_SPEED, GREEN_TURN_TIMEOUT, LINE_FOLLOW_SPEED,
                     MIN_LINE_SIZE_DEFAULT, TURN_AROUND_GREEN_COOLDOWN,
                     VISION_READY_TIMEOUT, camera_x, camera_y)
@@ -767,7 +766,6 @@ def control_loop():
                         # timeout e o MPU impedem giro indefinido.
                         angle = -180 if green_direction == "left" else 180
 
-                    elapsed_turn = now - green_turn_started
                     giro_mpu = progresso_giro_mpu(
                         green_mpu_turn_origin, green_mpu_last_yaw)
                     if (giro_mpu is not None
@@ -784,9 +782,12 @@ def control_loop():
                     lado_esperado = -1 if green_direction == "left" else 1
 
                     if (giro_mpu is not None
-                            and giro_mpu >= config.GREEN_MPU_HARD_LIMIT_DEG):
-                        # Se a camera perder a faixa por um frame, o chassi
-                        # ainda nao pode atravessar completamente os 90 graus.
+                            and giro_mpu >= config.GREEN_MPU_HARD_LIMIT_DEG
+                            and not (
+                                green_target_seen and linha_ramo_recente)):
+                        # O MPU limita somente uma procura perdida. Com o ramo
+                        # marcado visivel, a camera continua guiando-o ate o
+                        # centro, qualquer que seja o angulo da curva.
                         green_direction = None
                         green_turn_started = None
                         green_reverse_until = None
@@ -804,13 +805,6 @@ def control_loop():
                         status.value = (
                             'Verde limitado pelo MPU '
                             f'({giro_mpu:.0f} graus) — parada de seguranca')
-                    elif elapsed_turn < GREEN_TURN_BLIND_TIME:
-                        # A linha de entrada ainda pode estar sob o robo. O
-                        # controle visual ja atua, mas nao pode encerrar a
-                        # manobra durante esta janela curta.
-                        status.value = (
-                            f'Verde {green_direction} — encaixando ramo '
-                            f'({GREEN_TURN_BLIND_TIME:.1f} s)')
                     elif now >= green_turn_deadline:
                         # Sem esta trava um falso contorno poderia deixar o
                         # tanque girando indefinidamente. Nao da re, pois o

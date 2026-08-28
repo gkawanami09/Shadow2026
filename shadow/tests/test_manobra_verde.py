@@ -105,13 +105,17 @@ class ManobraVerdeTests(unittest.TestCase):
     def test_ramo_ainda_no_mesmo_lado_continua_girando(self):
         self.assertFalse(ramo_chegou_ao_centro(60, 80, 1))
 
-    def test_mpu_nao_deixa_concluir_verde_com_apenas_40_graus(self):
-        self.assertFalse(alinhamento_verde_pode_concluir(
+    def test_ramo_central_conclui_sem_exigir_90_graus_do_mpu(self):
+        self.assertTrue(alinhamento_verde_pode_concluir(
             0, 60, 1, 40.))
+
+    def test_mpu_nao_substitui_o_alinhamento_visual(self):
+        self.assertFalse(alinhamento_verde_pode_concluir(
+            60, 80, 1, 90.))
 
     def test_mpu_e_centro_persistente_podem_concluir_verde(self):
         self.assertTrue(alinhamento_verde_pode_concluir(
-            0, 60, 1, config.GREEN_MPU_COMPLETION_MIN_DEG))
+            0, 60, 1, 90.))
 
     def test_mpu_mede_giro_independente_do_sentido(self):
         self.assertEqual(progresso_giro_mpu(12., 102.), 90.)

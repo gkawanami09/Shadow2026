@@ -120,18 +120,12 @@ def alinhamento_verde_pode_concluir(
     lado_esperado,
     progresso_mpu,
 ):
-    """Exige giro material antes de aceitar a linha central como saida.
+    """Conclui quando o ramo escolhido chega ao centro da camera.
 
-    Sem essa trava, a linha de entrada ainda central podia encerrar a manobra
-    logo depois de o MPU apenas armar a procura do ramo. Sem leitura do MPU, a
-    camera continua suficiente: nesse caso o ramo obrigatoriamente ja apareceu
-    no lado marcado antes de chegar aqui.
+    O ramo ja precisou aparecer primeiro no lado indicado pelo verde. Portanto
+    o MPU nao define angulo minimo: uma saida curva pode encaixar com 50, 70
+    ou 90 graus. O MPU permanece apenas como protecao contra uma busca perdida.
     """
-    if progresso_mpu is not None:
-        progresso = float(progresso_mpu)
-        if (not math.isfinite(progresso)
-                or progresso < config.GREEN_MPU_COMPLETION_MIN_DEG):
-            return False
     return ramo_chegou_ao_centro(
         erro_inferior,
         erro_assinado_anterior,
