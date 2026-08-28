@@ -2,12 +2,20 @@
 """Inicia os processos de visão e controle do segue-linha."""
 
 import argparse
+import os
 import signal
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# Impede bibliotecas numericas de acordarem todos os nucleos nos imports.
+for _variavel_threads in (
+    "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS", "NUMBA_NUM_THREADS",
+):
+    os.environ.setdefault(_variavel_threads, "1")
 
 from multiprocessing import Process, shared_memory  # noqa: E402
 
@@ -72,7 +80,7 @@ def main():
 
     control_p = None
     if not args.vision_only:
-        time.sleep(.5)
+        # O controle ja espera o primeiro frame com os motores parados.
         control_p = Process(target=iniciar_controle, name="shadow-controle")
         control_p.start()
 

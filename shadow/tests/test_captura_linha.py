@@ -425,6 +425,7 @@ class LineCameraSelectionTests(unittest.TestCase):
                 "picamera2": SimpleNamespace(Picamera2=FakePicamera2),
                 "libcamera": SimpleNamespace(controls=controls),
             }),
+            mock.patch("visao.captura.LENS_POSITION", None),
             mock.patch("visao.captura.time.sleep"),
         ):
             camera = LineCamera()

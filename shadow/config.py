@@ -89,13 +89,14 @@ CAPTURE_FPS = 40
 CAPTURE_FPS_FALLBACK = 40
 camera_x = 448                            # resolução do algoritmo
 camera_y = 252
-# None executa um único autofocus na partida e trava a posição encontrada.
-# Um número continua permitindo a calibração manual em dioptrias.
-LENS_POSITION = None
+# A montagem atual retornou 19.002 no autofocus. O valor fixo elimina o ciclo
+# mecânico demorado em toda partida; use None somente após mover a câmera.
+LENS_POSITION = 19.0
 # Mantém exposição e balanço de branco automáticos. Fixar estes controles sem
 # calibração específica pode estourar toda a pista para branco.
 LINE_CAMERA_LOCK_AUTO_CONTROLS = False
-LINE_CAMERA_WARMUP_S = .45
+# AE/AWB continuam automáticos; oito frames estabilizam sem espera excessiva.
+LINE_CAMERA_WARMUP_S = .20
 LINE_CAMERA_EXPOSURE_VALUE = 0.0
 DEBUG_SHM_NAME = "shadow_shm_cam"
 DEBUG_SHM_SIZE = camera_x * camera_y * 3  # 338688 B
