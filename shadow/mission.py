@@ -236,7 +236,6 @@ class MissionSystem:
             "gap_center_y": -1.0,
             "gap_end_width": -1.0,
             "black_average": 0.0,
-            "entry_white_gate": False,
         }
         for nome, valor in valores.items():
             self._definir_compartilhado(nome, valor)

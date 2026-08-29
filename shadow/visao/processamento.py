@@ -12,8 +12,6 @@ from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, VISION_MAX_FRAMES,
 from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
                                          entry_armed,
-                                         entry_silver_confirmed,
-                                         entry_white_gate,
                                          green_candidate,
                                          green_turn_target,
                                          get_time_average, last_bottom_point,
@@ -35,7 +33,6 @@ from visao import linha as line_module
 from visao import verde as green_module
 from visao.captura import LineCamera
 from visao.entrada_missao import build_entry_gate, update_entry_silver
-from visao.entrada_branca import detectar_entrada_branca
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.linha import calculate_angle, determine_correct_line
 from visao.trajetoria import extrair_ponto_futuro
@@ -142,7 +139,6 @@ def vision_loop(debug=False):
     # ele nunca é construído e o custo é zero.
     entry_gate = build_entry_gate()
     ultimo_alinhamento_entrada = 0.
-    reta_prata_desde = None
 
     # Matriz usada para reduzir ruídos das máscaras.
     kernal = np.ones((3, 3), np.uint8)
@@ -232,11 +228,6 @@ def vision_loop(debug=False):
             # YOLO encontrou no mesmo frame.
             linha_a_frente_frame = _has_black_ahead(black_image)
             line_ahead.value = linha_a_frente_frame
-            medicao_entrada_branca = detectar_entrada_branca(
-                entry_black_mask,
-                linha_a_frente=linha_a_frente_frame,
-            )
-            entry_white_gate.value = medicao_entrada_branca.candidata
 
             # Recorta partes que não devem participar da decisão.
             if line_status.value == "gap_avoid":
@@ -474,58 +465,20 @@ def vision_loop(debug=False):
                 and abs(ponto_inferior_x_frame - camera_x / 2)
                 <= config.ENTRY_LINE_MAX_BOTTOM_ERROR_PX
             )
-            reta_prata_agora = bool(
-                linha_detectada_frame
-                and abs(angulo_frame) <= config.ENTRY_SILVER_STRAIGHT_MAX_ANGLE
-                and abs(ponto_inferior_x_frame - camera_x / 2)
-                <= config.ENTRY_SILVER_STRAIGHT_MAX_BOTTOM_ERROR_PX
-                and faixa_transversal_y_frame < 0.
-            )
-            curva_ou_90 = bool(
-                linha_detectada_frame and not reta_prata_agora)
-            if reta_prata_agora:
-                if reta_prata_desde is None:
-                    reta_prata_desde = frame_captured_at
+            if linha_alinhada:
                 ultimo_alinhamento_entrada = frame_captured_at
-            elif curva_ou_90:
-                # Nao herda o alinhamento/votos de uma reta ao iniciar curva.
-                reta_prata_desde = None
-                ultimo_alinhamento_entrada = 0.
             # A faixa prata naturalmente tapa/termina a linha preta. Assim,
             # o modelo recebe até 0,5 s após o último alinhamento real, mas
             # nunca quando o robô já começou uma correção de linha perdida.
             entrada_alinhada = (
-                reta_prata_desde is not None
-                and frame_captured_at - reta_prata_desde
-                >= config.ENTRY_SILVER_STRAIGHT_STABLE_S
-                and frame_captured_at - ultimo_alinhamento_entrada
+                frame_captured_at - ultimo_alinhamento_entrada
                 <= config.ENTRY_ALIGNMENT_HOLD_S
             )
-            # Durante a leitura e a execucao de um verde, o campo de visao
-            # muda muito e a lateral metalica/refletida pode ocupar a ROI.
-            # Prata so e valida no trecho reto, antes da manobra. Inclui o
-            # candidato ainda nao confirmado para nao acumular votos no meio
-            # da confirmacao do verde.
-            giro_verde_ativo = bool(
-                candidato_verde_frame
-                or turn_direction in ("left", "right", "turn_around")
-                or turn_dir.value in ("left", "right", "turn_around")
-                or green_turn_target.value in (-1, 1)
-            )
-            prata_liberada = not (
-                (config.ENTRY_SILVER_BLOCK_GREEN_TURN and giro_verde_ativo)
-                or curva_ou_90)
-            bloqueio_prata = (
-                "bloqueada: manobra verde" if giro_verde_ativo
-                else "bloqueada: curva/90 graus" if curva_ou_90
-                else "")
             update_entry_silver(
                 entry_gate, cv2_img, frame_captured_at,
                 line_aligned=entrada_alinhada,
                 black_mask=entry_black_mask,
-                ramp_black_mask=entry_ramp_black_mask,
-                detection_allowed=prata_liberada,
-                block_reason=bloqueio_prata)
+                ramp_black_mask=entry_ramp_black_mask)
 
             processamento_ms = (
                 time.perf_counter() - inicio_processamento
@@ -587,33 +540,20 @@ def vision_loop(debug=False):
                     )
                     if entrada is None and confianca_bruta is not None:
                         confianca_entrada = confianca_bruta
-                    medicao_prata = getattr(entry_gate, "last_result", None)
-                    if medicao_prata is not None:
-                        texto_prata = (
-                            f"PRATA score={medicao_prata.score} "
-                            f"sat={medicao_prata.saturacao_media:.0f} "
-                            f"stdV={medicao_prata.desvio_brilho:.0f} "
-                            f"claro={medicao_prata.pct_claro:.0%} "
-                            f"largura={medicao_prata.largura_ratio:.0%} "
-                            f"linhaFim={int(medicao_prata.linha_fim)} "
-                            f"frames={entry_gate.votes} "
-                            f"PRATA={int(entry_silver_confirmed.value)}")
-                    else:
-                        texto_prata = (
-                            f"ONNX PRATA {entry_gate.votes}/"
-                            f"{config.ENTRY_SILVER_VOTE_WINDOW} "
-                            f"conf={confianca_entrada:.2f}/"
-                            f"{config.ENTRY_MODEL_MIN_CONFIDENCE:.2f} "
-                            f"{motivo_entrada}")
                     cv2.putText(
-                        cv2_img, texto_prata, (5, 42),
-                        cv2.FONT_HERSHEY_SIMPLEX, .35, (255, 255, 0), 1,
-                        cv2.LINE_AA)
-                    if entry_silver_confirmed.value:
-                        cv2.putText(
-                            cv2_img, "PRATA CONFIRMADA", (5, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, .55, (0, 255, 255), 2,
-                            cv2.LINE_AA)
+                        cv2_img,
+                        f"ONNX PRATA {entry_gate.votes}/"
+                        f"{config.ENTRY_SILVER_VOTE_WINDOW} "
+                        f"conf={confianca_entrada:.2f}/"
+                        f"{config.ENTRY_MODEL_MIN_CONFIDENCE:.2f} "
+                        f"{motivo_entrada}",
+                        (5, 42),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        .35,
+                        (255, 255, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
                 nomes_controle = ("TRACK", "CORNER", "LOST", "SPECIAL")
                 indice_controle = int(steering_state.value)
                 nome_controle = (
@@ -669,20 +609,9 @@ def vision_loop(debug=False):
                     (0, 255, 255),
                     1,
                 )
-                cv2.putText(
-                    cv2_img,
-                    "PORTAO BRANCO="
-                    f"{int(medicao_entrada_branca.candidata)} "
-                    f"L={medicao_entrada_branca.preto_esquerda:.0%} "
-                    f"C={medicao_entrada_branca.preto_centro:.0%} "
-                    f"R={medicao_entrada_branca.preto_direita:.0%}",
-                    (5, 76), cv2.FONT_HERSHEY_SIMPLEX, .35,
-                    (255, 255, 0), 1, cv2.LINE_AA,
-                )
                 shm_array[:] = cv2_img
 
     finally:
-        entry_white_gate.value = False
         if entry_gate is not None:
             entry_gate.close()
         camera.close()

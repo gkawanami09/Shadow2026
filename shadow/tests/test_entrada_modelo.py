@@ -39,12 +39,6 @@ class EntryModelTests(unittest.TestCase):
         self.assertGreater(config.ENTRY_ALIGNMENT_HOLD_S, 0)
         self.assertLessEqual(config.ENTRY_ALIGNMENT_HOLD_S, 1.0)
 
-    def test_prata_exige_reta_estavel_mais_rigida_que_alinhamento(self):
-        self.assertLess(
-            config.ENTRY_SILVER_STRAIGHT_MAX_ANGLE,
-            config.ENTRY_LINE_MAX_ANGLE)
-        self.assertGreater(config.ENTRY_SILVER_STRAIGHT_STABLE_S, 0)
-
     def test_saida_yolo_uma_classe_vira_caixa_no_frame(self):
         model = EntryModel(
             backend="onnx", input_size=640, min_confidence=.6)
@@ -394,7 +388,7 @@ class EntryGateTests(_TwoVotesEntryGateTestCase):
 
 
 class EntryGateDefaultConfigTests(unittest.TestCase):
-    def test_modelo_legado_confirma_no_primeiro_frame(self):
+    def test_prata_alinhada_sem_preto_confirma_no_primeiro_frame(self):
         self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 1)
         gate = EntryGate()
         detection = EntryDetection((1, 2, 20, 8), .50)

@@ -15,8 +15,6 @@ import time
 import numpy as np
 
 import config
-from visao.faixa_prata_entrada import (
-    carregar_parametros_prata, detectar_faixa_prata)
 from shared.dados_compartilhados import (
     ENTRY_SILVER_BLACK_FOLLOW, ENTRY_SILVER_IDLE, ENTRY_SILVER_VALIDATING,
     entry_armed, entry_silver_confirmed, entry_silver_detected,
@@ -635,94 +633,10 @@ class EntryPipeline:
         self.worker.close()
 
 
-class ScoreEntryPipeline:
-    """Detector local de prata + votos, sem inferencia ou estado de motor."""
-
-    def __init__(self):
-        self.params = carregar_parametros_prata()
-        self.last_detection = None
-        self.last_result = None
-        self.last_reason = "inicio"
-        self._votes = 0
-        self._armed = False
-        self._pending = None
-        self._last_log_at = float("-inf")
-
-    @property
-    def votes(self):
-        return self._votes
-
-    @property
-    def state(self):
-        # O candidato nao freia o robo. A transicao de motor continua sendo
-        # somente a confirmacao final em controle/ciclo.py.
-        return ENTRY_SILVER_IDLE
-
-    def set_armed(self, armed):
-        armed = bool(armed)
-        if armed == self._armed:
-            return
-        self._armed = armed
-        self._votes = 0
-        self.last_detection = None
-        self.last_result = None
-        self.last_reason = "reiniciado" if armed else "entrada desarmada"
-        self._pending = None
-
-    def submit(self, frame, timestamp, line_aligned, *, black_mask=None,
-               ramp_black_mask=None):
-        del ramp_black_mask
-        self._pending = (frame, float(timestamp), bool(line_aligned), black_mask)
-
-    def poll(self):
-        if self._pending is None:
-            return False, self.last_detection
-        frame, timestamp, line_aligned, black_mask = self._pending
-        self._pending = None
-        result = detectar_faixa_prata(
-            frame, black_mask, line_aligned=line_aligned, params=self.params)
-        self.last_result = result
-        if result.bbox is not None:
-            self.last_detection = EntryDetection(
-                tuple(float(value) for value in result.bbox),
-                min(1., result.score / 10.),
-            )
-
-        if result.bbox is not None and result.linha_fim and (
-                result.score >= self.params.ENTRY_SILVER_SCORE_MIN):
-            self._votes = min(
-                self.params.ENTRY_SILVER_CONFIRM_FRAMES, self._votes + 1)
-            self.last_reason = "score_prata_aprovado"
-            if timestamp - self._last_log_at >= config.ENTRY_SILVER_LOG_INTERVAL_S:
-                print(
-                    "[PRATA] score=" f"{result.score} "
-                    f"sat={result.saturacao_media:.0f} "
-                    f"stdV={result.desvio_brilho:.0f} "
-                    f"claro={result.pct_claro:.0%} "
-                    f"largura={result.largura_ratio:.0%} "
-                    f"linha_fim={int(result.linha_fim)} "
-                    f"frames={self._votes}")
-                self._last_log_at = timestamp
-        else:
-            self._votes = max(0, self._votes - config.ENTRY_SILVER_MISS_DECAY)
-            self.last_reason = "score_prata_insuficiente"
-
-        confirmed = self._votes >= self.params.ENTRY_SILVER_CONFIRM_FRAMES
-        if confirmed:
-            self.last_reason = "confirmada"
-        return confirmed, self.last_detection
-
-    def close(self):
-        self._pending = None
-
-
 def build_entry_gate():
     """Só cria o worker durante a fase de linha da missão completa."""
     if not mission_mode.value or not config.ENTRY_SILVER_ENABLED:
         return None
-    if config.ENTRY_SILVER_DETECTOR == "score":
-        print("[visao] detector de faixa prata por score armado")
-        return ScoreEntryPipeline()
     pipeline = EntryPipeline()
     print("[visão] modelo de entrada armado: "
           f"{pipeline.model.active_path.name} ({pipeline.model.active_backend})")
@@ -737,10 +651,8 @@ def update_entry_silver(
     line_aligned=False,
     black_mask=None,
     ramp_black_mask=None,
-    detection_allowed=True,
-    block_reason="",
 ):
-    """Avalia a entrada configurada e publica somente a confirmacao final."""
+    """Entrega o frame ao YOLO e publica somente resultados prontos."""
     if entry_gate is None:
         return
     if not entry_armed.value:
@@ -749,17 +661,6 @@ def update_entry_silver(
         entry_silver_confirmed.value = False
         entry_silver_votes.value = 0
         entry_silver_reason.value = "entrada desarmada"
-        entry_silver_state.value = ENTRY_SILVER_IDLE
-        return
-    # Verde confirmado/candidato ou manobra: a camera pode ver metal lateral
-    # enquanto gira. Zera votos e nao deixa uma observacao antiga completar a
-    # confirmacao depois da curva.
-    if not detection_allowed:
-        entry_gate.set_armed(False)
-        entry_silver_detected.value = False
-        entry_silver_confirmed.value = False
-        entry_silver_votes.value = 0
-        entry_silver_reason.value = block_reason or "prata bloqueada"
         entry_silver_state.value = ENTRY_SILVER_IDLE
         return
     entry_gate.set_armed(True)
@@ -783,7 +684,6 @@ def update_entry_silver(
     entry_silver_reason.value = entry_gate.last_reason
     entry_silver_state.value = state
     if confirmed and not entry_silver_confirmed.value:
-        needed = getattr(entry_gate, "params", config).ENTRY_SILVER_CONFIRM_FRAMES
-        print("[PRATA] CONFIRMADA - entrando no resgate "
-              f"({entry_gate.votes}/{needed} frames)")
+        print("[visão] faixa PRATA confirmada pelo modelo "
+              f"({entry_gate.votes}/{config.ENTRY_SILVER_VOTE_WINDOW} votos)")
     entry_silver_confirmed.value = confirmed

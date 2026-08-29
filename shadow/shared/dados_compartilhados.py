@@ -81,7 +81,6 @@ ENTRY_SILVER_IDLE = 0
 ENTRY_SILVER_VALIDATING = 1
 ENTRY_SILVER_BLACK_FOLLOW = 2
 entry_silver_state = Value("b", ENTRY_SILVER_IDLE)
-entry_white_gate = Value("b", False)  # preto lateral + centro branco, sem linha
 rescue_requested = Value("b", False)  # controle pediu o handoff
 red_finished = Value("b", False)      # faixa vermelha final cumprida
 timer = Timer()
