@@ -435,6 +435,7 @@ class BallPickupSequencer:
                 return PickupStep(
                     self.RELEASE_PENDING,
                     self._release_detail(),
+                    futaba_action=self._sustentar_elevador(),
                     gripper_action=self._release_action(),
                 )
             self.state = self.LOWER_PENDING
@@ -486,6 +487,10 @@ class BallPickupSequencer:
             return PickupStep(
                 self.WIGGLE_PENDING,
                 self._wiggle_detail(),
+                futaba_action=(
+                    self._sustentar_elevador()
+                    if self._release_mode == "selection" else None
+                ),
                 gripper_action=self._wiggle_actions[self._wiggle_index],
             )
 
@@ -509,6 +514,10 @@ class BallPickupSequencer:
                 return PickupStep(
                     self.WIGGLE_PENDING,
                     self._wiggle_detail(),
+                    futaba_action=(
+                        self._sustentar_elevador()
+                        if self._release_mode == "selection" else None
+                    ),
                     gripper_action=self._wiggle_actions[
                         self._wiggle_index],
                 )
@@ -517,6 +526,10 @@ class BallPickupSequencer:
             return PickupStep(
                 self.RESTORE_PENDING,
                 "liberacao concluida; restaurando as garras",
+                futaba_action=(
+                    self._sustentar_elevador()
+                    if self._release_mode == "selection" else None
+                ),
                 gripper_action=self._restore_action(),
             )
 
@@ -570,6 +583,14 @@ class BallPickupSequencer:
         self.state = self.DEPOSIT_START
         return True
 
+    @staticmethod
+    def _sustentar_elevador():
+        """Mantém leve torque de subida durante a transferência à caçamba."""
+        return (
+            cfg.BALL_PICKUP_LIFT_HOLD_POWER,
+            cfg.BALL_PICKUP_LIFT_HOLD_MS,
+        )
+
     def mark_futaba_started(self, now=None):
         """Inicia cada prazo somente depois da escrita serial correspondente."""
         now = time.monotonic() if now is None else float(now)
@@ -595,6 +616,14 @@ class BallPickupSequencer:
         if self.state == self.CARRY_READY:
             # O pulso e temporizado pelo Arduino. Na missao, a selecao comeca
             # logo depois e substitui esta ordem pela pequena descida.
+            return
+        if self.state in (
+            self.RELEASE_PENDING,
+            self.WIGGLE_PENDING,
+            self.RESTORE_PENDING,
+        ):
+            # Renovação de sustentação: o estado continua pertencendo ao
+            # movimento de garra que foi emitido no mesmo pacote lógico.
             return
         if self.state == self.LOWER_PENDING:
             self.state = self.LOWER_WAIT

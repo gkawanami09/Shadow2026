@@ -264,10 +264,10 @@ BALL_PICKUP_LIFT_POWER = 20
 BALL_PICKUP_LIFT_MS = 1400
 BALL_PICKUP_LIFT_SLOW_POWER = 10
 BALL_PICKUP_LIFT_SLOW_MS = 250
-# Sustentacao curta no alto. Em servo continuo isto e velocidade minima, nao
-# controle real de torque; por isso o comando e fraco e limitado a 300 ms.
-BALL_PICKUP_LIFT_HOLD_POWER = 1
-BALL_PICKUP_LIFT_HOLD_MS = 300
+# Sustentação suave para cima no alto. Ela é renovada em cada movimento de
+# garra durante a transferência para a caçamba, para o elevador não ceder.
+BALL_PICKUP_LIFT_HOLD_POWER = 5
+BALL_PICKUP_LIFT_HOLD_MS = 700
 BALL_PICKUP_LOWER_POWER = -20
 BALL_PICKUP_LOWER_MS = 25
 BALL_PICKUP_LOWER_GUARD_S = 0.05

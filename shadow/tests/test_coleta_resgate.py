@@ -226,7 +226,7 @@ class BallPickupSequencerTests(unittest.TestCase):
                 cfg.BALL_PICKUP_LIFT_HOLD_POWER,
                 cfg.BALL_PICKUP_LIFT_HOLD_MS,
             ),
-            (1, 300),
+            (5, 700),
         )
         self.assertEqual(
             (cfg.BALL_PICKUP_LOWER_POWER, cfg.BALL_PICKUP_LOWER_MS),
@@ -577,7 +577,10 @@ class BallPickupSequencerTests(unittest.TestCase):
                 ),
                 (20, 1400),
                 (10, 250),
-                (1, 300),
+                (
+                    cfg.BALL_PICKUP_LIFT_HOLD_POWER,
+                    cfg.BALL_PICKUP_LIFT_HOLD_MS,
+                ),
                 (-20, 25),
             ],
         )
@@ -630,6 +633,23 @@ class BallPickupSequencerTests(unittest.TestCase):
                 )
                 self.assertEqual(complete.state, pickup.COMPLETE)
                 self.assertIn("selecao", complete.detail)
+
+    def test_selecao_renova_sustentacao_enquanto_move_as_garras(self):
+        pickup, actions, _complete = _run_sequence("silver", selection=True)
+        inicio_transferencia = len(pickup._gripper_close_actions)
+        transferencias = [
+            step for step in actions
+            if step.gripper_action is not None
+        ][inicio_transferencia:]
+
+        self.assertTrue(transferencias)
+        self.assertTrue(all(
+            step.futaba_action == (
+                cfg.BALL_PICKUP_LIFT_HOLD_POWER,
+                cfg.BALL_PICKUP_LIFT_HOLD_MS,
+            )
+            for step in transferencias
+        ))
 
     def test_both_colors_restore_exact_initial_gripper_positions(self):
         for kind in ("silver", "black"):

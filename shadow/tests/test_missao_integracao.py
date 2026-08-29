@@ -70,7 +70,7 @@ class MissionDebugWindowTests(unittest.TestCase):
         self.assertIs(processos[-1].target, iniciar_debug_linha)
         self.assertEqual(processos[-1].name, "shadow-debug-linha")
 
-    def test_percurso_inicia_vigia_yolo_com_camera_de_resgate(self):
+    def test_percurso_inicia_vigia_yolo_depois_da_linha_ficar_pronta(self):
         processos = []
 
         class ProcessoFalso:
@@ -94,6 +94,8 @@ class MissionDebugWindowTests(unittest.TestCase):
         with (patch("mission.Process", ProcessoFalso),
               patch("mission.time.sleep")):
             sistema.start_line_phase()
+            self.assertEqual(len(processos), 2)
+            sistema._start_vigia_yolo()
 
         self.assertEqual(len(processos), 3)
         self.assertIs(processos[-1].target, iniciar_vigia_yolo)
@@ -135,6 +137,14 @@ class MissionReadinessTests(unittest.TestCase):
     def test_filho_morto_durante_inicio_forca_recuperacao(self):
         sistema, _ = self._sistema(filho_vivo=False)
         self.assertFalse(sistema.wait_line_ready())
+
+    def test_vigia_yolo_morto_nao_bloqueia_retomada_da_linha(self):
+        sistema, _ = self._sistema(
+            status="Shadow2026 pronto - aguardando linha")
+        sistema.line_children = [MissionReadinessTests.FilhoFalso(True)]
+        sistema.children.append(MissionReadinessTests.FilhoFalso(False))
+
+        self.assertTrue(sistema.wait_line_ready())
 
     def test_faixa_vermelha_final_encerra_a_fase(self):
         sistema, compartilhado = self._sistema(status="Seguindo linha")

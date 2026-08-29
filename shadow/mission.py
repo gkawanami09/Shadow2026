@@ -215,6 +215,10 @@ class MissionSystem:
         self.motor_lock = motor_lock
         self.args = args
         self.children = []
+        # Visão de linha e controle/serial são a fase de percurso. O vigia
+        # YOLO e a janela debug são auxiliares: não podem bloquear a volta à
+        # linha se demorarem a reabrir depois de um resgate.
+        self.line_children = []
         self.resgate_ativo = False
         self.argumentos_resgate = None
         self.rescue_returncode = None
@@ -253,6 +257,12 @@ class MissionSystem:
         for nome, valor in valores.items():
             self._definir_compartilhado(nome, valor)
 
+    def _children_essenciais(self):
+        """Retorna apenas visão de linha e controle que fazem o robô andar."""
+        # O fallback preserva os testes e sistemas antigos que injetam apenas
+        # ``children`` sem separar os processos auxiliares.
+        return self.line_children or self.children
+
     # -- ciclo de vida do percurso ---------------------------------------
     def start_line_phase(self):
         """Sobe visão (câmera 1) e controle (serial)."""
@@ -271,18 +281,7 @@ class MissionSystem:
         control = Process(target=iniciar_controle, name="shadow-controle")
         control.start()
         self.children = [vision, control]
-        import config_resgate
-        if (
-            config_resgate.MISSION_YOLO_RESCUE_ENABLED
-            and hasattr(self.args, "rescue_camera_index")
-        ):
-            vigilante = Process(
-                target=iniciar_vigia_yolo,
-                args=(self.args.rescue_camera_index,),
-                name="shadow-vigia-yolo",
-            )
-            vigilante.start()
-            self.children.append(vigilante)
+        self.line_children = [vision, control]
         if self.args.debug:
             debug = Process(
                 target=iniciar_debug_linha,
@@ -292,6 +291,30 @@ class MissionSystem:
             self.children.append(debug)
         print("[missão] percurso ativo: câmera 1 e serial com os filhos")
 
+    def _start_vigia_yolo(self):
+        """Abre a câmera frontal só após o primeiro frame da linha.
+
+        O libcamera ainda pode estar alocando buffers nos primeiros frames
+        após o resgate. Abrir as duas câmeras nessa janela já deixou a visão
+        de linha sem frame e o controle venceu seu timeout de 10 s.
+        """
+        import config_resgate
+        if not (
+            config_resgate.MISSION_YOLO_RESCUE_ENABLED
+            and hasattr(self.args, "rescue_camera_index")
+        ):
+            return
+        if any(child.name == "shadow-vigia-yolo" for child in self.children):
+            return
+        vigilante = Process(
+            target=iniciar_vigia_yolo,
+            args=(self.args.rescue_camera_index,),
+            name="shadow-vigia-yolo",
+        )
+        vigilante.start()
+        self.children.append(vigilante)
+        print("[missão] segue-linha pronto; vigia YOLO da câmera frontal ativo")
+
     def wait_line_ready(self):
         """Espera a câmera e a serial ficarem prontas sem travar para sempre."""
         prazo = time.monotonic() + (
@@ -300,12 +323,15 @@ class MissionSystem:
             + 2.0
         )
         while time.monotonic() < prazo:
-            if not all(child.is_alive() for child in self.children):
+            if not all(
+                child.is_alive() for child in self._children_essenciais()
+            ):
                 return False
             texto = str(self.shared.status.value).lower()
             if "falha camera de linha" in texto:
                 return False
             if "pronto" in texto or "seguindo linha" in texto:
+                self._start_vigia_yolo()
                 return True
             time.sleep(.05)
         raise RuntimeError(
@@ -324,7 +350,9 @@ class MissionSystem:
                 return "finished"
             if self.shared.terminate.value:
                 return "quit"
-            if not all(child.is_alive() for child in self.children):
+            if not all(
+                child.is_alive() for child in self._children_essenciais()
+            ):
                 # Um filho caiu: pode ter sido exceção, Ctrl-C ou o próprio
                 # fim normal do controle. Quem decide é o flag já lido acima.
                 return "child_died"
@@ -364,6 +392,7 @@ class MissionSystem:
                 f"processos do segue-linha ainda vivos: {vivos}; "
                 "o resgate não pode começar")
         self.children = []
+        self.line_children = []
 
     def close_line_camera(self):
         """A câmera 1 é fechada no ``finally`` do processo de visão."""
@@ -492,6 +521,7 @@ class MissionSystem:
         if self.children:
             self.join_line_children()
         self.children = []
+        self.line_children = []
         if not self._lock_held:
             self.motor_lock.acquire()
             self._lock_held = True
