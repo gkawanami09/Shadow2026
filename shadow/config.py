@@ -465,17 +465,26 @@ ENTRY_SILVER_VALIDATION_S = 0.0
 # nova candidatura prata por este periodo. Cada frame com preto renova o prazo.
 ENTRY_BLACK_FOLLOW_TIMEOUT_S = 1.0
 # ---------------------------------------------------------------------------
-# Entrada por ausencia de preto (piso branco)
+# Entrada por corredor branco entre laterais pretas
 # ---------------------------------------------------------------------------
-# Depois de ter seguido uma linha preta, se ela desaparecer enquanto o robo
-# estiver reto por este tempo, entra no resgate. O temporizador nao conta no
-# boot sem linha, em curva, em marcador ou em manobra verde.
-# Perder preto nunca basta para entrar: gap, curva ou sombra nao sao prata.
-# Entrada escolhida para a prova: depois de ter visto a linha, o robo entra no
-# resgate somente se ficar reto sem preto/linha a frente por este tempo.
-# Curva, verde, vermelho, gap e boot sem linha nao contam o temporizador.
+# Depois de ter seguido uma linha, exige preto nas duas laterais, centro branco
+# e nenhuma continuacao central. Para imediatamente e entra apenas se essa
+# geometria permanecer por todo o intervalo. Boot, curva, marcador e gap nao
+# contam o temporizador.
 ENTRY_NO_BLACK_RESCUE_TEST_ENABLED = True
 ENTRY_NO_BLACK_RESCUE_DELAY_S = 3.0
+# Geometria da entrada por branco: preto dos dois lados, corredor central sem
+# preto e nenhuma continuacao da linha a frente. Razoes sobre a mascara preta.
+ENTRY_WHITE_GATE_Y_MIN = .42
+ENTRY_WHITE_GATE_Y_MAX = .94
+ENTRY_WHITE_GATE_LEFT_X_MIN = .02
+ENTRY_WHITE_GATE_LEFT_X_MAX = .32
+ENTRY_WHITE_GATE_CENTER_X_MIN = .38
+ENTRY_WHITE_GATE_CENTER_X_MAX = .62
+ENTRY_WHITE_GATE_RIGHT_X_MIN = .68
+ENTRY_WHITE_GATE_RIGHT_X_MAX = .98
+ENTRY_WHITE_GATE_SIDE_MIN_BLACK_RATIO = .28
+ENTRY_WHITE_GATE_CENTER_MAX_BLACK_RATIO = .10
 # Ao confirmar, o controle apenas para e entrega a serial. O resgate preserva
 # seu avanço reto normal de 1 s antes de iniciar os giros de busca.
 # Além do modelo, o primeiro voto precisa ter a linha preta rastreada. A

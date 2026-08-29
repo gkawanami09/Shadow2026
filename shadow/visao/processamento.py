@@ -13,6 +13,7 @@ from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
                                          entry_armed,
                                          entry_silver_confirmed,
+                                         entry_white_gate,
                                          green_candidate,
                                          green_turn_target,
                                          get_time_average, last_bottom_point,
@@ -34,6 +35,7 @@ from visao import linha as line_module
 from visao import verde as green_module
 from visao.captura import LineCamera
 from visao.entrada_missao import build_entry_gate, update_entry_silver
+from visao.entrada_branca import detectar_entrada_branca
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.linha import calculate_angle, determine_correct_line
 from visao.trajetoria import extrair_ponto_futuro
@@ -230,6 +232,11 @@ def vision_loop(debug=False):
             # YOLO encontrou no mesmo frame.
             linha_a_frente_frame = _has_black_ahead(black_image)
             line_ahead.value = linha_a_frente_frame
+            medicao_entrada_branca = detectar_entrada_branca(
+                entry_black_mask,
+                linha_a_frente=linha_a_frente_frame,
+            )
+            entry_white_gate.value = medicao_entrada_branca.candidata
 
             # Recorta partes que não devem participar da decisão.
             if line_status.value == "gap_avoid":
@@ -662,9 +669,20 @@ def vision_loop(debug=False):
                     (0, 255, 255),
                     1,
                 )
+                cv2.putText(
+                    cv2_img,
+                    "PORTAO BRANCO="
+                    f"{int(medicao_entrada_branca.candidata)} "
+                    f"L={medicao_entrada_branca.preto_esquerda:.0%} "
+                    f"C={medicao_entrada_branca.preto_centro:.0%} "
+                    f"R={medicao_entrada_branca.preto_direita:.0%}",
+                    (5, 76), cv2.FONT_HERSHEY_SIMPLEX, .35,
+                    (255, 255, 0), 1, cv2.LINE_AA,
+                )
                 shm_array[:] = cv2_img
 
     finally:
+        entry_white_gate.value = False
         if entry_gate is not None:
             entry_gate.close()
         camera.close()

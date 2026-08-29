@@ -39,6 +39,7 @@ from shared.dados_compartilhados import (ENTRY_SILVER_BLACK_FOLLOW,
                                entry_armed, entry_silver_confirmed,
                                entry_silver_detected, entry_silver_reason,
                                entry_silver_state, entry_silver_votes,
+                               entry_white_gate,
                                green_candidate,
                                green_turn_target,
                                last_bottom_point,
@@ -71,7 +72,7 @@ def _enter_rescue_zone(arduino):
 
 
 def _enter_rescue_after_no_black(arduino):
-    """Entrega a serial ao resgate apos a ausencia de preto confirmada."""
+    """Entrega a serial apos confirmar o corredor branco entre laterais."""
     if terminate.value:
         status.value = 'Entrada do resgate cancelada - encerrando controle'
         return False
@@ -81,11 +82,11 @@ def _enter_rescue_after_no_black(arduino):
     if not arduino.connected:
         status.value = 'Arduino desconectado na entrada do resgate'
         return False
-    status.value = 'Linha preta ausente - entrando no resgate'
+    status.value = 'Entrada branca confirmada - entrando no resgate'
     entry_armed.value = False
-    _reset_entry_silver("entrada por ausencia de preto")
+    _reset_entry_silver("entrada por corredor branco")
     print(
-        "[controle] linha preta ausente por "
+        "[controle] entrada branca permaneceu valida por "
         f"{config.ENTRY_NO_BLACK_RESCUE_DELAY_S:.1f} s; PARAR "
         "— resgate avançará 1 s antes dos giros")
     return True
@@ -396,7 +397,7 @@ def control_loop():
                 if (green_turn_target.value == 2
                         and now >= green_release_until):
                     green_turn_target.value = 0
-                if line_detected.value:
+                if line_detected.value and not entry_white_gate.value:
                     # Nunca inicie o teste apenas porque a camera acabou de
                     # ligar sem a linha no campo. Primeiro a linha precisa ter
                     # sido vista nesta fase do percurso.
@@ -411,8 +412,7 @@ def control_loop():
                 can_count_no_black = (
                     test_no_black_active
                     and black_line_seen
-                    and not line_detected.value
-                    and not line_ahead.value
+                    and entry_white_gate.value
                     and turn_dir.value == "straight"
                     and not preferencia_linha_esquerda.value
                     and not green_candidate.value
@@ -421,10 +421,17 @@ def control_loop():
                     and green_direction is None
                 )
                 if can_count_no_black:
+                    # O padrao surgiu: pare antes de iniciar a confirmacao.
+                    # Nenhum comando do segue-linha pode sobrescrever PARAR
+                    # enquanto os tres segundos ainda estao contando.
+                    controlador_linha.suspender()
+                    steer()
+                    status.value = 'Entrada branca candidata - validando 3 s'
                     if no_black_since is None:
                         no_black_since = now
                         print(
-                            "[controle] sem preto em reta; validando "
+                            "[controle] preto dos dois lados, centro branco "
+                            "e sem continuacao; PARAR e validar "
                             f"{config.ENTRY_NO_BLACK_RESCUE_DELAY_S:.1f} s")
                     elif (
                         now - no_black_since
@@ -441,15 +448,17 @@ def control_loop():
                         if arduino.connected and not terminate.value:
                             sleep_steering(.05)
                         continue
+                    sleep_steering(.02)
+                    continue
                 else:
                     no_black_since = None
 
-                # Durante este teste, ausencia de preto e o proprio gatilho
-                # de entrada. Nao a transforme antes em uma manobra de gap,
-                # que impediria a contagem de completar os tres segundos.
+                # O gap continua normal quando a geometria lateral da entrada
+                # nao existe. O candidato de entrada ja retornou acima com os
+                # motores parados, portanto nunca disputa esta decisao.
                 gap_allowed = (
                     GAP_ENABLED
-                    and not test_no_black_active
+                    and not entry_white_gate.value
                     # Gap e somente uma ausencia em reta. Durante uma curva
                     # verde, perder a faixa por alguns frames e esperado e o
                     # ramo travado precisa continuar tendo prioridade.
