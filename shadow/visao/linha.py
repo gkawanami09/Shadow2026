@@ -71,6 +71,25 @@ def remover_componentes_isolados_da_borda(mascara):
     return mascara
 
 
+def preencher_furos_de_reflexo(mascara):
+    """Reconecta furos pequenos do LED dentro da faixa preta detectada.
+
+    A mascara considera preto como branco. Portanto, o reflexo do LED abre
+    pontos pretos dentro da faixa branca. O fechamento morfologico preenche
+    somente falhas menores que o kernel; uma area grande de prata permanece
+    fora da mascara e continua sendo tratada pela geometria da linha.
+    """
+    if mascara is None or mascara.ndim != 2 or not mascara.size:
+        return mascara
+    size = max(1, int(config.LINE_REFLECTION_HOLE_CLOSE_KERNEL))
+    if size % 2 == 0:
+        size += 1
+    if size == 1:
+        return mascara
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+    return cv2.morphologyEx(mascara, cv2.MORPH_CLOSE, kernel)
+
+
 def mascarar_extremidades_com_linha_central(mascara):
     """Bloqueia a borda enquanto ainda ha linha consistente no centro.
 

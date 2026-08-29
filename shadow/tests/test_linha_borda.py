@@ -22,6 +22,7 @@ except ImportError:
 
 from visao.linha import (  # noqa: E402
     mascarar_extremidades_com_linha_central,
+    preencher_furos_de_reflexo,
     remover_componentes_isolados_da_borda,
 )
 
@@ -69,6 +70,16 @@ class LinhaBordaTests(unittest.TestCase):
         filtrada = mascarar_extremidades_com_linha_central(mascara)
 
         self.assertTrue(np.all(filtrada[55:100, 125:150] == 255))
+
+    def test_reflexo_pequeno_na_fita_e_preenchido(self):
+        mascara = np.zeros((100, 160), dtype=np.uint8)
+        mascara[20:100, 70:90] = 255
+        # O LED abre uma falha menor que o kernel dentro da fita detectada.
+        mascara[55:60, 76:84] = 0
+
+        filtrada = preencher_furos_de_reflexo(mascara)
+
+        self.assertTrue(np.all(filtrada[55:60, 76:84] == 255))
 
 
 if __name__ == "__main__":

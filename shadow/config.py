@@ -167,6 +167,10 @@ LINE_CENTER_SUPPORT_X_MAX = .60
 LINE_CENTER_SUPPORT_Y_MIN = .55
 LINE_CENTER_SUPPORT_MIN_FILL = .08
 LINE_CENTER_SUPPORT_EDGE_MASK_RATIO = .25
+# Reflexos pontuais do LED removem pequenos trechos da mascara da fita preta.
+# Um fechamento curto recompõe esses furos, sem transformar a mancha larga do
+# prata em uma linha. Deve ser impar e menor que a largura normal da fita.
+LINE_REFLECTION_HOLE_CLOSE_KERNEL = 9
 LINE_CROP_INITIAL = .52
 LINE_CROP_NORMAL = .52
 LINE_CROP_GREEN = .45                     # durante curva verde
@@ -193,6 +197,10 @@ LINE_PATH_MIN_VERTICAL_SPAN_RATIO = .28
 LINE_PATH_MIN_SAMPLES = 7
 LINE_PATH_MAX_BAND_GAP = 2
 LINE_PATH_MAX_LATERAL_JUMP_PX = camera_x * .30
+# O contorno so pode comandar o segue-linha se render uma trajetoria continua
+# pelas bandas horizontais. Fragmentos escuros do prata normalmente falham
+# nesta prova e passam a ser tratados como linha perdida, nao como direcao.
+LINE_REQUIRE_CONFIDENT_PATH = True
 # Reflexos das luzes abrem pequenos vazios dentro da faixa preta. Eles nao
 # sao bifurcacoes: intervalos proximos sao reunidos e uma separacao so limita
 # o ponto futuro quando for larga e persistir por varias bandas da imagem.

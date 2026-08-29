@@ -108,6 +108,20 @@ class PontoFuturoTests(unittest.TestCase):
 
         self.assertFalse(futuro.valido)
 
+    def test_fragmentos_escuros_do_prata_nao_formam_trajetoria(self):
+        mascara = np.zeros((252, 448), dtype=np.uint8)
+        # Cada fragmento e largo, mas nenhum deles forma um caminho continuo
+        # de baixo para cima que possa orientar o segue-linha.
+        for y in (230, 185, 140, 95):
+            cv2.rectangle(mascara, (120, y), (350, y + 16), 255, -1)
+        contornos, _ = cv2.findContours(
+            mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+        for contorno in contornos:
+            futuro = extrair_ponto_futuro(
+                contorno, mascara_linha=mascara, origem_x=224)
+            self.assertFalse(futuro.valido)
+
     def test_circulo_nao_e_reduzido_a_media_dos_dois_ramos(self):
         mascara = np.zeros((252, 448), dtype=np.uint8)
         cv2.line(mascara, (224, 251), (224, 220), 255, 18)

@@ -230,6 +230,10 @@ def vision_loop(debug=False):
             if line_status.value == "gap_avoid":
                 apply_gap_avoid_mask(black_image)
 
+            # Primeiro fecha os pequenos buracos abertos pelo reflexo direto
+            # do LED na fita. Isso permite usar um teto de preto mais baixo,
+            # sem perder a linha verdadeira por pontos brilhantes.
+            black_image = line_module.preencher_furos_de_reflexo(black_image)
             # O prata pode gerar ilhas na mascara nas duas extremidades.
             # Remova somente as que nao se conectam ao corredor central antes
             # da morfologia dilata-las e uni-las artificialmente a linha.
@@ -269,6 +273,20 @@ def vision_loop(debug=False):
                 for contorno in contours_blk
                 if cv2.contourArea(contorno) > area_minima_linha
             ]
+            if (config.LINE_REQUIRE_CONFIDENT_PATH
+                    and line_status.value != "gap_avoid"):
+                # Area grande nao e prova suficiente: o prata pode produzir
+                # varios pedacos escuros. Exigir um caminho continuo impede
+                # esses fragmentos de chegarem ao calculo de angulo.
+                contours_blk = [
+                    contorno
+                    for contorno in contours_blk
+                    if extrair_ponto_futuro(
+                        contorno,
+                        mascara_linha=black_image,
+                        origem_x=camera_x / 2,
+                    ).valido
+                ]
 
             # Procura a faixa vermelha.
             candidato_vermelho_frame = check_contour_size(
