@@ -118,7 +118,10 @@ def _executar_sequencia_partida(arduino):
     if not config.STARTUP_TURN_SEQUENCE_ENABLED:
         return True
     status.value = 'Executando sequencia de partida'
-    print("[controle] sequencia de partida: D0.5 E1 D1 E1 D0.5")
+    tempo_total = sum(duracao for _sentido, duracao in config.STARTUP_TURN_SEQUENCE)
+    print(
+        "[controle] sequencia de partida: "
+        f"{tempo_total:.1f} s de giro ativo balanceado")
     for indice, (sentido, duracao) in enumerate(
             config.STARTUP_TURN_SEQUENCE):
         if terminate.value or not arduino.connected:
