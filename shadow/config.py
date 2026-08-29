@@ -204,7 +204,10 @@ LINE_REQUIRE_CONFIDENT_PATH = True
 # A confianca tambem exige que o caminho comece perto da base do robo. Assim,
 # uma mancha escura vista apenas sobre o prata nao pode virar uma linha-alvo
 # sem estar ligada ao trecho que o robo realmente vinha seguindo.
-LINE_PATH_REQUIRE_BASE_ANCHOR = True
+# A camera pode ver a fita ja deslocada no rodape durante curvas. Mantenha
+# esta prova disponivel para ensaio, mas desligada no percurso ate haver uma
+# calibracao geometrica especifica da camera.
+LINE_PATH_REQUIRE_BASE_ANCHOR = False
 LINE_PATH_BASE_ANCHOR_Y_MIN = .82
 LINE_PATH_BASE_ANCHOR_MAX_OFFSET_RATIO = .30
 LINE_PATH_BASE_ANCHOR_MAX_WIDTH_RATIO = .35

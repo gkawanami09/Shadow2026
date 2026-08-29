@@ -11,6 +11,7 @@ import numpy as np
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
+import config  # noqa: E402
 from visao.trajetoria import (  # noqa: E402
     caminho_confiavel_ate_origem,
     extrair_ponto_futuro,
@@ -132,8 +133,13 @@ class PontoFuturoTests(unittest.TestCase):
         contornos, _ = cv2.findContours(
             mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
-        self.assertFalse(caminho_confiavel_ate_origem(
-            contornos[0], mascara_linha=mascara, origem_x=224))
+        anterior = config.LINE_PATH_REQUIRE_BASE_ANCHOR
+        config.LINE_PATH_REQUIRE_BASE_ANCHOR = True
+        try:
+            self.assertFalse(caminho_confiavel_ate_origem(
+                contornos[0], mascara_linha=mascara, origem_x=224))
+        finally:
+            config.LINE_PATH_REQUIRE_BASE_ANCHOR = anterior
 
     def test_caminho_central_continuo_e_confiavel(self):
         mascara, contorno = linha([(224, 251), (224, 5)])
