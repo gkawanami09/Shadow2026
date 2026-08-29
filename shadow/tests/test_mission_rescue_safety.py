@@ -58,6 +58,12 @@ class RescueReturnSafetyTests(unittest.TestCase):
         self.assertIn("reiniciando imediatamente pelo segue-linha", fonte)
         self.assertNotIn("system.aguardar_ciclo_do_arduino(motivo)", fonte)
 
+    def test_reinicio_espera_liberacao_da_camera_e_detecta_falha_visivel(self):
+        fonte = (SHADOW_ROOT / "mission.py").read_text(encoding="utf-8")
+
+        self.assertIn("MISSION_CAMERA_HANDOFF_SETTLE_S", fonte)
+        self.assertIn("Falha camera de linha", fonte)
+
     def test_falha_serial_tardia_do_resgate_reinicia_o_percurso(self):
         args = type("Args", (), {"gerenciado_pela_missao": True})()
         arduino = type("Arduino", (), {"connected": False})()

@@ -145,7 +145,17 @@ def rescue_return_action(returncode):
 def iniciar_visao(debug):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     from visao.processamento import vision_loop
-    vision_loop(debug)
+    # Um erro ao reabrir a camera depois do resgate ocorria somente no filho e
+    # deixava o controle esperando ``vision_ready`` sem diagnostico. Publique
+    # o erro para o supervisor encerrar esta tentativa e iniciar outra.
+    try:
+        print("[visao] iniciando camera de linha")
+        vision_loop(debug)
+    except Exception as err:  # noqa: BLE001
+        from shared.dados_compartilhados import status
+        status.value = f"Falha camera de linha: {err}"
+        print(f"[visao] FALHA ao iniciar camera de linha: {err}")
+        raise
 
 
 def iniciar_controle():
@@ -267,6 +277,8 @@ class MissionSystem:
             if not all(child.is_alive() for child in self.children):
                 return False
             texto = str(self.shared.status.value).lower()
+            if "falha camera de linha" in texto:
+                return False
             if "pronto" in texto or "seguindo linha" in texto:
                 return True
             time.sleep(.05)
@@ -458,7 +470,12 @@ class MissionSystem:
             self._lock_held = True
         self._preparar_nova_tentativa()
         print("[missao] recursos limpos; tentando iniciar o percurso")
-        time.sleep(config.MISSION_RECOVERY_DELAY_S)
+        espera_camera = max(
+            config.MISSION_RECOVERY_DELAY_S,
+            config.MISSION_CAMERA_HANDOFF_SETTLE_S,
+        )
+        print(f"[missao] aguardando {espera_camera:.1f}s para liberar camera")
+        time.sleep(espera_camera)
         self.start_line_phase()
 
     @staticmethod

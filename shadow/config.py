@@ -24,6 +24,9 @@ SERIAL_RECONNECT_BACKOFF = 0.5            # s — espera minima entre tentativas
 MISSION_RECOVERY_DELAY_S = 1.0
 # Uma queda no resgate sempre recria a fase de percurso. O processo de
 # controle aguarda o handshake do Arduino; uma religacao rapida tambem vale.
+# Libcamera libera buffers depois de ``close()`` de forma assincrona. Antes de
+# abrir a camera inferior novamente, espere essa liberacao completar.
+MISSION_CAMERA_HANDOFF_SETTLE_S = 2.0
 MAX_PWM = 120                             # teto absoluto; firmware tambem trava em 120
 
 # ----------------------------------------------------------------------------
@@ -389,7 +392,7 @@ ENTRY_TURN_AROUND_REARM_S = 1.0
 CONTROL_MAX_ITERATIONS = 60               # teto do loop de controle
 VISION_MAX_FRAMES = 45                    # folga para não descartar captura de 40 FPS
 VISION_OPENCV_THREADS = 1                 # evita picos curtos em todos os núcleos
-VISION_READY_TIMEOUT = 15                 # s que o controle espera a visao no boot
+VISION_READY_TIMEOUT = 10                 # s que o controle espera a visao no boot
 
 # ----------------------------------------------------------------------------
 # Entrada da sala de resgate por modelo ONNX — CÂMERA DE LINHA
