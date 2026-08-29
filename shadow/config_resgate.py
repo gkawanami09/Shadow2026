@@ -217,8 +217,10 @@ BALL_CRESCENT_TOKEN_TTL_S = 0.80
 # Primeiro o robo baixa o Futaba, sem avancar. Depois percorre com ele baixo a
 # soma dos dois avancos antigos (1 s + 1 s) e completa mais 200 ms antes de
 # fechar as garras. Somente o modo de parede, configurado abaixo, acrescenta re.
-BALL_PICKUP_FUTABA_POWER = -20
-BALL_PICKUP_FUTABA_MS = 1500
+# Calibracao fisica no CH4: a descida completa e confiavel usa potencia
+# negativa maxima durante 700 ms antes do avanco e do fechamento das garras.
+BALL_PICKUP_FUTABA_POWER = -100
+BALL_PICKUP_FUTABA_MS = 700
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
 # O firmware inicia em esquerda=180 e direita=0. Para aproximar as duas
 # garras 20 graus do centro, a esquerda usa sinal negativo e a direita

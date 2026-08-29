@@ -569,9 +569,12 @@ class BallPickupSequencerTests(unittest.TestCase):
         )
         self.assertEqual(
             [step.futaba_action for step in actions
-             if step.futaba_action is not None],
+            if step.futaba_action is not None],
             [
-                (-20, 1500),
+                (
+                    cfg.BALL_PICKUP_FUTABA_POWER,
+                    cfg.BALL_PICKUP_FUTABA_MS,
+                ),
                 (20, 1900),
                 (10, 400),
                 (1, 300),
