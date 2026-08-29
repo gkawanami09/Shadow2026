@@ -690,11 +690,16 @@ def main():
                     )
                     tentativas += 1
                     if returncode == RESCUE_EXIT_ARDUINO_DESCONECTADO:
-                        # O resgate acabou porque perdeu a unica placa que
-                        # controla os motores. Nao tente abrir uma nova serial
-                        # no meio do reboot: espere o ciclo fisico completo
-                        # que sinaliza reposicionamento seguro do robo.
-                        system.aguardar_ciclo_do_arduino(motivo)
+                        # O resgate so devolve este codigo depois de observar
+                        # a queda real da serial e liberar seus recursos.
+                        # Nao espere uma SEGUNDA observacao da porta USB: se
+                        # o Arduino for desligado/religado rapido, a porta ja
+                        # pode ter voltado e essa espera ficaria infinita.
+                        # A sessao nova faz o handshake e repete ate o Uno
+                        # responder, sempre com os motores parados no boot.
+                        print(
+                            "[missao] Arduino caiu no resgate; "
+                            "reiniciando imediatamente pelo segue-linha")
                     iniciar_percurso_ate_pronto(motivo)
                     continue
 

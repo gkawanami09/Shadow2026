@@ -2,9 +2,7 @@
 
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
 
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
@@ -50,24 +48,13 @@ class RescueReturnSafetyTests(unittest.TestCase):
         self.assertEqual(rescue_return_action(4), RESCUE_RETURN_STOPPED)
         self.assertEqual(rescue_return_action(99), RESCUE_RETURN_STOPPED)
 
-    def test_ciclo_fisico_sustentado_do_arduino_libera_nova_tentativa(self):
-        sistema = MissionSystem(None, None, SimpleNamespace())
-        portas = iter((set(), {"/dev/ttyACM0"}, set(), {"/dev/ttyACM0"}))
-
-        with (
-            patch.object(
-                sistema, "_portas_arduino_presentes", side_effect=portas),
-            patch("mission.time.sleep"),
-            patch("mission.time.monotonic", side_effect=(0.0, 1.0, 2.0, 6.0)),
-        ):
-            sistema.aguardar_ciclo_do_arduino("teste")
-
-    def test_fluxo_da_missao_usa_a_espera_do_ciclo_ao_desconectar(self):
+    def test_fluxo_da_missao_reinicia_sem_esperar_outra_porta_usb(self):
         fonte = (SHADOW_ROOT / "mission.py").read_text(encoding="utf-8")
 
         self.assertIn(
             "if returncode == RESCUE_EXIT_ARDUINO_DESCONECTADO:", fonte)
-        self.assertIn("system.aguardar_ciclo_do_arduino(motivo)", fonte)
+        self.assertIn("reiniciando imediatamente pelo segue-linha", fonte)
+        self.assertNotIn("system.aguardar_ciclo_do_arduino(motivo)", fonte)
 
     def test_falha_serial_tardia_do_resgate_reinicia_o_percurso(self):
         args = type("Args", (), {"gerenciado_pela_missao": True})()

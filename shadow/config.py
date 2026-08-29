@@ -22,10 +22,8 @@ SERIAL_MIN_RESEND_S = 0.05                # s — dedupe de comandos identicos
 SERIAL_RECONNECT_BACKOFF = 0.5            # s — espera minima entre tentativas de reconexao
 # A missao se recupera de uma queda do Arduino sem encerrar o supervisor.
 MISSION_RECOVERY_DELAY_S = 1.0
-# Uma queda USB curta nao e um reinicio intencional da placa. Para rearmar o
-# percurso depois de uma falha no resgate, o Arduino deve ficar ausente por
-# este tempo continuo antes de reaparecer.
-MISSION_ARDUINO_DESLIGAMENTO_MINIMO_S = 3.0
+# Uma queda no resgate sempre recria a fase de percurso. O processo de
+# controle aguarda o handshake do Arduino; uma religacao rapida tambem vale.
 MAX_PWM = 120                             # teto absoluto; firmware tambem trava em 120
 
 # ----------------------------------------------------------------------------
