@@ -251,7 +251,7 @@ BALL_PICKUP_GRIPPER_STEP_INTERVAL_S = 0.05
 # e apenas 250 ms na aproximacao lenta. A forca nao muda, evitando que a
 # garra perca a esfera; somente a altura final fica menor.
 BALL_PICKUP_LIFT_POWER = 20
-BALL_PICKUP_LIFT_MS = 1500
+BALL_PICKUP_LIFT_MS = 1400
 BALL_PICKUP_LIFT_SLOW_POWER = 10
 BALL_PICKUP_LIFT_SLOW_MS = 250
 # Sustentacao curta no alto. Em servo continuo isto e velocidade minima, nao
