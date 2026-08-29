@@ -274,6 +274,28 @@ class DepositMarkerControllerTests(unittest.TestCase):
         self.assertEqual(retomada.state, controller.START)
         self.assertEqual(retomada.angle, cfg.DEPOSIT_SEARCH_TANK_ANGLE)
 
+    def test_marcador_perdido_apos_alinhar_retorna_com_giro_forte(self):
+        controller = DepositMarkerController("green", start_time=0.0)
+        controller.state = controller.APPROACH
+        controller._last_seen_at = 0.0
+
+        parar = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=cfg.DEPOSIT_REACQUIRE_TIMEOUT_S,
+        )
+        controller.mark_lost_stopped(now=cfg.DEPOSIT_REACQUIRE_TIMEOUT_S)
+        giro = controller.update(
+            None,
+            FRAME_SHAPE,
+            now=cfg.DEPOSIT_REACQUIRE_TIMEOUT_S + .01,
+        )
+
+        self.assertEqual(parar.state, controller.LOST_STOP)
+        self.assertEqual(giro.state, controller.START)
+        self.assertEqual(giro.angle, cfg.DEPOSIT_SEARCH_TANK_ANGLE)
+        self.assertEqual(giro.speed, cfg.DEPOSIT_LOST_MARKER_TANK_SPEED)
+
     def test_align_direction_and_speed_are_gentle(self):
         for center_x, sign in ((520.0, 1), (120.0, -1)):
             with self.subTest(center_x=center_x):

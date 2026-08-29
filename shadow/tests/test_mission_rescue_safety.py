@@ -58,6 +58,14 @@ class RescueReturnSafetyTests(unittest.TestCase):
         self.assertIn("reiniciando imediatamente pelo segue-linha", fonte)
         self.assertNotIn("system.aguardar_ciclo_do_arduino(motivo)", fonte)
 
+    def test_falha_do_resgate_devolve_a_missao_sem_esperar_desligamento(self):
+        fonte = (SHADOW_ROOT / "resgate.py").read_text(encoding="utf-8")
+
+        self.assertIn("falha terminal; devolvendo ao segue-linha", fonte)
+        self.assertIn("ERRO; devolvendo ao segue-linha", fonte)
+        self.assertNotIn(
+            "_aguardar_desligamento_do_arduino(arduino, str(err))", fonte)
+
     def test_reinicio_espera_liberacao_da_camera_e_detecta_falha_visivel(self):
         fonte = (SHADOW_ROOT / "mission.py").read_text(encoding="utf-8")
 
@@ -72,6 +80,13 @@ class RescueReturnSafetyTests(unittest.TestCase):
             runtime_error_exit_code(args, arduino, 3),
             EXIT_ARDUINO_DESCONECTADO,
         )
+
+    def test_falha_com_arduino_ainda_conectado_tambem_interrompe_resgate(self):
+        args = type("Args", (), {"gerenciado_pela_missao": True})()
+        arduino = type("Arduino", (), {"connected": True})()
+
+        self.assertEqual(runtime_error_exit_code(args, arduino, 3), 3)
+        self.assertEqual(rescue_return_action(3), RESCUE_RETURN_STOPPED)
 
     def test_resgate_precisa_passar_por_reconectando_antes_da_linha(self):
         with self.assertRaisesRegex(RuntimeError, "proibida"):

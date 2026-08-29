@@ -397,6 +397,11 @@ class DepositMarkerController:
         self._tracking_reset_requested = True
         self._reset_progress()
         self._reset_verify()
+        # O alinhamento é deliberadamente suave, mas, depois de perder um
+        # marcador real, PWM baixo pode nem vencer o atrito do chassi. A nova
+        # busca começa no próximo update com o giro robusto das bolinhas.
+        self.search_tank_speed = cfg.DEPOSIT_LOST_MARKER_TANK_SPEED
+        self.search_full_turn_s = cfg.DEPOSIT_LOST_MARKER_FULL_TURN_S
 
     def mark_arrival_stopped(self, now=None):
         if self.state != self.ARRIVAL_STOP:

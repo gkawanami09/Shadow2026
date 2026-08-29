@@ -2832,12 +2832,11 @@ def main(args=None):
                     f"[resgate] estado terminal {comando.state}; "
                     "motores parados")
                 if args.drive and args.gerenciado_pela_missao:
-                    _aguardar_desligamento_do_arduino(
-                        arduino,
-                        f"estado terminal {comando.state}",
-                    )
-                    raise ArduinoDisconnectedDuringRescue(
-                        "Arduino desligado apos falha retida no resgate")
+                    # Nunca espere uma ação manual aqui: a falha tem de
+                    # liberar o supervisor para reiniciar pelo segue-linha.
+                    codigo_saida = EXIT_INCOMPLETE
+                    print("[resgate] falha terminal; devolvendo ao segue-linha")
+                    break
                 if not args.debug or args.drive:
                     break
 
@@ -2858,10 +2857,9 @@ def main(args=None):
             and args.gerenciado_pela_missao
             and arduino is not None
         ):
-            if arduino.connected:
-                _aguardar_desligamento_do_arduino(arduino, str(err))
-            codigo_saida = EXIT_ARDUINO_DESCONECTADO
-            print(f"[resgate] ERRO retido ate desconexao: {err}")
+            codigo_saida = runtime_error_exit_code(
+                args, arduino, EXIT_INCOMPLETE)
+            print(f"[resgate] ERRO; devolvendo ao segue-linha: {err}")
         else:
             codigo_saida = runtime_error_exit_code(
                 args, arduino, codigo_saida)

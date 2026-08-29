@@ -442,6 +442,11 @@ DEPOSIT_SEARCH_FULL_TURN_S = (
     * BALL_SEARCH_TANK_SPEED
     / DEPOSIT_SEARCH_TANK_SPEED
 )
+# Um marcador já confirmado que some não pode deixar o robô corrigindo com o
+# PWM baixo de aproximação. Após a parada de segurança, a reacquisição usa o
+# giro forte já calibrado para buscar as bolinhas.
+DEPOSIT_LOST_MARKER_TANK_SPEED = BALL_SEARCH_TANK_SPEED
+DEPOSIT_LOST_MARKER_FULL_TURN_S = BALL_SEARCH_FULL_TURN_S
 # A busca do marcador vermelho usa o mesmo ritmo seguro da busca das bolas:
 # gira um trecho, freia, espera a vibracao e somente entao observa a camera.
 DEPOSIT_SEARCH_PULSE_S = BALL_SEARCH_PULSE_S
