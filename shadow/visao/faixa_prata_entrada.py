@@ -95,8 +95,12 @@ def detectar_faixa_prata(frame_bgr, black_mask=None, *, line_aligned=False):
     dark = value <= config.ENTRY_SILVER_DARK_VALUE
     neutral_contrast = low_sat & (bright | dark)
     row_fill = np.mean(neutral_contrast, axis=1)
+    bright_row = np.mean(low_sat & bright, axis=1)
+    dark_row = np.mean(low_sat & dark, axis=1)
     band = _maior_faixa_contigua(
-        row_fill >= config.ENTRY_SILVER_MIN_CONTRAST_ROW_FILL)
+        (row_fill >= config.ENTRY_SILVER_MIN_CONTRAST_ROW_FILL)
+        & (bright_row >= config.ENTRY_SILVER_MIN_BRIGHT_RATIO)
+        & (dark_row >= config.ENTRY_SILVER_MIN_DARK_ROW_RATIO))
 
     bbox = None
     width_ratio = 0.

@@ -60,6 +60,15 @@ class FaixaPrataEntradaTests(unittest.TestCase):
 
         self.assertFalse(resultado.candidata)
 
+    def test_linha_preta_estreita_sobre_piso_branco_nao_e_prata(self):
+        frame = np.full((*SHAPE, 3), 240, dtype=np.uint8)
+        frame[:, 210:238] = 25
+        resultado = detectar_faixa_prata(
+            frame, mascara_linha_ate(180), line_aligned=True)
+
+        self.assertIsNone(resultado.bbox)
+        self.assertFalse(resultado.candidata)
+
     def test_faixa_reflexiva_larga_com_linha_terminando_confirma_candidata(self):
         frame, (y0, y1) = faixa_prata_reflexiva()
         resultado = detectar_faixa_prata(

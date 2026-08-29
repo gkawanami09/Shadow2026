@@ -496,6 +496,10 @@ ENTRY_SILVER_BRIGHT_VALUE = 220
 ENTRY_SILVER_DARK_VALUE = 90
 ENTRY_SILVER_MIN_BRIGHT_RATIO = .025
 ENTRY_SILVER_MIN_DARK_RATIO = .025
+# A assinatura metalica exige claro e escuro na MESMA linha da faixa. A linha
+# preta normal ocupa pouca largura; este minimo evita somar fita preta estreita
+# com piso branco claro como se fossem uma unica superficie prata.
+ENTRY_SILVER_MIN_DARK_ROW_RATIO = .12
 ENTRY_SILVER_MIN_CONTRAST_ROW_FILL = .16
 ENTRY_SILVER_MIN_WIDE_RATIO = .62
 ENTRY_SILVER_MIN_BAND_HEIGHT_RATIO = .035
