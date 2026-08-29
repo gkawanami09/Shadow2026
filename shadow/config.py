@@ -260,10 +260,10 @@ PIVOT_RECOVERY_EXIT_ANGLE = 40
 # ----------------------------------------------------------------------------
 # Verde
 # ----------------------------------------------------------------------------
-GREEN_MIN_AREA = 2500                     # area minima do marcador
-GREEN_MARKER_MIN_ASPECT = .5              # quadrado tolerando perspectiva
-GREEN_MARKER_MAX_ASPECT = 2.0
-GREEN_MARKER_MIN_RECT_FILL = .58          # rejeita reflexos/manchas alongadas
+GREEN_MIN_AREA = 2700                     # elimina manchas pequenas do piso
+GREEN_MARKER_MIN_ASPECT = .60             # marcador e aproximadamente quadrado
+GREEN_MARKER_MAX_ASPECT = 1.70
+GREEN_MARKER_MIN_RECT_FILL = .65          # rejeita reflexos/manchas irregulares
 GREEN_BLACK_ROI_SCALE = .9                # alcance da busca ao redor do verde
 GREEN_BLACK_MIN_RUN_RATIO = .42           # linha continua, nao media de pixels
 GREEN_BLACK_MAX_GAP_RATIO = .28           # precisa estar logo junto do quadrado
@@ -487,8 +487,8 @@ BLACK_MAX_RAMP_DOWN_TOP_DEFAULT = [27, 27, 26]      # BGR
 # S e V não mudam — trocar dois canais não altera máximo nem mínimo.
 # Marcador verde sob pouca luz perde saturacao e pode deslocar um pouco o
 # matiz. A area/forma do triangulo ainda e validada depois desta mascara.
-GREEN_MIN_DEFAULT = [15, 60, 12]                     # HSV (era H=58)
-GREEN_MAX_DEFAULT = [75, 255, 255]                   # HSV (era H=98)
+GREEN_MIN_DEFAULT = [20, 100, 35]                    # HSV (era H=58)
+GREEN_MAX_DEFAULT = [70, 255, 255]                   # HSV (era H=98)
 # Laranja ocupa o fim da banda baixa do HSV. Vermelho fica restrito aos tons
 # proximos de 0 ou 180, com cor e brilho suficientes para nao pegar laranja.
 RED_MIN_1_DEFAULT = [0, 125, 100]                    # HSV

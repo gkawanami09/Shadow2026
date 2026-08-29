@@ -115,6 +115,10 @@ class ValidacaoVerdeTests(unittest.TestCase):
             confirmador.atualizar("straight", candidato=False)
         self.assertFalse(confirmador.candidato_ativo)
 
+    def test_mancha_verde_pequena_nao_bloqueia_o_robo(self):
+        # 50 x 50 = 2500 px²: abaixo do tamanho minimo do marcador real.
+        self.assertFalse(has_plausible_green([_quadrado(lado=50)]))
+
     def test_dois_verdes_validos_tem_prioridade_de_180(self):
         contornos, preto = _dois_verdes_validos()
         self.assertEqual(check_green(contornos, preto), "turn_around")
