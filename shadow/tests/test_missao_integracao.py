@@ -220,10 +220,9 @@ class MissionRecoveryTests(unittest.TestCase):
 
 
 class MissionEntryAdvanceTests(unittest.TestCase):
-    def test_entrada_usa_score_prata_e_nunca_ausencia_de_preto(self):
-        self.assertTrue(config.ENTRY_SILVER_ENABLED)
-        self.assertEqual(config.ENTRY_SILVER_DETECTOR, "score")
-        self.assertFalse(config.ENTRY_NO_BLACK_RESCUE_TEST_ENABLED)
+    def test_entrada_usa_ausencia_de_preto_e_prata_fica_desligada(self):
+        self.assertFalse(config.ENTRY_SILVER_ENABLED)
+        self.assertTrue(config.ENTRY_NO_BLACK_RESCUE_TEST_ENABLED)
 
     def test_entrada_inicia_busca_sem_avanco_reto(self):
         self.assertEqual(cfg.MISSION_ENTRY_FORWARD_S, 0.0)
