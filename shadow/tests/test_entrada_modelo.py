@@ -388,7 +388,7 @@ class EntryGateTests(_TwoVotesEntryGateTestCase):
 
 
 class EntryGateDefaultConfigTests(unittest.TestCase):
-    def test_prata_alinhada_sem_preto_confirma_no_primeiro_frame(self):
+    def test_modelo_legado_confirma_no_primeiro_frame(self):
         self.assertEqual(config.ENTRY_SILVER_VOTES_NEEDED, 1)
         gate = EntryGate()
         detection = EntryDetection((1, 2, 20, 8), .50)

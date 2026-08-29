@@ -401,11 +401,13 @@ VISION_READY_TIMEOUT = 15                 # s que o controle espera a visao no b
 # câmera de resgate, de outro ângulo, com outra iluminação e outro tamanho
 # aparente. Misturar os dois perfis foi explicitamente evitado.
 #
-# Teste temporario de entrada: nesta configuracao a entrada pelo YOLO prata
-# fica completamente desligada. O controle entra no resgate pela ausencia de
-# preto configurada logo abaixo. Para voltar ao modelo, ponha este valor em
-# ``True`` e desligue ``ENTRY_NO_BLACK_RESCUE_TEST_ENABLED``.
-ENTRY_SILVER_ENABLED = False
+# A entrada da sala e detectada localmente pela camera de linha, combinando
+# reflexo metalico, geometria transversal e o termino da linha preta. O
+# handoff continua sendo o mesmo ja usado pela missao.
+ENTRY_SILVER_ENABLED = True
+# Detector leve por score; o modelo ONNX/NCNN antigo fica preservado apenas
+# para ferramentas e testes, mas nao participa do percurso.
+ENTRY_SILVER_DETECTOR = "score"
 # `entrada.onnx` é um YOLO de uma classe, exportado em 640×640.
 ENTRY_MODEL_PATH = "modelos/entrada.onnx"
 # Export NCNN 416×416 do mesmo `entrada.pt`. No Pi, NCNN é mais adequado ao
@@ -433,6 +435,8 @@ ENTRY_MODEL_PENDING_FRAMES = 24
 ENTRY_MODEL_THREADS = 2
 # Um unico prata alinhado sem preto depois da caixa inicia o resgate logo. A
 # rampa ainda e barrada antes deste voto pelos dois limiares de preto.
+# Compatibilidade exclusiva do pipeline ONNX legado; o detector por score usa
+# ENTRY_SILVER_CONFIRM_FRAMES abaixo e nao para o robo no primeiro candidato.
 ENTRY_SILVER_VOTES_NEEDED = 1
 ENTRY_SILVER_VOTE_WINDOW = 3
 # Contexto da prata: a imagem clara no final da rampa só é um falso
@@ -460,12 +464,13 @@ ENTRY_SILVER_VALIDATION_S = 0.0
 # nova candidatura prata por este periodo. Cada frame com preto renova o prazo.
 ENTRY_BLACK_FOLLOW_TIMEOUT_S = 1.0
 # ---------------------------------------------------------------------------
-# Teste de entrada sem prata -- SOMENTE na missao completa
+# Teste de entrada sem prata -- SOMENTE em bancada
 # ---------------------------------------------------------------------------
 # Depois de ter seguido uma linha preta, se ela desaparecer enquanto o robo
 # estiver reto por este tempo, entra no resgate. O temporizador nao conta no
 # boot sem linha, em curva, em marcador ou em manobra verde.
-ENTRY_NO_BLACK_RESCUE_TEST_ENABLED = True
+# Perder preto nunca basta para entrar: gap, curva ou sombra nao sao prata.
+ENTRY_NO_BLACK_RESCUE_TEST_ENABLED = False
 ENTRY_NO_BLACK_RESCUE_DELAY_S = 3.0
 # Ao confirmar, o controle apenas para e entrega a serial. O resgate preserva
 # seu avanço reto normal de 1 s antes de iniciar os giros de busca.
@@ -478,6 +483,33 @@ ENTRY_LINE_MAX_BOTTOM_ERROR_PX = 110
 # A faixa pode cobrir o fim da linha no frame seguinte. Conserva o último
 # alinhamento comprovado por este intervalo, sem aceitar uma linha antiga.
 ENTRY_ALIGNMENT_HOLD_S = .70
+
+# Detector por score da faixa prata. A ROI e' a parte util do piso a frente
+# do robo; os limites sao pontos de partida e devem ser calibrados no stream.
+ENTRY_SILVER_ROI_X_MIN = .08
+ENTRY_SILVER_ROI_X_MAX = .92
+ENTRY_SILVER_ROI_Y_MIN = .35
+ENTRY_SILVER_ROI_Y_MAX = .95
+ENTRY_SILVER_MAX_SATURATION = 75.
+ENTRY_SILVER_MIN_STD_VALUE = 34.
+ENTRY_SILVER_BRIGHT_VALUE = 220
+ENTRY_SILVER_DARK_VALUE = 90
+ENTRY_SILVER_MIN_BRIGHT_RATIO = .025
+ENTRY_SILVER_MIN_DARK_RATIO = .025
+ENTRY_SILVER_MIN_CONTRAST_ROW_FILL = .16
+ENTRY_SILVER_MIN_WIDE_RATIO = .62
+ENTRY_SILVER_MIN_BAND_HEIGHT_RATIO = .035
+ENTRY_SILVER_SCORE_MIN = 9
+ENTRY_SILVER_CONFIRM_FRAMES = 4
+ENTRY_SILVER_MISS_DECAY = 1
+# A linha deve chegar centralizada logo abaixo da faixa e nao pode continuar
+# alem dela. Estes valores usam a mascara preta ja calculada pelo pipeline.
+ENTRY_SILVER_LINE_X_MIN = .38
+ENTRY_SILVER_LINE_X_MAX = .62
+ENTRY_SILVER_LINE_APPROACH_RATIO = .20
+ENTRY_SILVER_LINE_MIN_ROW_FILL = .10
+ENTRY_SILVER_LINE_MIN_ROWS_RATIO = .10
+ENTRY_SILVER_LOG_INTERVAL_S = .50
 
 # ----------------------------------------------------------------------------
 # Cores usadas quando uma chave não existe no config.ini

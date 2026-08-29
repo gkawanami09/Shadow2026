@@ -12,6 +12,7 @@ from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, VISION_MAX_FRAMES,
 from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
                                          entry_armed,
+                                         entry_silver_confirmed,
                                          green_candidate,
                                          green_turn_target,
                                          get_time_average, last_bottom_point,
@@ -540,20 +541,33 @@ def vision_loop(debug=False):
                     )
                     if entrada is None and confianca_bruta is not None:
                         confianca_entrada = confianca_bruta
+                    medicao_prata = getattr(entry_gate, "last_result", None)
+                    if medicao_prata is not None:
+                        texto_prata = (
+                            f"PRATA score={medicao_prata.score} "
+                            f"sat={medicao_prata.saturacao_media:.0f} "
+                            f"stdV={medicao_prata.desvio_brilho:.0f} "
+                            f"claro={medicao_prata.pct_claro:.0%} "
+                            f"largura={medicao_prata.largura_ratio:.0%} "
+                            f"linhaFim={int(medicao_prata.linha_fim)} "
+                            f"frames={entry_gate.votes} "
+                            f"PRATA={int(entry_silver_confirmed.value)}")
+                    else:
+                        texto_prata = (
+                            f"ONNX PRATA {entry_gate.votes}/"
+                            f"{config.ENTRY_SILVER_VOTE_WINDOW} "
+                            f"conf={confianca_entrada:.2f}/"
+                            f"{config.ENTRY_MODEL_MIN_CONFIDENCE:.2f} "
+                            f"{motivo_entrada}")
                     cv2.putText(
-                        cv2_img,
-                        f"ONNX PRATA {entry_gate.votes}/"
-                        f"{config.ENTRY_SILVER_VOTE_WINDOW} "
-                        f"conf={confianca_entrada:.2f}/"
-                        f"{config.ENTRY_MODEL_MIN_CONFIDENCE:.2f} "
-                        f"{motivo_entrada}",
-                        (5, 42),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        .35,
-                        (255, 255, 0),
-                        1,
-                        cv2.LINE_AA,
-                    )
+                        cv2_img, texto_prata, (5, 42),
+                        cv2.FONT_HERSHEY_SIMPLEX, .35, (255, 255, 0), 1,
+                        cv2.LINE_AA)
+                    if entry_silver_confirmed.value:
+                        cv2.putText(
+                            cv2_img, "PRATA CONFIRMADA", (5, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, .55, (0, 255, 255), 2,
+                            cv2.LINE_AA)
                 nomes_controle = ("TRACK", "CORNER", "LOST", "SPECIAL")
                 indice_controle = int(steering_state.value)
                 nome_controle = (
