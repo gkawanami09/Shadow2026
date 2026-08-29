@@ -102,6 +102,37 @@ class MissionDebugWindowTests(unittest.TestCase):
         self.assertEqual(processos[-1].args, (0,))
         self.assertFalse(compartilhado.rescue_yolo_confirmed.value)
 
+    def test_yolo_nao_reabre_depois_do_primeiro_handoff(self):
+        processos = []
+
+        class ProcessoFalso:
+            def __init__(self, target, args=(), name=None):
+                self.target, self.args, self.name = target, args, name
+                processos.append(self)
+
+            def start(self):
+                return None
+
+        valor = lambda inicial: SimpleNamespace(value=inicial)
+        compartilhado = SimpleNamespace(
+            terminate=valor(False), rescue_requested=valor(True),
+            rescue_yolo_confirmed=valor(True), red_finished=valor(False),
+            mission_mode=valor(False),
+        )
+        sistema = MissionSystem(
+            compartilhado, motor_lock=None,
+            args=SimpleNamespace(debug=False, rescue_camera_index=0),
+        )
+        with (patch("mission.Process", ProcessoFalso),
+              patch("mission.time.sleep")):
+            sistema.start_line_phase()
+            compartilhado.rescue_yolo_confirmed.value = True
+            self.assertTrue(sistema.consume_yolo_rescue_request())
+            sistema._start_vigia_yolo()
+
+        self.assertFalse(compartilhado.rescue_yolo_confirmed.value)
+        self.assertEqual(len(processos), 2)
+
 
 class MissionReadinessTests(unittest.TestCase):
     class FilhoFalso:

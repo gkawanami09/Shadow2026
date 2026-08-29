@@ -222,6 +222,9 @@ class MissionSystem:
         self.resgate_ativo = False
         self.argumentos_resgate = None
         self.rescue_returncode = None
+        # O vigia frontal so pode autorizar uma entrada por execucao da missao.
+        # Depois do primeiro handoff, as retomadas ficam em segue-linha puro.
+        self.yolo_rescue_consumed = False
         self._lock_held = True
 
     def _definir_compartilhado(self, nome, valor):
@@ -301,6 +304,7 @@ class MissionSystem:
         import config_resgate
         if not (
             config_resgate.MISSION_YOLO_RESCUE_ENABLED
+            and not self.yolo_rescue_consumed
             and hasattr(self.args, "rescue_camera_index")
         ):
             return
@@ -314,6 +318,18 @@ class MissionSystem:
         vigilante.start()
         self.children.append(vigilante)
         print("[missão] segue-linha pronto; vigia YOLO da câmera frontal ativo")
+
+    def consume_yolo_rescue_request(self):
+        """Desabilita o vigia para as retomadas depois do handoff YOLO."""
+        if self.yolo_rescue_consumed:
+            return False
+        confirmado = getattr(self.shared, "rescue_yolo_confirmed", None)
+        if confirmado is None or not confirmado.value:
+            return False
+        self.yolo_rescue_consumed = True
+        confirmado.value = False
+        print("[missão] primeira vítima YOLO consumida; retomadas serão só segue-linha")
+        return True
 
     def wait_line_ready(self):
         """Espera a câmera e a serial ficarem prontas sem travar para sempre."""
@@ -739,6 +755,9 @@ def main():
                             "um processo do percurso terminou; "
                             "reiniciando antes da faixa prata")
 
+                # A primeira confirmacao do vigia e consumida nesta execucao:
+                # mesmo que o resgate falhe, a volta nao reabre o YOLO.
+                system.consume_yolo_rescue_request()
                 estado_atual = mudar_estado(
                     estado_atual,
                     EstadoMissao.ENTRADA_RESGATE,
