@@ -63,5 +63,42 @@ class EntryAfterNoBlackTests(unittest.TestCase):
         self.assertFalse(ciclo.entry_armed.value)
 
 
+class StartupTurnSequenceTests(unittest.TestCase):
+    def setUp(self):
+        self.terminate_original = ciclo.terminate.value
+        self.status_original = ciclo.status.value
+        ciclo.terminate.value = False
+
+    def tearDown(self):
+        ciclo.terminate.value = self.terminate_original
+        ciclo.status.value = self.status_original
+
+    def test_sequencia_gira_d_e_d_e_d_com_tempos_configurados(self):
+        arduino = ArduinoFalso(connected=True)
+        movimentos = []
+        esperas = []
+
+        with (
+            patch.object(
+                ciclo, "steer_line",
+                side_effect=lambda sentido, velocidade, tank=False: (
+                    movimentos.append((sentido, velocidade, tank)) or True)),
+            patch.object(ciclo, "steer", return_value=True) as parar,
+            patch.object(
+                ciclo, "sleep_steering",
+                side_effect=lambda duracao: esperas.append(duracao)),
+        ):
+            self.assertTrue(ciclo._executar_sequencia_partida(arduino))
+
+        self.assertEqual(
+            [movimento[0] for movimento in movimentos],
+            [1., -1., 1., -1., 1.])
+        self.assertEqual(
+            [duracao for duracao in esperas if duracao >= .5],
+            [.5, 1., 1., 1., .5])
+        self.assertTrue(all(movimento[2] for movimento in movimentos))
+        self.assertEqual(parar.call_count, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

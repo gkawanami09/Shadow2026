@@ -100,6 +100,32 @@ def _reset_entry_silver(reason):
     entry_silver_state.value = ENTRY_SILVER_IDLE
 
 
+def _executar_sequencia_partida(arduino):
+    """Faz a varredura direita/esquerda antes de iniciar o segue-linha."""
+    if not config.STARTUP_TURN_SEQUENCE_ENABLED:
+        return True
+    status.value = 'Executando sequencia de partida'
+    print("[controle] sequencia de partida: D0.5 E1 D1 E1 D0.5")
+    for indice, (sentido, duracao) in enumerate(
+            config.STARTUP_TURN_SEQUENCE):
+        if terminate.value or not arduino.connected:
+            steer()
+            return False
+        lado = "direita" if sentido > 0 else "esquerda"
+        print(f"[controle] partida: {lado} por {duracao:.1f} s")
+        if steer_line(
+                sentido, config.STARTUP_TURN_SPEED, tank=True) is False:
+            steer()
+            return False
+        sleep_steering(duracao)
+        if steer() is False or not arduino.connected:
+            return False
+        if indice < len(config.STARTUP_TURN_SEQUENCE) - 1:
+            sleep_steering(config.STARTUP_TURN_PAUSE_S)
+    print("[controle] sequencia de partida concluida; liberando segue-linha")
+    return not terminate.value and arduino.connected
+
+
 def control_loop():
     try:
         arduino = Arduino()
@@ -142,6 +168,14 @@ def control_loop():
         time.sleep(.05)
 
     if terminate.value:
+        try:
+            steer()
+        finally:
+            arduino.close()
+        return
+
+    if not _executar_sequencia_partida(arduino):
+        status.value = 'Sequencia de partida interrompida'
         try:
             steer()
         finally:

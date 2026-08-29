@@ -29,6 +29,21 @@ MISSION_RECOVERY_DELAY_S = 1.0
 MISSION_CAMERA_HANDOFF_SETTLE_S = 2.0
 MAX_PWM = 120                             # teto absoluto; firmware tambem trava em 120
 
+# Varredura executada uma vez ao iniciar cada sessao de controle do Arduino,
+# antes de liberar o segue-linha. Sinal positivo gira para a direita; negativo,
+# para a esquerda. A soma dos tempos e equilibrada e termina na orientacao
+# inicial: D 0,5 s; E 1 s; D 1 s; E 1 s; D 0,5 s.
+STARTUP_TURN_SEQUENCE_ENABLED = True
+STARTUP_TURN_SPEED = .50
+STARTUP_TURN_PAUSE_S = .08
+STARTUP_TURN_SEQUENCE = (
+    (1., .5),
+    (-1., 1.),
+    (1., 1.),
+    (-1., 1.),
+    (1., .5),
+)
+
 # ----------------------------------------------------------------------------
 # Parada de segurança por obstáculo
 # ----------------------------------------------------------------------------
