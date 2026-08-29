@@ -49,6 +49,17 @@ class ConfirmadorVerde:
         now = time.monotonic() if now is None else float(now)
         if self._direcao_travada is not None:
             if now < self._trava_ate:
+                # Um dos marcadores pode entrar no quadro antes do outro e
+                # confirmar provisoriamente uma curva de 90 graus. Quando o
+                # segundo aparece, o par validado precisa promover a ordem
+                # para 180 graus em vez de ficar preso nessa primeira leitura.
+                if (direcao == "turn_around"
+                        and self._direcao_travada != "turn_around"):
+                    self._historico.clear()
+                    self._contagem_180 += 1
+                    if self._contagem_180 >= self.frames_180:
+                        self._candidatos.append(True)
+                        return self._travar_direcao("turn_around", now)
                 # Mantem a sinalizacao de marcador durante a manobra, mesmo
                 # se o quadro atual trouxer outra mancha verde.
                 self._candidatos.append(True)

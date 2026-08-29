@@ -131,6 +131,14 @@ class ValidacaoVerdeTests(unittest.TestCase):
             confirmador.atualizar("turn_around", now=0.2), "turn_around")
         self.assertEqual(confirmador.atualizar("left", now=1.0), "straight")
 
+    def test_dois_verdes_substituem_trava_confirmada_de_90(self):
+        confirmador = ConfirmadorVerde(frames=1, frames_180=1)
+        self.assertEqual(confirmador.atualizar("right", now=0.0), "right")
+        self.assertEqual(
+            confirmador.atualizar("turn_around", now=0.1), "turn_around")
+        self.assertEqual(
+            confirmador.atualizar("right", now=0.2), "turn_around")
+
     def test_verde_confirmado_ignora_falso_verde_por_meio_segundo(self):
         confirmador = ConfirmadorVerde(frames=1)
         self.assertEqual(confirmador.atualizar("right", now=0.0), "right")
