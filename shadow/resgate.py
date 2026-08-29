@@ -887,8 +887,7 @@ def parse_args():
     parser.add_argument(
         "--drive", action="store_true",
         help=(
-            "AUTORIZA movimento; sem isto o Arduino fica em PARAR "
-            "(o LED ainda e apagado no uso da camera real)"))
+            "AUTORIZA movimento; sem isto o Arduino fica em PARAR"))
     parser.add_argument(
         "--debug", action="store_true",
         help="mostra a camera anotada; q ou Esc encerra")
@@ -1019,14 +1018,11 @@ def main(args=None):
             arduino = Arduino()
             init_steering(arduino)
             steer()
-            arduino.led("APAGADO")
             if args.gerenciado_pela_missao:
                 # Ao cair a placa, a tentativa inteira volta ao percurso; nao
                 # e seguro retomar coleta, deposito ou saida numa serial nova.
                 arduino.travar_sessao()
-            print(
-                "[resgate] LED APAGADO antes de abrir a camera; "
-                "motores em PARAR")
+            print("[resgate] motores em PARAR antes de abrir a camera")
 
         if args.video is not None:
             fonte = VideoSource(args.video)
@@ -2444,7 +2440,7 @@ def main(args=None):
                 steer()
                 print(
                     "[saida] saida alinhada; trocando diretamente para a "
-                    "camera de linha com o LED aceso para avancar ate a "
+                    "camera de linha para avancar ate a "
                     "proxima faixa")
                 if trabalhador is not None:
                     trabalhador.close(timeout=cfg.RESCUE_WORKER_JOIN_TIMEOUT_S)

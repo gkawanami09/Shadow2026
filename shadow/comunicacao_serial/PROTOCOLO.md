@@ -30,22 +30,21 @@ lado por meio de `controle/direcao.py`.
 | `GIRAR_ESQ <v>` / `GIRAR_DIR <v>` | pivot no lugar | `OK GIRAR_… <v>` |
 
 | `SERVO <nome> <delta>` | move relativamente a ultima posicao; nomes ativos `GARRA_ESQ`, `GARRA_DIR` ou `CACAMBA`; delta -180..180 | `OK SERVO <nome> DELTA <d> POS <alvo>` |
-| `LED APAGADO\|ACESO` | controla o LED indicador em D12; inicia aceso no boot | `OK LED <modo>` |
 | `ULTRASSOM` | mede o sensor com TRIG D8 e ECHO D11 | `OK ULTRASSOM <mm>`; `-1` = sem eco |
 | `ULTRASSOM FRENTE` | mede explicitamente o HC-SR04 frontal | `OK ULTRASSOM FRENTE <mm>`; `-1` = sem eco |
 | `ULTRASSOM LATERAL` | mede o HC-SR04 apontado para a direita | `OK ULTRASSOM LATERAL <mm>`; `-1` = sem eco |
 | `MPU` | le orientacao relativa atual | `OK MPU PITCH=<p> ROLL=<r> YAW=<y>` |
 | `MPU ZERO` | zera a referencia relativa, somente com o robo parado | `OK MPU ZERO` |
-| `FUTABA <potencia> <tempo_ms>` | aciona CH3 com potencia assinada -100..100 por 1..3000 ms e corta o sinal automaticamente | `OK FUTABA POTENCIA <p> TEMPO_MS <ms>` |
+| `FUTABA <potencia> <tempo_ms>` | aciona CH4 com potencia assinada -100..100 por 1..3000 ms e corta o sinal automaticamente | `OK FUTABA POTENCIA <p> TEMPO_MS <ms>` |
 | `FUTABA STATUS` | informa se esta ativo e a potencia atual | `OK FUTABA <estado> POTENCIA <p>` |
-| `FUTABA PARAR` | corta imediatamente a saida CH3 | `OK FUTABA PARADO` |
+| `FUTABA PARAR` | corta imediatamente a saida CH4 | `OK FUTABA PARADO` |
 
 Erros: `ERRO PARAMETROS_INVALIDOS`, `ERRO MOTOR_INVALIDO`, `ERRO SERVO_INVALIDO`, `ERRO SERVO_DESATIVADO`, `ERRO COMANDO_INVALIDO`.
 
 Os comandos antigos e o banner `SPEC_01` continuam iguais. Os comandos de
 perifericos sao adicionais e nao modificam as velocidades dos motores. O PCA9685
 usa o endereco I2C `0x40`, 50 Hz, com CH0=garra esquerda, CH1=garra direita,
-CH2=cacamba e CH3=Futaba. No boot, a garra esquerda vai para 180 graus e a
+CH2=cacamba, CH3 livre e CH4=Futaba. No boot, a garra esquerda vai para 180 graus e a
 direita para 0 graus (extremos abertos); a cacamba vai para 90 graus e o canal
 do Futaba permanece totalmente desligado.
 
@@ -86,6 +85,6 @@ positivos comandam subida e negativos comandam descida.
   no mesmo pacote USB. O Uno ainda atualiza CH0 e CH1 sequencialmente, mas sem
   permitir outro comando intercalado.
 - **Futaba com rodas paradas**: durante `FUTABA -20 1500`, use `LADO 0 0`
-  como keepalive. Repetir `PARAR` cortaria CH3 antes dos 1500 ms.
+  como keepalive. Repetir `PARAR` cortaria CH4 antes dos 1500 ms.
 - **Aviso**: não usar `dsrdtr`/`rtscts`, pois no Uno eles podem travar a
   escrita.

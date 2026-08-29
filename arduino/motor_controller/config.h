@@ -13,14 +13,6 @@
 
 
 // ======================================================
-// LED
-// ======================================================
-
-// LED indicador controlado pela Raspberry Pi no CH4 do PCA9685.
-#define LED_CANAL_PCA 4
-
-
-// ======================================================
 // SENSORES ULTRASSONICOS
 // ======================================================
 
@@ -67,7 +59,7 @@
 // ======================================================
 // FUTABA
 //
-// Servo continuo de elevacao - CH3.
+// Servo continuo de elevacao - CH4.
 // ======================================================
 
 #define FUTABA_PULSO_NEUTRO_US 1660
@@ -88,8 +80,8 @@
 // CH0 = Garra esquerda
 // CH1 = Garra direita
 // CH2 = Servo cacamba
-// CH3 = Futaba
-// CH4 = LED
+// CH3 = livre
+// CH4 = Futaba
 // ======================================================
 
 #define SERVO_GARRA_ESQUERDA 0
@@ -98,7 +90,7 @@
 
 #define SERVO_CACAMBA 2
 
-#define SERVO_FUTABA 3
+#define SERVO_FUTABA 4
 
 
 // ======================================================

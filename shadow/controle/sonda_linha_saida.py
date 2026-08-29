@@ -1,4 +1,4 @@
-"""Teste curto da abertura usando somente a camera inferior e LED aceso."""
+"""Teste curto da abertura usando somente a camera inferior."""
 
 import time
 
@@ -55,8 +55,6 @@ def testar_abertura_com_camera_linha(
 
     try:
         parar()
-        if arduino.led("ACESO") is False:
-            raise RuntimeError("nao foi possivel acender LED da camera de linha")
         camera = camera_factory()
         fim_aquecimento = relogio() + cfg.EXIT_LINE_CAMERA_WARMUP_S
         while relogio() < fim_aquecimento:
@@ -135,10 +133,5 @@ def testar_abertura_com_camera_linha(
         if camera is not None:
             try:
                 camera.close()
-            except Exception:
-                pass
-        if not sucesso:
-            try:
-                arduino.led("APAGADO")
             except Exception:
                 pass

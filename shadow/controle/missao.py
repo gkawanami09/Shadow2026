@@ -12,14 +12,8 @@ resgate.
 # A ordem abaixo é o contrato de segurança da missão. Cada passo é o nome de
 # um método do objeto "sistema" injetado no executor.
 #
-# Observação importante sobre o LED: o regulamento interno do Shadow manda
-# apagá-lo antes do resgate, mas apagar o LED exige a serial. Por isso ele é
-# apagado enquanto a serial do segue-linha ainda existe (único momento em que
-# isso é possível) e a rotina de resgate REAFIRMA o LED apagado assim que
-# abre a própria serial. Os dois passos estão explícitos na lista.
 HANDOFF_TO_RESCUE = (
     "stop_motors",              # PARAR antes de qualquer desmontagem
-    "led_off",                  # ainda na serial do segue-linha
     "terminate_line_children",  # sinaliza visão e controle
     "join_line_children",       # espera de fato terminarem
     "assert_line_children_dead",
@@ -28,7 +22,6 @@ HANDOFF_TO_RESCUE = (
     "release_motor_lock",       # MotorOwnerLock liberado
     "acquire_rescue_motor_lock",
     "open_rescue_serial",
-    "assert_led_off",           # reafirma na serial nova
     "open_rescue_camera",       # somente agora a câmera 0 abre
     "start_rescue",
 )
@@ -47,7 +40,6 @@ HANDOFF_TO_LINE = (
     "acquire_line_motor_lock",
     "open_line_camera",         # câmera 1 reaberta
     "open_line_serial",
-    "led_on",                   # volta ao percurso com LED aceso
     "reacquire_line",
 )
 

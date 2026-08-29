@@ -77,7 +77,6 @@ def confirmar_saida_com_camera_linha(
     rechecando = False
     faixa_centralizada_hits = 0
     avancando_para_faixa = False
-    manter_led_aceso = False
 
     def parar():
         if acao_direcao() is False:
@@ -137,8 +136,6 @@ def confirmar_saida_com_camera_linha(
 
     try:
         parar()
-        arduino.led("ACESO")
-        print("[saida] LED ACESO: entrando na camera do segue-linha")
         camera = camera_factory()
 
         print(
@@ -301,7 +298,6 @@ def confirmar_saida_com_camera_linha(
                 except ErroRetomadaSaida as erro:
                     print(f"[saida] retomada falhou: {erro}; PARADO")
                     return RETOMADA_FALHOU
-                manter_led_aceso = True
                 print(
                     "[saida] retomada concluida: "
                     f"pose={retomada.orientacao_soleira}, "
@@ -343,13 +339,6 @@ def confirmar_saida_com_camera_linha(
             except Exception as erro:
                 if erro_limpeza is None:
                     erro_limpeza = erro
-        if not manter_led_aceso:
-            try:
-                arduino.led("APAGADO")
-            except Exception as erro:
-                if erro_limpeza is None:
-                    erro_limpeza = erro
-            print("[saida] LED APAGADO: retornando a camera de resgate")
         if erro_limpeza is not None:
             raise RuntimeError(
                 "falha ao liberar a camera da saida") from erro_limpeza

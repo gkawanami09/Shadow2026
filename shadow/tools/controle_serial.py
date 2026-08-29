@@ -25,8 +25,6 @@ Digite exatamente o comando que deseja enviar, por exemplo:
   FUTABA -25 200        gira negativo por 200 ms
   FUTABA PARAR          corta o sinal imediatamente
   FUTABA STATUS
-  LED ACESO
-  LED APAGADO
   ULTRASSOM                  le o sensor frontal (pinos 8/11)
   ULTRASSOM FRENTE           le o sensor frontal explicitamente
   ULTRASSOM LATERAL          le o sensor lateral (pinos 12/13)

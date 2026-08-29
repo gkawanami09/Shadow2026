@@ -13,10 +13,10 @@ motores; por isso NUNCA coexistem. A missão alterna entre duas configurações
 mutuamente exclusivas:
 
 * **percurso** — dois processos filhos (visão da câmera 1 + controle da
-  serial), com o LED aceso, exatamente como ``main.py``;
+  serial), exatamente como ``main.py``;
 * **resgate** — a função principal de ``resgate.py`` roda dentro deste
   processo, depois que os filhos do percurso morreram, e assume a câmera 0,
-  a serial e a trava com o LED apagado.
+  a serial e a trava.
 
 Entre as duas existe o handoff, cuja ORDEM é o contrato de segurança da
 missão. Essa ordem está declarada em ``controle/missao.py``
@@ -230,7 +230,7 @@ class MissionSystem:
 
     # -- ciclo de vida do percurso ---------------------------------------
     def start_line_phase(self):
-        """Sobe visão (câmera 1) e controle (serial + LED aceso)."""
+        """Sobe visão (câmera 1) e controle (serial)."""
         self.shared.terminate.value = False
         self._definir_compartilhado("vision_ready", False)
         self.shared.rescue_requested.value = False
@@ -304,10 +304,6 @@ class MissionSystem:
         """
         return True
 
-    def led_off(self):
-        """LED APAGADO enviado por ``ciclo.py`` antes de liberar a serial."""
-        return True
-
     def terminate_line_children(self):
         self.shared.terminate.value = True
 
@@ -357,12 +353,8 @@ class MissionSystem:
         """``resgate.py`` abre a própria serial ao iniciar."""
         return True
 
-    def assert_led_off(self):
-        """``resgate.py`` reafirma LED APAGADO na serial nova."""
-        return True
-
     def open_rescue_camera(self):
-        """``resgate.py`` abre a câmera 0 depois da serial e do LED."""
+        """``resgate.py`` abre a câmera 0 depois da serial."""
         return True
 
     def start_rescue(self):
@@ -413,10 +405,6 @@ class MissionSystem:
 
     def open_line_serial(self):
         """A serial reabre quando o processo de controle sobe."""
-        return True
-
-    def led_on(self):
-        """``ciclo.py`` envia LED ACESO ao assumir a serial."""
         return True
 
     def _preparar_retomada_linha(self):

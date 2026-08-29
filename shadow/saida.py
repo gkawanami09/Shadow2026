@@ -98,10 +98,6 @@ def main(argv=None):
             except (OSError, RuntimeError):
                 pass
             try:
-                arduino.led("APAGADO")
-            except (OSError, RuntimeError):
-                pass
-            try:
                 arduino.close()
             except (OSError, RuntimeError):
                 pass

@@ -123,7 +123,7 @@ propaga a exceção. Ele não continua abrindo a câmera seguinte.
 
 **Resgate → percurso** (`HANDOFF_TO_LINE`) é o espelho: parar, fechar a
 câmera 0, liberar serial e trava, readquirir a trava, abrir a câmera 1, abrir
-a serial, LED ACESO, reacquirir a linha.
+a serial e reacquirir a linha.
 
 ## 4. Faixa PRATA de entrada
 

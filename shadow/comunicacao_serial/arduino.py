@@ -32,7 +32,6 @@ class Arduino:
         self._last_reconnect_t = 0.0
         self._connected = False
         self._connection_epoch = 0
-        self._desired_led_mode = None
         self._rx_buffer = bytearray()
         self._ultra_pending = False
         self._ultra_deadline = 0.0
@@ -209,16 +208,6 @@ class Arduino:
             f"SERVO GARRA_ESQ {deslocamento_esq}",
             f"SERVO GARRA_DIR {deslocamento_dir}",
         ))
-
-    def led(self, modo):
-        """Define o LED como APAGADO ou ACESO."""
-        modo = str(modo).upper()
-        if modo not in ("APAGADO", "ACESO"):
-            raise ValueError(f"Modo de LED invalido: {modo}")
-        # O Uno reinicia com o LED aceso ao reabrir a USB. Guardar o modo
-        # desejado permite restaura-lo automaticamente numa reconexao.
-        self._desired_led_mode = modo
-        return self._send_aux_cmd(f"LED {modo}")
 
     def distancia_ultrassom(self, timeout=0.2, lado="FRENTE"):
         """Solicita uma leitura e retorna a distancia em mm, ou None sem eco."""
@@ -416,7 +405,7 @@ class Arduino:
         return self._send_aux_cmd(f"FUTABA {potencia} {tempo_ms}")
 
     def parar_futaba(self):
-        """Corta imediatamente o sinal do canal continuo CH3."""
+        """Corta imediatamente o sinal do canal continuo CH4."""
         return self._send_aux_cmd("FUTABA PARAR")
 
     def comando_serial(self, comando, timeout=0.5, resposta_esperada=None):
@@ -662,7 +651,4 @@ class Arduino:
         for device in self._candidate_ports():
             if self._try_port(device):
                 print(f"[serial] reconectado em {device}")
-                if self._desired_led_mode is not None:
-                    self._send_aux_cmd(
-                        f"LED {self._desired_led_mode}")
                 return

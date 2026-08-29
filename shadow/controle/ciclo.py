@@ -64,12 +64,8 @@ def _enter_rescue_zone(arduino):
     """Entrega a câmera/serial ao resgate, que faz seu avanço de 1 segundo."""
     if steer() is False or not arduino.connected:
         return False
-    # O LED só pode ser apagado enquanto esta serial ainda existe. O processo
-    # de resgate reafirma o comando assim que abre a serial dele.
-    if arduino.led("APAGADO") is False or not arduino.connected:
-        return False
     entry_armed.value = False
-    print("[controle] entrada confirmada; PARAR e LED APAGADO — "
+    print("[controle] entrada confirmada; PARAR — "
           "resgate fará o avanço de 1 s")
     return True
 
@@ -86,17 +82,11 @@ def _enter_rescue_after_no_black(arduino):
         status.value = 'Arduino desconectado na entrada do resgate'
         return False
     status.value = 'Linha preta ausente - entrando no resgate'
-    if arduino.led("APAGADO") is False:
-        status.value = 'Falha ao apagar LED na entrada do resgate - tentando novamente'
-        return False
-    if not arduino.connected:
-        status.value = 'Arduino desconectado ao apagar LED da entrada'
-        return False
     entry_armed.value = False
     _reset_entry_silver("entrada por ausencia de preto")
     print(
         "[controle] linha preta ausente por "
-        f"{config.ENTRY_NO_BLACK_RESCUE_DELAY_S:.1f} s; PARAR e LED APAGADO "
+        f"{config.ENTRY_NO_BLACK_RESCUE_DELAY_S:.1f} s; PARAR "
         "— resgate avançará 1 s antes dos giros")
     return True
 
@@ -158,10 +148,6 @@ def control_loop():
             arduino.close()
         return
 
-    # O LED passa a significar que camera e controle estao realmente prontos.
-    # Assim nao existe mais uma espera silenciosa depois de ele acender.
-    arduino.led("ACESO")
-    print("[controle] LED ACESO: segue-linha pronto")
     line_status.value = "line_detected"
     status.value = "Shadow2026 pronto — aguardando linha"
     print("Shadow2026 ready — awaiting line")

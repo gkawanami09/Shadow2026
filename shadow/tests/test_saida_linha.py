@@ -221,7 +221,7 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
         self.assertEqual(len(run.retomada.calls), 1)
         self.assertEqual(len(run.confirmadores.instances), 2)
         self.assertTrue(run.camera.closed)
-        self.assertEqual(run.arduino.led_modes, ["ACESO"])
+        self.assertEqual(run.arduino.led_modes, [])
         self.assertEqual(run.steer.events[-1][1], ())
 
     def test_prata_e_reconfirmada_e_da_re_exata_de_um_segundo(self):
@@ -230,7 +230,7 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
         self.assertEqual(run.resultado, NAO_PRETA)
         self.assertEqual(run.retomada.executou, 0)
         self.assertEqual(len(run.confirmadores.instances), 2)
-        self.assertEqual(run.arduino.led_modes, ["ACESO", "APAGADO"])
+        self.assertEqual(run.arduino.led_modes, [])
 
         eventos = run.steer.events
         indice_re = next(
@@ -287,7 +287,7 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
 
         self.assertEqual(run.resultado, saida_linha.RETOMADA_FALHOU)
         self.assertEqual(run.retomada.executou, 1)
-        self.assertEqual(run.arduino.led_modes, ["ACESO", "APAGADO"])
+        self.assertEqual(run.arduino.led_modes, [])
         self.assertTrue(run.camera.closed)
         self.assertEqual(run.steer.events[-1][1], ())
         self.assertFalse(any(
@@ -295,7 +295,7 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
             for _t, args, _kwargs in run.steer.events
         ))
 
-    def test_camera_de_linha_avanca_primeiro_com_led_aceso_sem_giro(self):
+    def test_camera_de_linha_avanca_primeiro_sem_giro(self):
         clock = FakeClock()
         distante = np.full(
             (config.camera_y, config.camera_x, 3), 205, dtype=np.uint8
@@ -312,8 +312,8 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
         confirmadores = ConfirmadorFactory([PRETA, PRETA])
         retomada = RetomadaFactory()
 
-        def abrir_camera_com_led():
-            self.assertEqual(arduino.led_modes, ["ACESO"])
+        def abrir_camera():
+            self.assertEqual(arduino.led_modes, [])
             return camera
 
         with patch.object(
@@ -324,14 +324,14 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
             resultado = saida_linha.confirmar_saida_com_camera_linha(
                 arduino,
                 steer,
-                abrir_camera_com_led,
+                abrir_camera,
                 relogio=clock,
                 dormir=clock.sleep,
                 retomada_factory=retomada,
             )
 
         self.assertEqual(resultado, PRETA)
-        self.assertEqual(arduino.led_modes, ["ACESO"])
+        self.assertEqual(arduino.led_modes, [])
         self.assertEqual(retomada.executou, 1)
         avancos = [
             args for _t, args, _kwargs in steer.events
@@ -373,7 +373,7 @@ class SaidaLinhaRuntimeTests(unittest.TestCase):
             )
 
         self.assertEqual(resultado, saida_linha.LINHA_NAO_ENCONTRADA)
-        self.assertEqual(arduino.led_modes, ["ACESO", "APAGADO"])
+        self.assertEqual(arduino.led_modes, [])
         self.assertEqual(retomada.executou, 0)
         movimentos = [
             args for _t, args, _kwargs in steer.events if args

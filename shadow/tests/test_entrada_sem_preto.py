@@ -53,20 +53,6 @@ class EntryAfterNoBlackTests(unittest.TestCase):
         ciclo.terminate.value = self.terminate_original
         ciclo.status.value = self.status_original
 
-    def test_falha_ao_apagar_led_mantem_entrada_armada_para_retry(self):
-        arduino = ArduinoFalso(led_result=False)
-
-        with patch.object(ciclo, "steer", return_value=True):
-            entrou = ciclo._enter_rescue_after_no_black(arduino)
-
-        self.assertFalse(entrou)
-        self.assertTrue(ciclo.entry_armed.value)
-        self.assertEqual(arduino.led_calls, ["APAGADO"])
-        self.assertEqual(
-            ciclo.status.value,
-            'Falha ao apagar LED na entrada do resgate - tentando novamente',
-        )
-
     def test_handoff_confirmado_desarma_entrada(self):
         arduino = ArduinoFalso(led_result=True)
 

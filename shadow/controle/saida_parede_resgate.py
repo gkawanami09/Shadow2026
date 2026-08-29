@@ -4,9 +4,9 @@ Depois do avanco curto e do giro inicial de 90 graus, cada passagem segue a
 mesma ordem: avanco ate 118 mm no ultrassom frontal, pivo traseiro ate o
 lateral estabilizar (ou completar 2 s), translacao para a direita e
 afastamento para a esquerda ate o lateral marcar ao menos 120 mm. Depois de
-cada par de passagens, a camera de segue-linha, com LED aceso, guia o avanco
+cada par de passagens, a camera de segue-linha guia o avanco
 ate preto, um vao lateral ou a parede frontal. Neste ultimo caso, a camera
-frontal com LED apagado decide o triangulo verde.
+frontal decide o triangulo verde.
 """
 
 from dataclasses import dataclass
@@ -492,7 +492,7 @@ class ControladorSaidaParede:
                 f"{cfg.SAIDA_PAREDE_DISTANCIA_LATERAL_MINIMA_PRETO_MM} mm; "
                 "aproximando ate 118 mm"
                 if preto_ignorado
-                else "avancando com camera de linha e LED aceso; procurando preto ou 118 mm"
+                else "avancando com camera de linha; procurando preto ou 118 mm"
             )
             return self._frente(
                 self.AVANCAR_CAMERA_LINHA,
@@ -525,7 +525,7 @@ class ControladorSaidaParede:
                 return self.atualizar(agora)
             return self._parado(
                 self.VERIFICAR_TRIANGULO_VERDE,
-                "parado; camera frontal procurando triangulo verde com LED apagado",
+                "parado; camera frontal procurando triangulo verde",
             )
 
         if self.state == self.AGUARDAR_MPU_TRIANGULO_VERDE:
@@ -978,8 +978,6 @@ def executar_alinhamento_parede(
         classificador_linha = None
         ultima_sequencia_linha = 0
         confirmacoes_linha_preta = 0
-        if arduino.led("APAGADO") is False:
-            raise RuntimeError("nao foi possivel apagar LED apos camera de linha")
 
     def salvar_debug_verde(motivo):
         """Salva o quadro e as duas mascaras para calibrar na Raspberry."""
@@ -1018,10 +1016,7 @@ def executar_alinhamento_parede(
             f"{pasta} ({motivo})")
 
     try:
-        if arduino.led("APAGADO") is False:
-            raise RuntimeError("nao foi possivel apagar LED da saida")
-        print(
-            "[saida] LED APAGADO; cameras serao abertas uma por vez conforme a rota")
+        print("[saida] cameras serao abertas uma por vez conforme a rota")
         while True:
             agora = time.monotonic()
             if (
@@ -1036,13 +1031,10 @@ def executar_alinhamento_parede(
                     raise RuntimeError(
                         "camera frontal ainda aberta ao iniciar camera de linha")
                 if fonte_linha is None:
-                    if arduino.led("ACESO") is False:
-                        raise RuntimeError(
-                            "nao foi possivel acender LED da camera de linha")
                     fonte_linha = fonte_assincrona_factory(camera_linha_factory())
                     classificador_linha = classificador_linha_factory()
                     print(
-                        "[saida] camera do segue-linha ativa com LED ACESO; "
+                        "[saida] camera do segue-linha ativa; "
                         "procurando faixa preta")
                 quadro_linha = fonte_linha.poll(ultima_sequencia_linha)
                 if quadro_linha is not None:
@@ -1078,15 +1070,12 @@ def executar_alinhamento_parede(
                     raise RuntimeError(
                         "camera de linha ainda aberta ao iniciar camera frontal")
                 if fonte_verde is None:
-                    if arduino.led("APAGADO") is False:
-                        raise RuntimeError(
-                            "nao foi possivel manter o LED apagado na camera frontal")
                     fonte_verde = fonte_assincrona_factory(
                         camera_factory(camera_index))
                     detector_triangulo_verde = detector_verde_factory("green")
                     detector_painel_verde = detector_painel_verde_factory()
                     print(
-                        "[saida] camera frontal ativa com LED APAGADO; "
+                        "[saida] camera frontal ativa; "
                         "procurando triangulo verde")
                 quadro = fonte_verde.poll(ultima_sequencia_verde)
                 if quadro is not None:
@@ -1147,7 +1136,7 @@ def executar_alinhamento_parede(
                 salvar_debug_verde(comando.detail)
 
             # Cada handoff fecha a camera anterior antes de abrir a proxima.
-            # Assim LED/camera de linha nunca coexistem com a frontal.
+            # Assim as duas cameras nunca ficam abertas ao mesmo tempo.
             if not controlador.usa_camera_linha_preta and fonte_linha is not None:
                 fechar_camera_linha()
             if not controlador.usa_camera_triangulo_verde and fonte_verde is not None:

@@ -46,11 +46,6 @@ class HandoffToRescueTests(unittest.TestCase):
     def test_parar_e_o_primeiro_passo(self):
         self.assertEqual(self.log[0], "stop_motors")
 
-    def test_led_apagado_antes_de_liberar_a_serial(self):
-        self.assertLess(
-            index_of(self.log, "led_off"),
-            index_of(self.log, "release_serial"))
-
     def test_filhos_encerrados_antes_de_fechar_a_camera_de_linha(self):
         self.assertLess(
             index_of(self.log, "join_line_children"),
@@ -75,14 +70,6 @@ class HandoffToRescueTests(unittest.TestCase):
             index_of(self.log, "release_motor_lock"),
             index_of(self.log, "acquire_rescue_motor_lock"))
 
-    def test_led_reafirmado_apagado_na_serial_nova(self):
-        self.assertLess(
-            index_of(self.log, "open_rescue_serial"),
-            index_of(self.log, "assert_led_off"))
-        self.assertLess(
-            index_of(self.log, "assert_led_off"),
-            index_of(self.log, "open_rescue_camera"))
-
     def test_resgate_inicia_por_ultimo(self):
         self.assertEqual(self.log[-1], "start_rescue")
 
@@ -101,12 +88,6 @@ class HandoffToLineTests(unittest.TestCase):
         self.assertLess(
             index_of(self.log, "close_rescue_camera"),
             index_of(self.log, "open_line_camera"))
-
-    def test_led_aceso_ao_voltar_ao_percurso(self):
-        self.assertIn("led_on", self.log)
-        self.assertLess(
-            index_of(self.log, "open_line_serial"),
-            index_of(self.log, "led_on"))
 
     def test_linha_e_reacquirida_no_fim(self):
         self.assertEqual(self.log[-1], "reacquire_line")

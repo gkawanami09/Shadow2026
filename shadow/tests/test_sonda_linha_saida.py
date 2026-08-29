@@ -108,10 +108,10 @@ class SondaLinhaSaidaTests(unittest.TestCase):
         self.assertEqual(resultado.resultado, "nao_preta")
         self.assertGreater(resultado.avanco_s, 0.0)
         self.assertTrue(camera.fechada)
-        self.assertEqual(arduino.leds, ["ACESO", "APAGADO"])
+        self.assertEqual(arduino.leds, [])
         self.assertIn((0, sonda.cfg.SAIDA_PAREDE_PWM_SONDA_LINHA / 120.0), direcao.comandos)
 
-    def test_preto_so_e_liberado_depois_da_retomada_e_mantem_led_aceso(self):
+    def test_preto_so_e_liberado_depois_da_retomada(self):
         relogio = RelogioFalso()
         arduino = ArduinoFalso()
         camera = CameraFalsa(relogio)
@@ -146,7 +146,7 @@ class SondaLinhaSaidaTests(unittest.TestCase):
         self.assertEqual(resultado.resultado, "preta")
         self.assertEqual(len(retomadas), 1)
         self.assertTrue(camera.fechada)
-        self.assertEqual(arduino.leds, ["ACESO"])
+        self.assertEqual(arduino.leds, [])
 
 
 if __name__ == "__main__":

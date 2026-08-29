@@ -2,7 +2,7 @@
 
 Esta etapa é deliberadamente independente do segue-linha. A lógica de linha,
 a máquina de estados existente e o firmware não foram alterados; a única
-integração no controle de linha é enviar `LED ACESO` ao iniciar esse modo.
+integração no controle de linha ocorre pela troca segura de câmera e serial.
 
 ## Escopo
 
@@ -215,7 +215,7 @@ deslocamentos relativos e não podem ser repetidos.
 
 Depois do `PARAR` que finaliza a aproximação, o robô avança 1,00 s com o
 elevador levantado e para novamente. Só então usa `LADO 0 0` para manter as
-quatro rodas zeradas enquanto CH3 desce, sem interromper os 1500 ms. Depois do
+quatro rodas zeradas enquanto CH4 desce, sem interromper os 1500 ms. Depois do
 prazo, envia `FUTABA PARAR` e inicia o segundo avanço de 1,00 s. Depois mantém
 o mesmo avanço por mais 0,20 s com o elevador baixo. As garras permanecem
 abertas; no fim o programa envia `PARAR` e fecha as duas em uma única escrita
@@ -278,10 +278,8 @@ desviar o eco e uma parede pode gerar uma falsa proximidade.
 
 Outras travas:
 
-- ao usar a câmera real, a serial é aberta, os motores recebem `PARAR` e o
-  comando `LED APAGADO` é enviado antes da abertura da câmera;
-- se a USB reconectar e reiniciar o Uno, o modo do LED é reaplicado
-  automaticamente;
+- ao usar a câmera real, a serial é aberta e os motores recebem `PARAR` antes
+  da abertura da câmera;
 - `--drive` continua obrigatório para permitir qualquer movimento; sem ele, a
   serial fica aberta apenas para manter `PARAR` e o LED apagado;
 - um lock de sistema impede segue-linha e resgate de comandarem os motores ao

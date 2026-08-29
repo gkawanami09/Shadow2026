@@ -13,21 +13,13 @@ const byte TAMANHO_COMANDO = 64;
 char buffer_comando[TAMANHO_COMANDO];
 byte tamanho_comando = 0;
 unsigned long ultimo_comando_ms = 0;
-// ======================================================
-// LED
-// ======================================================
-enum ModoLed {
-  LED_APAGADO,
-  LED_ACESO
-};
-ModoLed modo_led = LED_ACESO;
-// ======================================================
 // SERVOS
 // ======================================================
-int posicao_servo_atual[4] = {
+int posicao_servo_atual[5] = {
   SERVO_POSICAO_INICIAL_GARRA_ESQ,
   SERVO_POSICAO_INICIAL_GARRA_DIR,
   SERVO_POSICAO_INICIAL_CACAMBA,
+  0,
   0
 };
 // ======================================================
@@ -87,7 +79,6 @@ EstadoRampa estado_rampa = RAMPA_PLANO;
 // ======================================================
 void escrever_pca9685(byte registrador, byte valor);
 void definir_servo(byte canal, int angulo);
-void definir_modo_led(ModoLed novo_modo);
 void atualizar_mpu();
 // ======================================================
 // PCA9685
@@ -98,13 +89,6 @@ void desligar_canal_pca9685(byte canal) {
   escrever_pca9685(base + 1, 0);
   escrever_pca9685(base + 2, 0);
   escrever_pca9685(base + 3, 0x10);
-}
-void ligar_canal_pca9685(byte canal) {
-  byte base = 0x06 + 4 * canal;
-  escrever_pca9685(base, 0);
-  escrever_pca9685(base + 1, 0x10);
-  escrever_pca9685(base + 2, 0);
-  escrever_pca9685(base + 3, 0);
 }
 // ======================================================
 // CONFIGURACAO DOS PINOS
@@ -204,12 +188,12 @@ void configurar_pca9685() {
     0x00,
     0xA0
   );
-  // Primeiro desliga os cinco canais utilizados.
+  // Primeiro desliga os cinco primeiros canais.
   //
-  // Futaba CH3 permanece desligado.
+  // Futaba CH4 permanece desligado ate receber um comando FUTABA.
   for (
     byte canal = 0;
-    canal <= LED_CANAL_PCA;
+    canal <= SERVO_FUTABA;
     canal++
   ) {
     desligar_canal_pca9685(
@@ -229,7 +213,6 @@ void configurar_pca9685() {
     SERVO_CACAMBA,
     SERVO_POSICAO_INICIAL_CACAMBA
   );
-  definir_modo_led(modo_led);
 }
 // ======================================================
 // SERVO POR ANGULO
@@ -441,7 +424,7 @@ bool canal_servo_por_nome(
     ) == 0 ||
     strcmp(
       nome,
-      "CH3"
+      "CH4"
     ) == 0
   ) {
     *canal =
@@ -451,21 +434,6 @@ bool canal_servo_por_nome(
   }
   return true;
 }
-// ======================================================
-// LED
-// ======================================================
-void definir_modo_led(
-  ModoLed novo_modo
-) {
-  modo_led =
-    novo_modo;
-  if (modo_led == LED_ACESO) {
-    ligar_canal_pca9685(LED_CANAL_PCA);
-  } else {
-    desligar_canal_pca9685(LED_CANAL_PCA);
-  }
-}
-// ======================================================
 // ULTRASSOM
 // ======================================================
 long medir_distancia_mm(
@@ -1977,56 +1945,6 @@ void processar_comando(
     }
     return;
   }
-  // ==================================================
-  // LED
-  //
-  // CODIGO ORIGINAL.
-  // ==================================================
-  if (
-    strcmp(
-      tipo,
-      "LED"
-    ) == 0
-  ) {
-    if (
-      primeiro == NULL ||
-      segundo != NULL
-    ) {
-      Serial.println(
-        "ERRO PARAMETROS_INVALIDOS"
-      );
-    } else if (
-      strcmp(
-        primeiro,
-        "APAGADO"
-      ) == 0
-    ) {
-      definir_modo_led(
-        LED_APAGADO
-      );
-      Serial.println(
-        "OK LED APAGADO"
-      );
-    } else if (
-      strcmp(
-        primeiro,
-        "ACESO"
-      ) == 0
-    ) {
-      definir_modo_led(
-        LED_ACESO
-      );
-      Serial.println(
-        "OK LED ACESO"
-      );
-    } else {
-      Serial.println(
-        "ERRO PARAMETROS_INVALIDOS"
-      );
-    }
-    return;
-  }
-  // ==================================================
   // ULTRASSOM
   //
   // CODIGO ORIGINAL.

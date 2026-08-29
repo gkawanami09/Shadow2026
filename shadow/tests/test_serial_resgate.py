@@ -1,4 +1,4 @@
-"""Testes da serial e do LED durante o resgate."""
+"""Testes da serial durante o resgate."""
 
 from collections import deque
 import sys
@@ -60,7 +60,6 @@ class RescueSerialLedTests(unittest.TestCase):
         arduino._connected = False
         arduino._connection_epoch = 0
         arduino._last_reconnect_t = -1e9
-        arduino._desired_led_mode = None
         arduino._ser = None
         arduino._last_cmd = None
         arduino._last_send_t = 0.0
@@ -90,19 +89,8 @@ class RescueSerialLedTests(unittest.TestCase):
         arduino._ser = FakeSerial()
         return arduino
 
-    def test_led_command_is_remembered(self):
+    def test_reconnect_does_not_send_peripheral_commands(self):
         arduino = self._bare_arduino()
-        sent = []
-        arduino._send_aux_cmd = sent.append
-
-        arduino.led("apagado")
-
-        self.assertEqual(arduino._desired_led_mode, "APAGADO")
-        self.assertEqual(sent, ["LED APAGADO"])
-
-    def test_reconnect_restores_led_before_returning(self):
-        arduino = self._bare_arduino()
-        arduino._desired_led_mode = "APAGADO"
         arduino._candidate_ports = lambda: ["/dev/ttyACM0"]
         sent = []
         arduino._send_aux_cmd = sent.append
@@ -115,7 +103,7 @@ class RescueSerialLedTests(unittest.TestCase):
         arduino._try_reconnect()
 
         self.assertTrue(arduino._connected)
-        self.assertEqual(sent, ["LED APAGADO"])
+        self.assertEqual(sent, [])
 
     def test_connection_epoch_changes_when_new_serial_is_adopted(self):
         arduino = self._bare_arduino()

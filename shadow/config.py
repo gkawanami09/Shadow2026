@@ -120,12 +120,12 @@ LINE_LOSS_STEER_HOLD = .7                 # s — conserva a curva ao sair breve
 # interrompe os comandos de movimento nem o watchdog. A correcao proporcional
 # do segue-linha recebe a propria velocidade abaixo; assim, ela escala junto
 # com o PWM em subida e descida.
-# Quando o MPU classifica o robo como SUBINDO, o segue-linha usa PWM 110; em
+# Quando o MPU classifica o robo como SUBINDO, o segue-linha usa PWM 120; em
 # DESCENDO, usa PWM 70. Em PLANO, volta ao PWM normal configurado acima.
 RAMPA_HABILITADA = True
 RAMPA_CONSULTA_INTERVALO_S = .10
 RAMPA_RESPOSTA_TIMEOUT_S = .20
-RAMPA_SUBIDA_PWM = 110
+RAMPA_SUBIDA_PWM = 120
 RAMPA_DESCIDA_PWM = 70
 RAMPA_SUBIDA_SPEED = RAMPA_SUBIDA_PWM / MAX_PWM
 RAMPA_DESCIDA_SPEED = RAMPA_DESCIDA_PWM / MAX_PWM

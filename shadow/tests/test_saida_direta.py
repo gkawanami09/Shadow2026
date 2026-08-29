@@ -67,7 +67,7 @@ class SaidaDiretaTests(unittest.TestCase):
         )
         self.assertTrue(arduino.sessao_travada)
         self.assertTrue(arduino.fechado)
-        self.assertEqual(arduino.leds, ["APAGADO"])
+        self.assertEqual(arduino.leds, [])
         self.assertGreaterEqual(parar.call_count, 2)
 
     def test_falha_na_manobra_fecha_arduino_e_nao_retorna_sucesso(self):
