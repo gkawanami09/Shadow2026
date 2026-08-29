@@ -95,7 +95,7 @@ class StartupTurnSequenceTests(unittest.TestCase):
             [1., -1., 1., -1., 1.])
         self.assertEqual(
             [duracao for duracao in esperas if duracao >= .5],
-            [.5, 1., 1., 1., .5])
+            [1.25, 2.5, 2.5, 2.5, 1.25])
         self.assertTrue(all(movimento[2] for movimento in movimentos))
         self.assertEqual(parar.call_count, 5)
 

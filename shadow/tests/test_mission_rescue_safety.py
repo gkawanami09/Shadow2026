@@ -88,6 +88,18 @@ class RescueReturnSafetyTests(unittest.TestCase):
         self.assertEqual(runtime_error_exit_code(args, arduino, 3), 3)
         self.assertEqual(rescue_return_action(3), RESCUE_RETURN_STOPPED)
 
+    def test_falha_de_desvio_serial_nao_pode_prender_o_controle(self):
+        fonte = (SHADOW_ROOT / "controle" / "ciclo.py").read_text(
+            encoding="utf-8")
+
+        self.assertIn(
+            "falha no desvio do obstáculo: {erro}", fonte)
+        self.assertNotIn(
+            "while not terminate.value:\n"
+            "                        arduino.refresh(fail_closed=True)",
+            fonte,
+        )
+
     def test_resgate_precisa_passar_por_reconectando_antes_da_linha(self):
         with self.assertRaisesRegex(RuntimeError, "proibida"):
             mudar_estado(

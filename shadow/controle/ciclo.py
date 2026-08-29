@@ -419,10 +419,15 @@ def control_loop():
                 except RuntimeError as erro:
                     status.value = 'Falha no desvio do obstáculo — PARADO'
                     print(f"[controle] falha no desvio do obstáculo: {erro}")
-                    while not terminate.value:
-                        arduino.refresh(fail_closed=True)
-                        time.sleep(.05)
-                    break
+                    # A serial pode ter caído no meio da manobra. Não espere
+                    # ``terminate`` aqui: esse loop mantinha o filho vivo e
+                    # impedia mission.py de notar a falha e recriar a sessão
+                    # de segue-linha após a reconexão do Arduino.
+                    try:
+                        steer()
+                    finally:
+                        arduino.close()
+                    return
 
                 # Descarta o eco antigo e devolve o movimento ao segue-linha.
                 arduino.cancelar_ultrassom()
