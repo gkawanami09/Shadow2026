@@ -137,15 +137,12 @@ class ControladorRetanguloVerde:
                 cfg.RESCUE_GREEN_CAMERA_ALIGN_TANK_SPEED
             ),
             approach_speed=cfg.RESCUE_GREEN_CAMERA_APPROACH_SPEED,
-            pulsed_search=(target_kind == "red"),
-            search_tank_speed=(
-                cfg.RED_DEPOSIT_SEARCH_TANK_SPEED
-                if target_kind == "red" else None
-            ),
-            search_full_turn_s=(
-                cfg.RED_DEPOSIT_SEARCH_FULL_TURN_S
-                if target_kind == "red" else None
-            ),
+            # Verde e vermelho usam o mesmo ciclo: gira em pulsos, para,
+            # deixa a câmera assentar e só então aceita o marcador. Assim o
+            # verde perdido nunca vira giro contínuo lento.
+            pulsed_search=True,
+            search_tank_speed=cfg.RED_DEPOSIT_SEARCH_TANK_SPEED,
+            search_full_turn_s=cfg.RED_DEPOSIT_SEARCH_FULL_TURN_S,
         )
         self.confirmador = ConfirmadorTelaVerde()
         self.aproximacao_final = False

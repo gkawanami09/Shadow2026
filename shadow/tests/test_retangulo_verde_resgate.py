@@ -179,7 +179,18 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
             observando.state,
             controlador.navegacao.PULSE_OBSERVE,
         )
-        self.assertEqual(observando.angle, 190)
+
+    def test_verde_tambem_observa_parado_antes_do_primeiro_pulso(self):
+        controlador = ControladorRetanguloVerde(
+            start_time=0.0,
+            target_kind="green",
+        )
+
+        inicio = controlador.update(None, FORMATO, now=0.0)
+
+        self.assertTrue(controlador.navegacao.pulsed_search)
+        self.assertEqual(inicio.state, controlador.navegacao.PULSE_BRAKE)
+        self.assertEqual(inicio.angle, 190)
 
     def test_avanca_reto_em_pwm_80_mesmo_com_verde_de_um_lado(self):
         comando = self.controlador.update(
@@ -201,6 +212,8 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
 
     def test_camera_alinha_e_aproxima_antes_de_habilitar_ultrassom(self):
         controlador = ControladorRetanguloVerde(start_time=0.0)
+        # A busca pulsada já fez a primeira observação parada.
+        controlador.navegacao._initial_observation_complete = True
 
         encontrou = controlador.update(
             marcador_verde(0.01, center_x=500),
@@ -286,6 +299,7 @@ class ControladorRetanguloVerdeTests(unittest.TestCase):
     def test_verde_perdido_apos_alinhamento_reinicia_giro_do_marcador(self):
         controlador = ControladorRetanguloVerde(start_time=0.0)
         controlador.navegacao.state = controlador.navegacao.ALIGN
+        controlador.navegacao._initial_observation_complete = True
         controlador.navegacao._last_seen_at = 0.0
 
         parar = controlador.update(
