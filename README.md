@@ -14,6 +14,12 @@ programa, as duas rotinas:
 - `shadow/main.py`: segue a linha, lê verde e vermelho e trata gap;
 - `shadow/resgate.py`: encontra a vítima, aproxima e executa a coleta.
 
+Enquanto segue a linha, a câmera frontal também mantém o YOLO de vítimas
+ativo. Uma vítima plausível confirmada em vários frames e com confiança de ao
+menos 0,80 faz o controle parar os motores e iniciar o resgate. Após uma
+reinicialização do robô — inclusive se ela ocorreu no resgate — a missão sobe
+novamente no modo segue-linha com esse vigia já ativo.
+
 `main.py` e `resgate.py` são entradas de diagnóstico isolado. Não os execute
 ao mesmo tempo nem em paralelo com `mission.py`, pois usam as câmeras, os
 motores e a mesma conexão serial.

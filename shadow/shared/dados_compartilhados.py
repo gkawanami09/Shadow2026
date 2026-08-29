@@ -82,6 +82,7 @@ ENTRY_SILVER_VALIDATING = 1
 ENTRY_SILVER_BLACK_FOLLOW = 2
 entry_silver_state = Value("b", ENTRY_SILVER_IDLE)
 rescue_requested = Value("b", False)  # controle pediu o handoff
+rescue_yolo_confirmed = Value("b", False)  # vigia YOLO pediu handoff seguro
 red_finished = Value("b", False)      # faixa vermelha final cumprida
 timer = Timer()
 

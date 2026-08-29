@@ -50,7 +50,8 @@ from shared.dados_compartilhados import (ENTRY_SILVER_BLACK_FOLLOW,
                                mission_mode,
                                preferencia_linha_esquerda,
                                red_candidate, red_detected, red_finished,
-                               rescue_requested, status, terminate,
+                               rescue_requested, rescue_yolo_confirmed,
+                               status, terminate,
                                STEERING_CORNER, STEERING_LOST,
                                STEERING_SPECIAL, STEERING_TRACK,
                                steering_correction, steering_heading,
@@ -88,6 +89,18 @@ def _enter_rescue_after_no_black(arduino):
         "[controle] linha preta ausente por "
         f"{config.ENTRY_NO_BLACK_RESCUE_DELAY_S:.1f} s; PARAR "
         "— resgate avançará 1 s antes dos giros")
+    return True
+
+
+def _enter_rescue_from_yolo(arduino):
+    """Consome o pedido do vigia sem entregar a serial de forma insegura."""
+    if terminate.value or steer() is False or not arduino.connected:
+        rescue_yolo_confirmed.value = False
+        return False
+    entry_armed.value = False
+    _reset_entry_silver("vitima YOLO confirmada")
+    status.value = "Vitima YOLO confirmada - entrando no resgate"
+    print("[controle] vítima YOLO confirmada; PARAR - iniciando resgate")
     return True
 
 
@@ -174,12 +187,32 @@ def control_loop():
             arduino.close()
         return
 
+    # O vigia pode ter confirmado uma vítima enquanto a câmera de linha
+    # aquecia. Não inicie sequer a sequência de partida nesse caso.
+    if mission_mode.value and rescue_yolo_confirmed.value:
+        if _enter_rescue_from_yolo(arduino):
+            rescue_requested.value = True
+        else:
+            status.value = "Falha ao parar para vitima YOLO - reiniciando missao"
+        arduino.close()
+        return
+
     if not _executar_sequencia_partida(arduino):
         status.value = 'Sequencia de partida interrompida'
         try:
             steer()
         finally:
             arduino.close()
+        return
+
+    # A sequência de partida usa pulsos de no máximo um segundo; consome já o
+    # pedido que chegou durante ela antes de qualquer comando de segue-linha.
+    if mission_mode.value and rescue_yolo_confirmed.value:
+        if _enter_rescue_from_yolo(arduino):
+            rescue_requested.value = True
+        else:
+            status.value = "Falha ao parar para vitima YOLO - reiniciando missao"
+        arduino.close()
         return
 
     line_status.value = "line_detected"
@@ -258,6 +291,14 @@ def control_loop():
             # A confirmacao tem prioridade sobre qualquer outra manobra: este
             # processo ainda e o dono seguro da serial e precisa parar antes
             # de o supervisor abrir o resgate.
+            if mission_mode.value and rescue_yolo_confirmed.value:
+                if _enter_rescue_from_yolo(arduino):
+                    rescue_requested.value = True
+                else:
+                    status.value = (
+                        "Falha ao parar para vitima YOLO - reiniciando missao")
+                break
+
             if (config.ENTRY_SILVER_ENABLED
                     and mission_mode.value and entry_armed.value
                     and entry_silver_confirmed.value):

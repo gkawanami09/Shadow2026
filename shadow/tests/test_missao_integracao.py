@@ -20,6 +20,7 @@ import resgate  # noqa: E402
 from mission import (  # noqa: E402
     MissionSystem,
     _tecla_fecha_debug,
+    iniciar_vigia_yolo,
     iniciar_debug_linha,
 )
 
@@ -68,6 +69,36 @@ class MissionDebugWindowTests(unittest.TestCase):
         self.assertEqual(len(processos), 3)
         self.assertIs(processos[-1].target, iniciar_debug_linha)
         self.assertEqual(processos[-1].name, "shadow-debug-linha")
+
+    def test_percurso_inicia_vigia_yolo_com_camera_de_resgate(self):
+        processos = []
+
+        class ProcessoFalso:
+            def __init__(self, target, args=(), name=None):
+                self.target, self.args, self.name = target, args, name
+                processos.append(self)
+
+            def start(self):
+                return None
+
+        valor = lambda inicial: SimpleNamespace(value=inicial)
+        compartilhado = SimpleNamespace(
+            terminate=valor(False), rescue_requested=valor(False),
+            rescue_yolo_confirmed=valor(True), red_finished=valor(False),
+            mission_mode=valor(False),
+        )
+        sistema = MissionSystem(
+            compartilhado, motor_lock=None,
+            args=SimpleNamespace(debug=False, rescue_camera_index=0),
+        )
+        with (patch("mission.Process", ProcessoFalso),
+              patch("mission.time.sleep")):
+            sistema.start_line_phase()
+
+        self.assertEqual(len(processos), 3)
+        self.assertIs(processos[-1].target, iniciar_vigia_yolo)
+        self.assertEqual(processos[-1].args, (0,))
+        self.assertFalse(compartilhado.rescue_yolo_confirmed.value)
 
 
 class MissionReadinessTests(unittest.TestCase):

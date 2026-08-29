@@ -164,6 +164,18 @@ def iniciar_controle():
     control_loop()
 
 
+def iniciar_vigia_yolo(camera_index):
+    """Procura vítimas pela câmera frontal, sem jamais comandar motores."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    from shared.dados_compartilhados import (
+        rescue_yolo_confirmed,
+        status,
+        terminate,
+    )
+    from visao.vigia_vitimas_missao import vigiar_vitimas
+    vigiar_vitimas(camera_index, terminate, rescue_yolo_confirmed, status)
+
+
 def _tecla_fecha_debug(tecla):
     return (tecla & 0xFF) in (ord("q"), 27)
 
@@ -236,6 +248,7 @@ class MissionSystem:
             "gap_center_y": -1.0,
             "gap_end_width": -1.0,
             "black_average": 0.0,
+            "rescue_yolo_confirmed": False,
         }
         for nome, valor in valores.items():
             self._definir_compartilhado(nome, valor)
@@ -246,6 +259,7 @@ class MissionSystem:
         self.shared.terminate.value = False
         self._definir_compartilhado("vision_ready", False)
         self.shared.rescue_requested.value = False
+        self._definir_compartilhado("rescue_yolo_confirmed", False)
         self.shared.red_finished.value = False
         self.shared.mission_mode.value = True
         self._definir_compartilhado("status", "Inicializando percurso")
@@ -257,6 +271,18 @@ class MissionSystem:
         control = Process(target=iniciar_controle, name="shadow-controle")
         control.start()
         self.children = [vision, control]
+        import config_resgate
+        if (
+            config_resgate.MISSION_YOLO_RESCUE_ENABLED
+            and hasattr(self.args, "rescue_camera_index")
+        ):
+            vigilante = Process(
+                target=iniciar_vigia_yolo,
+                args=(self.args.rescue_camera_index,),
+                name="shadow-vigia-yolo",
+            )
+            vigilante.start()
+            self.children.append(vigilante)
         if self.args.debug:
             debug = Process(
                 target=iniciar_debug_linha,
@@ -448,6 +474,7 @@ class MissionSystem:
         self.shared.entry_silver_reason.value = ""
         self.shared.entry_silver_state.value = 0
         self.shared.rescue_requested.value = False
+        self._definir_compartilhado("rescue_yolo_confirmed", False)
         self.shared.red_finished.value = False
         self.shared.status.value = "Reiniciando missao - aguardando Arduino"
 

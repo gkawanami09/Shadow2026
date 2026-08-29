@@ -87,6 +87,12 @@ VICTIM_MODEL_NMS_IOU = 0.45
 # Ordem das classes no modelo. Precisa bater com o data.yaml do treino.
 VICTIM_MODEL_CLASSES = ("black", "silver")
 
+# Vigia ativo durante o segue-linha da missão completa. O valor é separado do
+# limiar de busca normal para que somente uma detecção muito segura interrompa
+# o percurso.
+MISSION_YOLO_RESCUE_ENABLED = True
+MISSION_YOLO_RESCUE_MIN_CONFIDENCE = 0.80
+
 # ---------------------------------------------------------------------------
 # Detector treinado da faixa de saída
 # ---------------------------------------------------------------------------
