@@ -475,11 +475,26 @@ def vision_loop(debug=False):
                 frame_captured_at - ultimo_alinhamento_entrada
                 <= config.ENTRY_ALIGNMENT_HOLD_S
             )
+            # Durante a leitura e a execucao de um verde, o campo de visao
+            # muda muito e a lateral metalica/refletida pode ocupar a ROI.
+            # Prata so e valida no trecho reto, antes da manobra. Inclui o
+            # candidato ainda nao confirmado para nao acumular votos no meio
+            # da confirmacao do verde.
+            giro_verde_ativo = bool(
+                candidato_verde_frame
+                or turn_direction in ("left", "right", "turn_around")
+                or turn_dir.value in ("left", "right", "turn_around")
+                or green_turn_target.value in (-1, 1)
+            )
+            prata_liberada = not (
+                config.ENTRY_SILVER_BLOCK_GREEN_TURN and giro_verde_ativo)
             update_entry_silver(
                 entry_gate, cv2_img, frame_captured_at,
                 line_aligned=entrada_alinhada,
                 black_mask=entry_black_mask,
-                ramp_black_mask=entry_ramp_black_mask)
+                ramp_black_mask=entry_ramp_black_mask,
+                detection_allowed=prata_liberada,
+                block_reason="bloqueada: manobra verde" if not prata_liberada else "")
 
             processamento_ms = (
                 time.perf_counter() - inicio_processamento

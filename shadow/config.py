@@ -514,6 +514,9 @@ ENTRY_SILVER_LINE_APPROACH_RATIO = .20
 ENTRY_SILVER_LINE_MIN_ROW_FILL = .10
 ENTRY_SILVER_LINE_MIN_ROWS_RATIO = .10
 ENTRY_SILVER_LOG_INTERVAL_S = .50
+# Nunca avalia prata enquanto um verde esta sendo reconhecido ou executado.
+# Isso impede reflexos laterais vistos durante o giro de virarem resgate.
+ENTRY_SILVER_BLOCK_GREEN_TURN = True
 
 # ----------------------------------------------------------------------------
 # Cores usadas quando uma chave não existe no config.ini

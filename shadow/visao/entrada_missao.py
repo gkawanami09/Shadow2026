@@ -15,7 +15,8 @@ import time
 import numpy as np
 
 import config
-from visao.faixa_prata_entrada import detectar_faixa_prata
+from visao.faixa_prata_entrada import (
+    carregar_parametros_prata, detectar_faixa_prata)
 from shared.dados_compartilhados import (
     ENTRY_SILVER_BLACK_FOLLOW, ENTRY_SILVER_IDLE, ENTRY_SILVER_VALIDATING,
     entry_armed, entry_silver_confirmed, entry_silver_detected,
@@ -638,6 +639,7 @@ class ScoreEntryPipeline:
     """Detector local de prata + votos, sem inferencia ou estado de motor."""
 
     def __init__(self):
+        self.params = carregar_parametros_prata()
         self.last_detection = None
         self.last_result = None
         self.last_reason = "inicio"
@@ -678,7 +680,7 @@ class ScoreEntryPipeline:
         frame, timestamp, line_aligned, black_mask = self._pending
         self._pending = None
         result = detectar_faixa_prata(
-            frame, black_mask, line_aligned=line_aligned)
+            frame, black_mask, line_aligned=line_aligned, params=self.params)
         self.last_result = result
         if result.bbox is not None:
             self.last_detection = EntryDetection(
@@ -686,9 +688,10 @@ class ScoreEntryPipeline:
                 min(1., result.score / 10.),
             )
 
-        if result.candidata:
+        if result.bbox is not None and result.linha_fim and (
+                result.score >= self.params.ENTRY_SILVER_SCORE_MIN):
             self._votes = min(
-                config.ENTRY_SILVER_CONFIRM_FRAMES, self._votes + 1)
+                self.params.ENTRY_SILVER_CONFIRM_FRAMES, self._votes + 1)
             self.last_reason = "score_prata_aprovado"
             if timestamp - self._last_log_at >= config.ENTRY_SILVER_LOG_INTERVAL_S:
                 print(
@@ -704,7 +707,7 @@ class ScoreEntryPipeline:
             self._votes = max(0, self._votes - config.ENTRY_SILVER_MISS_DECAY)
             self.last_reason = "score_prata_insuficiente"
 
-        confirmed = self._votes >= config.ENTRY_SILVER_CONFIRM_FRAMES
+        confirmed = self._votes >= self.params.ENTRY_SILVER_CONFIRM_FRAMES
         if confirmed:
             self.last_reason = "confirmada"
         return confirmed, self.last_detection
@@ -734,6 +737,8 @@ def update_entry_silver(
     line_aligned=False,
     black_mask=None,
     ramp_black_mask=None,
+    detection_allowed=True,
+    block_reason="",
 ):
     """Avalia a entrada configurada e publica somente a confirmacao final."""
     if entry_gate is None:
@@ -744,6 +749,17 @@ def update_entry_silver(
         entry_silver_confirmed.value = False
         entry_silver_votes.value = 0
         entry_silver_reason.value = "entrada desarmada"
+        entry_silver_state.value = ENTRY_SILVER_IDLE
+        return
+    # Verde confirmado/candidato ou manobra: a camera pode ver metal lateral
+    # enquanto gira. Zera votos e nao deixa uma observacao antiga completar a
+    # confirmacao depois da curva.
+    if not detection_allowed:
+        entry_gate.set_armed(False)
+        entry_silver_detected.value = False
+        entry_silver_confirmed.value = False
+        entry_silver_votes.value = 0
+        entry_silver_reason.value = block_reason or "prata bloqueada"
         entry_silver_state.value = ENTRY_SILVER_IDLE
         return
     entry_gate.set_armed(True)
@@ -767,6 +783,7 @@ def update_entry_silver(
     entry_silver_reason.value = entry_gate.last_reason
     entry_silver_state.value = state
     if confirmed and not entry_silver_confirmed.value:
+        needed = getattr(entry_gate, "params", config).ENTRY_SILVER_CONFIRM_FRAMES
         print("[PRATA] CONFIRMADA - entrando no resgate "
-              f"({entry_gate.votes}/{config.ENTRY_SILVER_CONFIRM_FRAMES} frames)")
+              f"({entry_gate.votes}/{needed} frames)")
     entry_silver_confirmed.value = confirmed

@@ -377,6 +377,45 @@ class LineFollowerUnchangedTests(unittest.TestCase):
             entry_silver_reason.value = anterior_motivo
             entry_silver_state.value = anterior_estado
 
+    def test_manobra_verde_bloqueia_e_descarta_votos_de_prata(self):
+        """Reflexo durante giro verde nao pode completar a entrada."""
+        from shared.dados_compartilhados import (
+            entry_armed, entry_silver_confirmed, entry_silver_detected,
+            entry_silver_reason, entry_silver_state, entry_silver_votes,
+        )
+        from visao import entrada_missao
+
+        class GatePlaceholder:
+            def __init__(self):
+                self.arm_states = []
+
+            def set_armed(self, armed):
+                self.arm_states.append(bool(armed))
+
+            def submit(self, *args, **kwargs):
+                raise AssertionError("prata nao pode ser medida durante giro verde")
+
+        before = (entry_armed.value, entry_silver_detected.value,
+                  entry_silver_confirmed.value, entry_silver_votes.value,
+                  entry_silver_reason.value, entry_silver_state.value)
+        try:
+            entry_armed.value = True
+            entry_silver_detected.value = True
+            entry_silver_confirmed.value = False
+            entry_silver_votes.value = 3
+            gate = GatePlaceholder()
+            entrada_missao.update_entry_silver(
+                gate, None, 0.0, detection_allowed=False,
+                block_reason="bloqueada: manobra verde")
+            self.assertEqual(gate.arm_states, [False])
+            self.assertFalse(entry_silver_detected.value)
+            self.assertEqual(entry_silver_votes.value, 0)
+            self.assertEqual(entry_silver_reason.value, "bloqueada: manobra verde")
+        finally:
+            (entry_armed.value, entry_silver_detected.value,
+             entry_silver_confirmed.value, entry_silver_votes.value,
+             entry_silver_reason.value, entry_silver_state.value) = before
+
 
 class PulsedSearchConfigTests(unittest.TestCase):
     def test_pulso_e_setores_batem_com_o_360_calibrado(self):
