@@ -20,7 +20,10 @@ except ImportError:
         return function if function is not None else lambda decorated: decorated
     sys.modules["numba"] = types.SimpleNamespace(njit=_njit)
 
-from visao.linha import remover_componentes_isolados_da_borda  # noqa: E402
+from visao.linha import (  # noqa: E402
+    mascarar_extremidades_com_linha_central,
+    remover_componentes_isolados_da_borda,
+)
 
 
 class LinhaBordaTests(unittest.TestCase):
@@ -47,6 +50,25 @@ class LinhaBordaTests(unittest.TestCase):
         filtrada = remover_componentes_isolados_da_borda(mascara)
 
         self.assertTrue(np.all(filtrada[45:65, :90] == 255))
+
+    def test_escuro_lateral_nao_puxa_com_linha_central_visivel(self):
+        mascara = np.zeros((100, 160), dtype=np.uint8)
+        mascara[55:100, 72:88] = 255
+        # Mancha escura ligada artificialmente a linha e a borda direita.
+        mascara[70:100, 80:160] = 255
+
+        filtrada = mascarar_extremidades_com_linha_central(mascara)
+
+        self.assertTrue(np.all(filtrada[:, 120:] == 0))
+        self.assertTrue(np.all(filtrada[55:100, 72:80] == 255))
+
+    def test_borda_volta_a_valer_depois_que_linha_sai_do_centro(self):
+        mascara = np.zeros((100, 160), dtype=np.uint8)
+        mascara[55:100, 125:150] = 255
+
+        filtrada = mascarar_extremidades_com_linha_central(mascara)
+
+        self.assertTrue(np.all(filtrada[55:100, 125:150] == 255))
 
 
 if __name__ == "__main__":

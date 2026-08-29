@@ -7,8 +7,7 @@ import cv2
 import numpy as np
 
 import config
-from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, VISION_MAX_FRAMES,
-                    camera_x, camera_y)
+from config import DEBUG_SHM_NAME, VISION_MAX_FRAMES, camera_x, camera_y
 from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
                                          entry_armed,
@@ -115,8 +114,6 @@ def vision_loop(debug=False):
     green_module.aquecer_numba()
     print("[visão] cálculos prontos em "
           f"{time.perf_counter() - inicio_aquecimento:.2f}s")
-
-    bottom_y = camera_y
 
     time_line_angle = empty_time_arr()
     time_turn_direction = empty_time_arr()
@@ -233,18 +230,15 @@ def vision_loop(debug=False):
             if line_status.value == "gap_avoid":
                 apply_gap_avoid_mask(black_image)
 
-            if (
-                bottom_y < camera_y * .95
-                and media_preto < BLACK_AVG_SIDE_MASK
-                and line_status.value == "line_detected"
-            ):
-                cv2.rectangle(black_image, (0, 0), (int(camera_x * .25), camera_y), 0, -1)
-                cv2.rectangle(black_image, (int(camera_x * .75), 0), (camera_x, camera_y), 0, -1)
-
             # O prata pode gerar ilhas na mascara nas duas extremidades.
             # Remova somente as que nao se conectam ao corredor central antes
             # da morfologia dilata-las e uni-las artificialmente a linha.
             black_image = line_module.remover_componentes_isolados_da_borda(
+                black_image)
+            # Se a linha central ainda estiver presente, o preto/reflexo nas
+            # pontas nao pode alterar a direcao. Numa curva real, a presenca
+            # central desaparece e a borda volta a participar sozinha.
+            black_image = line_module.mascarar_extremidades_com_linha_central(
                 black_image)
 
             # Redução de ruído.
@@ -412,7 +406,6 @@ def vision_loop(debug=False):
 
                 time_last_average_line_point = add_time_value(time_last_average_line_point, x)
 
-                bottom_y = bottom_point[1]
                 ponto_inferior_x_frame = float(bottom_point[0])
                 ponto_inferior_y_frame = float(bottom_point[1])
 

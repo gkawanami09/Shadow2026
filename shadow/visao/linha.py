@@ -71,6 +71,38 @@ def remover_componentes_isolados_da_borda(mascara):
     return mascara
 
 
+def mascarar_extremidades_com_linha_central(mascara):
+    """Bloqueia a borda enquanto ainda ha linha consistente no centro.
+
+    Este segundo nivel cobre o reflexo escuro que toca ou se une a outro
+    componente, caso em que ele nao pode ser removido como uma ilha. A linha
+    real so perde a permissao para ir ate a lateral enquanto ainda ha bastante
+    preto central na parte proxima ao robo; ao sair do centro, a mascara se
+    libera automaticamente para permitir curvas.
+    """
+    if mascara is None or mascara.ndim != 2 or not mascara.size:
+        return mascara
+    height, width = mascara.shape
+    y_start = min(height, max(0, int(round(
+        height * config.LINE_CENTER_SUPPORT_Y_MIN))))
+    x_start = min(width, max(0, int(round(
+        width * config.LINE_CENTER_SUPPORT_X_MIN))))
+    x_end = min(width, max(x_start + 1, int(round(
+        width * config.LINE_CENTER_SUPPORT_X_MAX))))
+    central = mascara[y_start:, x_start:x_end]
+    if not central.size:
+        return mascara
+    fill = np.count_nonzero(central) / central.size
+    if fill < config.LINE_CENTER_SUPPORT_MIN_FILL:
+        return mascara
+
+    edge_width = max(1, int(round(
+        width * config.LINE_CENTER_SUPPORT_EDGE_MASK_RATIO)))
+    mascara[:, :edge_width] = 0
+    mascara[:, width - edge_width:] = 0
+    return mascara
+
+
 def determine_correct_line(contours_blk, preferir_esquerda=False,
                            turn_direction=None):
     """Escolhe o contorno mantendo o ramo verde ja marcado."""

@@ -159,6 +159,14 @@ LINE_IGNORE_ISOLATED_EDGE_COMPONENTS = True
 LINE_EDGE_COMPONENT_MARGIN_RATIO = .035
 LINE_EDGE_COMPONENT_CENTER_X_MIN = .18
 LINE_EDGE_COMPONENT_CENTER_X_MAX = .82
+# Quando a linha ainda esta visivel no centro inferior, a leitura das faixas
+# externas e bloqueada. Isto impede o escuro do prata de puxar o robo para o
+# canto; a mascara lateral e liberada assim que a linha realmente sair dali.
+LINE_CENTER_SUPPORT_X_MIN = .40
+LINE_CENTER_SUPPORT_X_MAX = .60
+LINE_CENTER_SUPPORT_Y_MIN = .55
+LINE_CENTER_SUPPORT_MIN_FILL = .08
+LINE_CENTER_SUPPORT_EDGE_MASK_RATIO = .25
 LINE_CROP_INITIAL = .52
 LINE_CROP_NORMAL = .52
 LINE_CROP_GREEN = .45                     # durante curva verde
