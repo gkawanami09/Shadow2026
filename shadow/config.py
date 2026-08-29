@@ -487,8 +487,8 @@ BLACK_MAX_RAMP_DOWN_TOP_DEFAULT = [27, 27, 26]      # BGR
 # S e V não mudam — trocar dois canais não altera máximo nem mínimo.
 # Marcador verde sob pouca luz perde saturacao e pode deslocar um pouco o
 # matiz. A area/forma do triangulo ainda e validada depois desta mascara.
-GREEN_MIN_DEFAULT = [20, 100, 35]                    # HSV (era H=58)
-GREEN_MAX_DEFAULT = [70, 255, 255]                   # HSV (era H=98)
+GREEN_MIN_DEFAULT = [24, 130, 50]                    # HSV (era H=58)
+GREEN_MAX_DEFAULT = [66, 255, 255]                   # HSV (era H=98)
 # Laranja ocupa o fim da banda baixa do HSV. Vermelho fica restrito aos tons
 # proximos de 0 ou 180, com cor e brilho suficientes para nao pegar laranja.
 RED_MIN_1_DEFAULT = [0, 125, 100]                    # HSV

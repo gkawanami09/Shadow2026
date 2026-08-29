@@ -37,7 +37,7 @@ from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_valu
 from visao.linha import calculate_angle, determine_correct_line
 from visao.trajetoria import extrair_ponto_futuro
 from visao.verde import (ConfirmadorVerde, check_green,
-                         has_plausible_green, latch_turn_direction)
+                         latch_turn_direction)
 from visao.faixa_verde import altura_faixa_transversal
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
 
@@ -289,7 +289,12 @@ def vision_loop(debug=False):
                     debug_img=cv2_img if debug else None)
             else:
                 direcao_verde_bruta = "straight"
-            candidato_verde_agora = has_plausible_green(contours_grn)
+            # Uma mancha verde de tamanho/formato plausiveis ainda nao pode
+            # frear ou travar a rota. So vira candidata se tambem estiver
+            # ligada ao preto na geometria obrigatoria do marcador.
+            candidato_verde_agora = (
+                direcao_verde_bruta in ("left", "right", "turn_around")
+            )
             turn_direction = confirmador_verde.atualizar(
                 direcao_verde_bruta, candidato=candidato_verde_agora)
             candidato_verde_frame = confirmador_verde.candidato_ativo

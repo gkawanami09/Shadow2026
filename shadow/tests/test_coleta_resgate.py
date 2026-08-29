@@ -208,18 +208,18 @@ class BallPickupSequencerTests(unittest.TestCase):
         )
         self.assertEqual(
             (cfg.BALL_PICKUP_LIFT_POWER, cfg.BALL_PICKUP_LIFT_MS),
-            (20, 1900),
+            (20, 1500),
         )
         self.assertEqual(
             (
                 cfg.BALL_PICKUP_LIFT_SLOW_POWER,
                 cfg.BALL_PICKUP_LIFT_SLOW_MS,
             ),
-            (10, 400),
+            (10, 250),
         )
         self.assertEqual(
             cfg.BALL_PICKUP_LIFT_MS + cfg.BALL_PICKUP_LIFT_SLOW_MS,
-            2300,
+            1750,
         )
         self.assertEqual(
             (
@@ -575,8 +575,8 @@ class BallPickupSequencerTests(unittest.TestCase):
                     cfg.BALL_PICKUP_FUTABA_POWER,
                     cfg.BALL_PICKUP_FUTABA_MS,
                 ),
-                (20, 1900),
-                (10, 400),
+                (20, 1500),
+                (10, 250),
                 (1, 300),
                 (-20, 25),
             ],
