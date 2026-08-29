@@ -91,6 +91,14 @@ class ManobraVerdeTests(unittest.TestCase):
             True, config.GREEN_TURN_SIDE_MIN_ERROR_PX + 1, 1))
         self.assertTrue(controle_visual_verde_liberado(True, True))
 
+    def test_ramo_pacman_proximo_ao_centro_ainda_e_adquirido(self):
+        # O ramo pode surgir primeiro pouco alem do centro; nao precisa
+        # esperar a faixa chegar quase na lateral para assumir o rastreio.
+        self.assertTrue(ramo_marcado_visto_pela_camera(
+            True, config.GREEN_TURN_SIDE_MIN_ERROR_PX + 1, 1))
+        self.assertFalse(ramo_marcado_visto_pela_camera(
+            True, config.GREEN_TURN_SIDE_MIN_ERROR_PX - 1, 1))
+
     def test_ramo_oposto_nao_pode_cancelar_giro_verde(self):
         self.assertFalse(ramo_marcado_visto_pela_camera(
             True, -(config.GREEN_TURN_SIDE_MIN_ERROR_PX + 1), 1))

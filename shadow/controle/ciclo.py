@@ -450,6 +450,11 @@ def control_loop():
                 gap_allowed = (
                     GAP_ENABLED
                     and not test_no_black_active
+                    # Gap e somente uma ausencia em reta. Durante uma curva
+                    # verde, perder a faixa por alguns frames e esperado e o
+                    # ramo travado precisa continuar tendo prioridade.
+                    and green_direction is None
+                    and turn_dir.value == "straight"
                     and now >= gap_retry_after
                 )
                 if (gap_allowed and not line_detected.value
@@ -830,6 +835,14 @@ def control_loop():
                         )
                         if ramo_armado_pela_camera:
                             green_target_seen = True
+                            # O ramo marcado acabou de aparecer no lado
+                            # correto. Arme imediatamente a memoria de canto
+                            # para nao perder um Pacman se ele desaparecer no
+                            # proximo frame durante o giro.
+                            controlador_linha.forcar_canto(
+                                lado_esperado,
+                                agora=now,
+                            )
                             green_transversal_frames = 0
                             green_last_signed_error = (
                                 lado_esperado * erro_inferior)

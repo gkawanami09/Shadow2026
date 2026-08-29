@@ -200,6 +200,11 @@ LINE_CORNER_SIDE_HEADING_DEG = 35.
 LINE_CORNER_TARGET_MIN = .35
 LINE_CORNER_CONFIRM_FRAMES = 2
 LINE_CORNER_MIN_CORRECTION = .72
+# Mesmo antes da confirmacao completa, um frame com rumo de canto forte pode
+# sumir na proxima imagem. Mantem esse sentido brevemente para curvas muito
+# fechadas, sem transformar uma perda em reta em giro persistente.
+LINE_CORNER_CANDIDATE_LOST_HOLD_S = .40
+LINE_CORNER_CANDIDATE_MIN_CORRECTION = .55
 LINE_CORNER_FINISH_CORRECTION = .35
 # Curva fechada confirmada usa tanque simetrico na parte forte. A histerese
 # impede alternancia entre tanque e diferencial perto do limiar; abaixo da
@@ -215,7 +220,7 @@ LINE_CORNER_EXIT_FRAMES = 3
 # ruido, preservando a firmeza dos cantos reais de 90 graus.
 LINE_CORNER_RETURN_CANCEL_FRAMES = 2
 LINE_CORNER_TIMEOUT_S = 1.6
-LINE_CORNER_LOST_HOLD_S = .65
+LINE_CORNER_LOST_HOLD_S = .90
 # Ao desaparecer em uma reta (piso branco/gap), continue estritamente reto por
 # esta janela antes da parada de seguranca. Curvas confirmadas usam a memoria
 # separada acima para nao escapar de um canto de 90 graus.
@@ -288,11 +293,14 @@ GREEN_BRANCH_CONFIRM_FRAMES = 2           # evita liberar tanque por um ruido
 GREEN_STRAIGHT_TOP_Y_RATIO = .32          # faixa futura onde a saida deve chegar
 GREEN_STRAIGHT_BOTTOM_Y_RATIO = .72       # entrada precisa vir da base do robo
 GREEN_STRAIGHT_CORRIDOR_RATIO = .20       # tolera chegada inclinada na camera wide
-GREEN_TURN_BLIND_TIME = .30                # s — giro sem aceitar leitura da camera
-GREEN_TURN_SIDE_MIN_ERROR_PX = 55          # linha alvo deve primeiro entrar pelo lado marcado
+GREEN_TURN_BLIND_TIME = .38                # s — deixa o Pacman sair da linha de entrada
+# Em Pacman, o ramo entra na imagem ainda perto do centro. Exigir 55 px fazia
+# o robo continuar o pivot e por vezes atravessar a ramificacao antes de
+# entregar o comando ao rastreador visual.
+GREEN_TURN_SIDE_MIN_ERROR_PX = 35          # linha alvo deve primeiro entrar pelo lado marcado
 GREEN_TURN_CENTER_TOLERANCE_PX = 35        # px — ponto inferior aceito no centro da camera
 GREEN_TURN_CENTER_CONFIRM_FRAMES = 3       # nunca conclui por um frame central
-GREEN_TURN_TIMEOUT = 2.0                   # s — para com seguranca se nao reencontrar o ramo
+GREEN_TURN_TIMEOUT = 2.6                   # s — janela extra para ramificacao Pacman
 GREEN_TURN_SPEED = .5                     # base PWM 60, preserva o giro
 GREEN_MPU_ENABLED = True                  # camera guia; MPU limita excesso de giro
 GREEN_MPU_QUERY_INTERVAL_S = .04

@@ -93,6 +93,31 @@ class ControladorSegueLinha:
         """Descarta a memoria durante verde, gap ou outra manobra deliberada."""
         self.reset()
 
+    def forcar_canto(self, sinal, *, agora=None):
+        """Arma a memoria de curva para uma ramificacao ja confirmada.
+
+        O verde ja provou qual lado e a camera acabou de ver o ramo naquele
+        lado. Em curvas fechadas, especialmente no Pacman, a faixa pode
+        desaparecer no frame seguinte; aguardar dois frames normais deixava
+        a perda ser tratada como reta/gap antes de a memoria de canto existir.
+        """
+        sinal = self._sinal(float(sinal))
+        if not sinal:
+            return False
+        agora = time.monotonic() if agora is None else float(agora)
+        self._canto_sinal = sinal
+        self._canto_candidato_sinal = 0
+        self._canto_candidato_frames = 0
+        self._canto_alinhado_frames = 0
+        self._canto_retorno_frames = 0
+        self._canto_iniciado_em = agora
+        self._ultimo_visto_em = agora
+        self._perdida_desde = None
+        self.estado = CORNER
+        self._ultima_correcao = sinal * max(
+            abs(self._ultima_correcao), config.LINE_CORNER_MIN_CORRECTION)
+        return True
+
     @staticmethod
     def _sinal(valor):
         return 1 if valor > 0 else -1 if valor < 0 else 0
@@ -107,22 +132,32 @@ class ControladorSegueLinha:
             else agora - self._ultimo_visto_em
         )
         em_canto = self._canto_sinal != 0
+        candidato_canto = (
+            not em_canto
+            and self._canto_candidato_frames > 0
+            and self._canto_candidato_sinal != 0
+        )
         limite = (
             config.LINE_CORNER_LOST_HOLD_S
             if em_canto else config.LINE_TRACK_LOST_HOLD_S
         )
+        if candidato_canto:
+            limite = config.LINE_CORNER_CANDIDATE_LOST_HOLD_S
         comando_valido = desde_vista <= limite
         # Branco em uma reta deve produzir um avanco previsivel, sem prolongar
         # a ultima correcao lateral. Em um canto confirmado, preserve o giro
         # porque zerar a correcao faria o robo escapar antes da nova reta.
-        correcao = (
-            self._ultima_correcao
-            if comando_valido and em_canto
-            else 0.
-        )
+        correcao = self._ultima_correcao if (
+            comando_valido and (em_canto or candidato_canto)
+        ) else 0.
         if comando_valido and em_canto:
             correcao = self._canto_sinal * max(
                 abs(correcao), config.LINE_CORNER_MIN_CORRECTION)
+        elif comando_valido and candidato_canto:
+            correcao = self._canto_candidato_sinal * max(
+                abs(correcao),
+                config.LINE_CORNER_CANDIDATE_MIN_CORRECTION,
+            )
 
         self._ultima_saida = SaidaSegueLinha(
             correcao=max(min(correcao, 1.), -1.),

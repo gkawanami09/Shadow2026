@@ -216,6 +216,33 @@ class SeguidorLinhaTests(unittest.TestCase):
         self.assertGreaterEqual(
             perdida.correcao, config.LINE_CORNER_MIN_CORRECTION)
 
+    def test_curva_preta_fechada_mantem_sentido_ao_perder_apos_um_frame(self):
+        # Numa curva muito fechada, a linha pode sair da imagem antes do
+        # segundo quadro que confirmaria o canto completo.
+        primeiro = self.quadro(
+            a_frente=False,
+            inferior=(224., 251.),
+            alvo=(447., 126.),
+        )
+        perdida = self.quadro(detectada=False, dt=.10)
+
+        self.assertEqual(primeiro.estado, TRACK)
+        self.assertEqual(perdida.estado, LOST)
+        self.assertTrue(perdida.comando_valido)
+        self.assertGreaterEqual(
+            perdida.correcao,
+            config.LINE_CORNER_CANDIDATE_MIN_CORRECTION,
+        )
+
+    def test_ramo_verde_forca_memoria_de_canto_antes_do_segundo_frame(self):
+        self.controlador.forcar_canto(1, agora=self.agora)
+        perdida = self.quadro(detectada=False, dt=.10)
+
+        self.assertEqual(perdida.estado, LOST)
+        self.assertTrue(perdida.comando_valido)
+        self.assertGreaterEqual(
+            perdida.correcao, config.LINE_CORNER_MIN_CORRECTION)
+
     def test_ponto_futuro_oposto_cancela_canto_ja_armado(self):
         self.quadro(
             a_frente=False, alvo=(447., 126.), futuro=(380., 80.))
