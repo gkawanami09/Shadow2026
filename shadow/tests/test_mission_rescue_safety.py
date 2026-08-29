@@ -62,6 +62,13 @@ class RescueReturnSafetyTests(unittest.TestCase):
         ):
             sistema.aguardar_ciclo_do_arduino("teste")
 
+    def test_fluxo_da_missao_usa_a_espera_do_ciclo_ao_desconectar(self):
+        fonte = (SHADOW_ROOT / "mission.py").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "if returncode == RESCUE_EXIT_ARDUINO_DESCONECTADO:", fonte)
+        self.assertIn("system.aguardar_ciclo_do_arduino(motivo)", fonte)
+
     def test_falha_serial_tardia_do_resgate_reinicia_o_percurso(self):
         args = type("Args", (), {"gerenciado_pela_missao": True})()
         arduino = type("Arduino", (), {"connected": False})()

@@ -689,6 +689,12 @@ def main():
                         motivo,
                     )
                     tentativas += 1
+                    if returncode == RESCUE_EXIT_ARDUINO_DESCONECTADO:
+                        # O resgate acabou porque perdeu a unica placa que
+                        # controla os motores. Nao tente abrir uma nova serial
+                        # no meio do reboot: espere o ciclo fisico completo
+                        # que sinaliza reposicionamento seguro do robo.
+                        system.aguardar_ciclo_do_arduino(motivo)
                     iniciar_percurso_ate_pronto(motivo)
                     continue
 
