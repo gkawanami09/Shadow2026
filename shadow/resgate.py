@@ -536,7 +536,12 @@ def _saida_concluida_libera_missao(args, codigo_saida, comando):
     )
 
 
-def _iniciar_busca_segura(arduino, start_time=None, accepts_kind=None):
+def _iniciar_busca_segura(
+    arduino,
+    start_time=None,
+    accepts_kind=None,
+    initial_observe_s=0.0,
+):
     """Cria uma busca somente depois de substituir movimento antigo por PARAR."""
     if arduino is not None and arduino.parar() is False:
         raise RuntimeError(
@@ -544,6 +549,7 @@ def _iniciar_busca_segura(arduino, start_time=None, accepts_kind=None):
     return make_search_controller(
         start_time=start_time,
         accepts_kind=accepts_kind,
+        initial_observe_s=initial_observe_s,
     )
 
 
@@ -1070,7 +1076,14 @@ def main(args=None):
             None if args.drive
             else BallApproachController(start_time=armado_em))
         busca = (
-            _iniciar_busca_segura(arduino, start_time=armado_em)
+            _iniciar_busca_segura(
+                arduino,
+                start_time=armado_em,
+                initial_observe_s=(
+                    cfg.MISSION_YOLO_REACQUIRE_S
+                    if args.gerenciado_pela_missao else 0.0
+                ),
+            )
             if args.drive else None)
         coleta = BallPickupSequencer()
         comando = MotionCommand(

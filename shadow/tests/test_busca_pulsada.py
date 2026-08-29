@@ -65,6 +65,29 @@ class PulsedCycleTests(unittest.TestCase):
         self.assertEqual(giro.angle, cfg.BALL_SEARCH_TANK_ANGLE)
         self.assertEqual(giro.speed, cfg.BALL_SEARCH_TANK_SPEED)
 
+    def test_observacao_inicial_trava_alvo_sem_iniciar_giro(self):
+        search = PulsedBallSearchController(
+            start_time=0.0, initial_observe_s=1.5)
+        alvo = FakeDetection(timestamp=0.10)
+
+        command = search.update(alvo, now=0.11)
+
+        self.assertEqual(command.state, search.TARGET_STOP)
+        self.assertEqual(command.angle, 190)
+        self.assertEqual(search.pulses, 0)
+
+    def test_observacao_inicial_sem_alvo_so_gira_apos_prazo(self):
+        search = PulsedBallSearchController(
+            start_time=0.0, initial_observe_s=1.5)
+
+        parado = search.update(None, now=1.49)
+        giro = search.update(None, now=1.50)
+
+        self.assertEqual(parado.state, search.INITIAL_OBSERVE)
+        self.assertEqual(parado.angle, 190)
+        self.assertEqual(giro.state, search.START)
+        self.assertEqual(giro.angle, cfg.BALL_SEARCH_TANK_ANGLE)
+
     def test_o_giro_realmente_para_para_observar(self):
         assentou = self._pulso_completo(0.0)
         command = self.search.update(None, now=assentou + 0.01)

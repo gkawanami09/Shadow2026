@@ -92,6 +92,10 @@ VICTIM_MODEL_CLASSES = ("black", "silver")
 # o percurso.
 MISSION_YOLO_RESCUE_ENABLED = True
 MISSION_YOLO_RESCUE_MIN_CONFIDENCE = 0.80
+# Depois do handoff do segue-linha, a mesma bola costuma continuar no quadro.
+# Fique parado tempo suficiente para o novo worker adquirir três frames antes
+# de iniciar qualquer giro de busca.
+MISSION_YOLO_REACQUIRE_S = 1.50
 
 # ---------------------------------------------------------------------------
 # Detector treinado da faixa de saída

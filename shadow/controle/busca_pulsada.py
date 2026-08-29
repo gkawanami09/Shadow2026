@@ -45,6 +45,7 @@ class PulsedBallSearchController:
     # mesmos nomes do controlador contínuo para o log e o overlay não mudarem
     # de vocabulário no meio da competição.
     START = "SEARCH_START"
+    INITIAL_OBSERVE = "SEARCH_INITIAL_OBSERVE"
     ROTATING = "SEARCH_PULSE"
     BRAKE = "SEARCH_BRAKE"
     SETTLE = "SEARCH_SETTLE"
@@ -58,14 +59,17 @@ class PulsedBallSearchController:
 
     #: Estados em que o robô está parado por construção.
     STOPPED_STATES = (
-        BRAKE, SETTLE, OBSERVE, TARGET_STOP, VERIFY, TURN_STOP,
+        INITIAL_OBSERVE, BRAKE, SETTLE, OBSERVE, TARGET_STOP, VERIFY, TURN_STOP,
         FINAL_VERIFY, ACQUIRED, COMPLETE,
     )
 
-    def __init__(self, start_time=None, accepts_kind=None):
+    def __init__(self, start_time=None, accepts_kind=None, initial_observe_s=0.0):
         now = time.monotonic() if start_time is None else float(start_time)
-        self.state = self.START
+        self.state = (
+            self.INITIAL_OBSERVE
+            if float(initial_observe_s) > 0.0 else self.START)
         self._created_at = now
+        self._initial_observe_until = now + max(float(initial_observe_s), 0.0)
         #: Filtro opcional de cor para diagnósticos e futuras estratégias.
         self._accepts_kind = accepts_kind
         self._rotation_started_at = None
@@ -155,6 +159,7 @@ class PulsedBallSearchController:
 
         handler = {
             self.START: self._on_start,
+            self.INITIAL_OBSERVE: self._on_initial_observe,
             self.ROTATING: self._on_rotating,
             self.BRAKE: self._on_brake,
             self.SETTLE: self._on_settle,
@@ -171,6 +176,20 @@ class PulsedBallSearchController:
     def _on_start(self, detection, now):
         return self._tank(
             self.START, "iniciando pulso de busca em modo tanque")
+
+    def _on_initial_observe(self, detection, now):
+        """Readquire a bola recém-vista antes de começar uma varredura."""
+        if self._valid(detection, now):
+            return self._request_target_stop(detection)
+        if self._plausible(detection, now):
+            return self._request_target_stop(detection, tentative=True)
+        if now >= self._initial_observe_until:
+            self.state = self.START
+            return self._tank(
+                self.START, "alvo inicial nao reapareceu; iniciando busca")
+        return self._stop(
+            self.INITIAL_OBSERVE,
+            "parado; readquirindo a bola vista antes do handoff")
 
     def _on_rotating(self, detection, now):
         # Um candidato visto durante o giro FREIA imediatamente, mas não
@@ -469,10 +488,17 @@ class PulsedBallSearchController:
             target_kind=target_kind)
 
 
-def make_search_controller(start_time=None, accepts_kind=None):
+def make_search_controller(
+    start_time=None,
+    accepts_kind=None,
+    initial_observe_s=0.0,
+):
     """Fábrica usada pelo resgate: pulsada por padrão, contínua se desligada."""
     if cfg.BALL_SEARCH_PULSED:
         return PulsedBallSearchController(
-            start_time=start_time, accepts_kind=accepts_kind)
+            start_time=start_time,
+            accepts_kind=accepts_kind,
+            initial_observe_s=initial_observe_s,
+        )
     from controle.busca_resgate import BallSearchController
     return BallSearchController(start_time=start_time)
