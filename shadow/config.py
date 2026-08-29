@@ -201,6 +201,13 @@ LINE_PATH_MAX_LATERAL_JUMP_PX = camera_x * .30
 # pelas bandas horizontais. Fragmentos escuros do prata normalmente falham
 # nesta prova e passam a ser tratados como linha perdida, nao como direcao.
 LINE_REQUIRE_CONFIDENT_PATH = True
+# A confianca tambem exige que o caminho comece perto da base do robo. Assim,
+# uma mancha escura vista apenas sobre o prata nao pode virar uma linha-alvo
+# sem estar ligada ao trecho que o robo realmente vinha seguindo.
+LINE_PATH_REQUIRE_BASE_ANCHOR = True
+LINE_PATH_BASE_ANCHOR_Y_MIN = .82
+LINE_PATH_BASE_ANCHOR_MAX_OFFSET_RATIO = .30
+LINE_PATH_BASE_ANCHOR_MAX_WIDTH_RATIO = .35
 # Reflexos das luzes abrem pequenos vazios dentro da faixa preta. Eles nao
 # sao bifurcacoes: intervalos proximos sao reunidos e uma separacao so limita
 # o ponto futuro quando for larga e persistir por varias bandas da imagem.

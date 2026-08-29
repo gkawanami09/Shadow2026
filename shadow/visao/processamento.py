@@ -34,7 +34,7 @@ from visao.captura import LineCamera
 from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.linha import calculate_angle, determine_correct_line
-from visao.trajetoria import extrair_ponto_futuro
+from visao.trajetoria import caminho_confiavel_ate_origem, extrair_ponto_futuro
 from visao.verde import (ConfirmadorVerde, check_green,
                          latch_turn_direction)
 from visao.faixa_verde import altura_faixa_transversal
@@ -281,11 +281,11 @@ def vision_loop(debug=False):
                 contours_blk = [
                     contorno
                     for contorno in contours_blk
-                    if extrair_ponto_futuro(
+                    if caminho_confiavel_ate_origem(
                         contorno,
                         mascara_linha=black_image,
                         origem_x=camera_x / 2,
-                    ).valido
+                    )
                 ]
 
             # Procura a faixa vermelha.
