@@ -151,6 +151,12 @@ PASSO_VELOCIDADE_RETA_RAPIDA = .01
 # ----------------------------------------------------------------------------
 MIN_LINE_SIZE_DEFAULT = 3000              # area minima do contorno
 BLACK_AVG_SIDE_MASK = 21                  # mascara lateral se imagem limpa
+# Reflexos/partes do chassi podem formar um contorno alto preso na borda da
+# imagem. A fita cruza a lateral em curvas, mas nao deve acompanha-la por uma
+# grande altura vertical.
+LINE_REJECT_LONG_EDGE_CONTOURS = True
+LINE_EDGE_CONTOUR_MARGIN_RATIO = .08
+LINE_EDGE_CONTOUR_MAX_VERTICAL_SPAN_RATIO = .35
 LINE_CROP_INITIAL = .52
 LINE_CROP_NORMAL = .52
 LINE_CROP_GREEN = .45                     # durante curva verde

@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from numba import njit
 
+import config
 from config import (BOTTOM_CENTER_CONTROL, BOTTOM_CENTER_MIN_Y,
                     BOTTOM_CENTER_WEIGHT,
                     GREEN_BRANCH_TRACKER_OFFSET_PX,
@@ -33,6 +34,33 @@ def contorno_atravessa_laterais(contorno):
         np.min(pontos_x) < camera_x * .02
         and np.max(pontos_x) > camera_x * .98
     )
+
+
+def contorno_grudado_na_borda(contorno, largura=None, altura=None):
+    """Detecta uma mancha que percorre a lateral da imagem por muito tempo.
+
+    Um risco/linha transversal pode tocar a borda, mas ocupa pouca altura ali.
+    O reflexo visto no prata forma uma parede vertical na borda e precisa ser
+    removido antes de a pontuacao do rastreador escolher esse contorno.
+    """
+    if not config.LINE_REJECT_LONG_EDGE_CONTOURS:
+        return False
+    if contorno is None or np.asarray(contorno).size == 0:
+        return False
+    width = camera_x if largura is None else int(largura)
+    height = camera_y if altura is None else int(altura)
+    if width <= 1 or height <= 1:
+        return False
+    pontos = np.asarray(contorno)[:, 0]
+    margin = max(1, int(round(width * config.LINE_EDGE_CONTOUR_MARGIN_RATIO)))
+    for borda in (pontos[pontos[:, 0] <= margin],
+                  pontos[pontos[:, 0] >= width - 1 - margin]):
+        if not borda.size:
+            continue
+        span_vertical = int(np.max(borda[:, 1]) - np.min(borda[:, 1]) + 1)
+        if span_vertical >= height * config.LINE_EDGE_CONTOUR_MAX_VERTICAL_SPAN_RATIO:
+            return True
+    return False
 
 
 def determine_correct_line(contours_blk, preferir_esquerda=False,
