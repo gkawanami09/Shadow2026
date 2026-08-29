@@ -484,12 +484,15 @@ ENTRY_SILVER_VALIDATION_S = 0.0
 # nova candidatura prata por este periodo. Cada frame com preto renova o prazo.
 ENTRY_BLACK_FOLLOW_TIMEOUT_S = 1.0
 # ---------------------------------------------------------------------------
-# Teste de entrada sem prata -- SOMENTE na missao completa
+# Entrada por ausencia de preto -- SOMENTE para teste controlado
 # ---------------------------------------------------------------------------
 # Depois de ter seguido uma linha preta, se ela desaparecer enquanto o robo
 # estiver reto por este tempo, entra no resgate. O temporizador nao conta no
 # boot sem linha, em curva, em marcador ou em manobra verde.
-ENTRY_NO_BLACK_RESCUE_TEST_ENABLED = True
+# Nunca habilitar no percurso: prata, reflexos ou uma falha breve de visao
+# tambem podem esconder a linha. A entrada no resgate permanece desligada
+# enquanto ``ENTRY_SILVER_ENABLED`` estiver False.
+ENTRY_NO_BLACK_RESCUE_TEST_ENABLED = False
 ENTRY_NO_BLACK_RESCUE_DELAY_S = 3.0
 # Ao confirmar, o controle apenas para e entrega a serial. O resgate preserva
 # seu avanço reto normal de 1 s antes de iniciar os giros de busca.

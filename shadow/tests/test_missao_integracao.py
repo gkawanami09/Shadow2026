@@ -222,7 +222,7 @@ class MissionRecoveryTests(unittest.TestCase):
 class MissionEntryAdvanceTests(unittest.TestCase):
     def test_teste_desliga_modelo_prata_e_configura_entrada_por_sem_preto(self):
         self.assertFalse(config.ENTRY_SILVER_ENABLED)
-        self.assertTrue(config.ENTRY_NO_BLACK_RESCUE_TEST_ENABLED)
+        self.assertFalse(config.ENTRY_NO_BLACK_RESCUE_TEST_ENABLED)
         self.assertEqual(config.ENTRY_NO_BLACK_RESCUE_DELAY_S, 3.0)
 
     def test_entrada_inicia_busca_sem_avanco_reto(self):
