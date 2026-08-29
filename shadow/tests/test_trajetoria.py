@@ -11,11 +11,7 @@ import numpy as np
 SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
-import config  # noqa: E402
-from visao.trajetoria import (  # noqa: E402
-    caminho_confiavel_ate_origem,
-    extrair_ponto_futuro,
-)
+from visao.trajetoria import extrair_ponto_futuro  # noqa: E402
 
 
 def linha(pontos, espessura=18):
@@ -111,41 +107,6 @@ class PontoFuturoTests(unittest.TestCase):
         futuro = self.futuro([(224, 251), (300, 220)])
 
         self.assertFalse(futuro.valido)
-
-    def test_fragmentos_escuros_do_prata_nao_formam_trajetoria(self):
-        mascara = np.zeros((252, 448), dtype=np.uint8)
-        # Cada fragmento e largo, mas nenhum deles forma um caminho continuo
-        # de baixo para cima que possa orientar o segue-linha.
-        for y in (230, 185, 140, 95):
-            cv2.rectangle(mascara, (120, y), (350, y + 16), 255, -1)
-        contornos, _ = cv2.findContours(
-            mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-
-        for contorno in contornos:
-            futuro = extrair_ponto_futuro(
-                contorno, mascara_linha=mascara, origem_x=224)
-            self.assertFalse(futuro.valido)
-
-    def test_caminho_precisa_chegar_ate_a_base_do_robo(self):
-        mascara = np.zeros((252, 448), dtype=np.uint8)
-        # Mancha longa sobre o prata, mas iniciada longe do rodape.
-        cv2.rectangle(mascara, (205, 45), (243, 190), 255, -1)
-        contornos, _ = cv2.findContours(
-            mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-
-        anterior = config.LINE_PATH_REQUIRE_BASE_ANCHOR
-        config.LINE_PATH_REQUIRE_BASE_ANCHOR = True
-        try:
-            self.assertFalse(caminho_confiavel_ate_origem(
-                contornos[0], mascara_linha=mascara, origem_x=224))
-        finally:
-            config.LINE_PATH_REQUIRE_BASE_ANCHOR = anterior
-
-    def test_caminho_central_continuo_e_confiavel(self):
-        mascara, contorno = linha([(224, 251), (224, 5)])
-
-        self.assertTrue(caminho_confiavel_ate_origem(
-            contorno, mascara_linha=mascara, origem_x=224))
 
     def test_circulo_nao_e_reduzido_a_media_dos_dois_ramos(self):
         mascara = np.zeros((252, 448), dtype=np.uint8)

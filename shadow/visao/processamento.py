@@ -7,7 +7,8 @@ import cv2
 import numpy as np
 
 import config
-from config import DEBUG_SHM_NAME, VISION_MAX_FRAMES, camera_x, camera_y
+from config import (BLACK_AVG_SIDE_MASK, DEBUG_SHM_NAME, VISION_MAX_FRAMES,
+                    camera_x, camera_y)
 from shared.dados_compartilhados import (add_time_value, black_average,
                                          config_manager, empty_time_arr,
                                          entry_armed,
@@ -34,7 +35,7 @@ from visao.captura import LineCamera
 from visao.entrada_missao import build_entry_gate, update_entry_silver
 from visao.gap import apply_gap_avoid_mask, publish_gap_geometry, reset_gap_values
 from visao.linha import calculate_angle, determine_correct_line
-from visao.trajetoria import caminho_confiavel_ate_origem, extrair_ponto_futuro
+from visao.trajetoria import extrair_ponto_futuro
 from visao.verde import (ConfirmadorVerde, check_green,
                          latch_turn_direction)
 from visao.faixa_verde import altura_faixa_transversal
@@ -114,6 +115,8 @@ def vision_loop(debug=False):
     green_module.aquecer_numba()
     print("[visão] cálculos prontos em "
           f"{time.perf_counter() - inicio_aquecimento:.2f}s")
+
+    bottom_y = camera_y
 
     time_line_angle = empty_time_arr()
     time_turn_direction = empty_time_arr()
@@ -230,20 +233,13 @@ def vision_loop(debug=False):
             if line_status.value == "gap_avoid":
                 apply_gap_avoid_mask(black_image)
 
-            # Primeiro fecha os pequenos buracos abertos pelo reflexo direto
-            # do LED na fita. Isso permite usar um teto de preto mais baixo,
-            # sem perder a linha verdadeira por pontos brilhantes.
-            black_image = line_module.preencher_furos_de_reflexo(black_image)
-            # O prata pode gerar ilhas na mascara nas duas extremidades.
-            # Remova somente as que nao se conectam ao corredor central antes
-            # da morfologia dilata-las e uni-las artificialmente a linha.
-            black_image = line_module.remover_componentes_isolados_da_borda(
-                black_image)
-            # Se a linha central ainda estiver presente, o preto/reflexo nas
-            # pontas nao pode alterar a direcao. Numa curva real, a presenca
-            # central desaparece e a borda volta a participar sozinha.
-            black_image = line_module.mascarar_extremidades_com_linha_central(
-                black_image)
+            if (
+                bottom_y < camera_y * .95
+                and media_preto < BLACK_AVG_SIDE_MASK
+                and line_status.value == "line_detected"
+            ):
+                cv2.rectangle(black_image, (0, 0), (int(camera_x * .25), camera_y), 0, -1)
+                cv2.rectangle(black_image, (int(camera_x * .75), 0), (camera_x, camera_y), 0, -1)
 
             # Redução de ruído.
             if line_status.value == "gap_avoid":
@@ -273,20 +269,6 @@ def vision_loop(debug=False):
                 for contorno in contours_blk
                 if cv2.contourArea(contorno) > area_minima_linha
             ]
-            if (config.LINE_REQUIRE_CONFIDENT_PATH
-                    and line_status.value != "gap_avoid"):
-                # Area grande nao e prova suficiente: o prata pode produzir
-                # varios pedacos escuros. Exigir um caminho continuo impede
-                # esses fragmentos de chegarem ao calculo de angulo.
-                contours_blk = [
-                    contorno
-                    for contorno in contours_blk
-                    if caminho_confiavel_ate_origem(
-                        contorno,
-                        mascara_linha=black_image,
-                        origem_x=camera_x / 2,
-                    )
-                ]
 
             # Procura a faixa vermelha.
             candidato_vermelho_frame = check_contour_size(
@@ -424,6 +406,7 @@ def vision_loop(debug=False):
 
                 time_last_average_line_point = add_time_value(time_last_average_line_point, x)
 
+                bottom_y = bottom_point[1]
                 ponto_inferior_x_frame = float(bottom_point[0])
                 ponto_inferior_y_frame = float(bottom_point[1])
 

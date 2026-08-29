@@ -4,7 +4,6 @@ import cv2
 import numpy as np
 from numba import njit
 
-import config
 from config import (BOTTOM_CENTER_CONTROL, BOTTOM_CENTER_MIN_Y,
                     BOTTOM_CENTER_WEIGHT,
                     GREEN_BRANCH_TRACKER_OFFSET_PX,
@@ -34,92 +33,6 @@ def contorno_atravessa_laterais(contorno):
         np.min(pontos_x) < camera_x * .02
         and np.max(pontos_x) > camera_x * .98
     )
-
-
-def remover_componentes_isolados_da_borda(mascara):
-    """Remove reflexos nas extremidades, sem recortar a linha de verdade.
-
-    O prata pode aparecer como manchas somente nos cantos da camera. Na
-    mascara de preto elas competem com a linha. Um componente que toca uma
-    borda e nao tem pixels no corredor central e' descartado; uma curva real
-    permanece, pois continua conectada a esse corredor.
-    """
-    if not config.LINE_IGNORE_ISOLATED_EDGE_COMPONENTS:
-        return mascara
-    if mascara is None or mascara.ndim != 2 or not mascara.size:
-        return mascara
-
-    height, width = mascara.shape
-    if height == 0 or width < 3:
-        return mascara
-    margin = max(1, int(round(width * config.LINE_EDGE_COMPONENT_MARGIN_RATIO)))
-    center_start = int(round(width * config.LINE_EDGE_COMPONENT_CENTER_X_MIN))
-    center_end = int(round(width * config.LINE_EDGE_COMPONENT_CENTER_X_MAX))
-    center_start = min(max(0, center_start), width - 1)
-    center_end = min(max(center_start + 1, center_end), width)
-
-    component_count, labels, stats, _ = cv2.connectedComponentsWithStats(
-        mascara, connectivity=8)
-    for label in range(1, component_count):
-        x, _y, component_width, _height, _area = stats[label]
-        touches_edge = x <= margin or x + component_width >= width - margin
-        if not touches_edge:
-            continue
-        component = labels == label
-        if not np.any(component[:, center_start:center_end]):
-            mascara[component] = 0
-    return mascara
-
-
-def preencher_furos_de_reflexo(mascara):
-    """Reconecta furos pequenos do LED dentro da faixa preta detectada.
-
-    A mascara considera preto como branco. Portanto, o reflexo do LED abre
-    pontos pretos dentro da faixa branca. O fechamento morfologico preenche
-    somente falhas menores que o kernel; uma area grande de prata permanece
-    fora da mascara e continua sendo tratada pela geometria da linha.
-    """
-    if mascara is None or mascara.ndim != 2 or not mascara.size:
-        return mascara
-    size = max(1, int(config.LINE_REFLECTION_HOLE_CLOSE_KERNEL))
-    if size % 2 == 0:
-        size += 1
-    if size == 1:
-        return mascara
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
-    return cv2.morphologyEx(mascara, cv2.MORPH_CLOSE, kernel)
-
-
-def mascarar_extremidades_com_linha_central(mascara):
-    """Bloqueia a borda enquanto ainda ha linha consistente no centro.
-
-    Este segundo nivel cobre o reflexo escuro que toca ou se une a outro
-    componente, caso em que ele nao pode ser removido como uma ilha. A linha
-    real so perde a permissao para ir ate a lateral enquanto ainda ha bastante
-    preto central na parte proxima ao robo; ao sair do centro, a mascara se
-    libera automaticamente para permitir curvas.
-    """
-    if mascara is None or mascara.ndim != 2 or not mascara.size:
-        return mascara
-    height, width = mascara.shape
-    y_start = min(height, max(0, int(round(
-        height * config.LINE_CENTER_SUPPORT_Y_MIN))))
-    x_start = min(width, max(0, int(round(
-        width * config.LINE_CENTER_SUPPORT_X_MIN))))
-    x_end = min(width, max(x_start + 1, int(round(
-        width * config.LINE_CENTER_SUPPORT_X_MAX))))
-    central = mascara[y_start:, x_start:x_end]
-    if not central.size:
-        return mascara
-    fill = np.count_nonzero(central) / central.size
-    if fill < config.LINE_CENTER_SUPPORT_MIN_FILL:
-        return mascara
-
-    edge_width = max(1, int(round(
-        width * config.LINE_CENTER_SUPPORT_EDGE_MASK_RATIO)))
-    mascara[:, :edge_width] = 0
-    mascara[:, width - edge_width:] = 0
-    return mascara
 
 
 def determine_correct_line(contours_blk, preferir_esquerda=False,

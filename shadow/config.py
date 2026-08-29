@@ -151,26 +151,6 @@ PASSO_VELOCIDADE_RETA_RAPIDA = .01
 # ----------------------------------------------------------------------------
 MIN_LINE_SIZE_DEFAULT = 3000              # area minima do contorno
 BLACK_AVG_SIDE_MASK = 21                  # mascara lateral se imagem limpa
-# Reflexos do piso prata podem virar ilhas de "preto" coladas na borda da
-# imagem. Elas nao pertencem a trilha e podem vencer a escolha do contorno.
-# O filtro remove somente componentes de borda que nao alcancam este corredor
-# central; uma curva real que sai para a lateral continua ligada a ele.
-LINE_IGNORE_ISOLATED_EDGE_COMPONENTS = True
-LINE_EDGE_COMPONENT_MARGIN_RATIO = .035
-LINE_EDGE_COMPONENT_CENTER_X_MIN = .18
-LINE_EDGE_COMPONENT_CENTER_X_MAX = .82
-# Quando a linha ainda esta visivel no centro inferior, a leitura das faixas
-# externas e bloqueada. Isto impede o escuro do prata de puxar o robo para o
-# canto; a mascara lateral e liberada assim que a linha realmente sair dali.
-LINE_CENTER_SUPPORT_X_MIN = .40
-LINE_CENTER_SUPPORT_X_MAX = .60
-LINE_CENTER_SUPPORT_Y_MIN = .55
-LINE_CENTER_SUPPORT_MIN_FILL = .08
-LINE_CENTER_SUPPORT_EDGE_MASK_RATIO = .25
-# Reflexos pontuais do LED removem pequenos trechos da mascara da fita preta.
-# Um fechamento curto recompõe esses furos, sem transformar a mancha larga do
-# prata em uma linha. Deve ser impar e menor que a largura normal da fita.
-LINE_REFLECTION_HOLE_CLOSE_KERNEL = 9
 LINE_CROP_INITIAL = .52
 LINE_CROP_NORMAL = .52
 LINE_CROP_GREEN = .45                     # durante curva verde
@@ -197,20 +177,6 @@ LINE_PATH_MIN_VERTICAL_SPAN_RATIO = .28
 LINE_PATH_MIN_SAMPLES = 7
 LINE_PATH_MAX_BAND_GAP = 2
 LINE_PATH_MAX_LATERAL_JUMP_PX = camera_x * .30
-# O contorno so pode comandar o segue-linha se render uma trajetoria continua
-# pelas bandas horizontais. Fragmentos escuros do prata normalmente falham
-# nesta prova e passam a ser tratados como linha perdida, nao como direcao.
-LINE_REQUIRE_CONFIDENT_PATH = True
-# A confianca tambem exige que o caminho comece perto da base do robo. Assim,
-# uma mancha escura vista apenas sobre o prata nao pode virar uma linha-alvo
-# sem estar ligada ao trecho que o robo realmente vinha seguindo.
-# A camera pode ver a fita ja deslocada no rodape durante curvas. Mantenha
-# esta prova disponivel para ensaio, mas desligada no percurso ate haver uma
-# calibracao geometrica especifica da camera.
-LINE_PATH_REQUIRE_BASE_ANCHOR = False
-LINE_PATH_BASE_ANCHOR_Y_MIN = .82
-LINE_PATH_BASE_ANCHOR_MAX_OFFSET_RATIO = .30
-LINE_PATH_BASE_ANCHOR_MAX_WIDTH_RATIO = .35
 # Reflexos das luzes abrem pequenos vazios dentro da faixa preta. Eles nao
 # sao bifurcacoes: intervalos proximos sao reunidos e uma separacao so limita
 # o ponto futuro quando for larga e persistir por varias bandas da imagem.
@@ -494,15 +460,12 @@ ENTRY_SILVER_VALIDATION_S = 0.0
 # nova candidatura prata por este periodo. Cada frame com preto renova o prazo.
 ENTRY_BLACK_FOLLOW_TIMEOUT_S = 1.0
 # ---------------------------------------------------------------------------
-# Entrada por ausencia de preto -- SOMENTE para teste controlado
+# Teste de entrada sem prata -- SOMENTE na missao completa
 # ---------------------------------------------------------------------------
 # Depois de ter seguido uma linha preta, se ela desaparecer enquanto o robo
 # estiver reto por este tempo, entra no resgate. O temporizador nao conta no
 # boot sem linha, em curva, em marcador ou em manobra verde.
-# Nunca habilitar no percurso: prata, reflexos ou uma falha breve de visao
-# tambem podem esconder a linha. A entrada no resgate permanece desligada
-# enquanto ``ENTRY_SILVER_ENABLED`` estiver False.
-ENTRY_NO_BLACK_RESCUE_TEST_ENABLED = False
+ENTRY_NO_BLACK_RESCUE_TEST_ENABLED = True
 ENTRY_NO_BLACK_RESCUE_DELAY_S = 3.0
 # Ao confirmar, o controle apenas para e entrega a serial. O resgate preserva
 # seu avanço reto normal de 1 s antes de iniciar os giros de busca.
