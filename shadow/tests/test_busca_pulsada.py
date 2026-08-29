@@ -72,9 +72,10 @@ class PulsedCycleTests(unittest.TestCase):
 
         command = search.update(alvo, now=0.11)
 
-        self.assertEqual(command.state, search.TARGET_STOP)
+        self.assertEqual(command.state, search.ACQUIRED)
         self.assertEqual(command.angle, 190)
         self.assertEqual(search.pulses, 0)
+        self.assertTrue(search.target_acquired)
 
     def test_observacao_inicial_sem_alvo_so_gira_apos_prazo(self):
         search = PulsedBallSearchController(

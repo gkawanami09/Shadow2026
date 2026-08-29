@@ -180,7 +180,19 @@ class PulsedBallSearchController:
     def _on_initial_observe(self, detection, now):
         """Readquire a bola recém-vista antes de começar uma varredura."""
         if self._valid(detection, now):
-            return self._request_target_stop(detection)
+            # A missão entregou o robô já parado e este alvo passou pelos
+            # locks temporal e físico. Não faça uma segunda parada/validação:
+            # ela interromperia a perseguição justamente quando a garra já
+            # está armada. O chamador cria o controlador de aproximação no
+            # mesmo tick e ele manda ALIGN ou APPROACH imediatamente.
+            self._target_kind = detection.kind
+            self._tentative_target = False
+            self.state = self.ACQUIRED
+            return self._stop(
+                self.ACQUIRED,
+                "bola confirmada parada; iniciando aproximacao direta",
+                target_kind=self._target_kind,
+            )
         if self._plausible(detection, now):
             return self._request_target_stop(detection, tentative=True)
         if now >= self._initial_observe_until:
