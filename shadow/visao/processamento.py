@@ -267,9 +267,7 @@ def vision_loop(debug=False):
             contours_blk = [
                 contorno
                 for contorno in contours_blk
-                if (cv2.contourArea(contorno) > area_minima_linha
-                    and not line_module.contorno_grudado_na_borda(
-                        contorno, camera_x, camera_y))
+                if cv2.contourArea(contorno) > area_minima_linha
             ]
 
             # Procura a faixa vermelha.
