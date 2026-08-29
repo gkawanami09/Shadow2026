@@ -39,10 +39,9 @@ RESCUE_ARM_DELAY_S = 3.0
 RESCUE_WORKER_JOIN_TIMEOUT_S = 2.0
 
 # Ao entrar na sala pela missao completa, o segue-linha entrega os motores
-# parados ao resgate. O robo atravessa a faixa prata em linha reta antes de
-# iniciar os pulsos de giro que procuram as vitimas. Este movimento nao e
-# executado ao abrir ``resgate.py`` sozinho.
-MISSION_ENTRY_FORWARD_S = 1.0
+# parados ao resgate. A busca pelas vitimas comeca imediatamente, sem um novo
+# avanco reto. Este movimento nao e executado ao abrir ``resgate.py`` sozinho.
+MISSION_ENTRY_FORWARD_S = 0.0
 MISSION_ENTRY_FORWARD_PWM = 80
 MISSION_ENTRY_FORWARD_SPEED = MISSION_ENTRY_FORWARD_PWM / 120.0
 
@@ -218,9 +217,9 @@ BALL_CRESCENT_TOKEN_TTL_S = 0.80
 # soma dos dois avancos antigos (1 s + 1 s) e completa mais 200 ms antes de
 # fechar as garras. Somente o modo de parede, configurado abaixo, acrescenta re.
 # Calibracao fisica no CH4: a descida completa e confiavel usa potencia
-# negativa maxima durante 700 ms antes do avanco e do fechamento das garras.
+# negativa maxima durante 1 s antes do avanco e do fechamento das garras.
 BALL_PICKUP_FUTABA_POWER = -100
-BALL_PICKUP_FUTABA_MS = 700
+BALL_PICKUP_FUTABA_MS = 1000
 BALL_PICKUP_FUTABA_GUARD_S = 0.10
 # O firmware inicia em esquerda=180 e direita=0. Para aproximar as duas
 # garras 20 graus do centro, a esquerda usa sinal negativo e a direita

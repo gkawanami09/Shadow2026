@@ -802,6 +802,12 @@ def _avancar_entrada_da_missao(args, arduino, acao_direcao):
     ):
         return False
 
+    if cfg.MISSION_ENTRY_FORWARD_S <= 0.0:
+        print(
+            "[resgate] entrada da missao: iniciando imediatamente a busca "
+            "das vitimas")
+        return True
+
     epoca_serial = arduino.connection_epoch
     print(
         "[resgate] entrada da missao: avancando reto por "

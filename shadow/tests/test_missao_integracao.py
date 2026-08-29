@@ -225,15 +225,15 @@ class MissionEntryAdvanceTests(unittest.TestCase):
         self.assertTrue(config.ENTRY_NO_BLACK_RESCUE_TEST_ENABLED)
         self.assertEqual(config.ENTRY_NO_BLACK_RESCUE_DELAY_S, 3.0)
 
-    def test_avanco_da_entrada_tem_um_segundo_e_pwm_80(self):
-        self.assertEqual(cfg.MISSION_ENTRY_FORWARD_S, 1.0)
+    def test_entrada_inicia_busca_sem_avanco_reto(self):
+        self.assertEqual(cfg.MISSION_ENTRY_FORWARD_S, 0.0)
         self.assertEqual(cfg.MISSION_ENTRY_FORWARD_PWM, 80)
         self.assertAlmostEqual(
             cfg.MISSION_ENTRY_FORWARD_SPEED * 120,
             cfg.MISSION_ENTRY_FORWARD_PWM,
         )
 
-    def test_teste_sem_preto_mantem_avanco_da_entrada(self):
+    def test_teste_sem_preto_inicia_busca_sem_avanco_da_entrada(self):
         args = SimpleNamespace(
             drive=True,
             gerenciado_pela_missao=True,
@@ -256,15 +256,8 @@ class MissionEntryAdvanceTests(unittest.TestCase):
             )
 
         self.assertTrue(executou)
-        mover.assert_called_once_with(
-            arduino,
-            direcao,
-            0,
-            cfg.MISSION_ENTRY_FORWARD_SPEED,
-            cfg.MISSION_ENTRY_FORWARD_S,
-            7,
-        )
-        self.assertEqual(comandos, [()])
+        mover.assert_not_called()
+        self.assertEqual(comandos, [])
 
     def test_resgate_aberto_sozinho_nao_faz_o_avanco(self):
         args = SimpleNamespace(
