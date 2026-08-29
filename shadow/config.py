@@ -151,6 +151,14 @@ PASSO_VELOCIDADE_RETA_RAPIDA = .01
 # ----------------------------------------------------------------------------
 MIN_LINE_SIZE_DEFAULT = 3000              # area minima do contorno
 BLACK_AVG_SIDE_MASK = 21                  # mascara lateral se imagem limpa
+# Reflexos do piso prata podem virar ilhas de "preto" coladas na borda da
+# imagem. Elas nao pertencem a trilha e podem vencer a escolha do contorno.
+# O filtro remove somente componentes de borda que nao alcancam este corredor
+# central; uma curva real que sai para a lateral continua ligada a ele.
+LINE_IGNORE_ISOLATED_EDGE_COMPONENTS = True
+LINE_EDGE_COMPONENT_MARGIN_RATIO = .035
+LINE_EDGE_COMPONENT_CENTER_X_MIN = .18
+LINE_EDGE_COMPONENT_CENTER_X_MAX = .82
 LINE_CROP_INITIAL = .52
 LINE_CROP_NORMAL = .52
 LINE_CROP_GREEN = .45                     # durante curva verde

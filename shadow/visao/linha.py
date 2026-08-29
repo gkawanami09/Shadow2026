@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from numba import njit
 
+import config
 from config import (BOTTOM_CENTER_CONTROL, BOTTOM_CENTER_MIN_Y,
                     BOTTOM_CENTER_WEIGHT,
                     GREEN_BRANCH_TRACKER_OFFSET_PX,
@@ -33,6 +34,41 @@ def contorno_atravessa_laterais(contorno):
         np.min(pontos_x) < camera_x * .02
         and np.max(pontos_x) > camera_x * .98
     )
+
+
+def remover_componentes_isolados_da_borda(mascara):
+    """Remove reflexos nas extremidades, sem recortar a linha de verdade.
+
+    O prata pode aparecer como manchas somente nos cantos da camera. Na
+    mascara de preto elas competem com a linha. Um componente que toca uma
+    borda e nao tem pixels no corredor central e' descartado; uma curva real
+    permanece, pois continua conectada a esse corredor.
+    """
+    if not config.LINE_IGNORE_ISOLATED_EDGE_COMPONENTS:
+        return mascara
+    if mascara is None or mascara.ndim != 2 or not mascara.size:
+        return mascara
+
+    height, width = mascara.shape
+    if height == 0 or width < 3:
+        return mascara
+    margin = max(1, int(round(width * config.LINE_EDGE_COMPONENT_MARGIN_RATIO)))
+    center_start = int(round(width * config.LINE_EDGE_COMPONENT_CENTER_X_MIN))
+    center_end = int(round(width * config.LINE_EDGE_COMPONENT_CENTER_X_MAX))
+    center_start = min(max(0, center_start), width - 1)
+    center_end = min(max(center_start + 1, center_end), width)
+
+    component_count, labels, stats, _ = cv2.connectedComponentsWithStats(
+        mascara, connectivity=8)
+    for label in range(1, component_count):
+        x, _y, component_width, _height, _area = stats[label]
+        touches_edge = x <= margin or x + component_width >= width - margin
+        if not touches_edge:
+            continue
+        component = labels == label
+        if not np.any(component[:, center_start:center_end]):
+            mascara[component] = 0
+    return mascara
 
 
 def determine_correct_line(contours_blk, preferir_esquerda=False,

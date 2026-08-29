@@ -241,6 +241,12 @@ def vision_loop(debug=False):
                 cv2.rectangle(black_image, (0, 0), (int(camera_x * .25), camera_y), 0, -1)
                 cv2.rectangle(black_image, (int(camera_x * .75), 0), (camera_x, camera_y), 0, -1)
 
+            # O prata pode gerar ilhas na mascara nas duas extremidades.
+            # Remova somente as que nao se conectam ao corredor central antes
+            # da morfologia dilata-las e uni-las artificialmente a linha.
+            black_image = line_module.remover_componentes_isolados_da_borda(
+                black_image)
+
             # Redução de ruído.
             if line_status.value == "gap_avoid":
                 black_image = cv2.erode(black_image, kernal, iterations=5)
