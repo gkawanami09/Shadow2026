@@ -138,6 +138,12 @@ class MissionReadinessTests(unittest.TestCase):
         sistema, _ = self._sistema(filho_vivo=False)
         self.assertFalse(sistema.wait_line_ready())
 
+    def test_yolo_confirmado_na_inicializacao_entra_no_resgate(self):
+        sistema, compartilhado = self._sistema(filho_vivo=False)
+        compartilhado.rescue_requested.value = True
+
+        self.assertTrue(sistema.wait_line_ready())
+
     def test_vigia_yolo_morto_nao_bloqueia_retomada_da_linha(self):
         sistema, _ = self._sistema(
             status="Shadow2026 pronto - aguardando linha")

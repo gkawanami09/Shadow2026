@@ -323,6 +323,11 @@ class MissionSystem:
             + 2.0
         )
         while time.monotonic() < prazo:
+            # A confirmação YOLO pode chegar no primeiro frame. Nesse caso o
+            # controle para os motores e encerra de propósito para entregar a
+            # serial ao resgate; isso não é falha de inicialização.
+            if self.shared.rescue_requested.value:
+                return True
             if not all(
                 child.is_alive() for child in self._children_essenciais()
             ):
