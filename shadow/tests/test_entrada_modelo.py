@@ -39,6 +39,12 @@ class EntryModelTests(unittest.TestCase):
         self.assertGreater(config.ENTRY_ALIGNMENT_HOLD_S, 0)
         self.assertLessEqual(config.ENTRY_ALIGNMENT_HOLD_S, 1.0)
 
+    def test_prata_exige_reta_estavel_mais_rigida_que_alinhamento(self):
+        self.assertLess(
+            config.ENTRY_SILVER_STRAIGHT_MAX_ANGLE,
+            config.ENTRY_LINE_MAX_ANGLE)
+        self.assertGreater(config.ENTRY_SILVER_STRAIGHT_STABLE_S, 0)
+
     def test_saida_yolo_uma_classe_vira_caixa_no_frame(self):
         model = EntryModel(
             backend="onnx", input_size=640, min_confidence=.6)

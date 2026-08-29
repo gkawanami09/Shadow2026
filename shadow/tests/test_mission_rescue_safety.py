@@ -2,7 +2,9 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 SHADOW_ROOT = Path(__file__).resolve().parents[1]

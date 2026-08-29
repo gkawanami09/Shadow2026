@@ -140,6 +140,7 @@ def vision_loop(debug=False):
     # ele nunca é construído e o custo é zero.
     entry_gate = build_entry_gate()
     ultimo_alinhamento_entrada = 0.
+    reta_prata_desde = None
 
     # Matriz usada para reduzir ruídos das máscaras.
     kernal = np.ones((3, 3), np.uint8)
@@ -466,13 +467,31 @@ def vision_loop(debug=False):
                 and abs(ponto_inferior_x_frame - camera_x / 2)
                 <= config.ENTRY_LINE_MAX_BOTTOM_ERROR_PX
             )
-            if linha_alinhada:
+            reta_prata_agora = bool(
+                linha_detectada_frame
+                and abs(angulo_frame) <= config.ENTRY_SILVER_STRAIGHT_MAX_ANGLE
+                and abs(ponto_inferior_x_frame - camera_x / 2)
+                <= config.ENTRY_SILVER_STRAIGHT_MAX_BOTTOM_ERROR_PX
+                and faixa_transversal_y_frame < 0.
+            )
+            curva_ou_90 = bool(
+                linha_detectada_frame and not reta_prata_agora)
+            if reta_prata_agora:
+                if reta_prata_desde is None:
+                    reta_prata_desde = frame_captured_at
                 ultimo_alinhamento_entrada = frame_captured_at
+            elif curva_ou_90:
+                # Nao herda o alinhamento/votos de uma reta ao iniciar curva.
+                reta_prata_desde = None
+                ultimo_alinhamento_entrada = 0.
             # A faixa prata naturalmente tapa/termina a linha preta. Assim,
             # o modelo recebe até 0,5 s após o último alinhamento real, mas
             # nunca quando o robô já começou uma correção de linha perdida.
             entrada_alinhada = (
-                frame_captured_at - ultimo_alinhamento_entrada
+                reta_prata_desde is not None
+                and frame_captured_at - reta_prata_desde
+                >= config.ENTRY_SILVER_STRAIGHT_STABLE_S
+                and frame_captured_at - ultimo_alinhamento_entrada
                 <= config.ENTRY_ALIGNMENT_HOLD_S
             )
             # Durante a leitura e a execucao de um verde, o campo de visao
@@ -487,14 +506,19 @@ def vision_loop(debug=False):
                 or green_turn_target.value in (-1, 1)
             )
             prata_liberada = not (
-                config.ENTRY_SILVER_BLOCK_GREEN_TURN and giro_verde_ativo)
+                (config.ENTRY_SILVER_BLOCK_GREEN_TURN and giro_verde_ativo)
+                or curva_ou_90)
+            bloqueio_prata = (
+                "bloqueada: manobra verde" if giro_verde_ativo
+                else "bloqueada: curva/90 graus" if curva_ou_90
+                else "")
             update_entry_silver(
                 entry_gate, cv2_img, frame_captured_at,
                 line_aligned=entrada_alinhada,
                 black_mask=entry_black_mask,
                 ramp_black_mask=entry_ramp_black_mask,
                 detection_allowed=prata_liberada,
-                block_reason="bloqueada: manobra verde" if not prata_liberada else "")
+                block_reason=bloqueio_prata)
 
             processamento_ms = (
                 time.perf_counter() - inicio_processamento

@@ -515,6 +515,12 @@ ENTRY_SILVER_LOG_INTERVAL_S = .50
 # Nunca avalia prata enquanto um verde esta sendo reconhecido ou executado.
 # Isso impede reflexos laterais vistos durante o giro de virarem resgate.
 ENTRY_SILVER_BLOCK_GREEN_TURN = True
+# Prata so pode ser validada depois de um pequeno trecho realmente reto. Estes
+# limites sao mais rigidos que o alinhamento comum da entrada: uma curva de
+# 90 graus ou uma faixa transversal zera os votos imediatamente.
+ENTRY_SILVER_STRAIGHT_MAX_ANGLE = 14
+ENTRY_SILVER_STRAIGHT_MAX_BOTTOM_ERROR_PX = 65
+ENTRY_SILVER_STRAIGHT_STABLE_S = .35
 
 # ----------------------------------------------------------------------------
 # Cores usadas quando uma chave não existe no config.ini
