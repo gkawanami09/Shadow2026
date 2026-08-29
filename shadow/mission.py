@@ -130,10 +130,12 @@ def mudar_estado(estado_atual, novo_estado, motivo=""):
 def rescue_return_action(returncode):
     """Define quando e seguro devolver o robô ao percurso.
 
-    Uma desconexão USB durante o resgate não informa se o Arduino reiniciou,
-    se os motores ainda receberam parte do último comando ou onde o robô
-    terminou fisicamente. Por isso, somente o término normal da saída preta
-    confirmada pode liberar o segue-linha.
+    Somente o término normal da saída preta confirmada devolve o robô ao
+    percurso *na mesma posição*. Qualquer outro código encerra a tentativa de
+    resgate e faz o supervisor criar uma nova sessão de segue-linha, que fica
+    parada até a serial do Arduino estar disponível. Assim, uma placa
+    desligada jamais encerra o ``mission.py`` nem mantém o robô preso no
+    resgate.
     """
     if int(returncode) == RESCUE_EXIT_OK:
         return RESCUE_RETURN_COMPLETED
@@ -674,14 +676,13 @@ def main():
                 returncode = system.wait_rescue()
                 rescue_action = rescue_return_action(returncode)
                 if rescue_action == RESCUE_RETURN_STOPPED:
-                    # Reconexões breves não rearmam a missão. A retomada só
-                    # ocorre após o operador desligar a placa pelo intervalo
-                    # mínimo, reposicionar o robô e religá-la.
-                    system.aguardar_ciclo_do_arduino(
-                        f"resgate terminou com codigo {returncode}")
                     motivo = (
                         f"resgate terminou com codigo {returncode}; "
-                        "Arduino foi desligado e religado")
+                        "voltando ao segue-linha e aguardando Arduino")
+                    print(
+                        "[missao] resgate interrompido; reiniciando o "
+                        "segue-linha. Os motores ficarao parados ate o "
+                        "Arduino reconectar.")
                     estado_atual = mudar_estado(
                         estado_atual,
                         EstadoMissao.RECONECTANDO,
@@ -712,13 +713,6 @@ def main():
                 raise
             except Exception as err:               # noqa: BLE001
                 print(f"[missao] tentativa interrompida: {err}")
-                if estado_atual in (
-                    EstadoMissao.ENTRADA_RESGATE,
-                    EstadoMissao.RESGATE,
-                ):
-                    # Depois da entrada confirmada nenhum erro comum pode
-                    # devolver os motores ao segue-linha.
-                    system.aguardar_ciclo_do_arduino(str(err))
                 tentativas += 1
                 estado_atual = mudar_estado(
                     estado_atual,

@@ -38,7 +38,10 @@ class RescueReturnSafetyTests(unittest.TestCase):
             RESCUE_RETURN_COMPLETED,
         )
 
-    def test_desconexao_do_arduino_bloqueia_reinicio_do_percurso(self):
+    def test_desconexao_do_arduino_encerra_resgate_para_reiniciar_percurso(self):
+        # ``mission.py`` trata este resultado como resgate interrompido. Ele
+        # não faz o handoff normal de volta, mas reinicia uma sessão de linha
+        # que aguarda a serial — sem fechar o supervisor.
         self.assertEqual(
             rescue_return_action(RESCUE_EXIT_ARDUINO_DESCONECTADO),
             RESCUE_RETURN_STOPPED,
@@ -68,12 +71,20 @@ class RescueReturnSafetyTests(unittest.TestCase):
             EXIT_ARDUINO_DESCONECTADO,
         )
 
-    def test_resgate_nao_pode_ir_direto_para_segue_linha(self):
+    def test_resgate_precisa_passar_por_reconectando_antes_da_linha(self):
         with self.assertRaisesRegex(RuntimeError, "proibida"):
             mudar_estado(
                 EstadoMissao.RESGATE,
                 EstadoMissao.SEGUE_LINHA,
             )
+        estado = mudar_estado(
+            EstadoMissao.RESGATE,
+            EstadoMissao.RECONECTANDO,
+        )
+        self.assertEqual(
+            mudar_estado(estado, EstadoMissao.SEGUE_LINHA),
+            EstadoMissao.SEGUE_LINHA,
+        )
 
     def test_so_finalizacao_concluida_libera_segue_linha(self):
         estado = mudar_estado(
