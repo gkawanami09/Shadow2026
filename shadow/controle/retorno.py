@@ -5,11 +5,9 @@ import time
 from config import (T_180, T_180_BLIND_EXTRA, T_180_CONFIRM_TIME, T_180_EXIT_BOTTOM_PX,
                     T_180_SEARCH_SPEED,
                     T_180_SEARCH_TIMEOUT, T_180_SPEED, T_180_TEST_STOP,
-                    TURN_AROUND_PREROLL, TURN_AROUND_REVERSE,
-                    TURN_AROUND_REVERSE_EXTRA, TURN_AROUND_SMALL_LINE,
-                    camera_x)
+                    TURN_AROUND_PREROLL, camera_x)
 from controle.direcao import sleep_steering, steer
-from shared.dados_compartilhados import (last_bottom_point, line_detected, line_size,
+from shared.dados_compartilhados import (last_bottom_point, line_detected,
                                status, terminate)
 
 
@@ -55,16 +53,4 @@ def turn_around(_last_turn_dir):
         sleep_steering(.01)
 
     steer()
-
-    # Dá ré até a câmera voltar a encontrar a linha.
-    steer(200, .7)
-    sleep_steering(TURN_AROUND_REVERSE)
-    steer()
-
-    if line_size.value < TURN_AROUND_SMALL_LINE:
-        steer(200, .7)
-        sleep_steering(TURN_AROUND_REVERSE_EXTRA)
-        steer()
-
-
     return "r"

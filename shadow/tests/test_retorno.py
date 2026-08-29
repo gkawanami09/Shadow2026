@@ -14,15 +14,13 @@ from controle import retorno  # noqa: E402
 
 
 class RetornoTests(unittest.TestCase):
-    def test_retorno_sempre_gira_direita_com_trecho_cego_e_re_curta(self):
+    def test_retorno_sempre_gira_direita_e_nunca_da_re(self):
         previous_detected = retorno.line_detected.value
         previous_bottom = retorno.last_bottom_point.value
-        previous_size = retorno.line_size.value
         previous_timeout = retorno.T_180_SEARCH_TIMEOUT
         try:
             retorno.line_detected.value = True
             retorno.last_bottom_point.value = config.camera_x // 2
-            retorno.line_size.value = config.TURN_AROUND_SMALL_LINE
             # Não é necessário esperar a busca para validar os comandos
             # temporizados; zera o timeout somente neste teste.
             retorno.T_180_SEARCH_TIMEOUT = 0
@@ -44,10 +42,12 @@ class RetornoTests(unittest.TestCase):
             durations = [call.args[0] for call in sleep.call_args_list]
             self.assertIn(config.T_180_BLIND_EXTRA, durations)
             self.assertEqual(config.T_180_BLIND_EXTRA, .10)
-            self.assertIn(config.TURN_AROUND_REVERSE, durations)
-            self.assertEqual(config.TURN_AROUND_REVERSE, .15)
+            movimentos_re = [call.args for call in steer.call_args_list
+                              if call.args and call.args[0] == 200]
+            self.assertEqual(movimentos_re, [])
+            self.assertNotIn(config.TURN_AROUND_REVERSE, durations)
+            self.assertNotIn(config.TURN_AROUND_REVERSE_EXTRA, durations)
         finally:
             retorno.line_detected.value = previous_detected
             retorno.last_bottom_point.value = previous_bottom
-            retorno.line_size.value = previous_size
             retorno.T_180_SEARCH_TIMEOUT = previous_timeout
