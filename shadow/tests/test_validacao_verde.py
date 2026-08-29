@@ -12,8 +12,9 @@ SHADOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SHADOW_ROOT))
 
 import config  # noqa: E402
+from shared.dados_compartilhados import (empty_time_arr, timer, turn_dir)  # noqa: E402
 from visao.verde import (ConfirmadorVerde, check_green,
-                         has_plausible_green)  # noqa: E402
+                         has_plausible_green, latch_turn_direction)  # noqa: E402
 
 
 def _quadrado(x=160, y=130, lado=60):
@@ -75,6 +76,22 @@ def _dois_verdes_validos():
 
 
 class ValidacaoVerdeTests(unittest.TestCase):
+    def setUp(self):
+        timer.remove_timer("left_marker")
+        timer.remove_timer("right_marker")
+        turn_dir.value = "straight"
+
+    def test_sem_marcador_nao_inventa_direcao_de_curva(self):
+        latch_turn_direction("straight", empty_time_arr())
+
+        self.assertEqual(turn_dir.value, "straight")
+
+    def test_memoria_de_marcador_ainda_conserva_direcao(self):
+        timer.set_timer("right_marker", 1.0)
+        latch_turn_direction("straight", empty_time_arr())
+
+        self.assertEqual(turn_dir.value, "right")
+
     def test_circulo_com_preto_acima_e_ao_lado_autoriza_curva(self):
         preto = np.zeros((config.camera_y, config.camera_x), dtype=np.uint8)
         verde = np.zeros_like(preto)

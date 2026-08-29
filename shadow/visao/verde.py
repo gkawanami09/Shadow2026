@@ -262,7 +262,13 @@ def average_direction(turn_direction):
 
 
 def latch_turn_direction(turn_direction, time_turn_direction):
-    """Confirma a direcao por varios quadros e guarda uma memoria curta."""
+    """Confirma a direcao por varios quadros e guarda uma memoria curta.
+
+    Sem um marcador confirmado, a direcao precisa voltar a ``straight``. A
+    memoria existe apenas para o breve intervalo em que o marcador sai da
+    imagem antes de o robo entrar no ramo indicado; ela nao pode inventar uma
+    curva em uma intersecao comum.
+    """
     time_turn_direction = add_time_value(
         time_turn_direction, average_direction(turn_direction))
     avg_turn_dir = get_time_average(time_turn_direction, GREEN_VOTE_WINDOW)
@@ -272,16 +278,20 @@ def latch_turn_direction(turn_direction, time_turn_direction):
     elif avg_turn_dir < -GREEN_VOTE_THRESHOLD:
         timer.set_timer("left_marker", GREEN_MARKER_MEMORY)
 
-    if (not timer.get_timer("right_marker")
-            and turn_direction != "turn_around" and avg_turn_dir >= 0):
+    if (timer.ativo("right_marker")
+            and turn_direction != "turn_around"):
         turn_dir.value = "right"
         line_crop.value = LINE_CROP_GREEN
-    elif (not timer.get_timer("left_marker")
-          and turn_direction != "turn_around" and avg_turn_dir <= 0):
+    elif (timer.ativo("left_marker")
+          and turn_direction != "turn_around"):
         turn_dir.value = "left"
         line_crop.value = LINE_CROP_GREEN
     else:
-        turn_dir.value = turn_direction
+        turn_dir.value = (
+            turn_direction
+            if turn_direction in ("left", "right", "turn_around")
+            else "straight"
+        )
         line_crop.value = LINE_CROP_NORMAL
 
     return time_turn_direction

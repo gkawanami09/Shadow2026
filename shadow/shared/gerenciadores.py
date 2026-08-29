@@ -48,3 +48,7 @@ class Timer:
             return False
         start, duration = self.__timers[name]
         return (time.perf_counter() - start) > duration
+
+    def ativo(self, name):
+        """Informa se um temporizador existe e ainda nao expirou."""
+        return name in self.__timers and not self.get_timer(name)

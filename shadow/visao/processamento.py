@@ -38,8 +38,7 @@ from visao.linha import calculate_angle, determine_correct_line
 from visao.trajetoria import extrair_ponto_futuro
 from visao.verde import (ConfirmadorVerde, check_green,
                          has_plausible_green, latch_turn_direction)
-from visao.faixa_verde import (altura_faixa_transversal,
-                               tem_continuacao_reta)
+from visao.faixa_verde import altura_faixa_transversal
 from visao.vermelho import ConfirmadorVermelho, check_contour_size
 
 # Cores carregadas do config.ini (fallback: valores do config.py)
@@ -322,10 +321,16 @@ def vision_loop(debug=False):
                     > camera_x / 2 + limite_lateral
                     for contorno in contours_blk
                 )
+                # Regra da OBR: em uma intersecao, so abandona a linha atual
+                # se ela terminar a frente ou se um verde confirmado indicar
+                # o ramo. Preto no corredor a frente, sem verde, e ordem de
+                # seguir reto. ``linha_a_frente_frame`` e medido antes das
+                # operacoes morfologicas justamente para nao perder essa
+                # continuidade por causa do filtro visual.
                 intersecao_sem_verde = bool(
                     not verde_autorizado
                     and possui_extensao_lateral
-                    and tem_continuacao_reta(black_image)
+                    and linha_a_frente_frame
                 )
                 if intersecao_sem_verde:
                     direcao_marcada = "straight"
