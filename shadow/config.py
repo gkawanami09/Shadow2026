@@ -269,6 +269,7 @@ GREEN_BLACK_MIN_RUN_RATIO = .42           # linha continua, nao media de pixels
 GREEN_BLACK_MAX_GAP_RATIO = .28           # precisa estar logo junto do quadrado
 GREEN_CONFIRM_FRAMES = 3                  # leituras coerentes para autorizar 90
 GREEN_CONFIRM_WINDOW_FRAMES = 5           # tolera ate 2 falhas curtas da mascara
+GREEN_DIRECTION_LOCK_S = .50              # marcador confirmado nao troca de ramo no giro
 GREEN_TURN_AROUND_CONFIRM_FRAMES = 1      # dois verdes validos tem prioridade
 GREEN_VOTE_WINDOW = .2                    # janela da media de votos
 GREEN_VOTE_THRESHOLD = .1                 # |media| que arma memoria

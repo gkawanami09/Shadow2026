@@ -1,6 +1,7 @@
 """Detecta e confirma os marcadores verdes do percurso."""
 
 from collections import deque
+import time
 
 import cv2
 import numpy as np
@@ -8,6 +9,7 @@ import numpy as np
 from config import (GREEN_BLACK_MAX_GAP_RATIO, GREEN_BLACK_MIN_RUN_RATIO,
                     GREEN_BLACK_ROI_SCALE, GREEN_CONFIRM_FRAMES,
                     GREEN_CONFIRM_WINDOW_FRAMES,
+                    GREEN_DIRECTION_LOCK_S,
                     GREEN_MARKER_MAX_ASPECT, GREEN_MARKER_MEMORY,
                     GREEN_MARKER_MIN_ASPECT, GREEN_MARKER_MIN_RECT_FILL,
                     GREEN_MIN_AREA, GREEN_TURN_AROUND_CONFIRM_FRAMES,
@@ -29,13 +31,32 @@ class ConfirmadorVerde:
         self._historico = deque(maxlen=self.window)
         self._candidatos = deque(maxlen=self.window)
         self._contagem_180 = 0
+        self._direcao_travada = None
+        self._trava_ate = 0.0
 
     @property
     def candidato_ativo(self):
         """Mantem na memoria um verde plausivel durante a janela de votos."""
         return any(self._candidatos)
 
-    def atualizar(self, direcao, candidato=None):
+    def atualizar(self, direcao, candidato=None, now=None):
+        """Confirma o marcador e trava seu ramo brevemente apos validar.
+
+        A trava e iniciada somente por um marcador ja confirmado. Assim, um
+        falso verde que apareca enquanto o robo inicia a curva nao consegue
+        substituir o ramo verdadeiro escolhido naquele cruzamento.
+        """
+        now = time.monotonic() if now is None else float(now)
+        if self._direcao_travada is not None:
+            if now < self._trava_ate:
+                # Mantem a sinalizacao de marcador durante a manobra, mesmo
+                # se o quadro atual trouxer outra mancha verde.
+                self._candidatos.append(True)
+                return self._direcao_travada
+            self._direcao_travada = None
+            self._historico.clear()
+            self._contagem_180 = 0
+
         if candidato is None:
             candidato = direcao != "straight"
         self._candidatos.append(bool(candidato))
@@ -45,7 +66,7 @@ class ConfirmadorVerde:
             self._historico.clear()
             self._contagem_180 += 1
             return (
-                "turn_around"
+                self._travar_direcao("turn_around", now)
                 if self._contagem_180 >= self.frames_180
                 else "straight"
             )
@@ -59,11 +80,14 @@ class ConfirmadorVerde:
         oposta = "right" if direcao == "left" else "left"
         votos = self._historico.count(direcao)
         votos_opostos = self._historico.count(oposta)
-        return (
-            direcao
-            if votos >= self.frames and votos > votos_opostos
-            else "straight"
-        )
+        if votos >= self.frames and votos > votos_opostos:
+            return self._travar_direcao(direcao, now)
+        return "straight"
+
+    def _travar_direcao(self, direcao, now):
+        self._direcao_travada = direcao
+        self._trava_ate = now + GREEN_DIRECTION_LOCK_S
+        return direcao
 
 
 def _marcador_plausivel(contour):

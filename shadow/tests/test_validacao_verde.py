@@ -125,11 +125,19 @@ class ValidacaoVerdeTests(unittest.TestCase):
 
     def test_180_cancela_confirmacao_parcial_de_90(self):
         confirmador = ConfirmadorVerde(frames=3, frames_180=1)
-        self.assertEqual(confirmador.atualizar("left"), "straight")
-        self.assertEqual(confirmador.atualizar("left"), "straight")
+        self.assertEqual(confirmador.atualizar("left", now=0.0), "straight")
+        self.assertEqual(confirmador.atualizar("left", now=0.1), "straight")
         self.assertEqual(
-            confirmador.atualizar("turn_around"), "turn_around")
-        self.assertEqual(confirmador.atualizar("left"), "straight")
+            confirmador.atualizar("turn_around", now=0.2), "turn_around")
+        self.assertEqual(confirmador.atualizar("left", now=1.0), "straight")
+
+    def test_verde_confirmado_ignora_falso_verde_por_meio_segundo(self):
+        confirmador = ConfirmadorVerde(frames=1)
+        self.assertEqual(confirmador.atualizar("right", now=0.0), "right")
+        # O falso verde parece indicar o ramo oposto no meio do giro.
+        self.assertEqual(confirmador.atualizar("left", now=0.49), "right")
+        # Depois da janela, uma nova direcao volta a precisar ser lida.
+        self.assertEqual(confirmador.atualizar("left", now=0.51), "left")
 
     def test_intersecao_que_continua_reto_obedece_ao_verde(self):
         contornos, preto = _cena_intersecao_direita()
