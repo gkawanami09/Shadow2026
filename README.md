@@ -1,5 +1,7 @@
 # Shadow2026
 
+<img width="1087" height="1447" alt="image" src="https://github.com/user-attachments/assets/66fe1cb2-a462-41ad-8992-0657cecfe49f" />
+
 Código do robô Shadow para a OBR. A pasta principal é `shadow/`.
 
 O comando autônomo da prova é o controlador central:
